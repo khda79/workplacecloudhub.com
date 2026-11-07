@@ -1,0 +1,889 @@
+/// Daily SmartInventory license email totals. One row per displayed product and one immutable snapshot ID per refresh.
+table 'License Report Summary'
+	lineageTag: 54624a36-4980-4d5d-a998-3fbe66b7b61a
+
+	/// The snapshot that produced the displayed email and recovery workbook.
+	measure 'License Report Snapshot ID' = IF([License Report Snapshot Consistent] = 1, SELECTEDVALUE('License Report Summary'[Snapshot ID]))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: be28d81d-de4f-4b7f-b6ef-e11bc268c7df
+
+	/// 1 when the snapshot IDs and candidate row counts match the daily email; an empty candidate table is valid only when both counts are zero.
+	measure 'License Report Snapshot Consistent' =
+			VAR _summary = CALCULATE(SELECTEDVALUE('License Report Summary'[Snapshot ID]), REMOVEFILTERS('License Report Summary'))
+			VAR _detailRows = COALESCE(CALCULATE(COUNTROWS('License Report Candidates'), REMOVEFILTERS('License Report Candidates')), 0)
+			VAR _detailSnapshot = CALCULATE(SELECTEDVALUE('License Report Candidates'[Snapshot ID]), REMOVEFILTERS('License Report Candidates'))
+			VAR _gaps = CALCULATE(SELECTEDVALUE('License Report Gaps'[Snapshot ID]), REMOVEFILTERS('License Report Gaps'))
+			VAR _sources = CALCULATE(SELECTEDVALUE('License Report Sources'[Snapshot ID]), REMOVEFILTERS('License Report Sources'))
+			VAR _recoveryKpi = CALCULATE(SUM('License Report Summary'[Recovery Candidates]), REMOVEFILTERS('License Report Summary'))
+			VAR _recoveryRows = COALESCE(CALCULATE(COUNTROWS('License Report Candidates'), REMOVEFILTERS('License Report Candidates'), 'License Report Candidates'[Candidate Type] = "Recovery"), 0)
+			VAR _reviewKpi = CALCULATE(MAX('License Report Summary'[E3 to F3 Review Candidates]), REMOVEFILTERS('License Report Summary'))
+			VAR _reviewRows = COALESCE(CALCULATE(COUNTROWS('License Report Candidates'), REMOVEFILTERS('License Report Candidates'), 'License Report Candidates'[Candidate Type] = "E3 to F3 review"), 0)
+			RETURN IF(NOT ISBLANK(_summary) && _summary = _gaps && _summary = _sources &&
+			    (_detailRows = 0 || _summary = _detailSnapshot) &&
+			    COALESCE(_recoveryKpi, 0) = _recoveryRows &&
+			    COALESCE(_reviewKpi, 0) = _reviewRows, 1, 0)
+		formatString: 0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 753b1ab6-8d65-4aa2-b6b6-a6ad99e81658
+
+	measure 'License Report Enabled Units' = IF([License Report Snapshot Consistent] = 1, SUM('License Report Summary'[Enabled Units]))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 15aa42e1-e71d-4bcf-b785-540f41cdb909
+
+	measure 'License Report Consumed Units' = IF([License Report Snapshot Consistent] = 1, SUM('License Report Summary'[Consumed Units]))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: ab8c1825-c6c8-42f6-8f21-3fcb69eed007
+
+	measure 'License Report Used (%)' = DIVIDE([License Report Consumed Units], [License Report Enabled Units])
+		formatString: 0.0%
+		displayFolder: Licensing | Mail parity
+		lineageTag: 8382036e-b394-4db9-9920-25a09ea7938f
+
+	/// Qualified recovery assignments for the current product or selected suites. BLANK when any selected suite is unqualified or snapshot counts differ.
+	measure 'License Report Recovery Candidates' =
+			VAR _unqualified = COALESCE(CALCULATE(COUNTROWS('License Report Summary'), KEEPFILTERS('License Report Summary'[Category] = "Suite"), ISBLANK('License Report Summary'[Recovery Candidates])), 0)
+			RETURN IF([License Report Snapshot Consistent] = 1 && _unqualified = 0, IF([License Geographic Scope Active]=1,CALCULATE(COUNTROWS('License Report Candidates'),KEEPFILTERS(TREATAS(VALUES('License Report Summary'[Product]),'License Report Candidates'[Product])),KEEPFILTERS('License Report Candidates'[Candidate Type]="Recovery")),SUM('License Report Summary'[Recovery Candidates])))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 5dd25974-be2b-4f4b-8524-fd13b21de91b
+
+	measure 'License Report F1 Recovery Candidates' = CALCULATE([License Report Recovery Candidates], 'License Report Summary'[Product] = "Microsoft 365 F1")
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: eed4d524-55e0-4f34-8e84-f129f49cdb45
+
+	measure 'License Report F3 Recovery Candidates' = CALCULATE([License Report Recovery Candidates], 'License Report Summary'[Product] = "Microsoft 365 F3")
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 2a51fb02-684c-4f3f-8c00-3211d7193b97
+
+	measure 'License Report E3 Recovery Candidates' = CALCULATE([License Report Recovery Candidates], 'License Report Summary'[Product] = "Microsoft 365 E3")
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 412cf394-5428-4cdf-8ee5-64f49363d2dc
+
+	measure 'License Report E5 Recovery Candidates' = CALCULATE([License Report Recovery Candidates], 'License Report Summary'[Product] = "Microsoft 365 E5")
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 3cead677-b0ac-429a-a3b1-b824dfa21fc6
+
+	/// Manual E3 to F3 review candidates, excluding E3 assignments already counted for recovery.
+	measure 'License Report E3 to F3 Review' = IF([License Report Snapshot Consistent]=1,IF([License Geographic Scope Active]=1,CALCULATE(COUNTROWS('License Report Candidates'),KEEPFILTERS('License Report Candidates'[Product]="Microsoft 365 E3"),KEEPFILTERS('License Report Candidates'[Candidate Type]="E3 to F3 review")),SUM('License Report Summary'[E3 to F3 Review Candidates])))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 81cef6dd-5b61-4414-a4a4-49c351f35731
+
+	measure 'License Report F1 Used (%)' = CALCULATE([License Report Used (%)], 'License Report Summary'[Product] = "Microsoft 365 F1")
+		formatString: 0.0%
+		displayFolder: Licensing | Mail parity
+		lineageTag: ad374c99-22f5-4d9e-83c6-435567d78307
+
+	measure 'License Report F3 Used (%)' = CALCULATE([License Report Used (%)], 'License Report Summary'[Product] = "Microsoft 365 F3")
+		formatString: 0.0%
+		displayFolder: Licensing | Mail parity
+		lineageTag: 5ab0d983-fcf3-44a4-aa90-749cb9a7ee70
+
+	measure 'License Report E3 Used (%)' = CALCULATE([License Report Used (%)], 'License Report Summary'[Product] = "Microsoft 365 E3")
+		formatString: 0.0%
+		displayFolder: Licensing | Mail parity
+		lineageTag: a1baef00-1faf-45d3-8141-1a00744ff87b
+
+	measure 'License Report E5 Used (%)' = CALCULATE([License Report Used (%)], 'License Report Summary'[Product] = "Microsoft 365 E5")
+		formatString: 0.0%
+		displayFolder: Licensing | Mail parity
+		lineageTag: f3e45d40-8489-41c2-8b16-4365d308a914
+
+	measure 'License Report Copilot Used (%)' = CALCULATE([License Report Used (%)], 'License Report Summary'[Product] = "Microsoft 365 Copilot")
+		formatString: 0.0%
+		displayFolder: Licensing | Mail parity
+		lineageTag: cf17a59e-2879-4075-b22c-b92103b2eb20
+
+	measure 'License Report Dynamics 365 Used (%)' = CALCULATE([License Report Used (%)], 'License Report Summary'[Product] = "Dynamics 365")
+		formatString: 0.0%
+		displayFolder: Licensing | Mail parity
+		lineageTag: 641dac0f-b310-44ff-88dd-e1c822e08fdb
+
+	measure 'License Report Power BI Used (%)' = CALCULATE([License Report Used (%)], 'License Report Summary'[Product] = "Power BI")
+		formatString: 0.0%
+		displayFolder: Licensing | Mail parity
+		lineageTag: 2f795946-9760-41a7-a57f-412742d2d88a
+
+	measure 'License Report F3/F1 Recovery Candidates' =
+			VAR _f1 = [License Report F1 Recovery Candidates]
+			VAR _f3 = [License Report F3 Recovery Candidates]
+			RETURN IF(ISBLANK(_f1) || ISBLANK(_f3), BLANK(), _f1 + _f3)
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 31918156-9dac-4ed4-adda-78b691f9a0bf
+
+	measure 'License Report Evidence Status' =
+			VAR _unknown = CALCULATE(COUNTROWS('License Report Summary'), 'License Report Summary'[Evidence Status] = "N/D")
+			VAR _provisional = CALCULATE(COUNTROWS('License Report Summary'), 'License Report Summary'[Evidence Status] = "Provisional")
+			RETURN IF([License Report Snapshot Consistent] <> 1, "Snapshot mismatch", IF(_unknown > 0, "N/D", IF(_provisional > 0, "Provisional", "Qualified")))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: cd6bc4f5-85ed-4561-892a-ba65a3c8ad2a
+
+	measure 'License Report Available (%)' = IF([License Report Snapshot Consistent] = 1 && SUM('License Report Summary'[Available Units]) >= 0, DIVIDE(SUM('License Report Summary'[Available Units]), SUM('License Report Summary'[Enabled Units])))
+		formatString: 0.0%
+		displayFolder: Licensing | Mail parity
+		lineageTag: dc0fa845-d6b0-40da-8047-d59f75db04cf
+
+	measure 'License Report Subscription Status' = IF(SELECTEDVALUE('License Report Summary'[Subscribed]) = "True", "Subscribed", "Not subscribed")
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 8e9dfa99-7972-4620-9798-fabda752d721
+
+	measure 'License Report F1 Utilization Label' =
+			VAR _enabled = CALCULATE(SUM('License Report Summary'[Enabled Units]), 'License Report Summary'[Product] = "Microsoft 365 F1")
+			VAR _used = [License Report F1 Used (%)]
+			RETURN IF([License Report Snapshot Consistent] <> 1, "N/D", IF(_enabled <= 0, "N/A", FORMAT(_used, "0.0%")))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 97b9d398-d6a5-4274-8907-f123798a815f
+
+	measure 'License Report F3 Utilization Label' =
+			VAR _enabled = CALCULATE(SUM('License Report Summary'[Enabled Units]), 'License Report Summary'[Product] = "Microsoft 365 F3")
+			VAR _used = [License Report F3 Used (%)]
+			RETURN IF([License Report Snapshot Consistent] <> 1, "N/D", IF(_enabled <= 0, "N/A", FORMAT(_used, "0.0%")))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 30410184-b1eb-41a0-a729-9f8b9739f58b
+
+	measure 'License Report E3 Utilization Label' =
+			VAR _enabled = CALCULATE(SUM('License Report Summary'[Enabled Units]), 'License Report Summary'[Product] = "Microsoft 365 E3")
+			VAR _used = [License Report E3 Used (%)]
+			RETURN IF([License Report Snapshot Consistent] <> 1, "N/D", IF(_enabled <= 0, "N/A", FORMAT(_used, "0.0%")))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 7e7ee33b-fc75-435f-9e58-d72c5de90e0f
+
+	measure 'License Report E5 Utilization Label' =
+			VAR _enabled = CALCULATE(SUM('License Report Summary'[Enabled Units]), 'License Report Summary'[Product] = "Microsoft 365 E5")
+			VAR _used = [License Report E5 Used (%)]
+			RETURN IF([License Report Snapshot Consistent] <> 1, "N/D", IF(_enabled <= 0, "N/A", FORMAT(_used, "0.0%")))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 1e25cfaf-b789-48d4-bbbe-506532e1b1bf
+
+	measure 'License Report Copilot Utilization Label' =
+			VAR _enabled = CALCULATE(SUM('License Report Summary'[Enabled Units]), 'License Report Summary'[Product] = "Microsoft 365 Copilot")
+			VAR _used = [License Report Copilot Used (%)]
+			RETURN IF([License Report Snapshot Consistent] <> 1, "N/D", IF(_enabled <= 0, "N/A", FORMAT(_used, "0.0%")))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 45a9803e-339b-4195-9328-130b546026e0
+
+	measure 'License Report Dynamics 365 Utilization Label' =
+			VAR _enabled = CALCULATE(SUM('License Report Summary'[Enabled Units]), 'License Report Summary'[Product] = "Dynamics 365")
+			VAR _used = [License Report Dynamics 365 Used (%)]
+			RETURN IF([License Report Snapshot Consistent] <> 1, "N/D", IF(_enabled <= 0, "N/A", FORMAT(_used, "0.0%")))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 3820496a-9578-4a0c-8ace-9476a2bbd297
+
+	measure 'License Report Power BI Utilization Label' =
+			VAR _enabled = CALCULATE(SUM('License Report Summary'[Enabled Units]), 'License Report Summary'[Product] = "Power BI")
+			VAR _used = [License Report Power BI Used (%)]
+			RETURN IF([License Report Snapshot Consistent] <> 1, "N/D", IF(_enabled <= 0, "N/A", FORMAT(_used, "0.0%")))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 27e22d88-04d0-446c-b43a-143c19561317
+
+	measure 'License Report E5 Recovery Label' =
+			VAR _count = [License Report E5 Recovery Candidates]
+			VAR _unknown = IF([License Geographic Scope Active]=1,BLANK(),CALCULATE(SUM('License Report Summary'[Recovery Unknown]), 'License Report Summary'[Product] = "Microsoft 365 E5"))
+			RETURN IF(ISBLANK(_count), "Unknown", FORMAT(_count, "#,0") & IF(_unknown > 0, " (Unknown: " & FORMAT(_unknown, "#,0") & ")", ""))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 265e0df2-e7a1-4ea2-96a5-b0ca937e396e
+
+	measure 'License Report E3 Recovery Label' =
+			VAR _count = [License Report E3 Recovery Candidates]
+			VAR _unknown = IF([License Geographic Scope Active]=1,BLANK(),CALCULATE(SUM('License Report Summary'[Recovery Unknown]), 'License Report Summary'[Product] = "Microsoft 365 E3"))
+			RETURN IF(ISBLANK(_count), "Unknown", FORMAT(_count, "#,0") & IF(_unknown > 0, " (Unknown: " & FORMAT(_unknown, "#,0") & ")", ""))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 57f24426-f0ba-4240-9714-198a73f65abd
+
+	measure 'License Report F3/F1 Recovery Label' =
+			VAR _count = [License Report F3/F1 Recovery Candidates]
+			VAR _unknown = IF([License Geographic Scope Active]=1,BLANK(),CALCULATE(SUM('License Report Summary'[Recovery Unknown]), 'License Report Summary'[Product] IN {"Microsoft 365 F1", "Microsoft 365 F3"}))
+			RETURN IF(ISBLANK(_count), "Unknown", FORMAT(_count, "#,0") & IF(_unknown > 0, " (Unknown: " & FORMAT(_unknown, "#,0") & ")", ""))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 07b0b2fc-102e-45d4-9146-b189024b8e0c
+
+	/// All selected suite rows must have qualified assignment evidence; recovery qualification is independent.
+	measure 'License Report Assignment Qualified' =
+			VAR _suiteRows = CALCULATE(COUNTROWS('License Report Summary'), KEEPFILTERS('License Report Summary'[Category] = "Suite"))
+			VAR _qualified = CALCULATE(COUNTROWS('License Report Summary'), KEEPFILTERS('License Report Summary'[Category] = "Suite"), 'License Report Summary'[Assignment Evidence Status] = "Qualified")
+			RETURN IF(_suiteRows > 0 && _suiteRows = _qualified && [License Report Snapshot Consistent] = 1 && [License Report Assignment Reconciled] = 1, 1, 0)
+		formatString: 0
+		isHidden
+		displayFolder: Assignment alerts
+		lineageTag: 970cd9e8-d50d-48ee-94a0-8888f60b2e73
+
+	/// Distinct users in Capacity wait across selected suites. A user may belong to both alert categories. Blank when evidence is unknown.
+	measure 'License Report Awaiting Capacity' = IF([License Report Assignment Qualified] = 1, COALESCE(CALCULATE(DISTINCTCOUNT('License Report Assignment Issues'[User ID]), KEEPFILTERS('License Report Assignment Issues'[Category] = "Capacity wait")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Assignment alerts
+		lineageTag: 2eae3874-411a-4a44-9600-1d2c190b68b0
+
+	/// Display qualified distinct users, or Unknown; never replace missing evidence with zero.
+	measure 'License Report Awaiting Capacity Label' = VAR _value = [License Report Awaiting Capacity] RETURN IF(ISBLANK(_value), "Unknown", FORMAT(_value, "#,##0"))
+		formatString: @
+		displayFolder: Assignment alerts
+		lineageTag: a142b7e8-8610-4cd0-8c52-4032c37502b3
+
+	/// Per-suite distinct users. Users appearing in several suites must not be summed into a global total.
+	measure 'License Report Awaiting Capacity Breakdown' = "F1 " & CALCULATE([License Report Awaiting Capacity Label], KEEPFILTERS('License Report Summary'[Product] = "Microsoft 365 F1")) & " | " & "F3 " & CALCULATE([License Report Awaiting Capacity Label], KEEPFILTERS('License Report Summary'[Product] = "Microsoft 365 F3")) & " | " & "E3 " & CALCULATE([License Report Awaiting Capacity Label], KEEPFILTERS('License Report Summary'[Product] = "Microsoft 365 E3")) & " | " & "E5 " & CALCULATE([License Report Awaiting Capacity Label], KEEPFILTERS('License Report Summary'[Product] = "Microsoft 365 E5"))
+		formatString: @
+		displayFolder: Assignment alerts
+		lineageTag: 964a1f0b-95c4-4b83-b217-8b0eae34c069
+
+	/// Distinct users in Licensing error across selected suites. A user may belong to both alert categories. Blank when evidence is unknown.
+	measure 'License Report Licensing Errors' = IF([License Report Assignment Qualified] = 1, COALESCE(CALCULATE(DISTINCTCOUNT('License Report Assignment Issues'[User ID]), KEEPFILTERS('License Report Assignment Issues'[Category] = "Licensing error")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Assignment alerts
+		lineageTag: b5dbec8c-cf3f-4857-a3af-25b8be1f708c
+
+	/// Display qualified distinct users, or Unknown; never replace missing evidence with zero.
+	measure 'License Report Licensing Errors Label' = VAR _value = [License Report Licensing Errors] RETURN IF(ISBLANK(_value), "Unknown", FORMAT(_value, "#,##0"))
+		formatString: @
+		displayFolder: Assignment alerts
+		lineageTag: 7bc7c944-29f5-4054-8f8a-a823f7d76fc9
+
+	/// Per-suite distinct users. Users appearing in several suites must not be summed into a global total.
+	measure 'License Report Licensing Errors Breakdown' = "F1 " & CALCULATE([License Report Licensing Errors Label], KEEPFILTERS('License Report Summary'[Product] = "Microsoft 365 F1")) & " | " & "F3 " & CALCULATE([License Report Licensing Errors Label], KEEPFILTERS('License Report Summary'[Product] = "Microsoft 365 F3")) & " | " & "E3 " & CALCULATE([License Report Licensing Errors Label], KEEPFILTERS('License Report Summary'[Product] = "Microsoft 365 E3")) & " | " & "E5 " & CALCULATE([License Report Licensing Errors Label], KEEPFILTERS('License Report Summary'[Product] = "Microsoft 365 E5"))
+		formatString: @
+		displayFolder: Assignment alerts
+		lineageTag: a8e2c0e7-381a-43b7-b1d6-d3bd25c6a1a6
+
+	/// Qualification of assignment alert sources, independent of recovery qualification.
+	measure 'License Report Assignment Status' = IF([License Report Assignment Qualified] = 1, "Qualified", "Unknown")
+		formatString: @
+		displayFolder: Assignment alerts
+		lineageTag: d09b9f2a-d15c-4e3e-bd1c-338262b94529
+
+	/// Snapshot/tenant equality and per-suite distinct counts must match Summary; empty qualified details may mean zero, but unknown counts never do.
+	measure 'License Report Assignment Reconciled' =
+			VAR _snapshot = CALCULATE(SELECTEDVALUE('License Report Summary'[Snapshot ID]), REMOVEFILTERS('License Report Summary'))
+			VAR _tenant = CALCULATE(SELECTEDVALUE('License Report Summary'[Tenant Key]), REMOVEFILTERS('License Report Summary'))
+			VAR _badIdentity = CALCULATE(COUNTROWS('License Report Assignment Issues'), REMOVEFILTERS('License Report Assignment Issues'), 'License Report Assignment Issues'[Snapshot ID] <> _snapshot || 'License Report Assignment Issues'[Tenant Key] <> _tenant)
+			VAR _suites = CALCULATETABLE(VALUES('License Report Summary'[Product]), KEEPFILTERS('License Report Summary'[Category] = "Suite"))
+			VAR _badCounts = SUMX(_suites,
+			    VAR _product = 'License Report Summary'[Product]
+			    VAR _waiting = CALCULATE(MAX('License Report Summary'[Assignment Capacity Wait]))
+			    VAR _errors = CALCULATE(MAX('License Report Summary'[Assignment Other Errors]))
+			    VAR _actualWaiting = COALESCE(CALCULATE(DISTINCTCOUNT('License Report Assignment Issues'[User ID]), REMOVEFILTERS('License Report Assignment Issues'), TREATAS({_product}, 'License Report Assignment Issues'[Product]), 'License Report Assignment Issues'[Category] = "Capacity wait"), 0)
+			    VAR _actualErrors = COALESCE(CALCULATE(DISTINCTCOUNT('License Report Assignment Issues'[User ID]), REMOVEFILTERS('License Report Assignment Issues'), TREATAS({_product}, 'License Report Assignment Issues'[Product]), 'License Report Assignment Issues'[Category] = "Licensing error"), 0)
+			    RETURN IF(ISBLANK(_waiting) || ISBLANK(_errors) || _waiting <> _actualWaiting || _errors <> _actualErrors, 1, 0))
+			RETURN IF(NOT ISBLANK(_snapshot) && NOT ISBLANK(_tenant) && COALESCE(_badIdentity, 0) = 0 && COALESCE(_badCounts, 0) = 0, 1, 0)
+		formatString: 0
+		isHidden
+		displayFolder: Assignment alerts
+		lineageTag: 74ea72cd-41bf-40b8-a1f7-33ab624375a2
+
+	/// Visual-level row guard for Licensing & Cost: show only complete selected products/families. Families come from the Licences ReportProduct column (SmartInventory SKU rules, EEA suites by GUID); partial family selection is not allocated. Does not modify or requalify published CSVs.
+	measure 'License Report Inventory Selection Included' =
+			VAR _filtered = ISCROSSFILTERED ( 'License SKU Capacity' )
+			VAR _product = SELECTEDVALUE ( 'License Report Summary'[Product] )
+			VAR _selected = VALUES ( 'License SKU Capacity'[SKU Part Number] )
+			VAR _family = FILTER ( ALL ( 'License SKU Capacity' ), 'License SKU Capacity'[Report Product] = _product )
+			VAR _missing = COUNTROWS ( EXCEPT ( SELECTCOLUMNS ( _family, "SKU", 'License SKU Capacity'[SKU Part Number] ), _selected ) )
+			RETURN IF ( NOT _filtered, 1, IF ( COUNTROWS ( _family ) > 0 && _missing = 0, 1, 0 ) )
+		formatString: 0
+		isHidden
+		displayFolder: Licensing | Filters
+		lineageTag: 4570da5f-d565-43c2-ac22-9f81a3c3354b
+
+	/// Selected-country/domain candidate assignments are recalculated from candidate rows, not tenant summary totals. Unknown assessment counts remain tenant-wide and are not allocated.
+	measure 'License Selected E5 Recovery Label' =
+			VAR _allowed = FILTER(ALL('License Report Summary'[Product]), CALCULATE([License Report Inventory Selection Included]) = 1)
+			VAR _scope = FILTER(_allowed, 'License Report Summary'[Product] IN {"Microsoft 365 E5"})
+			VAR _count = IF([License Report Snapshot Consistent] = 1, IF([License Geographic Scope Active]=1,CALCULATE(COUNTROWS('License Report Candidates'),KEEPFILTERS(TREATAS(_scope,'License Report Candidates'[Product])),KEEPFILTERS('License Report Candidates'[Candidate Type]="Recovery")),CALCULATE(SUM('License Report Summary'[Recovery Candidates]), KEEPFILTERS(_scope))))
+			VAR _unknown = IF([License Geographic Scope Active]=1,BLANK(),CALCULATE(SUM('License Report Summary'[Recovery Unknown]), KEEPFILTERS(_scope)))
+			RETURN IF(COUNTROWS(_scope) = 0, "Not selected", IF(ISBLANK(_count), "Unknown", FORMAT(_count, "#,0") & IF(_unknown > 0, " (Unknown: " & FORMAT(_unknown, "#,0") & ")", "")))
+		formatString: @
+		displayFolder: Licensing | Selection
+		lineageTag: 866a5f17-bb6e-4447-bb88-c1111bbc0517
+
+	/// Selected-country/domain candidate assignments are recalculated from candidate rows, not tenant summary totals. Unknown assessment counts remain tenant-wide and are not allocated.
+	measure 'License Selected E3 Recovery Label' =
+			VAR _allowed = FILTER(ALL('License Report Summary'[Product]), CALCULATE([License Report Inventory Selection Included]) = 1)
+			VAR _scope = FILTER(_allowed, 'License Report Summary'[Product] IN {"Microsoft 365 E3"})
+			VAR _count = IF([License Report Snapshot Consistent] = 1, IF([License Geographic Scope Active]=1,CALCULATE(COUNTROWS('License Report Candidates'),KEEPFILTERS(TREATAS(_scope,'License Report Candidates'[Product])),KEEPFILTERS('License Report Candidates'[Candidate Type]="Recovery")),CALCULATE(SUM('License Report Summary'[Recovery Candidates]), KEEPFILTERS(_scope))))
+			VAR _unknown = IF([License Geographic Scope Active]=1,BLANK(),CALCULATE(SUM('License Report Summary'[Recovery Unknown]), KEEPFILTERS(_scope)))
+			RETURN IF(COUNTROWS(_scope) = 0, "Not selected", IF(ISBLANK(_count), "Unknown", FORMAT(_count, "#,0") & IF(_unknown > 0, " (Unknown: " & FORMAT(_unknown, "#,0") & ")", "")))
+		formatString: @
+		displayFolder: Licensing | Selection
+		lineageTag: c52f5d48-b4af-4ee8-a7b8-6595c3c16e3e
+
+	/// Selected-country/domain candidate assignments are recalculated from candidate rows, not tenant summary totals. Unknown assessment counts remain tenant-wide and are not allocated.
+	measure 'License Selected F1 F3 Recovery Label' =
+			VAR _allowed = FILTER(ALL('License Report Summary'[Product]), CALCULATE([License Report Inventory Selection Included]) = 1)
+			VAR _scope = FILTER(_allowed, 'License Report Summary'[Product] IN {"Microsoft 365 F1","Microsoft 365 F3"})
+			VAR _count = IF([License Report Snapshot Consistent] = 1, IF([License Geographic Scope Active]=1,CALCULATE(COUNTROWS('License Report Candidates'),KEEPFILTERS(TREATAS(_scope,'License Report Candidates'[Product])),KEEPFILTERS('License Report Candidates'[Candidate Type]="Recovery")),CALCULATE(SUM('License Report Summary'[Recovery Candidates]), KEEPFILTERS(_scope))))
+			VAR _unknown = IF([License Geographic Scope Active]=1,BLANK(),CALCULATE(SUM('License Report Summary'[Recovery Unknown]), KEEPFILTERS(_scope)))
+			RETURN IF(COUNTROWS(_scope) = 0, "Not selected", IF(ISBLANK(_count), "Unknown", FORMAT(_count, "#,0") & IF(_unknown > 0, " (Unknown: " & FORMAT(_unknown, "#,0") & ")", "")))
+		formatString: @
+		displayFolder: Licensing | Selection
+		lineageTag: fccb185e-83bd-4924-b1c0-908bb8b71142
+
+	/// Selected-country/domain candidate assignments are recalculated from candidate rows, not tenant summary totals. Unknown assessment counts remain tenant-wide and are not allocated.
+	measure 'License Selected E3 Review Label' =
+			VAR _allowed = FILTER(ALL('License Report Summary'[Product]), CALCULATE([License Report Inventory Selection Included]) = 1)
+			VAR _scope = FILTER(_allowed, 'License Report Summary'[Product] = "Microsoft 365 E3")
+			VAR _count = IF([License Report Snapshot Consistent] = 1, IF([License Geographic Scope Active]=1,CALCULATE(COUNTROWS('License Report Candidates'),KEEPFILTERS(TREATAS(_scope,'License Report Candidates'[Product])),KEEPFILTERS('License Report Candidates'[Candidate Type]="E3 to F3 review")),CALCULATE(SUM('License Report Summary'[E3 to F3 Review Candidates]), KEEPFILTERS(_scope))))
+			RETURN IF(COUNTROWS(_scope) = 0, "Not selected", IF(ISBLANK(_count), "Unknown", FORMAT(_count, "#,0")))
+		formatString: @
+		displayFolder: Licensing | Selection
+		lineageTag: 1a62b14d-ce2d-46d6-81d5-44c1d89c370b
+
+	/// Distinct selected users across complete selected families, not the sum of suite counts.
+	measure 'License Selected Awaiting Capacity Label' =
+			VAR _allowed = FILTER(ALL('License Report Summary'[Product]), CALCULATE([License Report Inventory Selection Included]) = 1)
+			VAR _scope = FILTER(_allowed, 'License Report Summary'[Product] IN {"Microsoft 365 F1", "Microsoft 365 F3", "Microsoft 365 E3", "Microsoft 365 E5"})
+			RETURN IF(COUNTROWS(_scope) = 0, "Not selected", CALCULATE([License Report Awaiting Capacity Label], KEEPFILTERS(_scope)))
+		formatString: @
+		displayFolder: Licensing | Selection
+		lineageTag: 9585ec9d-cf44-4561-a6b5-d94e31d6c612
+
+	/// Per-suite selected distinct users. Excluded suites are a dash; suite counts may overlap.
+	measure 'License Selected Awaiting Capacity Breakdown' =
+			VAR _allowed = FILTER(ALL('License Report Summary'[Product]), CALCULATE([License Report Inventory Selection Included]) = 1)
+			RETURN "F1 " & IF(CONTAINS(_allowed, 'License Report Summary'[Product], "Microsoft 365 F1"), CALCULATE([License Report Awaiting Capacity Label], KEEPFILTERS('License Report Summary'[Product] = "Microsoft 365 F1")), "—") & " | " & "F3 " & IF(CONTAINS(_allowed, 'License Report Summary'[Product], "Microsoft 365 F3"), CALCULATE([License Report Awaiting Capacity Label], KEEPFILTERS('License Report Summary'[Product] = "Microsoft 365 F3")), "—") & " | " & "E3 " & IF(CONTAINS(_allowed, 'License Report Summary'[Product], "Microsoft 365 E3"), CALCULATE([License Report Awaiting Capacity Label], KEEPFILTERS('License Report Summary'[Product] = "Microsoft 365 E3")), "—") & " | " & "E5 " & IF(CONTAINS(_allowed, 'License Report Summary'[Product], "Microsoft 365 E5"), CALCULATE([License Report Awaiting Capacity Label], KEEPFILTERS('License Report Summary'[Product] = "Microsoft 365 E5")), "—")
+		formatString: @
+		displayFolder: Licensing | Selection
+		lineageTag: a41e3a74-6a4d-4644-babf-80959ec30d22
+
+	/// Distinct selected users across complete selected families, not the sum of suite counts.
+	measure 'License Selected Licensing Errors Label' =
+			VAR _allowed = FILTER(ALL('License Report Summary'[Product]), CALCULATE([License Report Inventory Selection Included]) = 1)
+			VAR _scope = FILTER(_allowed, 'License Report Summary'[Product] IN {"Microsoft 365 F1", "Microsoft 365 F3", "Microsoft 365 E3", "Microsoft 365 E5"})
+			RETURN IF(COUNTROWS(_scope) = 0, "Not selected", CALCULATE([License Report Licensing Errors Label], KEEPFILTERS(_scope)))
+		formatString: @
+		displayFolder: Licensing | Selection
+		lineageTag: 4445130e-c215-4a53-a642-1b55da98073f
+
+	/// Per-suite selected distinct users. Excluded suites are a dash; suite counts may overlap.
+	measure 'License Selected Licensing Errors Breakdown' =
+			VAR _allowed = FILTER(ALL('License Report Summary'[Product]), CALCULATE([License Report Inventory Selection Included]) = 1)
+			RETURN "F1 " & IF(CONTAINS(_allowed, 'License Report Summary'[Product], "Microsoft 365 F1"), CALCULATE([License Report Licensing Errors Label], KEEPFILTERS('License Report Summary'[Product] = "Microsoft 365 F1")), "—") & " | " & "F3 " & IF(CONTAINS(_allowed, 'License Report Summary'[Product], "Microsoft 365 F3"), CALCULATE([License Report Licensing Errors Label], KEEPFILTERS('License Report Summary'[Product] = "Microsoft 365 F3")), "—") & " | " & "E3 " & IF(CONTAINS(_allowed, 'License Report Summary'[Product], "Microsoft 365 E3"), CALCULATE([License Report Licensing Errors Label], KEEPFILTERS('License Report Summary'[Product] = "Microsoft 365 E3")), "—") & " | " & "E5 " & IF(CONTAINS(_allowed, 'License Report Summary'[Product], "Microsoft 365 E5"), CALCULATE([License Report Licensing Errors Label], KEEPFILTERS('License Report Summary'[Product] = "Microsoft 365 E5")), "—")
+		formatString: @
+		displayFolder: Licensing | Selection
+		lineageTag: 9ce7355e-6f6d-4123-90ed-893438ec7fa6
+
+	/// Visual guard for complete selected families; candidate/assignment rows retain their original grain.
+	measure 'License Candidate Selection Included' =
+			VAR _allowed = FILTER(ALL('License Report Summary'[Product]), CALCULATE([License Report Inventory Selection Included]) = 1)
+			VAR _products = VALUES('License Report Candidates'[Product])
+			RETURN IF(COUNTROWS(INTERSECT(_products, _allowed)) > 0, 1, 0)
+		formatString: 0
+		isHidden
+		displayFolder: Licensing | Selection
+		lineageTag: f61d7b59-5de7-4b7c-bc2d-a5581e10f61a
+
+	/// Visual guard for complete selected families; candidate/assignment rows retain their original grain.
+	measure 'License Assignment Selection Included' =
+			VAR _allowed = FILTER(ALL('License Report Summary'[Product]), CALCULATE([License Report Inventory Selection Included]) = 1)
+			VAR _products = VALUES('License Report Assignment Issues'[Product])
+			RETURN IF(COUNTROWS(INTERSECT(_products, _allowed)) > 0, 1, 0)
+		formatString: 0
+		isHidden
+		displayFolder: Licensing | Selection
+		lineageTag: 748a306d-0456-4148-8107-0a88eb05c143
+
+	/// Overview headline display for the fixed Product context. Respects complete family selection; Not selected is not zero, N/A means not subscribed, and an inconsistent snapshot is Unavailable.
+	measure 'License Overview Family Assignment Rate Label' =
+			VAR _snapshot = [License Report Snapshot Consistent]
+			VAR _included = [License Report Inventory Selection Included]
+			VAR _enabled = [License Report Enabled Units]
+			RETURN
+			SWITCH (
+			    TRUE (),
+			    _snapshot <> 1, "Unavailable",
+			    _included <> 1, "Not selected",
+			    ISBLANK ( _enabled ), "Unavailable",
+			    _enabled <= 0, "N/A",
+			    FORMAT ( [License Report Used (%)], "0.0%" )
+			)
+		formatString: @
+		displayFolder: Licensing | Overview display
+		lineageTag: fd7d6f80-bf67-4412-89e3-4ed23c192b62
+
+	/// Overview assigned units for the fixed Product context, only when the full family is selected and the published snapshot is consistent. Excluded or unavailable evidence stays BLANK, never zero.
+	measure 'License Overview Family Assigned Units' =
+			IF (
+			    [License Report Snapshot Consistent] = 1
+			        && [License Report Inventory Selection Included] = 1,
+			    [License Report Consumed Units]
+			)
+		formatString: #,0
+		displayFolder: Licensing | Overview display
+		lineageTag: a306eb42-336c-4d7a-a841-0b6e6185665f
+
+	/// Overview enabled units for the fixed Product context, only when the full family is selected and the published snapshot is consistent. Excluded or unavailable evidence stays BLANK, never zero.
+	measure 'License Overview Family Enabled Units' =
+			IF (
+			    [License Report Snapshot Consistent] = 1
+			        && [License Report Inventory Selection Included] = 1,
+			    [License Report Enabled Units]
+			)
+		formatString: #,0
+		displayFolder: Licensing | Overview display
+		lineageTag: 6309d494-5d7f-44cb-9c9c-58a34330f2c4
+
+	/// Overview available units for the fixed Product context, only when the full family is selected and the published snapshot is consistent. Excluded or unavailable evidence stays BLANK, never zero.
+	measure 'License Overview Family Available Units' =
+			VAR _available =
+			    IF (
+			        [License Report Snapshot Consistent] = 1
+			            && [License Report Inventory Selection Included] = 1,
+			        SUM ( 'License Report Summary'[Available Units] )
+			    )
+			RETURN IF ( NOT ISBLANK ( _available ), MAX ( _available, 0 ) )
+		formatString: #,0
+		displayFolder: Licensing | Overview display
+		lineageTag: 191eeb9c-9e0c-4960-9805-fa9760bf7160
+
+	/// Consumed units above enabled units for the selected families (absolute value); BLANK when capacity is not over-assigned.
+	measure 'License Overview Family Over-assigned Units' =
+			VAR _available =
+			    IF (
+			        [License Report Snapshot Consistent] = 1
+			            && [License Report Inventory Selection Included] = 1,
+			        SUM ( 'License Report Summary'[Available Units] )
+			    )
+			RETURN IF ( _available < 0, -_available )
+		formatString: #,0
+		displayFolder: Licensing | Capacity
+		lineageTag: 18b00caa-f2cc-4adc-ace1-09f58828be92
+
+	/// Available units, or Over-assigned when consumed units exceed enabled units; the absolute value is in the tooltip.
+	measure 'License Overview Family Available Label' =
+			VAR _available =
+			    IF (
+			        [License Report Snapshot Consistent] = 1
+			            && [License Report Inventory Selection Included] = 1,
+			        SUM ( 'License Report Summary'[Available Units] )
+			    )
+			RETURN IF ( ISBLANK ( _available ), BLANK (), IF ( _available < 0, "Over-assigned", FORMAT ( _available, "#,0" ) ) )
+		formatString: @
+		displayFolder: Licensing | Capacity
+		lineageTag: bdfe7ca1-6d3b-4857-8607-490b54c2191d
+
+	/// Published available units per row, or Over-assigned when consumed units exceed enabled units.
+	measure 'License Report Available Label' =
+			VAR _available = IF ( [License Report Snapshot Consistent] = 1, SUM ( 'License Report Summary'[Available Units] ) )
+			RETURN IF ( ISBLANK ( _available ), BLANK (), IF ( _available < 0, "Over-assigned", FORMAT ( _available, "#,0" ) ) )
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 05e1a74e-c7b7-4a13-b77c-91e4a5855ed5
+
+	/// Consumed units above enabled units per row (absolute value); BLANK otherwise.
+	measure 'License Report Over-assigned Units' =
+			VAR _available = IF ( [License Report Snapshot Consistent] = 1, SUM ( 'License Report Summary'[Available Units] ) )
+			RETURN IF ( _available < 0, -_available )
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 0027fd01-5b1a-4e58-af79-cc7cd59b47a4
+
+	/// Alert value is red only when the qualified distinct-user count is positive.
+	measure 'License Report Awaiting Capacity Color' = VAR _value = [License Report Awaiting Capacity] RETURN IF(NOT ISBLANK(_value) && _value > 0, "#B91C1C", "#183153")
+		formatString: @
+		displayFolder: Presentation
+		lineageTag: f483e72b-232b-4899-85be-ccd31456a049
+
+	/// Same complete-family selection and qualification as the selected label. Blank or unselected remains neutral.
+	measure 'License Selected Awaiting Capacity Color' =
+			VAR _allowed = FILTER(ALL('License Report Summary'[Product]), CALCULATE([License Report Inventory Selection Included]) = 1)
+			VAR _scope = FILTER(_allowed, 'License Report Summary'[Product] IN {"Microsoft 365 F1", "Microsoft 365 F3", "Microsoft 365 E3", "Microsoft 365 E5"})
+			VAR _value = IF(COUNTROWS(_scope) > 0, CALCULATE([License Report Awaiting Capacity], KEEPFILTERS(_scope)))
+			RETURN IF(NOT ISBLANK(_value) && _value > 0, "#B91C1C", "#183153")
+		formatString: @
+		displayFolder: Presentation
+		lineageTag: 57f6dd64-cd88-459a-a51c-84099fa05694
+
+	/// Alert value is red only when the qualified distinct-user count is positive.
+	measure 'License Report Licensing Errors Color' = VAR _value = [License Report Licensing Errors] RETURN IF(NOT ISBLANK(_value) && _value > 0, "#B91C1C", "#183153")
+		formatString: @
+		displayFolder: Presentation
+		lineageTag: 499f9aa5-4ff9-4f2a-997f-7dc3adce44bc
+
+	/// Same complete-family selection and qualification as the selected label. Blank or unselected remains neutral.
+	measure 'License Selected Licensing Errors Color' =
+			VAR _allowed = FILTER(ALL('License Report Summary'[Product]), CALCULATE([License Report Inventory Selection Included]) = 1)
+			VAR _scope = FILTER(_allowed, 'License Report Summary'[Product] IN {"Microsoft 365 F1", "Microsoft 365 F3", "Microsoft 365 E3", "Microsoft 365 E5"})
+			VAR _value = IF(COUNTROWS(_scope) > 0, CALCULATE([License Report Licensing Errors], KEEPFILTERS(_scope)))
+			RETURN IF(NOT ISBLANK(_value) && _value > 0, "#B91C1C", "#183153")
+		formatString: @
+		displayFolder: Presentation
+		lineageTag: acb5f218-a05f-466a-8a6c-ca321b335df2
+
+	/// Qualified distinct users awaiting capacity: zero retains existing color; positive is amber; red from 1% of distinct selected licensed users in the same product/country/domain scope. Unqualified or missing denominator is unknown. Complete-family guard retained. Status codes: 0 normal, 1 attention, 2 critical, 3 unknown.
+	measure 'KPI Alert Level License Report Awaiting Capacity Label' =
+			VAR _n = [License Report Awaiting Capacity]
+			VAR _d = [Selected Licensed Users]
+			VAR _r = DIVIDE(_n,_d)
+			RETURN SWITCH(TRUE(), ISBLANK(_n),3, _n=0,0, ISBLANK(_r),3, _r>=0.01,2,1)
+		formatString: 0
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 521ebb72-38e7-4498-b709-ba355df43def
+
+	/// User-visible threshold explanation for License Report Awaiting Capacity Label
+	measure 'KPI Alert Details License Report Awaiting Capacity Label' = VAR _s=[KPI Alert Level License Report Awaiting Capacity Label] RETURN SWITCH(_s,0,"Normal",1,"Attention",2,"Critical",3,"Unknown") & " | Qualified distinct users awaiting capacity: zero retains existing color; positive is amber; red from 1% of distinct selected licensed users in the same product/country/domain scope. Unqualified or missing denominator is unknown. Complete-family guard retained."
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 4f48a20c-a219-493a-a2f1-052f8f29d8e7
+
+	/// Qualified license recovery opportunity >0 is amber, never automatically red. Zero retains existing color. Unknown/unselected or partially unqualified labels are grey. Status codes: 0 normal, 1 attention, 2 critical, 3 unknown.
+	measure 'KPI Alert Level License Report Recovery Candidates' =
+			VAR _n=[License Report Recovery Candidates]
+			RETURN SWITCH(TRUE(),ISBLANK(_n),3,_n>0,1,0)
+		formatString: 0
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 6b29db0d-c5ca-4116-b0a1-6241d259aa75
+
+	/// User-visible threshold explanation for License Report Recovery Candidates
+	measure 'KPI Alert Details License Report Recovery Candidates' = VAR _s=[KPI Alert Level License Report Recovery Candidates] RETURN SWITCH(_s,0,"Normal",1,"Attention",2,"Critical",3,"Unknown") & " | Qualified license recovery opportunity >0 is amber, never automatically red. Zero retains existing color. Unknown/unselected or partially unqualified labels are grey."
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: fe4bb90d-2c37-43dc-a6ca-e0042e10a650
+
+	/// Qualified distinct users awaiting capacity: zero retains existing color; positive is amber; red from 1% of distinct selected licensed users in the same product/country/domain scope. Unqualified or missing denominator is unknown. Complete-family guard retained. Status codes: 0 normal, 1 attention, 2 critical, 3 unknown.
+	measure 'KPI Alert Level License Selected Awaiting Capacity Label' =
+			VAR _allowed = FILTER(ALL('License Report Summary'[Product]), CALCULATE([License Report Inventory Selection Included])=1)
+			VAR _scope=FILTER(_allowed,'License Report Summary'[Product] IN {"Microsoft 365 F1","Microsoft 365 F3","Microsoft 365 E3","Microsoft 365 E5"})
+			VAR _n = IF(COUNTROWS(_scope)>0,CALCULATE([License Report Awaiting Capacity],KEEPFILTERS(_scope)))
+			VAR _d = CALCULATE([Selected Licensed Users],KEEPFILTERS(_scope))
+			VAR _r = DIVIDE(_n,_d)
+			RETURN SWITCH(TRUE(), ISBLANK(_n),3, _n=0,0, ISBLANK(_r),3, _r>=0.01,2,1)
+		formatString: 0
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 142adcea-ef7e-4501-923e-9a84b207a091
+
+	/// User-visible threshold explanation for License Selected Awaiting Capacity Label
+	measure 'KPI Alert Details License Selected Awaiting Capacity Label' = VAR _s=[KPI Alert Level License Selected Awaiting Capacity Label] RETURN SWITCH(_s,0,"Normal",1,"Attention",2,"Critical",3,"Unknown") & " | Qualified distinct users awaiting capacity: zero retains existing color; positive is amber; red from 1% of distinct selected licensed users in the same product/country/domain scope. Unqualified or missing denominator is unknown. Complete-family guard retained."
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 96b075e7-d783-4c8d-8038-212d48ce8755
+
+	/// Qualified license recovery opportunity >0 is amber, never automatically red. Zero retains existing color. Unknown/unselected or partially unqualified labels are grey. Status codes: 0 normal, 1 attention, 2 critical, 3 unknown.
+	measure 'KPI Alert Level License Selected E3 Recovery Label' =
+			VAR _label=[License Selected E3 Recovery Label]
+			RETURN SWITCH(TRUE(),ISBLANK(_label)||CONTAINSSTRING(_label,"Unknown")||_label="Not selected"||_label="N/A",3,LEFT(_label,1)="0",0,1)
+		formatString: 0
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: a2a93b99-17e7-44e9-a45e-412931a196a2
+
+	/// User-visible threshold explanation for License Selected E3 Recovery Label
+	measure 'KPI Alert Details License Selected E3 Recovery Label' = VAR _s=[KPI Alert Level License Selected E3 Recovery Label] RETURN SWITCH(_s,0,"Normal",1,"Attention",2,"Critical",3,"Unknown") & " | Qualified license recovery opportunity >0 is amber, never automatically red. Zero retains existing color. Unknown/unselected or partially unqualified labels are grey."
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 8060340e-0397-42b0-8432-427cd648a5f6
+
+	/// Qualified license recovery opportunity >0 is amber, never automatically red. Zero retains existing color. Unknown/unselected or partially unqualified labels are grey. Status codes: 0 normal, 1 attention, 2 critical, 3 unknown.
+	measure 'KPI Alert Level License Selected F1 F3 Recovery Label' =
+			VAR _label=[License Selected F1 F3 Recovery Label]
+			RETURN SWITCH(TRUE(),ISBLANK(_label)||CONTAINSSTRING(_label,"Unknown")||_label="Not selected"||_label="N/A",3,LEFT(_label,1)="0",0,1)
+		formatString: 0
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 6a1306d0-a27b-4912-bb21-21e8d89c7ffe
+
+	/// User-visible threshold explanation for License Selected F1 F3 Recovery Label
+	measure 'KPI Alert Details License Selected F1 F3 Recovery Label' = VAR _s=[KPI Alert Level License Selected F1 F3 Recovery Label] RETURN SWITCH(_s,0,"Normal",1,"Attention",2,"Critical",3,"Unknown") & " | Qualified license recovery opportunity >0 is amber, never automatically red. Zero retains existing color. Unknown/unselected or partially unqualified labels are grey."
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 9e2dad2d-6c16-4f06-a7ab-cad63ed03791
+
+	/// Qualified license recovery opportunity >0 is amber, never automatically red. Zero retains existing color. Unknown/unselected or partially unqualified labels are grey. Status codes: 0 normal, 1 attention, 2 critical, 3 unknown.
+	measure 'KPI Alert Level License Selected E5 Recovery Label' =
+			VAR _label=[License Selected E5 Recovery Label]
+			RETURN SWITCH(TRUE(),ISBLANK(_label)||CONTAINSSTRING(_label,"Unknown")||_label="Not selected"||_label="N/A",3,LEFT(_label,1)="0",0,1)
+		formatString: 0
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 000c4afe-515a-4a2f-a5ec-806618f6ad58
+
+	/// User-visible threshold explanation for License Selected E5 Recovery Label
+	measure 'KPI Alert Details License Selected E5 Recovery Label' = VAR _s=[KPI Alert Level License Selected E5 Recovery Label] RETURN SWITCH(_s,0,"Normal",1,"Attention",2,"Critical",3,"Unknown") & " | Qualified license recovery opportunity >0 is amber, never automatically red. Zero retains existing color. Unknown/unselected or partially unqualified labels are grey."
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: dc5dde4a-96c3-420f-b716-0c7281bc7029
+
+	column 'Snapshot ID'
+		dataType: string
+		lineageTag: 39db6443-fe08-4820-8bd9-842d4d0ae30a
+		sourceColumn: Snapshot ID
+
+	column 'Tenant Key'
+		dataType: string
+		lineageTag: 7e8890ba-4d64-4bca-a41f-3e1683c41a47
+		sourceColumn: Tenant Key
+
+	column Product
+		dataType: string
+		lineageTag: fcf9806f-f8b1-4100-b49d-9ea583b53812
+		sourceColumn: Product
+
+	column Category
+		dataType: string
+		lineageTag: a564967b-ceae-4bf3-acd3-e1c2f1bdd99c
+		sourceColumn: Category
+
+	column 'Enabled Units'
+		dataType: int64
+		lineageTag: 91ad2e37-0d42-44e5-bff8-126d51b1e5cf
+		sourceColumn: Enabled Units
+
+	column 'Consumed Units'
+		dataType: int64
+		lineageTag: 5869ea45-2ec1-4438-a907-de0e7f920178
+		sourceColumn: Consumed Units
+
+	column 'Assigned Users'
+		dataType: int64
+		lineageTag: d87a5a5a-0931-40f4-909f-7f5ea3a0affa
+		sourceColumn: Assigned Users
+
+	column 'Recovery Candidates'
+		dataType: int64
+		lineageTag: 51ee3202-6d5b-4a81-bcaa-09e33ca4e599
+		sourceColumn: Recovery Candidates
+
+	column 'Recovery Unknown'
+		dataType: int64
+		lineageTag: 31b31c7d-52d9-497f-bf46-3ca1604cdb51
+		sourceColumn: Recovery Unknown
+
+	column 'Disabled Users'
+		dataType: int64
+		lineageTag: 2333ca2c-b828-406c-9ba6-cf255665d377
+		sourceColumn: Disabled Users
+
+	column 'No M365 Activity'
+		dataType: int64
+		lineageTag: 78ae2f67-e4bd-40d3-8dea-f034dd672fb4
+		sourceColumn: No M365 Activity
+
+	column 'No AD or Entra Activity'
+		dataType: int64
+		lineageTag: a0630df4-de94-428a-9321-8c75835af625
+		sourceColumn: No AD or Entra Activity
+
+	column 'No Mailbox Activity'
+		dataType: int64
+		lineageTag: 13f0e353-b3c3-4739-b7a9-44fac0a3e85d
+		sourceColumn: No Mailbox Activity
+
+	column 'No Local Apps Use'
+		dataType: int64
+		lineageTag: 44afe711-1a39-4114-9fe6-de1def47f004
+		sourceColumn: No Local Apps Use
+
+	column 'Candidates Primary Intune PC'
+		dataType: int64
+		lineageTag: 69075857-6fb6-4227-a99a-b0a89ae5efd7
+		sourceColumn: Candidates Primary Intune PC
+
+	column 'Shared Mailboxes Licensed'
+		dataType: int64
+		lineageTag: f64d71ca-3f02-4868-8ed1-4e16218e3767
+		sourceColumn: Shared Mailboxes Licensed
+
+	column 'Shared Under 50 GB'
+		dataType: int64
+		lineageTag: b5b34bd7-d50d-4b66-8569-c96cc957211b
+		sourceColumn: Shared Under 50 GB
+
+	column 'Multiple Target Suites'
+		dataType: int64
+		lineageTag: c7de259a-b4d0-4a30-ba0f-fa323a6ee3e5
+		sourceColumn: Multiple Target Suites
+
+	column 'Multiple Assigned SKUs'
+		dataType: int64
+		lineageTag: 867b275b-d0bc-4a53-9277-423f5d91ca0c
+		sourceColumn: Multiple Assigned SKUs
+
+	column 'Shared Removal Candidates'
+		dataType: int64
+		lineageTag: d7848ef1-e4a3-4c5d-a131-7c15420cb510
+		sourceColumn: Shared Removal Candidates
+
+	column 'E3 to F3 Review Candidates'
+		dataType: int64
+		lineageTag: 662d3bc2-6e88-44e8-8145-182d1b4a24fa
+		sourceColumn: E3 to F3 Review Candidates
+
+	column 'E3 to F3 Review Unknown'
+		dataType: int64
+		lineageTag: 54831751-df07-4e7c-9e33-61623b5ca711
+		sourceColumn: E3 to F3 Review Unknown
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: a68eb922-c013-40b4-98cc-edc28422e473
+		sourceColumn: Evidence Status
+
+	column 'Generated At UTC'
+		dataType: dateTime
+		lineageTag: ec022d40-92be-4fee-b06e-0d683ecaed14
+		sourceColumn: Generated At UTC
+
+	/// Exact Qualification value in the attached email workbook Summary sheet.
+	column 'Workbook Qualification'
+		dataType: string
+		lineageTag: a35554d5-2f85-49b7-a4d0-e1dc7753ec9f
+		summarizeBy: none
+		sourceColumn: Workbook Qualification
+
+	/// Exact LicenseSnapshotUtc value in the email workbook Summary sheet.
+	column 'License Snapshot UTC'
+		dataType: string
+		lineageTag: 4ddc0c80-a32f-48e1-80d9-f969a575af94
+		summarizeBy: none
+		sourceColumn: License Snapshot UTC
+
+	column 'Available Units'
+		dataType: int64
+		lineageTag: 93028660-7756-4121-8d6d-1476346b1512
+		sourceColumn: Available Units
+
+	column Subscribed
+		dataType: string
+		lineageTag: d76eb8e4-7647-4466-a131-31e3783ac57f
+		sourceColumn: Subscribed
+
+	column 'Disabled Unknown'
+		dataType: int64
+		lineageTag: 4c6ea812-4e0a-4e21-8b0c-4251e0da2954
+		sourceColumn: Disabled Unknown
+
+	column 'No M365 Activity Unknown'
+		dataType: int64
+		lineageTag: dcac5d89-054f-488c-b632-d8ee6efb578c
+		sourceColumn: No M365 Activity Unknown
+
+	column 'Multiple Target Suites Unknown'
+		dataType: int64
+		lineageTag: bef4d504-1f6b-4edf-885b-a4fd5b4e36d7
+		sourceColumn: Multiple Target Suites Unknown
+
+	column 'Multiple Assigned SKUs Unknown'
+		dataType: int64
+		lineageTag: 3f08ec12-cdf6-4b59-864d-c4b002fd9c12
+		sourceColumn: Multiple Assigned SKUs Unknown
+
+	column 'No AD or Entra Activity Unknown'
+		dataType: int64
+		lineageTag: 0f9e3679-87b7-4491-bbe6-63496d943aa9
+		sourceColumn: No AD or Entra Activity Unknown
+
+	column 'No Mailbox Activity Unknown'
+		dataType: int64
+		lineageTag: 27ce4321-e175-4d21-8710-66840864dfd7
+		sourceColumn: No Mailbox Activity Unknown
+
+	column 'No Local Apps Use Unknown'
+		dataType: int64
+		lineageTag: 132aa66f-e202-4afe-8cf2-a20a682b7299
+		sourceColumn: No Local Apps Use Unknown
+
+	column 'Candidates Primary Intune PC Unknown'
+		dataType: int64
+		lineageTag: 98bf3033-873e-4f27-a6ac-f0d3b7edbf07
+		sourceColumn: Candidates Primary Intune PC Unknown
+
+	column 'Shared Unknown'
+		dataType: int64
+		lineageTag: 5ce126b3-cca6-429b-9b2f-3fca86bcf49d
+		sourceColumn: Shared Unknown
+
+	column 'E3 to F3 Review Assigned'
+		dataType: int64
+		lineageTag: d3abaf03-963c-4d63-9553-12c0f539cb35
+		sourceColumn: E3 to F3 Review Assigned
+
+	column 'E3 to F3 Review Excluded'
+		dataType: int64
+		lineageTag: ce7b9f33-8851-4808-a8a9-074ca433c764
+		sourceColumn: E3 to F3 Review Excluded
+
+	column 'E3 to F3 Review Recovery Excluded'
+		dataType: int64
+		lineageTag: 7e3f205d-d42b-4052-9de5-dfb71aba3784
+		sourceColumn: E3 to F3 Review Recovery Excluded
+
+	/// Distinct users per suite waiting for assignment capacity. Unknown evidence remains blank.
+	column 'Assignment Capacity Wait'
+		dataType: int64
+		isHidden
+		lineageTag: 04006951-cfa8-43bc-b40d-6f6781153e98
+		summarizeBy: none
+		sourceColumn: Assignment Capacity Wait
+
+	/// Distinct users per suite with other assignment errors. Unknown evidence remains blank.
+	column 'Assignment Other Errors'
+		dataType: int64
+		isHidden
+		lineageTag: f0409543-848f-470b-a957-1acc8b7e8853
+		summarizeBy: none
+		sourceColumn: Assignment Other Errors
+
+	/// Assignment source qualification, separate from recovery source qualification.
+	column 'Assignment Evidence Status'
+		dataType: string
+		lineageTag: 9046249b-0d06-43d3-96d2-0decb75c5172
+		summarizeBy: none
+		sourceColumn: Assignment Evidence Status
+
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: d6bec7c2-058c-4837-849f-001d391600d6
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'License Report Summary Import' = m
+		mode: import
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
+				    Raw = GetLicenseReportCsv("M365_Licenses_ReportSummary.csv", {"SnapshotId", "TenantKey", "GeneratedAtUtc", "LicenseCollectedAtUtc", "Product", "Category", "EnabledUnits", "ConsumedUnits", "AvailableUnits", "Subscribed", "AssignedUsers", "RecoveryCandidates", "RecoveryUnknown", "DisabledUsers", "DisabledUnknown", "NoM365Activity", "NoM365ActivityUnknown", "MultipleTargetSuites", "MultipleTargetSuitesUnknown", "MultipleAssignedSkus", "MultipleAssignedSkusUnknown", "NoAdOrEntraActivity", "NoAdOrEntraActivityUnknown", "NoMailboxActivity", "NoMailboxActivityUnknown", "NoLocalAppsUse", "NoLocalAppsUseUnknown", "CandidatesPrimaryIntunePc", "CandidatesPrimaryIntunePcUnknown", "SharedMailboxesLicensed", "SharedUnder50Gb", "SharedRemovalCandidates", "SharedUnknown", "E3ToF3ReviewAssigned", "E3ToF3ReviewCandidates", "E3ToF3ReviewUnknown", "E3ToF3ReviewExcluded", "E3ToF3ReviewRecoveryExcluded", "EvidenceStatus", "WorkbookQualification"}),
+				    RowCheck = if not LicenseReportFileUsable("M365_Licenses_ReportSummary.csv") or Table.RowCount(Raw) >= 7 then Raw else error "License report CSV has too few rows",
+				    NonBlank = Table.ReplaceValue(RowCheck, "", null, Replacer.ReplaceValue, {"EnabledUnits", "ConsumedUnits", "AvailableUnits", "AssignedUsers", "RecoveryCandidates", "RecoveryUnknown", "DisabledUsers", "DisabledUnknown", "NoM365Activity", "NoM365ActivityUnknown", "MultipleTargetSuites", "MultipleTargetSuitesUnknown", "MultipleAssignedSkus", "MultipleAssignedSkusUnknown", "NoAdOrEntraActivity", "NoAdOrEntraActivityUnknown", "NoMailboxActivity", "NoMailboxActivityUnknown", "NoLocalAppsUse", "NoLocalAppsUseUnknown", "CandidatesPrimaryIntunePc", "CandidatesPrimaryIntunePcUnknown", "SharedMailboxesLicensed", "SharedUnder50Gb", "SharedRemovalCandidates", "SharedUnknown", "E3ToF3ReviewAssigned", "E3ToF3ReviewCandidates", "E3ToF3ReviewUnknown", "E3ToF3ReviewExcluded", "E3ToF3ReviewRecoveryExcluded", "GeneratedAtUtc"}),
+				    Renamed = Table.RenameColumns(NonBlank, {{"SnapshotId", "Snapshot ID"}, {"TenantKey", "Tenant Key"}, {"GeneratedAtUtc", "Generated At UTC"}, {"LicenseCollectedAtUtc", "License Snapshot UTC"}, {"EnabledUnits", "Enabled Units"}, {"ConsumedUnits", "Consumed Units"}, {"AvailableUnits", "Available Units"}, {"AssignedUsers", "Assigned Users"}, {"RecoveryCandidates", "Recovery Candidates"}, {"RecoveryUnknown", "Recovery Unknown"}, {"DisabledUsers", "Disabled Users"}, {"DisabledUnknown", "Disabled Unknown"}, {"NoM365Activity", "No M365 Activity"}, {"NoM365ActivityUnknown", "No M365 Activity Unknown"}, {"MultipleTargetSuites", "Multiple Target Suites"}, {"MultipleTargetSuitesUnknown", "Multiple Target Suites Unknown"}, {"MultipleAssignedSkus", "Multiple Assigned SKUs"}, {"MultipleAssignedSkusUnknown", "Multiple Assigned SKUs Unknown"}, {"NoAdOrEntraActivity", "No AD or Entra Activity"}, {"NoAdOrEntraActivityUnknown", "No AD or Entra Activity Unknown"}, {"NoMailboxActivity", "No Mailbox Activity"}, {"NoMailboxActivityUnknown", "No Mailbox Activity Unknown"}, {"NoLocalAppsUse", "No Local Apps Use"}, {"NoLocalAppsUseUnknown", "No Local Apps Use Unknown"}, {"CandidatesPrimaryIntunePc", "Candidates Primary Intune PC"}, {"CandidatesPrimaryIntunePcUnknown", "Candidates Primary Intune PC Unknown"}, {"SharedMailboxesLicensed", "Shared Mailboxes Licensed"}, {"SharedUnder50Gb", "Shared Under 50 GB"}, {"SharedRemovalCandidates", "Shared Removal Candidates"}, {"SharedUnknown", "Shared Unknown"}, {"E3ToF3ReviewAssigned", "E3 to F3 Review Assigned"}, {"E3ToF3ReviewCandidates", "E3 to F3 Review Candidates"}, {"E3ToF3ReviewUnknown", "E3 to F3 Review Unknown"}, {"E3ToF3ReviewExcluded", "E3 to F3 Review Excluded"}, {"E3ToF3ReviewRecoveryExcluded", "E3 to F3 Review Recovery Excluded"}, {"EvidenceStatus", "Evidence Status"}, {"WorkbookQualification", "Workbook Qualification"}}),
+				    WithAssignments = Table.RenameColumns(Renamed, {{"AssignmentCapacityWait", "Assignment Capacity Wait"}, {"AssignmentOtherErrors", "Assignment Other Errors"}, {"AssignmentEvidenceStatus", "Assignment Evidence Status"}}),
+				    Selected = Table.ReplaceValue(WithAssignments, "N/D", "Unknown", Replacer.ReplaceValue, {"Assignment Evidence Status"}),
+				    Typed = Table.TransformColumnTypes(Selected, {{"Assignment Capacity Wait", Int64.Type}, {"Assignment Other Errors", Int64.Type}, {"Enabled Units", Int64.Type}, {"Consumed Units", Int64.Type}, {"Available Units", Int64.Type}, {"Assigned Users", Int64.Type}, {"Recovery Candidates", Int64.Type}, {"Recovery Unknown", Int64.Type}, {"Disabled Users", Int64.Type}, {"Disabled Unknown", Int64.Type}, {"No M365 Activity", Int64.Type}, {"No M365 Activity Unknown", Int64.Type}, {"Multiple Target Suites", Int64.Type}, {"Multiple Target Suites Unknown", Int64.Type}, {"Multiple Assigned SKUs", Int64.Type}, {"Multiple Assigned SKUs Unknown", Int64.Type}, {"No AD or Entra Activity", Int64.Type}, {"No AD or Entra Activity Unknown", Int64.Type}, {"No Mailbox Activity", Int64.Type}, {"No Mailbox Activity Unknown", Int64.Type}, {"No Local Apps Use", Int64.Type}, {"No Local Apps Use Unknown", Int64.Type}, {"Candidates Primary Intune PC", Int64.Type}, {"Candidates Primary Intune PC Unknown", Int64.Type}, {"Shared Mailboxes Licensed", Int64.Type}, {"Shared Under 50 GB", Int64.Type}, {"Shared Removal Candidates", Int64.Type}, {"Shared Unknown", Int64.Type}, {"E3 to F3 Review Assigned", Int64.Type}, {"E3 to F3 Review Candidates", Int64.Type}, {"E3 to F3 Review Unknown", Int64.Type}, {"E3 to F3 Review Excluded", Int64.Type}, {"E3 to F3 Review Recovery Excluded", Int64.Type}, {"Generated At UTC", type datetime}}, "en-US")
+				in
+				    Typed)
+				in
+				    Readers[Finish](BusinessRows)
+

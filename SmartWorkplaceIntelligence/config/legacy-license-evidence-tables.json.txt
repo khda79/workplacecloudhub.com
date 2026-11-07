@@ -1,0 +1,172 @@
+{
+  "Version": "1.0",
+  "Purpose": "Retired SWI-computed license tables (New-LicensingEvidence). Only used to transfer immutable batches built before the retirement; never prepared again.",
+  "Tables": [
+    {
+      "index": 32,
+      "table": {
+        "table": "License Evidence",
+        "file": "LicenseEvidence.csv",
+        "uniqueKey": [
+          "SKU Part Number"
+        ],
+        "columns": [
+          {
+            "name": "License Product",
+            "type": "string"
+          },
+          {
+            "name": "SKU Part Number",
+            "type": "string"
+          },
+          {
+            "name": "Capacity Class",
+            "type": "string"
+          },
+          {
+            "name": "Enabled Units",
+            "type": "int64"
+          },
+          {
+            "name": "Consumed Units",
+            "type": "int64"
+          },
+          {
+            "name": "Available Units",
+            "type": "int64"
+          },
+          {
+            "name": "Capacity Utilization",
+            "type": "double"
+          },
+          {
+            "name": "Assigned Users",
+            "type": "int64"
+          },
+          {
+            "name": "Direct Assignments",
+            "type": "int64"
+          },
+          {
+            "name": "Group Assignments",
+            "type": "int64"
+          },
+          {
+            "name": "Direct and Group Assignments",
+            "type": "int64"
+          },
+          {
+            "name": "Potentially Reclaimable Assignments",
+            "type": "int64"
+          },
+          {
+            "name": "Dormant 31-90D Assignments",
+            "type": "int64"
+          },
+          {
+            "name": "Risk Priority",
+            "type": "string"
+          },
+          {
+            "name": "Risk Signal",
+            "type": "string"
+          },
+          {
+            "name": "Recommended Action",
+            "type": "string"
+          },
+          {
+            "name": "Snapshot Date",
+            "type": "dateTime"
+          },
+          {
+            "name": "Evidence Status",
+            "type": "string"
+          },
+          {
+            "name": "Microsoft 365 Plan",
+            "type": "string"
+          },
+          {
+            "name": "Disabled Reclaimable Assignments",
+            "type": "int64"
+          },
+          {
+            "name": "E3 to F3 Review Candidates",
+            "type": "int64"
+          }
+        ]
+      }
+    },
+    {
+      "index": 35,
+      "table": {
+        "table": "License Optimization Evidence",
+        "file": "LicenseOptimizationEvidence.csv",
+        "uniqueKey": [],
+        "columns": [
+          {
+            "name": "User Principal Name",
+            "type": "string"
+          },
+          {
+            "name": "SKU Part Number",
+            "type": "string"
+          },
+          {
+            "name": "License Product",
+            "type": "string"
+          },
+          {
+            "name": "Microsoft 365 Plan",
+            "type": "string"
+          },
+          {
+            "name": "Account State",
+            "type": "string"
+          },
+          {
+            "name": "Activity State",
+            "type": "string"
+          },
+          {
+            "name": "Last Activity Date",
+            "type": "dateTime"
+          },
+          {
+            "name": "Last Office Desktop Activation Date",
+            "type": "dateTime"
+          },
+          {
+            "name": "Mailbox Size GB",
+            "type": "double"
+          },
+          {
+            "name": "Archive State",
+            "type": "string"
+          },
+          {
+            "name": "Optimization Opportunity",
+            "type": "string"
+          },
+          {
+            "name": "Optimization Reason",
+            "type": "string"
+          },
+          {
+            "name": "Recommended Action",
+            "type": "string"
+          },
+          {
+            "name": "Evidence Status",
+            "type": "string"
+          },
+          {
+            "name": "Snapshot Date",
+            "type": "dateTime"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,252 @@
+/// Business-facing semantic model backed by governed SmartM365 domain evidence and observed histories. Generic CMDB projections and synthetic demonstration tables are retired. Offline validation does not imply production or Desktop qualification.
+model SmartWorkplaceIntelligence
+	culture: en-US
+	defaultPowerBIDataSourceVersion: powerBI_V3
+	discourageImplicitMeasures
+	sourceQueryCulture: en-US
+	dataAccessOptions
+		legacyRedirects
+		returnErrorValuesAsNull
+
+annotation PBI_QueryOrder = ["Date","Report Metadata","Executive KPI Trends","Device Inventory Evidence","User Inventory Evidence","Mailbox Evidence","Security Control Evidence","Enterprise Operational Signals","DataRoot","Device Risk Evidence Summary","User Activity History Evidence","Workforce Trend Evidence","Identity Reconciliation Evidence","Workforce Operational Signals","Windows Lifecycle Trend Evidence","Endpoint Experience Trend Evidence","Application Inventory Evidence","Application Trend Evidence","Application Operational Signals","Collaboration Adoption Evidence","Collaboration Object Evidence","Collaboration Trend Evidence","Collaboration Operational Signals","Content Storage Evidence","Content Storage Trend Evidence","Content Storage Operational Signals","Backup Mailbox Evidence","Backup Operational Signals","Data Trust Evidence","Data Trust Operational Signals","Device Directory Summary","SharePointSiteUrl","SharePointLibraryName","SharePointDataFolder","License Report Summary","License Report Candidates","License Report Gaps","License Report Sources","PreparedSourceMode","PreparedEvidenceRoot","PreparedSharePointFolder","GetPreparedEvidenceFile","PreparedBatchId","GetLicenseReportSnapshot","GetLicenseReportCsv","License Report Assignment Issues","License SKU Capacity","License SKU Candidates","License Report Qualification","Windows Migration Evidence","Mailbox Migration Batches","Windows Migration History","Mailbox Migration Inventory","Mailbox Migration Weekly History","Windows Migration AD Observations","Country Reference","SharePoint On-prem Farms","SharePoint On-prem Servers","SharePoint On-prem Service Applications","SharePoint On-prem Web Applications","SharePoint On-prem Web Zones","SharePoint On-prem Content Databases","SharePoint On-prem Site Collections","SharePoint On-prem Collection Coverage","All Accounts Evidence","All Devices Evidence","Device System Evidence","Endpoint Protection Policy","Endpoint Protection Evidence","Intune Configuration Policy Evidence","Intune Configuration Setting Evidence","Intune Configuration Assignment Evidence","Intune Configuration Device Evidence","Intune Managed App Evidence","Intune Managed App Assignment Evidence","Intune Managed App Deployment Evidence","Intune Enrollment Failure Evidence","Intune Operational Source Evidence","Tenant Evidence","Native Country Evidence","Native User Evidence","Native Device Evidence","Native Managed Device Evidence","Native Group Evidence","Verified Domain Evidence","AD User Evidence","AD Computer Evidence","AD Group Evidence","AD Domain Evidence","AD Object Evidence","AD Membership Evidence","Entra Membership Evidence","Native Hardware Evidence","Hardware Coverage Evidence","Device Source Evidence","Native AD Intune Coverage","Native Compliance Evidence","Autopilot Evidence","Native Configuration Catalog","Native Update Policy Evidence","Native Update Alert Evidence","Native Endpoint Score Evidence","Native Upgrade Eligibility","Native Discovered Application","Native Device Application","Native Application Ranking","Native License SKU","Native Service Plan","Native User License","Native User Service Plan","Native License Assignment","Native SharePoint Site","Native Team","Native Team Membership","Native EXO Mailbox","Native Mailbox Hosting","Native Hybrid Coverage","Native Workload Activity","Native User Device Link","Native Relationship Summary","Native Entity Finding","Native Quality Finding","Native Source Health","Teams Site Links","SharePoint Site Links","SharePoint Tenant Capacity","Collaboration Source Qualification","Daily Directory Trends","Daily Mailbox Trends","ReadMigrationCsv","ReadMigrationWeeklyHistory","GetSharePointOnPremCsv","NativeEvidenceTypes","PreparedExpectedTenantKey","GetPreparedBatchManifest","GetLicenseReportQualification","LicenseReportFileUsable","CreateMailboxMigrationReader","ReadMailboxMigrationCsv","Mailbox Migration Exceptions","Mailbox Migration Exception Summary","SPO Migration Plan","SPO Migration Web","SPO Migration Collection","SPO Migration Legacy Web","SPO Migration Legacy Collection","SPO Migration Scope","SPO Migration Findings","SPO Migration History","SPO Migration Source Summary","SPO Migration Source Type","SPO Migration Business Unit","SPO Migration Phase","SPO Migration Project","SPO Migration Operation","SPO Migration Snapshot Date","GetSharePointMigrationEvidence","PreparedReadFolder","CreatePreparedReaders","Exchange On-prem Infrastructure","Exchange Mailbox Server Reference","Exchange Mailbox Databases","Exchange Health Checker Servers","Exchange Health Checker Findings","Exchange Hybrid Free Busy Summary","Exchange Hybrid Free Busy Findings","ReadPreparedADAccountClassification","Device Deployment Risk","License User Assignments","Mailbox Delegation Detail","Mailbox Exploration Inventory","Mailbox License Membership","Mailbox License Selection","Device Exploration Inventory","Intune Presence Selection","NativeSourceHealthState","Hybrid Identity Findings","Device Readiness Gap Evidence","Readiness Source Status","Mailbox Account License Coverage","Readiness Reading","Readiness Condition","Backlog Attribution Selection","Readiness Matrix Metric","AssessDailyReadiness","CreateBacklogTools","Email Client Usage Evidence","OneDrive Activity Evidence","Group Activity Evidence","Copilot Daily Adoption Evidence","User Cleanup Evidence","Computer Cleanup Evidence","Mailbox Cleanup Evidence","Directory Cleanup Source Qualification","Historical Windows Readiness","Shared Mailbox License Evidence","Shared Mailbox License Detail"]
+
+annotation PBI_ProTooling = ["MCP-PBIModeling","DevMode"]
+
+annotation __PBI_TimeIntelligenceEnabled = 1
+
+ref table Date
+ref table 'Report Metadata'
+ref table 'Executive KPI Trends'
+ref table DateTableTemplate_b24e4abb-ee4b-49b2-9882-957599ce3aa1
+ref table 'Device Inventory Evidence'
+ref table 'Device Operational Signals'
+ref table 'Device Risk Evidence Summary'
+ref table 'User Inventory Evidence'
+ref table 'User Activity History Evidence'
+ref table 'Workforce Trend Evidence'
+ref table 'Identity Reconciliation Evidence'
+ref table 'Workforce Operational Signals'
+ref table 'Windows Lifecycle Trend Evidence'
+ref table 'Endpoint Experience Trend Evidence'
+ref table 'Application Inventory Evidence'
+ref table 'Application Trend Evidence'
+ref table 'Application Operational Signals'
+ref table 'Collaboration Adoption Evidence'
+ref table 'Collaboration Object Evidence'
+ref table 'Collaboration Trend Evidence'
+ref table 'Collaboration Operational Signals'
+ref table 'Content Storage Evidence'
+ref table 'Content Storage Trend Evidence'
+ref table 'Content Storage Operational Signals'
+ref table 'Backup Mailbox Evidence'
+ref table 'Backup Operational Signals'
+ref table 'Data Trust Evidence'
+ref table 'Data Trust Operational Signals'
+ref table 'Mailbox Evidence'
+ref table 'Security Control Evidence'
+ref table 'Enterprise Operational Signals'
+ref table 'Mailbox Exchange Version Catalog'
+ref table LocalDateTable_0b3d0881-ea5e-47e6-be43-df832464f67b
+ref table LocalDateTable_7ed3f920-2740-4f06-b5e4-1235160ee31a
+ref table LocalDateTable_64fabb92-bcfd-4bf8-bc58-fac647b4b957
+ref table LocalDateTable_7351d1a0-1eb4-4aea-9827-af128eb26629
+ref table LocalDateTable_09b9235b-b066-4958-97e2-848f2d2dddd1
+ref table LocalDateTable_34c9943b-b627-41a6-892f-38af610aa3ab
+ref table LocalDateTable_e444bea0-7cd3-4554-903e-4527328b5859
+ref table LocalDateTable_07dba14d-5771-4b27-9d12-29e8f8909a2e
+ref table LocalDateTable_907dcf50-c645-4908-abf0-a270c18cfb44
+ref table LocalDateTable_fff5b984-93b9-400c-b9b1-816638dc659b
+ref table LocalDateTable_092d7bca-578d-4359-9d57-7785e5c19297
+ref table LocalDateTable_3a66da98-0fbc-42b3-89df-31d1353178bb
+ref table LocalDateTable_63d8f937-1415-4f4a-b264-72221c118188
+ref table LocalDateTable_23ebdc86-a087-40cc-9e59-977a41aaba93
+ref table LocalDateTable_b62f6adb-63eb-4a4b-ad79-834b3e451455
+ref table LocalDateTable_36a66c53-7233-45f9-aae9-44d7dc6b9397
+ref table LocalDateTable_39fd069f-d4c0-4fbd-acf1-e67975dbf5d4
+ref table LocalDateTable_3bde06cb-1619-411f-a7f0-1e1435fac888
+ref table LocalDateTable_11d6eea0-46e2-4eb8-ba1b-53e58ca0be30
+ref table LocalDateTable_ac1cb02b-4ba7-4e8e-9125-ce7bdaddab0e
+ref table 'Device Directory Summary'
+ref table LocalDateTable_0cd5f2d1-5431-442e-98f7-a997ef72119f
+ref table LocalDateTable_e67025e1-0027-4578-ac67-8d29bff0dee2
+ref table LocalDateTable_992ffd8b-7f92-4f3a-bd88-9b41a35b51d2
+ref table 'Workforce License Review Selection'
+ref table LocalDateTable_a7bac2e8-dc96-494a-803b-01fa833a644d
+ref table LocalDateTable_9c75bf89-ef1c-44c2-a9c2-d4c0f8594ea3
+ref table LocalDateTable_5687bff7-bb24-402c-aec1-3a5d0ec7aa58
+ref table LocalDateTable_cdbfe80e-2839-456b-be8f-cb16ce0d35a5
+ref table 'Country Selection'
+ref table 'License Report Summary'
+ref table 'License Report Candidates'
+ref table 'License Report Gaps'
+ref table 'License Report Sources'
+ref table 'License Report Assignment Issues'
+ref table 'Windows Migration Evidence'
+ref table 'Mailbox Migration Batches'
+ref table 'Windows Migration History'
+ref table 'Mailbox Migration Inventory'
+ref table 'Mailbox Migration Weekly History'
+ref table 'Windows Migration AD Observations'
+ref table 'Country Reference'
+ref table 'SharePoint On-prem Farms'
+ref table 'SharePoint On-prem Servers'
+ref table 'SharePoint On-prem Service Applications'
+ref table 'SharePoint On-prem Web Applications'
+ref table 'SharePoint On-prem Web Zones'
+ref table 'SharePoint On-prem Content Databases'
+ref table 'SharePoint On-prem Site Collections'
+ref table 'SharePoint On-prem Collection Coverage'
+ref table 'All Accounts Evidence'
+ref table 'All Devices Evidence'
+ref table 'Device System Evidence'
+ref table 'Endpoint Protection Policy'
+ref table 'Endpoint Protection Evidence'
+ref table 'Intune Configuration Policy Evidence'
+ref table 'Intune Configuration Setting Evidence'
+ref table 'Intune Configuration Assignment Evidence'
+ref table 'Intune Configuration Device Evidence'
+ref table 'Intune Managed App Evidence'
+ref table 'Intune Managed App Assignment Evidence'
+ref table 'Intune Managed App Deployment Evidence'
+ref table 'Intune Enrollment Failure Evidence'
+ref table 'Intune Operational Source Evidence'
+ref table 'Tenant Evidence'
+ref table 'Native Country Evidence'
+ref table 'Native User Evidence'
+ref table 'Native Device Evidence'
+ref table 'Native Managed Device Evidence'
+ref table 'Native Group Evidence'
+ref table 'Verified Domain Evidence'
+ref table 'AD User Evidence'
+ref table 'AD Computer Evidence'
+ref table 'AD Group Evidence'
+ref table 'AD Domain Evidence'
+ref table 'AD Object Evidence'
+ref table 'AD Membership Evidence'
+ref table 'Entra Membership Evidence'
+ref table 'Native Hardware Evidence'
+ref table 'Hardware Coverage Evidence'
+ref table 'Device Source Evidence'
+ref table 'Native AD Intune Coverage'
+ref table 'Native Compliance Evidence'
+ref table 'Autopilot Evidence'
+ref table 'Native Configuration Catalog'
+ref table 'Native Update Policy Evidence'
+ref table 'Native Update Alert Evidence'
+ref table 'Native Endpoint Score Evidence'
+ref table 'Native Upgrade Eligibility'
+ref table 'Native Discovered Application'
+ref table 'Native Device Application'
+ref table 'Native Application Ranking'
+ref table 'Native License SKU'
+ref table 'Native Service Plan'
+ref table 'Native User License'
+ref table 'Native User Service Plan'
+ref table 'Native License Assignment'
+ref table 'Native SharePoint Site'
+ref table 'Native Team'
+ref table 'Native Team Membership'
+ref table 'Native EXO Mailbox'
+ref table 'Native Mailbox Hosting'
+ref table 'Native Hybrid Coverage'
+ref table 'Native Workload Activity'
+ref table 'Native User Device Link'
+ref table 'Native Relationship Summary'
+ref table 'Native Entity Finding'
+ref table 'Native Quality Finding'
+ref table 'Native Source Health'
+ref table 'Teams Site Links'
+ref table 'SharePoint Site Links'
+ref table 'SharePoint Tenant Capacity'
+ref table 'Collaboration Source Qualification'
+ref table 'Daily Directory Trends'
+ref table 'Daily Mailbox Trends'
+ref table 'Daily Axis'
+ref table 'Daily Domain'
+ref table 'Daily Period'
+ref table 'Daily View'
+ref table 'License Report Qualification'
+ref table 'License SKU Capacity'
+ref table 'License SKU Candidates'
+ref table LocalDateTable_391e0fd3-2e65-424c-9946-867c32d26a61
+ref table LocalDateTable_e51866cf-71bd-4a60-84c1-b0e49716c831
+ref table 'Mailbox Migration Exceptions'
+ref table 'Mailbox Migration Exception Summary'
+ref table 'SPO Migration Plan'
+ref table 'SPO Migration Web'
+ref table 'SPO Migration Collection'
+ref table 'SPO Migration Legacy Web'
+ref table 'SPO Migration Legacy Collection'
+ref table 'SPO Migration Scope'
+ref table 'SPO Migration Findings'
+ref table 'SPO Migration History'
+ref table 'SPO Migration Source Summary'
+ref table 'SPO Migration Source Type'
+ref table 'SPO Migration Business Unit'
+ref table 'SPO Migration Phase'
+ref table 'SPO Migration Project'
+ref table 'SPO Migration Operation'
+ref table 'SPO Migration Snapshot Date'
+ref table LocalDateTable_12cfc3be-73ac-46ad-83d3-b500fc834d3c
+ref table LocalDateTable_639f0ff7-b3b6-4a85-b662-3f9d23dd56f6
+ref table LocalDateTable_c8aab280-bc3d-4589-b957-cec92f234126
+ref table LocalDateTable_729976aa-a054-4d50-a79f-69df3e5654c0
+ref table LocalDateTable_d2e80d94-adc2-414c-8fa9-39bef439df3d
+ref table LocalDateTable_41b13c2b-fe1c-4d4e-abe2-c09e72f23525
+ref table LocalDateTable_a0cc9fe0-d3b1-4526-8fee-f1c3ed7fdc06
+ref table LocalDateTable_88fdfd00-17a7-4997-9c17-ce7ed1b56395
+ref table LocalDateTable_88b22d85-506f-48b8-a8ef-5d1d75dceb8a
+ref table LocalDateTable_734702e0-e7a1-4e0c-b4da-1ab6de316636
+ref table LocalDateTable_3c2bb49b-fdd0-41f3-a80d-34ce2f30e957
+ref table LocalDateTable_a5141330-a230-4c06-bddc-4c44597d9684
+ref table LocalDateTable_2a1736ef-f358-4c1d-a66f-352e2a360979
+ref table LocalDateTable_caef29d4-4061-4742-a804-43aaa04f73d2
+ref table LocalDateTable_6441f0c4-711f-4aec-ab37-50cfbb093e99
+ref table 'Loaded Batch Audit'
+ref table 'Exchange On-prem Infrastructure'
+ref table 'M365 License Selection'
+ref table 'M365 User License Membership'
+ref table 'M365 Device License Membership'
+ref table 'Exchange Mailbox Reconciliation'
+ref table 'Exchange Mailbox Server Reference'
+ref table 'Exchange Mailbox Databases'
+ref table 'Exchange Health Checker Servers'
+ref table 'Exchange Health Checker Findings'
+ref table 'Exchange Hybrid Free Busy Summary'
+ref table 'Exchange Hybrid Free Busy Findings'
+ref table 'Device Deployment Risk'
+ref table 'License User Assignments'
+ref table 'Mailbox Delegation Detail'
+ref table 'Mailbox Exploration Inventory'
+ref table 'Mailbox License Membership'
+ref table 'Mailbox License Selection'
+ref table 'Device Exploration Inventory'
+ref table 'Intune Presence Selection'
+ref table 'Account License Selection'
+ref table 'Account Explorer Inventory'
+ref table 'Global Device Inventory'
+ref table 'Device Identity Inventory'
+ref table 'Autopilot Identity Audit'
+ref table 'Primary User Selection'
+ref table 'Hybrid Identity Findings'
+ref table 'Device Readiness Gap Evidence'
+ref table 'Readiness Source Status'
+ref table 'Mailbox Account License Coverage'
+ref table 'Readiness Reading'
+ref table 'Readiness Condition'
+ref table 'Backlog Attribution Selection'
+ref table 'Readiness Matrix Metric'
+ref table 'Email Client Usage Evidence'
+ref table 'OneDrive Activity Evidence'
+ref table 'Group Activity Evidence'
+ref table 'Copilot Daily Adoption Evidence'
+ref table 'User Cleanup Evidence'
+ref table 'Computer Cleanup Evidence'
+ref table 'Mailbox Cleanup Evidence'
+ref table 'Directory Cleanup Source Qualification'
+ref table 'Historical Windows Readiness'
+ref table 'Shared Mailbox License Evidence'
+ref table 'Shared Mailbox License Detail'
+
+ref cultureInfo en-US
+

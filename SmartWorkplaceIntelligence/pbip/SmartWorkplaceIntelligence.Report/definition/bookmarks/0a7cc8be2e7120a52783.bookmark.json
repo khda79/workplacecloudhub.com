@@ -1,0 +1,112 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "0a7cc8be2e7120a52783",
+  "displayName": "Managed apps",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "06e8e79be24fb907920f",
+      "112e44cbf3144092ed4b",
+      "145ad159a5c3ed106b1d",
+      "776b3989c78d678a6ad3",
+      "8c59565eabaf5c336758",
+      "c560b8bd69be0fb81528",
+      "dc957f9aaa1a00cd5ac6",
+      "eaa4fe1c0e36d833b4c6",
+      "fb4bac758b2a5747441b",
+      "8235ce9f0393a6efb212",
+      "8939b1f637c63199981b",
+      "28d186295d95c434680a",
+      "807e427430839e2957a3",
+      "4b81e5ff0b540e630491",
+      "c36bf209b7816f15b778",
+      "ddd81e9fa21c4c2e689f"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "a821f7deb92bb3bc4c78",
+    "sections": {
+      "a821f7deb92bb3bc4c78": {
+        "visualContainers": {
+          "8235ce9f0393a6efb212": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "8939b1f637c63199981b": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "28d186295d95c434680a": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "807e427430839e2957a3": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "4b81e5ff0b540e630491": {
+            "singleVisual": {}
+          },
+          "c36bf209b7816f15b778": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "ddd81e9fa21c4c2e689f": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
+        "visualContainerGroups": {
+          "06e8e79be24fb907920f": {
+            "isHidden": true
+          },
+          "112e44cbf3144092ed4b": {
+            "isHidden": true
+          },
+          "145ad159a5c3ed106b1d": {
+            "isHidden": true
+          },
+          "776b3989c78d678a6ad3": {
+            "isHidden": true
+          },
+          "8c59565eabaf5c336758": {
+            "isHidden": true
+          },
+          "c560b8bd69be0fb81528": {
+            "isHidden": true
+          },
+          "dc957f9aaa1a00cd5ac6": {
+            "isHidden": false
+          },
+          "eaa4fe1c0e36d833b4c6": {
+            "isHidden": true
+          },
+          "fb4bac758b2a5747441b": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

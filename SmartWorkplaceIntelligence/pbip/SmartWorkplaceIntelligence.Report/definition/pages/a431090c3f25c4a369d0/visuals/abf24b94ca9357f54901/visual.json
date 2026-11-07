@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "abf24b94ca9357f54901",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 11000,
+    "height": 1080,
+    "width": 1920,
+    "tabOrder": 11000
+  },
+  "visualGroup": {
+    "displayName": "Native · Hardware coverage",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

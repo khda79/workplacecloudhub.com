@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Report",
+    "displayName": "SmartWorkplaceIntelligence BETA 1.0.0-beta.1",
+    "description": "Source-backed Smart Workplace Intelligence BETA report built from current private evidence and observed histories where available."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "8f4e1c3a-7b21-4b7d-9a44-02d7fb0ee201"
+  }
+}

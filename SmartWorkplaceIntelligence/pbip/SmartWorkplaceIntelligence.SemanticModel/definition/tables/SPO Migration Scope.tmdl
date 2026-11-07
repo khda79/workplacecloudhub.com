@@ -1,0 +1,154 @@
+/// SPO means SharePoint Online. Grain: Scope Key; source: one selected immutable prepared batch.
+table 'SPO Migration Scope'
+	isHidden
+	lineageTag: f0f0617f-63db-4f95-9d5f-3294c3220d9f
+
+	/// Prepared, tenant-qualified migration evidence: TenantKey.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: b7a194ab-4cc9-4c18-9e57-3e59a00c43cc
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Prepared, tenant-qualified migration evidence: Project Key.
+	column 'Project Key'
+		dataType: string
+		isHidden
+		lineageTag: 27d9fd93-caf7-4378-8adf-791f163ac130
+		summarizeBy: none
+		sourceColumn: Project Key
+
+	/// Prepared, tenant-qualified migration evidence: Snapshot ID.
+	column 'Snapshot ID'
+		dataType: string
+		isHidden
+		lineageTag: bd3e27e5-2e2c-483a-97f9-6e95a9c110f0
+		summarizeBy: none
+		sourceColumn: Snapshot ID
+
+	/// Prepared, tenant-qualified migration evidence: Snapshot Date.
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: e71116e6-c694-4b36-9fc5-5d50e252dea4
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: 34b20d78-9e75-458a-be34-8a3b2c6a9608
+			defaultHierarchy: LocalDateTable_a0cc9fe0-d3b1-4526-8fee-f1c3ed7fdc06.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	/// Prepared, tenant-qualified migration evidence: Scope Key.
+	column 'Scope Key'
+		dataType: string
+		isHidden
+		lineageTag: 3357de48-a845-4f31-9550-8fad39357e62
+		summarizeBy: none
+		sourceColumn: Scope Key
+
+	/// Prepared, tenant-qualified migration evidence: Operation Key.
+	column 'Operation Key'
+		dataType: string
+		isHidden
+		lineageTag: 90f309e4-da85-4fb6-9d76-5aa3c2b3fa8b
+		summarizeBy: none
+		sourceColumn: Operation Key
+
+	/// Prepared, tenant-qualified migration evidence: Web Key.
+	column 'Web Key'
+		dataType: string
+		isHidden
+		lineageTag: c79b2af8-9b6a-4455-b288-d88e3484cfd9
+		summarizeBy: none
+		sourceColumn: Web Key
+
+	/// Prepared, tenant-qualified migration evidence: Collection Key.
+	column 'Collection Key'
+		dataType: string
+		isHidden
+		lineageTag: fbaf0585-a5fa-4a41-9815-3de3f86cdbc8
+		summarizeBy: none
+		sourceColumn: Collection Key
+
+	/// Prepared, tenant-qualified migration evidence: Coverage Kind.
+	column 'Coverage Kind'
+		dataType: string
+		lineageTag: 5462b41f-b85c-4f3f-925a-cc347a427ca0
+		summarizeBy: none
+		sourceColumn: Coverage Kind
+
+	/// Prepared, tenant-qualified migration evidence: Is Effective.
+	column 'Is Effective'
+		dataType: boolean
+		lineageTag: b8a44104-d92a-4005-89e9-a12e5a786540
+		summarizeBy: none
+		sourceColumn: Is Effective
+
+	/// Prepared, tenant-qualified migration evidence: Is Direct.
+	column 'Is Direct'
+		dataType: boolean
+		lineageTag: 960a8fde-7106-4b03-880d-2fe258bca4e1
+		summarizeBy: none
+		sourceColumn: Is Direct
+
+	/// Prepared, tenant-qualified migration evidence: Effective Disposition.
+	column 'Effective Disposition'
+		dataType: string
+		lineageTag: 8f8588fe-1a06-4216-8e4b-b9110ea43a51
+		summarizeBy: none
+		sourceColumn: Effective Disposition
+
+	/// Prepared, tenant-qualified migration evidence: Has Conflict.
+	column 'Has Conflict'
+		dataType: boolean
+		lineageTag: a42811d6-0ddc-46ca-857f-ce64abe49f24
+		summarizeBy: none
+		sourceColumn: Has Conflict
+
+	column 'Project Identity'
+		dataType: string
+		isHidden
+		lineageTag: d0dbfba0-b777-41ee-92d2-0e33cf58255f
+		summarizeBy: none
+		sourceColumn: Project Identity
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: b2978237-f703-4929-909e-6156be761d28
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'SPO Migration Scope' = m
+		mode: import
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
+				    Source = GetSharePointMigrationEvidence("SharePointMigrationScopeEvidence.csv", {{"TenantKey", type text}, {"Project Key", type text}, {"Snapshot ID", type text}, {"Snapshot Date", type date}, {"Scope Key", type text}, {"Operation Key", type text}, {"Web Key", type text}, {"Collection Key", type text}, {"Coverage Kind", type text}, {"Is Effective", type logical}, {"Is Direct", type logical}, {"Effective Disposition", type text}, {"Has Conflict", type logical}}),
+				    Identity = Table.AddColumn(Source, "Project Identity", each Binary.ToText(Json.FromValue({[TenantKey], [Project Key]}), BinaryEncoding.Base64), type text),
+				    Categories = Table.TransformColumns(Identity, List.Transform(List.Intersect({{"Business Unit", "Phase"}, Table.ColumnNames(Identity)}), (c) => {c, each if _ = null then "(Unspecified)" else _, type text}))
+				in Categories)
+				in
+				    Readers[Finish](BusinessRows)
+

@@ -1,0 +1,177 @@
+/// Native source facet migrated from FactTeamMember; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Team Membership'
+	lineageTag: 6e1f1bdb-00f9-4a13-9a12-7067494976b5
+
+	/// Exact group membership edges for Teams. Migrated without changing the source calculation.
+	measure 'Native Team memberships' =
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native Team Membership')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Team Membership'[TenantUserKey]))), (COUNTROWS('Native Team Membership')))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 5e57648e-784f-4d3f-b2e8-77608b8f7ba9
+
+	/// Teams containing at least one exact guest membership. Migrated without changing the source calculation.
+	measure 'Native Teams with guests' =
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE(DISTINCTCOUNT('Native Team Membership'[TenantTeamKey]), KEEPFILTERS('Native Team Membership'[UserType] = "Guest"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Team Membership'[TenantUserKey]))), (CALCULATE(DISTINCTCOUNT('Native Team Membership'[TenantTeamKey]), KEEPFILTERS('Native Team Membership'[UserType] = "Guest"))))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 26744b77-0e7b-4362-a43b-4475be77252c
+
+	/// Share of exact Team membership edges by owner/member role. Migrated without changing the source calculation.
+	measure 'Native Team membership role rate' =
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((DIVIDE([Native Team memberships], CALCULATE([Native Team memberships], REMOVEFILTERS('Native Team Membership'[Role])))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Team Membership'[TenantUserKey]))), (DIVIDE([Native Team memberships], CALCULATE([Native Team memberships], REMOVEFILTERS('Native Team Membership'[Role])))))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 80602c60-77f7-4105-a374-71b606189fe0
+
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
+	measure 'Native Context Rows · Native Team Membership' =
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native Team Membership')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Team Membership'[TenantUserKey]))), (COUNTROWS('Native Team Membership')))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
+		formatString: #,0
+		isHidden
+		lineageTag: 53d8a96f-3344-4e2d-9a16-a040802109a6
+
+	/// SAM display resolved by qualified native identity, same tenant and loaded batch. Empty text when no qualified SAM; preserves unresolved source rows in table projections.
+	measure 'SAM · Native Team Membership' = VAR _display = (VAR _key=SELECTEDVALUE('Native Team Membership'[TenantUserKey]) VAR _tenant=SELECTEDVALUE('Native Team Membership'[TenantKey]) VAR _batch=SELECTEDVALUE('Native Team Membership'[Loaded Batch ID]) RETURN IF(NOT ISBLANK(_key),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[TenantUserKey],_key,'Native User Evidence'[TenantKey],_tenant,'Native User Evidence'[Loaded Batch ID],_batch))) RETURN IF(COUNTROWS('Native Team Membership') > 0, COALESCE(_display, ""))
+		displayFolder: Private identity display
+		lineageTag: 3c38b3d6-f5e5-462b-90d2-d945695f2e1d
+
+	/// Native FactTeamMember attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: dda9c18a-fb24-4402-a078-7e05979b349e
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native FactTeamMember attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 97540167-3475-4e66-ac42-849d434d8e87
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native FactTeamMember attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: db7fbd71-425e-4337-af89-600c90732ae6
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native FactTeamMember attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 53e57993-377d-475c-a283-4719acbe97ed
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native FactTeamMember attribute; source qualification is retained.
+	column TenantTeamMemberKey
+		dataType: string
+		isHidden
+		lineageTag: f88b5ffd-55dd-4897-9e18-b7cf98e53bb3
+		summarizeBy: none
+		sourceColumn: TenantTeamMemberKey
+
+	/// Native FactTeamMember attribute; source qualification is retained.
+	column TenantTeamKey
+		dataType: string
+		isHidden
+		lineageTag: 0d3e95ec-768e-4c89-a339-e927a289031d
+		summarizeBy: none
+		sourceColumn: TenantTeamKey
+
+	/// Native FactTeamMember attribute; source qualification is retained.
+	column TeamId
+		dataType: string
+		lineageTag: d0f6d27c-5115-49b3-b0de-3a689e97d741
+		summarizeBy: none
+		sourceColumn: TeamId
+
+	/// Native FactTeamMember attribute; source qualification is retained.
+	column TenantUserKey
+		dataType: string
+		isHidden
+		lineageTag: 8f4c6671-bfc9-4b16-87c0-21729d5c0ebb
+		summarizeBy: none
+		sourceColumn: TenantUserKey
+
+	/// Native FactTeamMember attribute; source qualification is retained.
+	column UserId
+		dataType: string
+		lineageTag: 3a024e42-5e13-4b38-aef8-9affbc6cd8e6
+		summarizeBy: none
+		sourceColumn: UserId
+
+	/// Native FactTeamMember attribute; source qualification is retained.
+	column UserPrincipalName
+		dataType: string
+		lineageTag: e8a6dc5a-78d2-4697-9aee-1f6c17854f79
+		summarizeBy: none
+		sourceColumn: UserPrincipalName
+
+	/// Native FactTeamMember attribute; source qualification is retained.
+	column UserType
+		dataType: string
+		lineageTag: faa0902f-2821-487f-9271-ce36259ccac3
+		summarizeBy: none
+		sourceColumn: UserType
+
+	/// Native FactTeamMember attribute; source qualification is retained.
+	column Role
+		dataType: string
+		lineageTag: 72e4ceeb-af43-4b1d-8489-92b93d222cfe
+		summarizeBy: none
+		sourceColumn: Role
+
+	/// Native FactTeamMember attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		lineageTag: 44bbac4c-6103-4b5d-ba0e-a82c65acfe98
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 65e18cca-eb44-43e3-a974-68c0eabbaa0a
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'Native Team Membership' = m
+		mode: import
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactTeamMember.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantTeamMemberKey", dataType="String"], [name="TenantTeamKey", dataType="String"], [name="TeamId", dataType="String"], [name="TenantUserKey", dataType="String"], [name="UserId", dataType="String"], [name="UserPrincipalName", dataType="String"], [name="UserType", dataType="String"], [name="Role", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]}))
+				in
+				    Readers[Finish](BusinessRows)
+

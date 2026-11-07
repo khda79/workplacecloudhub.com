@@ -1,0 +1,737 @@
+relationship rel_Date_Executive_KPI_Trends_Date_Key
+	fromColumn: 'Executive KPI Trends'.'Date Key'
+	toColumn: Date.'Date Key'
+
+relationship rel_user_activity_history_to_inventory
+	fromColumn: 'User Activity History Evidence'.'User Source ID'
+	toColumn: 'User Inventory Evidence'.'User Source ID'
+
+relationship rel_user_activity_history_to_date
+	fromColumn: 'User Activity History Evidence'.'Date Key'
+	toColumn: Date.'Date Key'
+
+relationship rel_workforce_trend_to_date
+	fromColumn: 'Workforce Trend Evidence'.'Date Key'
+	toColumn: Date.'Date Key'
+
+relationship rel_Date_Application_Trend_Evidence_Date_Key
+	fromColumn: 'Application Trend Evidence'.'Date Key'
+	toColumn: Date.'Date Key'
+
+relationship CollaborationTrendEvidence_Date
+	fromColumn: 'Collaboration Trend Evidence'.'Date Key'
+	toColumn: Date.'Date Key'
+
+relationship d8de528d-fe71-42de-bf5f-dd1e90ccaae6
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'User Inventory Evidence'.'Last Activity Date'
+	toColumn: LocalDateTable_0b3d0881-ea5e-47e6-be43-df832464f67b.Date
+
+relationship 9187c498-78ab-4b52-ad4d-af3185bc6817
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'User Inventory Evidence'.'Evidence Date'
+	toColumn: LocalDateTable_7ed3f920-2740-4f06-b5e4-1235160ee31a.Date
+
+relationship 4fac74b3-c3f1-403f-80da-f825f9c641c6
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Mailbox Evidence'.'Last Activity Date'
+	toColumn: LocalDateTable_64fabb92-bcfd-4bf8-bc58-fac647b4b957.Date
+
+relationship 81e59377-f0f1-4fa5-b2bf-d01399d45ce5
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Security Control Evidence'.'Snapshot Date'
+	toColumn: LocalDateTable_7351d1a0-1eb4-4aea-9827-af128eb26629.Date
+
+relationship b6a44913-a444-4fcd-b9cf-5f11c9ca63cb
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'User Activity History Evidence'.'Snapshot Date'
+	toColumn: LocalDateTable_09b9235b-b066-4958-97e2-848f2d2dddd1.Date
+
+relationship 42c5ef6f-19ab-45f7-8b2d-90de5dbc46c8
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'User Activity History Evidence'.'Last Activity Date'
+	toColumn: LocalDateTable_34c9943b-b627-41a6-892f-38af610aa3ab.Date
+
+relationship dffe9089-38e6-4808-8d01-05543499391f
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Workforce Trend Evidence'.'Snapshot Date'
+	toColumn: LocalDateTable_e444bea0-7cd3-4554-903e-4527328b5859.Date
+
+relationship 180e0e7e-0b5a-4497-b1b8-6600de8a84c3
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Identity Reconciliation Evidence'.'Evidence Date'
+	toColumn: LocalDateTable_07dba14d-5771-4b27-9d12-29e8f8909a2e.Date
+
+relationship fb74ea06-15bb-4aff-9b4e-c1419788d31c
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Application Inventory Evidence'.'Snapshot Date'
+	toColumn: LocalDateTable_907dcf50-c645-4908-abf0-a270c18cfb44.Date
+
+relationship 0f2508f5-3317-4474-97d9-1287acfc99a0
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Application Trend Evidence'.'Snapshot Date'
+	toColumn: LocalDateTable_fff5b984-93b9-400c-b9b1-816638dc659b.Date
+
+relationship 1ed3a234-0fd6-44c0-a312-d960ad470074
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Collaboration Adoption Evidence'.'Usage Refresh Date'
+	toColumn: LocalDateTable_092d7bca-578d-4359-9d57-7785e5c19297.Date
+
+relationship 696d3894-6d81-4fbc-980b-c7d794d16702
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Collaboration Object Evidence'.'Last Activity Date'
+	toColumn: LocalDateTable_3a66da98-0fbc-42b3-89df-31d1353178bb.Date
+
+relationship ca194499-edb9-4349-b904-eaaacbe755a4
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Collaboration Object Evidence'.'Snapshot Date'
+	toColumn: LocalDateTable_63d8f937-1415-4f4a-b264-72221c118188.Date
+
+relationship 0741e885-869b-471d-916d-7ca9dc4e235b
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Collaboration Trend Evidence'.'Snapshot Date'
+	toColumn: LocalDateTable_23ebdc86-a087-40cc-9e59-977a41aaba93.Date
+
+relationship 3b2bd393-27ba-4570-8069-2b721ee98199
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Content Storage Evidence'.'Last Activity Date'
+	toColumn: LocalDateTable_b62f6adb-63eb-4a4b-ad79-834b3e451455.Date
+
+relationship 5c2998eb-91ec-43aa-ae33-df38a4b8b9fd
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Content Storage Evidence'.'Snapshot Date'
+	toColumn: LocalDateTable_36a66c53-7233-45f9-aae9-44d7dc6b9397.Date
+
+relationship dbb5ebb0-940f-48f8-b83e-a114cf438aac
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Content Storage Trend Evidence'.'Snapshot Date'
+	toColumn: LocalDateTable_39fd069f-d4c0-4fbd-acf1-e67975dbf5d4.Date
+
+relationship b05a65f0-0620-4dd4-8e57-7cd83dd12c0c
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Backup Mailbox Evidence'.'Protection Snapshot Date'
+	toColumn: LocalDateTable_3bde06cb-1619-411f-a7f0-1e1435fac888.Date
+
+relationship 29d9fc6b-0fd4-4253-9c75-eaa229ba63f5
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Backup Mailbox Evidence'.'Policy Snapshot Date'
+	toColumn: LocalDateTable_11d6eea0-46e2-4eb8-ba1b-53e58ca0be30.Date
+
+relationship 2a9a07c1-3508-4ab9-a944-d1349047df9e
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Data Trust Evidence'.'Snapshot Date'
+	toColumn: LocalDateTable_ac1cb02b-4ba7-4e8e-9125-ce7bdaddab0e.Date
+
+relationship af25d72b-f474-4d3f-a099-a855a6159f66
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'User Inventory Evidence'.'AD Last Activity Date'
+	toColumn: LocalDateTable_0cd5f2d1-5431-442e-98f7-a997ef72119f.Date
+
+relationship cf8775ad-03fc-454c-a4ea-923e741dc3d4
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'User Inventory Evidence'.'M365 Last Activity Date'
+	toColumn: LocalDateTable_e67025e1-0027-4578-ac67-8d29bff0dee2.Date
+
+relationship b76347bc-6359-4e8f-9618-c13519b9d16b
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'User Inventory Evidence'.'M365 Usage Report Date'
+	toColumn: LocalDateTable_992ffd8b-7f92-4f3a-bd88-9b41a35b51d2.Date
+
+relationship rel_workforce_license_review_to_inventory
+	crossFilteringBehavior: bothDirections
+	fromColumn: 'Workforce License Review Selection'.'User Source ID'
+	toColumn: 'User Inventory Evidence'.'User Source ID'
+
+relationship 860d3156-60bd-4d7c-946f-616889068225
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'User Inventory Evidence'.'Office Desktop Usage Report Date'
+	toColumn: LocalDateTable_a7bac2e8-dc96-494a-803b-01fa833a644d.Date
+
+relationship aeadbb30-a64a-46e6-8830-ad10d63bdb7e
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'User Activity History Evidence'.'AD Last Activity Date'
+	toColumn: LocalDateTable_9c75bf89-ef1c-44c2-a9c2-d4c0f8594ea3.Date
+
+relationship de341192-97a0-4903-ae1b-8008d5143e3b
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'User Activity History Evidence'.'M365 Last Activity Date'
+	toColumn: LocalDateTable_5687bff7-bb24-402c-aec1-3a5d0ec7aa58.Date
+
+relationship 9e058c03-fdc3-4d80-80fa-fbe2ca4315e3
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Device Directory Summary'.'Snapshot Date'
+	toColumn: LocalDateTable_cdbfe80e-2839-456b-be8f-cb16ce0d35a5.Date
+
+relationship rel_country_selection_to_workforce_inventory
+	fromColumn: 'User Inventory Evidence'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship 'License Assignment Issues to Summary'
+	fromColumn: 'License Report Assignment Issues'.Product
+	toColumn: 'License Report Summary'.Product
+
+relationship SharePointOnPremInfrastructure1
+	fromColumn: 'SharePoint On-prem Servers'.'Farm Key'
+	toColumn: 'SharePoint On-prem Farms'.'Farm Key'
+
+relationship SharePointOnPremInfrastructure2
+	fromColumn: 'SharePoint On-prem Web Applications'.'Farm Key'
+	toColumn: 'SharePoint On-prem Farms'.'Farm Key'
+
+relationship SharePointOnPremInfrastructure3
+	fromColumn: 'SharePoint On-prem Content Databases'.'Web Application Key'
+	toColumn: 'SharePoint On-prem Web Applications'.'Web Application Key'
+
+relationship SharePointOnPremSites
+	fromColumn: 'SharePoint On-prem Site Collections'.'Content Database Key'
+	toColumn: 'SharePoint On-prem Content Databases'.'Content Database Key'
+
+relationship SharePointOnPremCoverage
+	fromColumn: 'SharePoint On-prem Collection Coverage'.'Content Database Key'
+	toColumn: 'SharePoint On-prem Content Databases'.'Content Database Key'
+
+relationship SharePointOnPremServiceApplications
+	fromColumn: 'SharePoint On-prem Service Applications'.'Farm Key'
+	toColumn: 'SharePoint On-prem Farms'.'Farm Key'
+
+relationship SharePointOnPremWebZones
+	fromColumn: 'SharePoint On-prem Web Zones'.'Web Application Key'
+	toColumn: 'SharePoint On-prem Web Applications'.'Web Application Key'
+
+relationship rel_country_selection_to_device_system_evidence
+	fromColumn: 'Device System Evidence'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship EndpointProtection_CountrySelection
+	fromColumn: 'Endpoint Protection Evidence'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship Intune_Configuration_Setting
+	fromColumn: 'Intune Configuration Setting Evidence'.'Policy Key'
+	toColumn: 'Intune Configuration Policy Evidence'.'Policy Key'
+
+relationship Intune_Configuration_Assignment
+	fromColumn: 'Intune Configuration Assignment Evidence'.'Policy Key'
+	toColumn: 'Intune Configuration Policy Evidence'.'Policy Key'
+
+relationship Intune_Configuration_Device
+	fromColumn: 'Intune Configuration Device Evidence'.'Policy Key'
+	toColumn: 'Intune Configuration Policy Evidence'.'Policy Key'
+
+relationship Intune_ManagedApp_Assignment
+	fromColumn: 'Intune Managed App Assignment Evidence'.'Application Key'
+	toColumn: 'Intune Managed App Evidence'.'Application Key'
+
+relationship Intune_ManagedApp_Deployment
+	fromColumn: 'Intune Managed App Deployment Evidence'.'Application Key'
+	toColumn: 'Intune Managed App Evidence'.'Application Key'
+
+relationship Intune_Device_IntuneConfigurationDeviceEvidence
+	fromColumn: 'Intune Configuration Device Evidence'.'Device Key'
+	toColumn: 'Device Inventory Evidence'.'Device Tenant Key'
+
+relationship Intune_Device_IntuneManagedAppDeploymentEvidence
+	fromColumn: 'Intune Managed App Deployment Evidence'.'Device Key'
+	toColumn: 'Device Inventory Evidence'.'Device Tenant Key'
+
+relationship Intune_Device_IntuneEnrollmentFailureEvidence
+	fromColumn: 'Intune Enrollment Failure Evidence'.'Device Key'
+	toColumn: 'Device Inventory Evidence'.'Device Tenant Key'
+
+relationship native-cmdb-report-0
+	fromColumn: 'Native User License'.TenantUserKey
+	toColumn: 'Native User Evidence'.TenantUserKey
+
+relationship native-cmdb-report-1
+	fromColumn: 'Native User License'.TenantSkuKey
+	toColumn: 'Native License SKU'.TenantSkuKey
+
+relationship native-cmdb-report-2
+	fromColumn: 'Native Compliance Evidence'.TenantDeviceKey
+	toColumn: 'Native Device Evidence'.TenantDeviceKey
+
+relationship native-cmdb-report-3
+	fromColumn: 'Native User Device Link'.TenantUserKey
+	toColumn: 'Native User Evidence'.TenantUserKey
+
+relationship native-cmdb-report-4
+	fromColumn: 'Native User Device Link'.TenantDeviceKey
+	toColumn: 'Native Device Evidence'.TenantDeviceKey
+
+relationship native-cmdb-report-5
+	fromColumn: 'Native EXO Mailbox'.TenantUserKey
+	toColumn: 'Native User Evidence'.TenantUserKey
+
+relationship native-cmdb-report-6
+	fromColumn: 'Device Source Evidence'.TenantDeviceKey
+	toColumn: 'Native Device Evidence'.TenantDeviceKey
+
+relationship native-cmdb-report-7
+	fromColumn: 'Native License Assignment'.TenantUserKey
+	toColumn: 'Native User Evidence'.TenantUserKey
+
+relationship native-cmdb-report-8
+	fromColumn: 'Native License Assignment'.TenantSkuKey
+	toColumn: 'Native License SKU'.TenantSkuKey
+
+relationship native-cmdb-report-9
+	fromColumn: 'Native License Assignment'.TenantGroupKey
+	toColumn: 'Native Group Evidence'.TenantGroupKey
+
+relationship native-cmdb-report-10
+	fromColumn: 'Native Entity Finding'.TenantDeviceKey
+	toColumn: 'Native Device Evidence'.TenantDeviceKey
+
+relationship native-cmdb-report-11
+	fromColumn: 'Native Entity Finding'.TenantUserKey
+	toColumn: 'Native User Evidence'.TenantUserKey
+
+relationship native-cmdb-report-12
+	fromColumn: 'Native Entity Finding'.TenantGroupKey
+	toColumn: 'Native Group Evidence'.TenantGroupKey
+
+relationship native-cmdb-executive-country-user
+	fromColumn: 'Native User Evidence'.CountryLabel
+	toColumn: 'Native Country Evidence'.CountryLabel
+
+relationship native-cmdb-executive-country-mailbox
+	fromColumn: 'Native Mailbox Hosting'.CountryLabel
+	toColumn: 'Native Country Evidence'.CountryLabel
+
+relationship native-cmdb-hardware-device
+	fromColumn: 'Native Hardware Evidence'.TenantDeviceKey
+	toColumn: 'Native Device Evidence'.TenantDeviceKey
+
+relationship native-cmdb-service-plan-user
+	fromColumn: 'Native User Service Plan'.TenantUserKey
+	toColumn: 'Native User Evidence'.TenantUserKey
+
+relationship native-cmdb-service-plan-sku
+	fromColumn: 'Native User Service Plan'.TenantSkuKey
+	toColumn: 'Native License SKU'.TenantSkuKey
+
+relationship native-cmdb-service-plan-definition
+	fromColumn: 'Native User Service Plan'.TenantServicePlanKey
+	toColumn: 'Native Service Plan'.TenantServicePlanKey
+
+relationship native-cmdb-app-device
+	fromColumn: 'Native Device Application'.'Tenant Intune device key'
+	toColumn: 'Native Managed Device Evidence'.TenantIntuneDeviceKey
+
+relationship native-cmdb-app-device-parent
+	fromColumn: 'Native Managed Device Evidence'.TenantDeviceKey
+	toColumn: 'Native Device Evidence'.TenantDeviceKey
+
+relationship native-cmdb-app-product
+	fromColumn: 'Native Device Application'.TenantApplicationKey
+	toColumn: 'Native Discovered Application'.TenantApplicationKey
+
+relationship native-cmdb-user-activity
+	fromColumn: 'Native Workload Activity'.TenantUserKey
+	toColumn: 'Native User Evidence'.TenantUserKey
+
+relationship native-cmdb-team-member-team
+	fromColumn: 'Native Team Membership'.TenantTeamKey
+	toColumn: 'Native Team'.TenantTeamKey
+
+relationship native-cmdb-team-member-user
+	fromColumn: 'Native Team Membership'.TenantUserKey
+	toColumn: 'Native User Evidence'.TenantUserKey
+
+relationship native-cmdb-native-ad-member-object
+	fromColumn: 'AD Membership Evidence'.TenantADObjectKey
+	toColumn: 'AD Object Evidence'.TenantADObjectKey
+
+relationship native-cmdb-native-ad-member-group
+	fromColumn: 'AD Membership Evidence'.TenantADGroupKey
+	toColumn: 'AD Group Evidence'.TenantADGroupKey
+
+relationship native-cmdb-native-entra-member-group
+	fromColumn: 'Entra Membership Evidence'.TenantGroupKey
+	toColumn: 'Native Group Evidence'.TenantGroupKey
+
+relationship TeamsSiteLinks_ObservedSite
+	fromColumn: 'Teams Site Links'.'Site ID'
+	toColumn: 'SharePoint Site Links'.'Site ID'
+
+relationship rel_daily_directory_date
+	fromColumn: 'Daily Directory Trends'.'Date Key'
+	toColumn: Date.'Date Key'
+
+relationship rel_daily_mailbox_date
+	fromColumn: 'Daily Mailbox Trends'.'Date Key'
+	toColumn: Date.'Date Key'
+
+relationship rel_daily_directory_domain
+	fromColumn: 'Daily Directory Trends'.'Domain Key'
+	toColumn: 'Daily Domain'.'Domain Key'
+
+relationship rel_daily_mailbox_domain
+	fromColumn: 'Daily Mailbox Trends'.'Domain Key'
+	toColumn: 'Daily Domain'.'Domain Key'
+
+relationship b2e36157-b645-4d93-8482-218dd1dd94c8
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Windows Migration History'.'Snapshot Date'
+	toColumn: LocalDateTable_391e0fd3-2e65-424c-9946-867c32d26a61.Date
+
+relationship ed027ab5-54c2-4030-ac03-e835e9ca972e
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Mailbox Migration Weekly History'.'Snapshot Date'
+	toColumn: LocalDateTable_e51866cf-71bd-4a60-84c1-b0e49716c831.Date
+
+relationship SpoMigration1
+	fromColumn: 'SPO Migration Plan'.'Source Type'
+	toColumn: 'SPO Migration Source Type'.'Source Type'
+
+relationship SpoMigration2
+	fromColumn: 'SPO Migration Plan'.'Business Unit'
+	toColumn: 'SPO Migration Business Unit'.'Business Unit'
+
+relationship SpoMigration3
+	fromColumn: 'SPO Migration Plan'.Phase
+	toColumn: 'SPO Migration Phase'.Phase
+
+relationship SpoMigration4
+	fromColumn: 'SPO Migration Plan'.'Operation Key'
+	toColumn: 'SPO Migration Operation'.'Operation Key'
+
+relationship SpoMigration5
+	fromColumn: 'SPO Migration History'.'Source Type'
+	toColumn: 'SPO Migration Source Type'.'Source Type'
+
+relationship SpoMigration6
+	fromColumn: 'SPO Migration History'.'Business Unit'
+	toColumn: 'SPO Migration Business Unit'.'Business Unit'
+
+relationship SpoMigration7
+	fromColumn: 'SPO Migration History'.Phase
+	toColumn: 'SPO Migration Phase'.Phase
+
+relationship SpoMigration8
+	fromColumn: 'SPO Migration History'.'Operation Key'
+	toColumn: 'SPO Migration Operation'.'Operation Key'
+
+relationship SpoMigration9
+	fromColumn: 'SPO Migration Plan'.'Project Identity'
+	toColumn: 'SPO Migration Project'.'Project Identity'
+
+relationship SpoMigration10
+	fromColumn: 'SPO Migration History'.'Project Identity'
+	toColumn: 'SPO Migration Project'.'Project Identity'
+
+relationship SpoMigration11
+	fromColumn: 'SPO Migration Source Summary'.'Project Identity'
+	toColumn: 'SPO Migration Project'.'Project Identity'
+
+relationship SpoMigration12
+	fromColumn: 'SPO Migration Findings'.'Project Identity'
+	toColumn: 'SPO Migration Project'.'Project Identity'
+
+relationship SpoMigration13
+	fromColumn: 'SPO Migration Legacy Web'.'Project Identity'
+	toColumn: 'SPO Migration Project'.'Project Identity'
+
+relationship SpoMigration14
+	fromColumn: 'SPO Migration Legacy Collection'.'Project Identity'
+	toColumn: 'SPO Migration Project'.'Project Identity'
+
+relationship SpoMigration15
+	fromColumn: 'SPO Migration Scope'.'Operation Key'
+	toColumn: 'SPO Migration Plan'.'Operation Key'
+
+relationship SpoMigration16
+	fromColumn: 'SPO Migration Scope'.'Web Key'
+	toColumn: 'SPO Migration Web'.'Web Key'
+
+relationship SpoMigration17
+	fromColumn: 'SPO Migration Web'.'Collection Key'
+	toColumn: 'SPO Migration Collection'.'Collection Key'
+
+relationship SpoMigration18
+	fromColumn: 'SPO Migration Web'.'Web Application Key'
+	toColumn: 'SharePoint On-prem Web Applications'.'Web Application Key'
+
+relationship SpoMigration19
+	fromColumn: 'SPO Migration History'.'Snapshot Date'
+	toColumn: 'SPO Migration Snapshot Date'.Date
+
+relationship SpoMigration20
+	isActive: false
+	fromColumn: 'SPO Migration Plan'.'Planned Date'
+	toColumn: Date.Date
+
+relationship SpoMigration21
+	isActive: false
+	fromColumn: 'SPO Migration Plan'.'Actual Date'
+	toColumn: Date.Date
+
+relationship SpoMigration22
+	isActive: false
+	fromColumn: 'SPO Migration Plan'.'Validation Date'
+	toColumn: Date.Date
+
+relationship 8270c404-4c3b-4fa6-ad57-15c577491570
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Plan'.'Snapshot Date'
+	toColumn: LocalDateTable_12cfc3be-73ac-46ad-83d3-b500fc834d3c.Date
+
+relationship 1d58d390-b94e-43e6-a61f-2e81993486aa
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Plan'.'Imported Migration Date'
+	toColumn: LocalDateTable_639f0ff7-b3b6-4a85-b662-3f9d23dd56f6.Date
+
+relationship 2d06df6a-55a9-40a1-b80e-9f072dfdcea3
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Web'.'Snapshot Date'
+	toColumn: LocalDateTable_c8aab280-bc3d-4589-b957-cec92f234126.Date
+
+relationship 8b3f8134-0156-49a1-9919-5364b13e2afe
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Collection'.'Snapshot Date'
+	toColumn: LocalDateTable_729976aa-a054-4d50-a79f-69df3e5654c0.Date
+
+relationship 632dd022-5b8a-415c-be33-6192a9a8ef6c
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Legacy Web'.'Snapshot Date'
+	toColumn: LocalDateTable_d2e80d94-adc2-414c-8fa9-39bef439df3d.Date
+
+relationship 7a4fed8e-bb12-4fe8-8402-065f9d4a18ac
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Legacy Collection'.'Snapshot Date'
+	toColumn: LocalDateTable_41b13c2b-fe1c-4d4e-abe2-c09e72f23525.Date
+
+relationship 34b20d78-9e75-458a-be34-8a3b2c6a9608
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Scope'.'Snapshot Date'
+	toColumn: LocalDateTable_a0cc9fe0-d3b1-4526-8fee-f1c3ed7fdc06.Date
+
+relationship 0933e60d-e3a0-46d3-aee6-6aedbb58d043
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Findings'.'Snapshot Date'
+	toColumn: LocalDateTable_88fdfd00-17a7-4997-9c17-ce7ed1b56395.Date
+
+relationship 5f1b4e41-b63f-4b58-89c2-966e60bfaf2e
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration History'.'Validation Date'
+	toColumn: LocalDateTable_88b22d85-506f-48b8-a8ef-5d1d75dceb8a.Date
+
+relationship d7b985dc-5b77-4612-b6a5-285ac941f2ec
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration History'.'Planned Date'
+	toColumn: LocalDateTable_734702e0-e7a1-4e0c-b4da-1ab6de316636.Date
+
+relationship d2db6f6f-8aba-4e41-9496-8f008496c81a
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration History'.'Actual Date'
+	toColumn: LocalDateTable_3c2bb49b-fdd0-41f3-a80d-34ce2f30e957.Date
+
+relationship 4c69d527-f16f-4c24-bb6e-7174c28d7edf
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration History'.'Imported Migration Date'
+	toColumn: LocalDateTable_a5141330-a230-4c06-bddc-4c44597d9684.Date
+
+relationship 1b886297-16e3-468a-ab89-405b13280c23
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Source Summary'.'Snapshot Date'
+	toColumn: LocalDateTable_2a1736ef-f358-4c1d-a66f-352e2a360979.Date
+
+relationship 2e47bbca-d23f-4eec-9eeb-7bb21eb4da6d
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Source Summary'.'Review Date'
+	toColumn: LocalDateTable_caef29d4-4061-4742-a804-43aaa04f73d2.Date
+
+relationship e07820e4-53f2-4241-95fe-a4107e4d2b7f
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Snapshot Date'.Date
+	toColumn: LocalDateTable_6441f0c4-711f-4aec-ab37-50cfbb093e99.Date
+
+relationship report_scope_Mailbox_Evidence_Country
+	fromColumn: 'Mailbox Evidence'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship report_scope_Windows_Migration_Evidence_Country
+	fromColumn: 'Windows Migration Evidence'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship report_scope_AD_User_Evidence_DomainName
+	fromColumn: 'AD User Evidence'.DomainName
+	toColumn: 'Daily Domain'.Domain
+
+relationship report_scope_AD_Computer_Evidence_DomainName
+	fromColumn: 'AD Computer Evidence'.DomainName
+	toColumn: 'Daily Domain'.Domain
+
+relationship report_scope_AD_Object_Evidence_DomainName
+	fromColumn: 'AD Object Evidence'.DomainName
+	toColumn: 'Daily Domain'.Domain
+
+relationship report_scope_Windows_Migration_Evidence_AD_Domain
+	fromColumn: 'Windows Migration Evidence'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship report_scope_Windows_Migration_AD_Observations_Source_Domain
+	fromColumn: 'Windows Migration AD Observations'.'Source Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship report_scope_Mailbox_Migration_Inventory_Source_Domain
+	fromColumn: 'Mailbox Migration Inventory'.'Source Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship m365_license_user_membership
+	crossFilteringBehavior: bothDirections
+	fromColumn: 'M365 User License Membership'.'User Source ID'
+	toColumn: 'User Inventory Evidence'.'User Source ID'
+
+relationship m365_license_user_selection
+	fromColumn: 'M365 User License Membership'.'License Product'
+	toColumn: 'M365 License Selection'.'License Product'
+
+relationship m365_license_device_membership
+	crossFilteringBehavior: bothDirections
+	fromColumn: 'M365 Device License Membership'.'Device Source ID'
+	toColumn: 'Device Inventory Evidence'.'Device Source ID'
+
+relationship m365_license_device_selection
+	fromColumn: 'M365 Device License Membership'.'License Product'
+	toColumn: 'M365 License Selection'.'License Product'
+
+relationship Private_IntunePresence_DeviceSystemEvidence
+	fromColumn: 'Device System Evidence'.'Intune presence'
+	toColumn: 'Intune Presence Selection'.'Intune presence'
+
+relationship Private_IntunePresence_DeviceExplorationInventory
+	fromColumn: 'Device Exploration Inventory'.'Intune presence'
+	toColumn: 'Intune Presence Selection'.'Intune presence'
+
+relationship Private_DeviceExploration_Intune
+	fromColumn: 'Device Inventory Evidence'.'Device Tenant Key'
+	toColumn: 'Device Exploration Inventory'.'Inventory Key'
+
+relationship Private_Scope_User_Inventory_Evidence_AD_Domain
+	fromColumn: 'User Inventory Evidence'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship Private_Scope_Device_Exploration_Inventory_AD_Domain
+	fromColumn: 'Device Exploration Inventory'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship Private_Scope_Native_AD_Intune_Coverage_AD_Domain
+	fromColumn: 'Native AD Intune Coverage'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship Private_Scope_Device_System_Evidence_AD_Domain
+	fromColumn: 'Device System Evidence'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship Private_Scope_All_Devices_Evidence_AD_Domain
+	fromColumn: 'All Devices Evidence'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship Private_Scope_License_Report_Candidates_AD_Domain
+	fromColumn: 'License Report Candidates'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship Private_Scope_License_Report_Candidates_Scope_Country
+	fromColumn: 'License Report Candidates'.'Scope Country'
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship Private_Scope_License_Report_Assignment_Issues_AD_Domain
+	fromColumn: 'License Report Assignment Issues'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship Private_Scope_License_Report_Assignment_Issues_Scope_Country
+	fromColumn: 'License Report Assignment Issues'.'Scope Country'
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship Private_Scope_License_SKU_Candidates_AD_Domain
+	fromColumn: 'License SKU Candidates'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship Private_Scope_License_SKU_Candidates_Scope_Country
+	fromColumn: 'License SKU Candidates'.'Scope Country'
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship Private_Scope_License_User_Assignments_AD_Domain
+	fromColumn: 'License User Assignments'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship Private_Scope_License_User_Assignments_Country
+	fromColumn: 'License User Assignments'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship Private_MailboxExploration_AD_Domain
+	fromColumn: 'Mailbox Exploration Inventory'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship Private_MailboxExploration_Country
+	fromColumn: 'Mailbox Exploration Inventory'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship Private_MailboxDelegates_Inventory
+	fromColumn: 'Mailbox Delegation Detail'.'Mailbox Key'
+	toColumn: 'Mailbox Exploration Inventory'.'Mailbox Key'
+
+relationship Private_MailboxLicenses_Inventory
+	crossFilteringBehavior: bothDirections
+	fromColumn: 'Mailbox License Membership'.'Mailbox Key'
+	toColumn: 'Mailbox Exploration Inventory'.'Mailbox Key'
+
+relationship Private_MailboxLicenses_Selection
+	fromColumn: 'Mailbox License Membership'.'License Product'
+	toColumn: 'Mailbox License Selection'.'License Product'
+
+relationship Private_DeviceExploration_Country
+	fromColumn: 'Device Exploration Inventory'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship Private_DeviceRisk_Inventory
+	crossFilteringBehavior: bothDirections
+	fromCardinality: one
+	fromColumn: 'Device Deployment Risk'.'Inventory Key'
+	toColumn: 'Device Exploration Inventory'.'Inventory Key'
+
+relationship Collaboration_Copilot_Daily_Date
+	fromColumn: 'Copilot Daily Adoption Evidence'.'Date Key'
+	toColumn: Date.'Date Key'
+
+relationship cleanup_country_0
+	fromColumn: 'User Cleanup Evidence'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship cleanup_domain_0
+	fromColumn: 'User Cleanup Evidence'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship cleanup_country_1
+	fromColumn: 'Computer Cleanup Evidence'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship cleanup_domain_1
+	fromColumn: 'Computer Cleanup Evidence'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship cleanup_country_2
+	fromColumn: 'Mailbox Cleanup Evidence'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship cleanup_domain_2
+	fromColumn: 'Mailbox Cleanup Evidence'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship report_scope_Mailbox_Migration_Inventory_Country
+	fromColumn: 'Mailbox Migration Inventory'.'Report Country'
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship 9ffdd70a-a7cd-4620-879e-3d9a84d108cf
+	fromColumn: 'Exchange Mailbox Reconciliation'.'Report Country'
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship Private_Reconciliation_AD_Domain
+	fromColumn: 'Exchange Mailbox Reconciliation'.'Report AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship a21191c4-6814-40ae-8c8e-9be31800a421
+	fromColumn: 'Historical Windows Readiness'.'Candidate Device Source ID'
+	toColumn: 'Windows Migration Evidence'.'Device Source ID'
+

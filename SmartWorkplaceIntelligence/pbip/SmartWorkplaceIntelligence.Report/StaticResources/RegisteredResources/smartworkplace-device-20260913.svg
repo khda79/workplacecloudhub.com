@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Workplace devices">
+  <rect x="8" y="12" width="38" height="29" rx="4" fill="#EAF4FF" stroke="#1F5A94" stroke-width="2.5"/>
+  <path d="M20 51h14M27 41v10" fill="none" stroke="#25364A" stroke-width="2.5" stroke-linecap="round"/>
+  <rect x="42" y="24" width="14" height="28" rx="3" fill="#E8FAF7" stroke="#008F8F" stroke-width="2.5"/>
+  <circle cx="49" cy="47" r="1.5" fill="#008F8F"/>
+</svg>

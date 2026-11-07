@@ -1,0 +1,167 @@
+/// SPO means SharePoint Online. Grain: Collection Key; source: one selected immutable prepared batch.
+table 'SPO Migration Collection'
+	lineageTag: de62807c-b7fa-45a7-83c7-715bc9e494e8
+
+	/// Current Collection Storage GiB. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
+	measure 'SPO Current Collection Storage GiB' =
+			VAR _keys=VALUES('SPO Migration Scope'[Collection Key])
+			RETURN IF(SELECTEDVALUE('SPO Migration Source Type'[Source Type])<>"Shared folders",
+			DIVIDE(CALCULATE(SUM('SPO Migration Collection'[Storage Bytes]), TREATAS(_keys, 'SPO Migration Collection'[Collection Key])),POWER(1024,3)))
+		formatString: 0.0
+		displayFolder: Migration\Volumes
+		lineageTag: 4426eb37-b92c-4797-9cd9-eb0249dae7c5
+
+	/// Fully Qualified Migrating GiB. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
+	measure 'SPO Fully Qualified Migrating GiB' =
+			VAR _collections=VALUES('SPO Migration Scope'[Collection Key])
+			VAR _eligible=CALCULATE(COUNTROWS('SPO Migration Collection'), KEEPFILTERS('SPO Migration Collection'[Is Fully Migrating]=TRUE()), TREATAS(_collections, 'SPO Migration Collection'[Collection Key]))
+			RETURN IF(_eligible>0 && SELECTEDVALUE('SPO Migration Source Type'[Source Type])<>"Shared folders",
+			DIVIDE(CALCULATE(SUM('SPO Migration Collection'[Storage Bytes]), KEEPFILTERS('SPO Migration Collection'[Is Fully Migrating]=TRUE()),TREATAS(_collections,'SPO Migration Collection'[Collection Key])),POWER(1024,3)))
+		formatString: 0.0
+		displayFolder: Migration\Volumes
+		lineageTag: f7ff0cfa-7bd3-4eb8-ad11-ecb8f7a87ac7
+
+	/// Volume Context. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
+	measure 'SPO Volume Context' = IF(ISBLANK([SPO Fully Qualified Migrating GiB]),"Not measurable: complete migration scope is not qualified", "Current source storage in fully qualified scope; not transferred bytes")
+		formatString: General
+		displayFolder: Migration\Volumes
+		lineageTag: 50f918c9-56fe-4356-a67d-e129441bfe83
+
+	/// Prepared, tenant-qualified migration evidence: TenantKey.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 6b4372f5-a64f-4394-9e2b-a5fdc3ae5368
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Prepared, tenant-qualified migration evidence: Project Key.
+	column 'Project Key'
+		dataType: string
+		isHidden
+		lineageTag: 4f6e2eda-64f5-4880-86b9-4ce4eed8ad1f
+		summarizeBy: none
+		sourceColumn: Project Key
+
+	/// Prepared, tenant-qualified migration evidence: Snapshot ID.
+	column 'Snapshot ID'
+		dataType: string
+		isHidden
+		lineageTag: 0ca11566-4a93-4640-ac78-7d0573d16833
+		summarizeBy: none
+		sourceColumn: Snapshot ID
+
+	/// Prepared, tenant-qualified migration evidence: Snapshot Date.
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: cc4deec9-a50a-4b19-b56b-6fe8376583b6
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: 8b3f8134-0156-49a1-9919-5364b13e2afe
+			defaultHierarchy: LocalDateTable_729976aa-a054-4d50-a79f-69df3e5654c0.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	/// Prepared, tenant-qualified migration evidence: Collection Key.
+	column 'Collection Key'
+		dataType: string
+		isHidden
+		lineageTag: 3122889f-f290-4162-950e-4da886fdd8ba
+		summarizeBy: none
+		sourceColumn: Collection Key
+
+	/// Prepared, tenant-qualified migration evidence: Source URL.
+	column 'Source URL'
+		dataType: string
+		lineageTag: fc8094ab-6041-4639-8506-39a7c7d8aa15
+		summarizeBy: none
+		sourceColumn: Source URL
+
+	/// Prepared, tenant-qualified migration evidence: Storage Bytes.
+	column 'Storage Bytes'
+		dataType: int64
+		isHidden
+		lineageTag: b721b666-5035-4921-a63d-3bfde5bcd657
+		summarizeBy: sum
+		sourceColumn: Storage Bytes
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Prepared, tenant-qualified migration evidence: Is Fully Covered.
+	column 'Is Fully Covered'
+		dataType: boolean
+		lineageTag: 8c6e4d7d-283c-4864-9022-765bfd514ec0
+		summarizeBy: none
+		sourceColumn: Is Fully Covered
+
+	/// Prepared, tenant-qualified migration evidence: Is Fully Migrating.
+	column 'Is Fully Migrating'
+		dataType: boolean
+		lineageTag: 49d0cb12-eaf7-4c27-8f38-209cdb6b3423
+		summarizeBy: none
+		sourceColumn: Is Fully Migrating
+
+	/// Prepared, tenant-qualified migration evidence: Captured UTC.
+	column 'Captured UTC'
+		dataType: dateTime
+		isHidden
+		formatString: yyyy-MM-dd HH:mm
+		lineageTag: 0a036dbc-b7c0-4116-849d-25e77f7e4cc2
+		summarizeBy: none
+		sourceColumn: Captured UTC
+
+	/// Prepared, tenant-qualified migration evidence: Run ID.
+	column 'Run ID'
+		dataType: string
+		isHidden
+		lineageTag: c8a7cae9-5fb3-4e75-8cbb-883f24a9bf27
+		summarizeBy: none
+		sourceColumn: Run ID
+
+	column 'Project Identity'
+		dataType: string
+		isHidden
+		lineageTag: b69b98a6-19d1-4705-b6b6-1f0cbeaa7eb5
+		summarizeBy: none
+		sourceColumn: Project Identity
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 137dd5bd-b4ea-420e-9b9a-729e983cce45
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'SPO Migration Collection' = m
+		mode: import
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
+				    Source = GetSharePointMigrationEvidence("SharePointMigrationCollectionEvidence.csv", {{"TenantKey", type text}, {"Project Key", type text}, {"Snapshot ID", type text}, {"Snapshot Date", type date}, {"Collection Key", type text}, {"Source URL", type text}, {"Storage Bytes", Int64.Type}, {"Is Fully Covered", type logical}, {"Is Fully Migrating", type logical}, {"Captured UTC", type datetime}, {"Run ID", type text}}),
+				    Identity = Table.AddColumn(Source, "Project Identity", each Binary.ToText(Json.FromValue({[TenantKey], [Project Key]}), BinaryEncoding.Base64), type text),
+				    Categories = Table.TransformColumns(Identity, List.Transform(List.Intersect({{"Business Unit", "Phase"}, Table.ColumnNames(Identity)}), (c) => {c, each if _ = null then "(Unspecified)" else _, type text}))
+				in Categories)
+				in
+				    Readers[Finish](BusinessRows)
+

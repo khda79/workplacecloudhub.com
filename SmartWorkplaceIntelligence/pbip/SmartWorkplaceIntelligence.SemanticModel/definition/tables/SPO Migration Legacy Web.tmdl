@@ -1,0 +1,124 @@
+/// SPO means SharePoint Online. Grain: Legacy Key; source: one selected immutable prepared batch.
+table 'SPO Migration Legacy Web'
+	isHidden
+	lineageTag: 928eef13-1ee6-4042-8ffd-35d48f395faa
+
+	/// Prepared, tenant-qualified migration evidence: TenantKey.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: ba752859-327c-4f25-9eec-f7f195a0bf6e
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Prepared, tenant-qualified migration evidence: Project Key.
+	column 'Project Key'
+		dataType: string
+		isHidden
+		lineageTag: 451c565b-3b90-4783-8fe7-b10757e6042f
+		summarizeBy: none
+		sourceColumn: Project Key
+
+	/// Prepared, tenant-qualified migration evidence: Snapshot ID.
+	column 'Snapshot ID'
+		dataType: string
+		isHidden
+		lineageTag: ed9b32b7-c2a8-43cd-84c3-daa2bcd49923
+		summarizeBy: none
+		sourceColumn: Snapshot ID
+
+	/// Prepared, tenant-qualified migration evidence: Snapshot Date.
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: e6a8cb15-9958-462d-95f2-def86c7c84a3
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: 632dd022-5b8a-415c-be33-6192a9a8ef6c
+			defaultHierarchy: LocalDateTable_d2e80d94-adc2-414c-8fa9-39bef439df3d.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	/// Prepared, tenant-qualified migration evidence: Legacy Key.
+	column 'Legacy Key'
+		dataType: string
+		isHidden
+		lineageTag: 7ac3d177-fae0-4184-945b-939e86e1fb70
+		summarizeBy: none
+		sourceColumn: Legacy Key
+
+	/// Prepared, tenant-qualified migration evidence: Legacy ID.
+	column 'Legacy ID'
+		dataType: string
+		lineageTag: 8d10771e-1f88-40fd-823e-9188b2425675
+		summarizeBy: none
+		sourceColumn: Legacy ID
+
+	/// Prepared, tenant-qualified migration evidence: Legacy Collection Key.
+	column 'Legacy Collection Key'
+		dataType: string
+		isHidden
+		lineageTag: a5dc3029-31de-42e9-a9a7-eb6a61ef12b7
+		summarizeBy: none
+		sourceColumn: Legacy Collection Key
+
+	/// Prepared, tenant-qualified migration evidence: Source URL.
+	column 'Source URL'
+		dataType: string
+		lineageTag: 83c672bb-788b-4c28-b722-1c4391aa6906
+		summarizeBy: none
+		sourceColumn: Source URL
+
+	/// Prepared, tenant-qualified migration evidence: Source Name.
+	column 'Source Name'
+		dataType: string
+		lineageTag: 1c4fbea3-be3a-4e95-873b-47f976f5099c
+		summarizeBy: none
+		sourceColumn: Source Name
+
+	column 'Project Identity'
+		dataType: string
+		isHidden
+		lineageTag: 136af0fd-e322-47f4-804d-8839a23e583c
+		summarizeBy: none
+		sourceColumn: Project Identity
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 9168cee1-79bf-43d1-bfb5-f0b79caaed47
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'SPO Migration Legacy Web' = m
+		mode: import
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
+				    Source = GetSharePointMigrationEvidence("SharePointMigrationLegacyWebEvidence.csv", {{"TenantKey", type text}, {"Project Key", type text}, {"Snapshot ID", type text}, {"Snapshot Date", type date}, {"Legacy Key", type text}, {"Legacy ID", type text}, {"Legacy Collection Key", type text}, {"Source URL", type text}, {"Source Name", type text}}),
+				    Identity = Table.AddColumn(Source, "Project Identity", each Binary.ToText(Json.FromValue({[TenantKey], [Project Key]}), BinaryEncoding.Base64), type text),
+				    Categories = Table.TransformColumns(Identity, List.Transform(List.Intersect({{"Business Unit", "Phase"}, Table.ColumnNames(Identity)}), (c) => {c, each if _ = null then "(Unspecified)" else _, type text}))
+				in Categories)
+				in
+				    Readers[Finish](BusinessRows)
+

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "7550e0fb27d1e79d9d99",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 3000,
+    "height": 1280,
+    "width": 1920,
+    "tabOrder": 1000
+  },
+  "visualGroup": {
+    "displayName": "Observed history",
+    "groupMode": "ScaleMode"
+  },
+  "parentGroupName": "b2deaadb9550a5b30275",
+  "isHidden": true
+}

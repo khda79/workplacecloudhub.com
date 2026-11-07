@@ -1,0 +1,5404 @@
+﻿. (Join-Path $PSScriptRoot '../../../../Config/SmartM365-TenantContext.ps1')
+Import-Module (Join-Path $PSScriptRoot '../../SmartM365.SharePointJsonTransition.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot '../../SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.8' -Global -ErrorAction Stop
+. (Join-Path $PSScriptRoot '../../SmartM365-CmdbReceipt.ps1')
+. (Join-Path $PSScriptRoot '../../SmartM365-MailMaintenance.ps1')
+. (Join-Path $PSScriptRoot '../../SmartM365-DeferredMail.ps1')
+. (Join-Path $PSScriptRoot '../../SmartM365-MailAdminRouting.ps1')
+. (Join-Path $PSScriptRoot '../../SmartM365-ImportExcelHealth.ps1')
+. (Join-Path $PSScriptRoot '../../SmartM365-InventoryLifecycle.ps1')
+. (Join-Path $PSScriptRoot '../../SmartM365-SharePointUploadPolicy.ps1')
+
+function Get-ModuleLocalConfig {
+    [CmdletBinding()]
+    param()
+    $modulePath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
+    Read-SmartM365ScriptConfiguration -ScriptPath $modulePath -MissingPolicy Optional
+}
+
+function Initialize-SmartM365ModuleGlobalConfigFromTemplate {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$TemplatePath
+    )
+
+    if (Test-Path -LiteralPath $Path) { return $true }
+    if (-not (Test-Path -LiteralPath $TemplatePath)) { return $false }
+
+    $targetFolder = Split-Path -Path $Path -Parent
+    if (-not [string]::IsNullOrWhiteSpace($targetFolder) -and -not (Test-Path -LiteralPath $targetFolder)) {
+        New-Item -Path $targetFolder -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    }
+
+    Copy-Item -LiteralPath $TemplatePath -Destination $Path -Force -ErrorAction Stop
+    Write-Host "Created missing global local configuration from template." -ForegroundColor Yellow
+    Write-Host ("Local JSON : {0}" -f $Path) -ForegroundColor Yellow
+    Write-Host ("Template   : {0}" -f $TemplatePath) -ForegroundColor Yellow
+    Write-Host 'Review the generated local JSON values; continuing with current file values.' -ForegroundColor Yellow
+    return $true
+}
+function Get-SmartM365EffectiveModuleGlobalConfig {
+    [CmdletBinding()]
+    param()
+
+    if ($null -ne $global:SmartM365GlobalConfig -and $global:SmartM365GlobalConfig.PSObject.Properties.Count -gt 0) {
+        $script:SmartM365GlobalConfig = $global:SmartM365GlobalConfig
+        return $script:SmartM365GlobalConfig
+    }
+
+    $requestedProfileKey = if (-not [string]::IsNullOrWhiteSpace([string]$global:SmartM365ProfileKey)) { [string]$global:SmartM365ProfileKey } else { [string]$global:SmartM365Tenant }
+    if ($null -ne $script:SmartM365GlobalConfig) {
+        $cachedProfileKey = ''
+        $cachedProfileProperty = $script:SmartM365GlobalConfig.PSObject.Properties['ProfileKey']
+        if ($null -ne $cachedProfileProperty -and $null -ne $cachedProfileProperty.Value) { $cachedProfileKey = [string]$cachedProfileProperty.Value }
+        if ([string]::IsNullOrWhiteSpace($requestedProfileKey) -or [string]::IsNullOrWhiteSpace($cachedProfileKey) -or $requestedProfileKey -ieq $cachedProfileKey) {
+            return $script:SmartM365GlobalConfig
+        }
+    }
+
+    $script:SmartM365GlobalConfig = [pscustomobject]@{}
+    $modulePath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
+    $searchRoot = Split-Path -Path $modulePath -Parent
+    while ($searchRoot) {
+        $tenantContextCandidates = @(
+            (Join-Path -Path $searchRoot -ChildPath 'SmartM365-TenantContext.ps1'),
+            (Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365-TenantContext.ps1')
+        )
+        foreach ($tenantContextPath in $tenantContextCandidates) {
+            if (Test-Path -LiteralPath $tenantContextPath) {
+                . $tenantContextPath
+                $profileKey = if ([string]::IsNullOrWhiteSpace($requestedProfileKey)) { 'test' } else { $requestedProfileKey }
+                $script:SmartM365GlobalConfig = Get-SmartM365EffectiveGlobalConfig -StartPath $searchRoot -ProfileKey $profileKey
+                break
+            }
+        }
+        if ($null -ne $script:SmartM365GlobalConfig -and $script:SmartM365GlobalConfig.PSObject.Properties.Count -gt 0) { break }
+
+        $globalConfigPath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json'; $globalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $globalConfigPath
+        $globalTemplatePath = Join-Path -Path $searchRoot -ChildPath 'Config\SmartM365.global.local.json.template'
+        if (-not (Test-Path -LiteralPath $globalConfigPath)) { Initialize-SmartM365ModuleGlobalConfigFromTemplate -Path $globalConfigPath -TemplatePath $globalTemplatePath | Out-Null }
+        if (Test-Path -LiteralPath $globalConfigPath) {
+            try { $script:SmartM365GlobalConfig = Get-Content -LiteralPath $globalConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop }
+            catch { throw ("Failed to read global local configuration '{0}': {1}" -f $globalConfigPath, $_.Exception.Message) }
+            break
+        }
+
+        $parent = Split-Path -Path $searchRoot -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $searchRoot) { break }
+        $searchRoot = $parent
+    }
+
+    return $script:SmartM365GlobalConfig
+}
+function Resolve-SmartM365ConfigValue { param([AllowNull()]$Value) Resolve-SmartM365ConfigurationTokens -Value $Value -Config (Get-SmartM365EffectiveModuleGlobalConfig) }
+function Get-ModuleLocalConfigValue { param([Parameter(Mandatory)]$Config,[Parameter(Mandatory)][string]$Name,$DefaultValue) Get-SmartM365ConfigurationValue -Name $Name -LocalConfig $Config -EffectiveConfig (Get-SmartM365EffectiveModuleGlobalConfig) -DefaultValue $DefaultValue }
+
+function Get-SmartM365CallerLocalConfig {
+    [CmdletBinding()]
+    param()
+
+    foreach ($frame in Get-PSCallStack) {
+        $scriptPath = $frame.ScriptName
+        if ([string]::IsNullOrWhiteSpace($scriptPath) -or $scriptPath -notmatch '\.ps1$') { continue }
+        $configPath = Join-Path -Path (Split-Path -Path $scriptPath -Parent) -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($scriptPath)); $configPath = Resolve-SmartM365JsonConfigurationPath -Path $configPath
+        if (-not (Test-Path -LiteralPath $configPath)) { continue }
+        return Read-SmartM365ScriptConfiguration -ConfigurationPath $configPath -MissingPolicy Optional
+    }
+    return [pscustomobject]@{}
+}
+
+function Get-SmartM365WeeklyHistoryConfigValue {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Name, [AllowNull()]$DefaultValue = $null)
+    $callerConfig = Get-SmartM365CallerLocalConfig
+    return Get-ModuleLocalConfigValue -Config $callerConfig -Name $Name -DefaultValue $DefaultValue
+}
+
+function Get-SmartM365WeeklyHistoryMaxRetentionWeeks {
+    # Global WeeklyHistoryMaxRetentionWeeks: ceiling on the weeks every WeeklyHistory keeps; 0 removes the ceiling.
+    [CmdletBinding()]
+    param()
+    $value = 12
+    try {
+        $property = (Get-SmartM365EffectiveModuleGlobalConfig).PSObject.Properties['WeeklyHistoryMaxRetentionWeeks']
+        if ($null -ne $property -and $null -ne $property.Value -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) { $value = [int]$property.Value }
+    }
+    catch { WriteLog -Message ("WeeklyHistoryMaxRetentionWeeks unreadable; default {0} applies: {1}" -f $value, $_.Exception.Message) -Level 'WARNING' }
+    return [Math]::Max(0, $value)
+}
+
+function Get-SmartM365IsoWeekName {
+    [CmdletBinding()]
+    param([datetime]$Date = (Get-Date))
+    $calendar = [System.Globalization.CultureInfo]::InvariantCulture.Calendar
+    $dayOfWeek = $calendar.GetDayOfWeek($Date)
+    if ($dayOfWeek -ge [System.DayOfWeek]::Monday -and $dayOfWeek -le [System.DayOfWeek]::Wednesday) { $Date = $Date.AddDays(3) }
+    $week = $calendar.GetWeekOfYear($Date, [System.Globalization.CalendarWeekRule]::FirstFourDayWeek, [System.DayOfWeek]::Monday)
+    return '{0}-W{1:00}' -f $Date.Year, $week
+}
+
+function Get-SmartM365WeeklyHistoryFileName {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    $fileName = [System.IO.Path]::GetFileName($Path)
+    return ($fileName -replace '_\d{8}[-_]\d{4,6}(?=\.csv$)', '')
+}
+
+function Save-SmartM365WeeklyInventoryHistory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string[]]$SourceFiles,
+        [Parameter(Mandatory)][string]$HistoryRootPath,
+        [int]$RetentionWeeks = 52,
+        [string]$HistoryLabel = 'SmartM365 inventory',
+        [switch]$OverwriteExisting,
+        [switch]$UploadChangedFilesOnly
+    )
+    if ([string]::IsNullOrWhiteSpace($HistoryRootPath)) { WriteLog -Message ("Weekly {0} history skipped: HistoryRootPath is empty." -f $HistoryLabel); return }
+    $existingSourceFiles = @($SourceFiles | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) })
+    if ($existingSourceFiles.Count -eq 0) { WriteLog -Message ("Weekly {0} history skipped: no source CSV file found." -f $HistoryLabel); return }
+    $weekName = Get-SmartM365IsoWeekName
+    $weekFolder = Join-Path -Path $HistoryRootPath -ChildPath $weekName
+    New-Item -Path $weekFolder -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    $historyManifests = @(Resolve-SmartM365WeeklyManifestPaths -HistoryRootPath $HistoryRootPath -HistoryLabel $HistoryLabel)
+    $manifestPath = Resolve-SmartM365OwnedJsonPath -Path (Join-Path $weekFolder 'manifest.json') -Owner ('WeeklyHistory:' + $HistoryLabel) -Validate {
+        param($document)
+        if ($document -isnot [pscustomobject]) { throw 'Weekly manifest must be an object.' }
+    }
+    $preexistingCsvCount = @(Get-ChildItem -LiteralPath $weekFolder -Filter '*.csv' -File -ErrorAction SilentlyContinue).Count
+    $previousManifest = $null
+    if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+        try { $manifestDocument = Read-SmartM365JsonDocument $manifestPath; $previousManifest = $manifestDocument.Document }
+        catch { throw "Weekly $HistoryLabel history manifest is invalid: $manifestPath. $($_.Exception.Message)" }
+    }
+    $copiedFiles = New-Object System.Collections.Generic.List[string]
+    $capturedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+    $fileSnapshotTimes = [ordered]@{}
+    if ($previousManifest -and $previousManifest.PSObject.Properties['FileSnapshotCreatedAtUtc'] -and $previousManifest.FileSnapshotCreatedAtUtc) {
+        foreach ($property in $previousManifest.FileSnapshotCreatedAtUtc.PSObject.Properties) {
+            $fileSnapshotTimes[$property.Name] = $property.Value
+        }
+    }
+    foreach ($sourceFile in $existingSourceFiles) {
+        $destinationFileName = Get-SmartM365WeeklyHistoryFileName -Path $sourceFile
+        $destinationFile = Join-Path -Path $weekFolder -ChildPath $destinationFileName
+        $destinationExists = Test-Path -LiteralPath $destinationFile -PathType Leaf
+        if ($destinationExists -and -not $OverwriteExisting) { continue }
+        Copy-SmartM365FileAtomically -SourcePath $sourceFile -DestinationPath $destinationFile
+        [void]$copiedFiles.Add($destinationFile)
+        $fileSnapshotTimes[$destinationFileName] = $capturedAtUtc
+        if ($destinationExists) {
+            WriteLog -Message ("Weekly {0} history refreshed for {1}: {2}" -f $HistoryLabel, $weekName, $destinationFile)
+        }
+    }
+    $manifestChanged = $copiedFiles.Count -gt 0 -or -not $previousManifest
+    if ($manifestChanged) {
+        $snapshotCreatedAtUtc = if ($previousManifest -and $previousManifest.PSObject.Properties['SnapshotCreatedAtUtc']) {
+            $previousManifest.SnapshotCreatedAtUtc
+        } elseif ($previousManifest -or $preexistingCsvCount -gt 0) { $null } else { $capturedAtUtc }
+        $manifest = [pscustomobject][ordered]@{
+            UpdatedAt                   = $capturedAtUtc
+            Week                        = $weekName
+            HistoryLabel                = $HistoryLabel
+            HistoryRootPath             = $HistoryRootPath
+            SnapshotPolicy              = 'FirstSnapshotPerIsoWeekUnlessOverwriteExisting'
+            SnapshotCreatedAtUtc        = $snapshotCreatedAtUtc
+            SnapshotTimestampStatus     = $(if ($snapshotCreatedAtUtc) { 'Recorded' } else { 'UnknownLegacy' })
+            FileSnapshotCreatedAtUtc    = $fileSnapshotTimes
+            Files                       = @(Get-ChildItem -LiteralPath $weekFolder -Filter '*.csv' -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { $_.Name })
+        }
+        $expectedManifestHash = if ($previousManifest) { $manifestDocument.SHA256 } else { 'ABSENT' }
+        $manifestBytes = [Text.UTF8Encoding]::new($false).GetBytes(($manifest | ConvertTo-Json -Depth 7))
+        $null = Write-SmartM365JsonBytesAtomically -Path $manifestPath -Bytes $manifestBytes -ExpectedSHA256 $expectedManifestHash -Validate {
+            param($document) if (-not $document.PSObject.Properties['Week']) { throw 'Weekly manifest Week missing.' }
+        }
+        if (-not $snapshotCreatedAtUtc) {
+            WriteLog -Message ("Weekly {0} history for {1} contains earlier CSV files without a verified capture time. SnapshotCreatedAtUtc remains null." -f $HistoryLabel, $weekName) -Level 'WARNING'
+        }
+    }
+    elseif (-not $previousManifest.PSObject.Properties['SnapshotCreatedAtUtc']) {
+        WriteLog -Message ("Weekly {0} history for {1} has a legacy manifest without a verified snapshot time; its UpdatedAt must not be interpreted as the CSV capture time." -f $HistoryLabel, $weekName) -Level 'WARNING'
+    }
+    if ($copiedFiles.Count -gt 0) { WriteLog -Message ("Weekly {0} history saved for {1}: {2} file(s) written in {3}" -f $HistoryLabel, $weekName, $copiedFiles.Count, $weekFolder) }
+    else { WriteLog -Message ("Weekly {0} history already exists for {1}. Snapshot skipped: {2}" -f $HistoryLabel, $weekName, $weekFolder) }
+
+    # Changed-only publication is not self-healing on its own: a marker is kept in the week folder
+    # until every upload succeeded, and a later run that finds it republishes the whole week.
+    $uploadSetting = Get-Variable -Name EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
+    $collectorPolicies = Get-Variable -Name SmartM365CollectorUploadPolicies -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    $publicationEnabled = [bool]($uploadSetting -and $uploadSetting.Value)
+    if ($null -ne $collectorPolicies) { $publicationEnabled = Test-SmartM365CollectorUploadEnabled -Category DataAll -Policies $collectorPolicies -RunEnabled $publicationEnabled }
+    $pendingPublicationPath = Join-Path -Path $weekFolder -ChildPath 'upload.pending'
+    $republishWeek = $UploadChangedFilesOnly -and $publicationEnabled -and (Test-Path -LiteralPath $pendingPublicationPath -PathType Leaf)
+    if ($republishWeek) {
+        WriteLog -Message ("Weekly {0} history for {1}: a previous SharePoint publication was incomplete; republishing the whole week." -f $HistoryLabel, $weekName) -Level 'WARNING'
+    }
+    $historyUploadCandidates = if ($UploadChangedFilesOnly -and -not $republishWeek) {
+        @(
+            @($copiedFiles.ToArray()) + $(if ($manifestChanged) { @($manifestPath) } else { @() }) |
+                Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
+                Sort-Object -Unique |
+                ForEach-Object { Get-Item -LiteralPath $_ }
+        )
+    }
+    else {
+        @(Get-ChildItem -LiteralPath $weekFolder -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -eq '.csv' -or $_.FullName -eq $manifestPath } | Sort-Object Name)
+    }
+    # Include every preferred manifest on retries, including a prior interrupted rename.
+    # Remote legacy-item handling is separate from this byte-preserving local transition.
+    $historyUploadCandidates = @(@($historyUploadCandidates) + @($historyManifests | Where-Object { $_.Path.EndsWith('.json.txt', [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Get-Item -LiteralPath $_.Path }) | Sort-Object FullName -Unique)
+    if ($UploadChangedFilesOnly -and $publicationEnabled) {
+        [IO.File]::WriteAllText($pendingPublicationPath, (Get-Date).ToUniversalTime().ToString('o'))
+    }
+    $unchangedManifestCount = 0
+    foreach ($historyUploadCandidate in $historyUploadCandidates) {
+        $uploadReceipt = if ($publicationEnabled) { Invoke-SmartM365SharePointCsvUpload -LocalFilePath $historyUploadCandidate.FullName } else { $null }
+        if ($uploadReceipt -and $uploadReceipt.PSObject.Properties['SkippedUnchanged'] -and $uploadReceipt.SkippedUnchanged) {
+            $unchangedManifestCount++
+        }
+        $uploadSetting = Get-Variable -Name EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
+        if ($publicationEnabled -and -not $uploadReceipt) {
+            throw 'Weekly history publication failed; snapshots are preserved and retention is deferred.'
+        }
+    }
+    if ($unchangedManifestCount -gt 0) {
+        WriteLog -Message ("Weekly {0} history: {1} unchanged SharePoint manifest(s) verified; uploads skipped." -f $HistoryLabel, $unchangedManifestCount) -Level 'INFO'
+    }
+    if ($publicationEnabled -and (Test-Path -LiteralPath $pendingPublicationPath -PathType Leaf)) {
+        Remove-Item -LiteralPath $pendingPublicationPath -Force
+    }
+
+    # The global ceiling bounds every producer, including a local value or 0 (keep all) left from older templates.
+    $maximumWeeks = Get-SmartM365WeeklyHistoryMaxRetentionWeeks
+    if ($maximumWeeks -gt 0 -and ($RetentionWeeks -le 0 -or $RetentionWeeks -gt $maximumWeeks)) { $RetentionWeeks = $maximumWeeks }
+    if ($RetentionWeeks -gt 0) {
+        $oldWeekFolders = @(Get-ChildItem -LiteralPath $HistoryRootPath -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d{4}-W\d{2}$' } | Sort-Object Name -Descending | Select-Object -Skip $RetentionWeeks)
+        foreach ($oldWeekFolder in $oldWeekFolders) {
+            try { Remove-Item -LiteralPath $oldWeekFolder.FullName -Recurse -Force -ErrorAction Stop; WriteLog -Message ("Deleted old weekly {0} history folder: {1}" -f $HistoryLabel, $oldWeekFolder.FullName) }
+            catch { WriteLog -Message ("Failed to delete old weekly {0} history folder '{1}': {2}" -f $HistoryLabel, $oldWeekFolder.FullName, $_.Exception.Message) -Level 'WARNING' }
+        }
+    }
+}
+
+function Add-SmartM365WeeklyHistory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string[]]$SourceCsvPaths,
+        [string]$HistoryRootPath,
+        [int]$RetentionWeeks = 52,
+        [string]$HistoryLabel = 'SmartM365 inventory',
+        [switch]$OverwriteExisting,
+        [switch]$UploadChangedFilesOnly
+    )
+    if ([string]::IsNullOrWhiteSpace($HistoryRootPath)) {
+        $firstSource = @($SourceCsvPaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) | Select-Object -First 1
+        if ($firstSource) {
+            $sourceFolder = Split-Path -Path $firstSource -Parent
+            if (-not [string]::IsNullOrWhiteSpace($sourceFolder)) { $HistoryRootPath = Join-Path -Path $sourceFolder -ChildPath 'WeeklyHistory' }
+        }
+    }
+    Save-SmartM365WeeklyInventoryHistory -SourceFiles $SourceCsvPaths -HistoryRootPath $HistoryRootPath -RetentionWeeks $RetentionWeeks -HistoryLabel $HistoryLabel -OverwriteExisting:$OverwriteExisting -UploadChangedFilesOnly:$UploadChangedFilesOnly
+}
+function Invoke-SmartM365WeeklyInventoryHistoryForCsv {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string[]]$SourceFiles, [string]$TimestampedPath)
+    $enabled = [bool](Get-SmartM365WeeklyHistoryConfigValue -Name 'EnableWeeklyHistory' -DefaultValue $true)
+    if (-not $enabled) { return }
+    $historyRootPath = Get-SmartM365WeeklyHistoryConfigValue -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
+    if ([string]::IsNullOrWhiteSpace($historyRootPath) -and -not [string]::IsNullOrWhiteSpace($TimestampedPath)) {
+        $sourceFolder = Split-Path -Path $TimestampedPath -Parent
+        if (-not [string]::IsNullOrWhiteSpace($sourceFolder)) { $historyRootPath = Join-Path -Path $sourceFolder -ChildPath 'WeeklyHistory' }
+    }
+    $retentionWeeks = [int](Get-SmartM365WeeklyHistoryConfigValue -Name 'WeeklyHistoryRetentionWeeks' -DefaultValue 52)
+    Save-SmartM365WeeklyInventoryHistory -SourceFiles $SourceFiles -HistoryRootPath $historyRootPath -RetentionWeeks $retentionWeeks -UploadChangedFilesOnly
+}
+
+
+function Get-SmartM365MaxItemsValue {
+    [CmdletBinding()]
+    param()
+
+    foreach ($name in @('SmartM365MaxItems','SmartM365TestMaxItems','MaxItems')) {
+        $variable = Get-Variable -Name $name -Scope Global -ErrorAction SilentlyContinue
+        if ($variable -and $null -ne $variable.Value) {
+            try {
+                $value = [int]$variable.Value
+                if ($value -gt 0) { return $value }
+            }
+            catch { }
+        }
+    }
+
+    return 0
+}
+
+function Test-SmartM365MaxItemsMode {
+    [CmdletBinding()]
+    param()
+
+    return ((Get-SmartM365MaxItemsValue) -gt 0)
+}
+
+function Get-SmartM365MaxItemsSuffix {
+    [CmdletBinding()]
+    param()
+
+    $maxItems = Get-SmartM365MaxItemsValue
+    if ($maxItems -le 0) { return '' }
+    return ('_MAXITEMS-{0}' -f $maxItems)
+}
+
+function Set-SmartM365MaxItemsMode {
+    [CmdletBinding()]
+    param([int]$MaxItems)
+
+    if ($MaxItems -gt 0) {
+        $global:SmartM365MaxItems = $MaxItems
+        $global:SmartM365TestMaxItems = $MaxItems
+        $global:SmartM365IsMaxItemsRun = $true
+        WriteLog -Message ("MaxItems test mode active: only a bounded dataset should be collected/exported. Power BI DATA-LAST and WeeklyHistory standard publication must not be updated by this run. MaxItems={0}" -f $MaxItems) -Level 'WARNING'
+    }
+}
+
+function Add-SmartM365MaxItemsSuffixToCsvPath {
+    [CmdletBinding()]
+    param([AllowNull()][string]$Path)
+
+    $suffix = Get-SmartM365MaxItemsSuffix
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($suffix)) { return $Path }
+
+    $folder = Split-Path -Path $Path -Parent
+    $name = [System.IO.Path]::GetFileNameWithoutExtension($Path)
+    $extension = [System.IO.Path]::GetExtension($Path)
+    if ($name -match [regex]::Escape($suffix)) { return $Path }
+    if ([string]::IsNullOrWhiteSpace($folder)) { return ("{0}{1}{2}" -f $name, $suffix, $extension) }
+    return (Join-Path -Path $folder -ChildPath ("{0}{1}{2}" -f $name, $suffix, $extension))
+}
+
+function Add-SmartM365MaxItemsSuffixToBaseName {
+    [CmdletBinding()]
+    param([string]$BaseFileName)
+
+    $suffix = Get-SmartM365MaxItemsSuffix
+    if ([string]::IsNullOrWhiteSpace($BaseFileName) -or [string]::IsNullOrWhiteSpace($suffix)) { return $BaseFileName }
+    if ($BaseFileName -match [regex]::Escape($suffix)) { return $BaseFileName }
+    return ("{0}{1}" -f $BaseFileName, $suffix)
+}
+
+function Add-SmartM365MaxItemsMailBanner {
+    [CmdletBinding()]
+    param([AllowNull()][string]$BodyHtml)
+
+    $maxItems = Get-SmartM365MaxItemsValue
+    if ($maxItems -le 0) { return $BodyHtml }
+    if ($BodyHtml -match 'SmartM365MaxItemsBanner') { return $BodyHtml }
+
+    $banner = @"
+<div class="SmartM365MaxItemsBanner" style="margin:12px 0;padding:12px 14px;border:1px solid #f59e0b;border-left:6px solid #d97706;background:#fffbeb;color:#92400e;font-family:Segoe UI,Arial,sans-serif;font-size:13px;line-height:19px;">
+  <strong>TEST RUN - MaxItems=$maxItems.</strong> This email and the generated CSV files come from a bounded SmartM365 test run. CSV names include <code>MAXITEMS-$maxItems</code> and must not be used by Power BI production datasets.
+</div>
+"@
+
+    if ([string]::IsNullOrWhiteSpace($BodyHtml)) { return $banner }
+    if ($BodyHtml -match '(?is)<body\b[^>]*>') {
+        return ([regex]::Replace($BodyHtml, '(?is)(<body\b[^>]*>)', ('$1' + "`n" + $banner), 1))
+    }
+    return ($banner + "`n" + [string]$BodyHtml)
+}
+
+function Add-SmartM365MaxItemsSubjectPrefix {
+    [CmdletBinding()]
+    param([AllowNull()][string]$Subject)
+
+    $maxItems = Get-SmartM365MaxItemsValue
+    if ($maxItems -le 0) { return $Subject }
+    $prefix = "[MAXITEMS-$maxItems TEST]"
+    if ([string]::IsNullOrWhiteSpace($Subject)) { return $prefix }
+    if ($Subject -like "*MAXITEMS-$maxItems*") { return $Subject }
+    return ("{0} {1}" -f $prefix, $Subject)
+}
+
+function Get-SmartM365MailTenantName {
+    [CmdletBinding()]
+    param([string]$TenantName = '')
+
+    if (-not [string]::IsNullOrWhiteSpace($TenantName)) {
+        return $TenantName.Trim()
+    }
+
+    $mailTenantVariable = Get-Variable -Name SmartM365MailTenantName -Scope Global -ErrorAction SilentlyContinue
+    if ($mailTenantVariable -and -not [string]::IsNullOrWhiteSpace([string]$mailTenantVariable.Value)) {
+        return ([string]$mailTenantVariable.Value).Trim()
+    }
+
+    $organizationVariable = Get-Variable -Name SmartM365OrganizationKey -Scope Global -ErrorAction SilentlyContinue
+    if ($organizationVariable -and -not [string]::IsNullOrWhiteSpace([string]$organizationVariable.Value)) {
+        return ([string]$organizationVariable.Value).Trim().ToUpperInvariant()
+    }
+
+    foreach ($variableName in @('SmartM365TenantKey', 'SmartM365Tenant', 'SmartM365ProfileKey')) {
+        $variable = Get-Variable -Name $variableName -Scope Global -ErrorAction SilentlyContinue
+        if ($variable -and -not [string]::IsNullOrWhiteSpace([string]$variable.Value)) {
+            return ([string]$variable.Value).Trim()
+        }
+    }
+
+    return 'UNKNOWN TENANT'
+}
+
+function Format-SmartM365MailSubject {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][string]$Subject,
+        [string]$TenantName = '',
+        [switch]$Orchestrator
+    )
+
+    $tenantLabel = (Get-SmartM365MailTenantName -TenantName $TenantName) -replace '[\[\]\r\n]+', ' '
+    $tenantLabel = $tenantLabel.Trim()
+    if ([string]::IsNullOrWhiteSpace($tenantLabel)) { $tenantLabel = 'UNKNOWN TENANT' }
+
+    $text = if ([string]::IsNullOrWhiteSpace($Subject)) { 'Notification' } else { $Subject.Trim() }
+    $maxItemsLabel = ''
+    if ($text -match '^(?<MaxItems>\[MAXITEMS-\d+ TEST\])\s*') {
+        $maxItemsLabel = $matches['MaxItems']
+        $text = $text.Substring($matches[0].Length).Trim()
+    }
+
+    if ($text -match '^\[SMART 365\]\s*-\s*\[[^\]]+\]\s*-\s*(?<Orchestrator>\[\s*Orchestrator\]\s*-\s*)?') {
+        if (-not [string]::IsNullOrWhiteSpace($matches['Orchestrator'])) { $Orchestrator = $true }
+        $text = $text.Substring($matches[0].Length).Trim()
+    }
+    elseif ($text -match '^\[(?<Severity>CRITICAL|ERROR|WARNING|WARN|INFO|OK|SUCCESS)\]\s*\[SmartM365 Orchestrator\]\[[^\]]+\]\s*') {
+        $Orchestrator = $true
+        $text = ('[{0}] {1}' -f $matches['Severity'].ToUpperInvariant(), $text.Substring($matches[0].Length).Trim()).Trim()
+    }
+    elseif ($text -match '^\[SmartM365 Orchestrator\]\[[^\]]+\]\s*') {
+        $Orchestrator = $true
+        $text = $text.Substring($matches[0].Length).Trim()
+    }
+    else {
+        $text = [regex]::Replace($text, '^(?i:SMART\s*365|SMART365)\s*-\s*', '')
+        $text = [regex]::Replace($text, '^(?i:\[SmartM365\])\s*', '')
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($maxItemsLabel)) {
+        $text = if ([string]::IsNullOrWhiteSpace($text)) { $maxItemsLabel } else { '{0} - {1}' -f $maxItemsLabel, $text }
+    }
+    if ([string]::IsNullOrWhiteSpace($text)) { $text = 'Notification' }
+
+    $prefix = '[SMART 365] - [{0}] - ' -f $tenantLabel
+    if ($Orchestrator) { $prefix += '[ Orchestrator] - ' }
+    return ($prefix + $text)
+}
+
+function Get-SmartM365MailScriptContext {
+    [CmdletBinding()]
+    param(
+        [string]$ScriptName = '',
+        [string]$ScriptVersion = '',
+        [string]$ScriptPath = ''
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ScriptName)) {
+        $nameVariable = Get-Variable -Name SmartM365ScriptFileName -Scope Global -ErrorAction SilentlyContinue
+        if ($nameVariable) { $ScriptName = [string]$nameVariable.Value }
+    }
+    if ([string]::IsNullOrWhiteSpace($ScriptVersion)) {
+        $versionVariable = Get-Variable -Name SmartM365ScriptVersion -Scope Global -ErrorAction SilentlyContinue
+        if ($versionVariable) { $ScriptVersion = [string]$versionVariable.Value }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($ScriptPath)) {
+        try {
+            foreach ($frame in (Get-PSCallStack)) {
+                if ([string]::IsNullOrWhiteSpace([string]$frame.ScriptName)) { continue }
+                if ($frame.ScriptName -notlike '*.ps1') { continue }
+                $ScriptPath = [string]$frame.ScriptName
+                break
+            }
+        }
+        catch { $ScriptPath = '' }
+    }
+    if ([string]::IsNullOrWhiteSpace($ScriptName) -and -not [string]::IsNullOrWhiteSpace($ScriptPath)) {
+        $ScriptName = [System.IO.Path]::GetFileName($ScriptPath)
+    }
+    if ([string]::IsNullOrWhiteSpace($ScriptName)) {
+        $legacyNameVariable = Get-Variable -Name SmartM365ScriptName -Scope Global -ErrorAction SilentlyContinue
+        if ($legacyNameVariable) { $ScriptName = [string]$legacyNameVariable.Value }
+    }
+    if ([string]::IsNullOrWhiteSpace($ScriptVersion) -and -not [string]::IsNullOrWhiteSpace($ScriptPath)) {
+        $ScriptVersion = Get-SmartM365ScriptVersionFromFile -Path $ScriptPath
+    }
+    if ([string]::IsNullOrWhiteSpace($ScriptName)) { $ScriptName = 'SmartM365' }
+    if ([string]::IsNullOrWhiteSpace($ScriptVersion)) { $ScriptVersion = 'unknown' }
+
+    return [pscustomobject]@{ ScriptName = $ScriptName.Trim(); ScriptVersion = $ScriptVersion.Trim() }
+}
+
+function Add-SmartM365MailExecutionFooter {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][string]$BodyHtml,
+        [string]$ScriptName = '',
+        [string]$ScriptVersion = '',
+        [string]$ScriptPath = ''
+    )
+
+    if ([string]::IsNullOrWhiteSpace($BodyHtml)) { $BodyHtml = '' }
+    if ($BodyHtml -match 'SmartM365MailExecutionFooter:v1') { return $BodyHtml }
+
+    $context = Get-SmartM365MailScriptContext -ScriptName $ScriptName -ScriptVersion $ScriptVersion -ScriptPath $ScriptPath
+    $safeScriptName = [System.Net.WebUtility]::HtmlEncode([string]$context.ScriptName)
+    $safeScriptVersion = [System.Net.WebUtility]::HtmlEncode([string]$context.ScriptVersion)
+    $footerHtml = @"
+<!-- SmartM365MailExecutionFooter:v1 -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;border-collapse:collapse;">
+  <tr>
+    <td align="center" style="padding:0 20px 18px 20px;color:#475569;font-family:Segoe UI,Arial,sans-serif;font-size:11px;line-height:16px;">
+      <strong style="color:#334155;">Script:</strong> $safeScriptName &nbsp;|&nbsp; <strong style="color:#334155;">Version:</strong> $safeScriptVersion
+    </td>
+  </tr>
+</table>
+"@
+
+    if ($BodyHtml -match '(?is)</body>') {
+        return [regex]::Replace($BodyHtml, '(?is)</body>', ($footerHtml + "`n" + '</body>'), 1)
+    }
+    return ($BodyHtml + "`n" + $footerHtml)
+}
+
+function Limit-SmartM365RowsForMaxItems {
+    [CmdletBinding()]
+    param([AllowNull()][object[]]$Data)
+
+    $maxItems = Get-SmartM365MaxItemsValue
+    if ($maxItems -le 0 -or $null -eq $Data) { return @($Data) }
+    $rows = @($Data)
+    if ($rows.Count -le $maxItems) { return $rows }
+    WriteLog -Message ("MaxItems={0}: limiting exported CSV rows from {1} to {0}." -f $maxItems, $rows.Count) -Level 'WARNING'
+    return @($rows | Select-Object -First $maxItems)
+}
+function Format-SmartM365LogLine {
+    param(
+        [AllowEmptyString()][string]$Message,
+        [string]$Level = "INFO",
+        [datetime]$Timestamp = (Get-Date)
+    )
+
+    $timestampText = $Timestamp.ToString("yyyy-MM-dd HH:mm:ss")
+    $normalizedLevel = if ([string]::IsNullOrWhiteSpace($Level)) { "INFO" } else { $Level.ToUpperInvariant() }
+    $messageLines = @([regex]::Split(([string]$Message), '\r?\n'))
+    foreach ($messageLine in $messageLines) {
+        "{0} [{1}] {2}" -f $timestampText, $normalizedLevel, $messageLine
+    }
+}
+
+function Update-SmartM365TimestampedTranscript {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return
+    }
+
+    $timestampText = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $lines = [System.IO.File]::ReadAllLines($Path)
+    $timestampPattern = '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\b'
+    $changed = $false
+    $updatedLines = foreach ($line in $lines) {
+        if ($line -match $timestampPattern) {
+            $line
+        }
+        elseif ($line -match '^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*(.*)$') {
+            $changed = $true
+            "{0} {1}" -f $Matches[1], $Matches[2]
+        }
+        else {
+            $changed = $true
+            "{0} {1}" -f $timestampText, $line
+        }
+    }
+
+    if ($changed) {
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllLines($Path, [string[]]$updatedLines, $utf8NoBom)
+    }
+}
+
+function WriteLog {
+    param(
+        [string]$Message,
+        [string]$Level = ""
+    )
+
+    # Automatically detect error keywords if no level is provided
+    if (-not $Level -or $Level -eq "") {
+        if ($Message -match "(?i)\berror\b|\bfailed\b|\bfailure\b") {
+            $Level = "ERROR"
+        }
+        else {
+            $Level = "INFO"
+        }
+    }
+    $normalizedLevel = $Level.Trim().ToUpperInvariant()
+    if ($normalizedLevel -eq 'WARN') { $normalizedLevel = 'WARNING' }
+    $Level = $normalizedLevel
+    if ($normalizedLevel -eq 'WARNING') {
+        $global:SmartM365WarningCount = [int]$global:SmartM365WarningCount + 1
+    }
+    elseif ($normalizedLevel -eq 'ERROR') {
+        $global:SmartM365ErrorCount = [int]$global:SmartM365ErrorCount + 1
+    }
+
+    $logEntry = @(Format-SmartM365LogLine -Message $Message -Level $Level)
+
+    switch ($normalizedLevel) {
+        "ERROR"   { $logEntry | ForEach-Object { Write-Host $_ -ForegroundColor Red } }
+        "WARNING" { $logEntry | ForEach-Object { Write-Host $_ -ForegroundColor Yellow } }
+        "INFO"    { $logEntry | ForEach-Object { Write-Host $_ -ForegroundColor Cyan } }
+        "DEBUG"   { $logEntry | ForEach-Object { Write-Host $_ -ForegroundColor Gray } }
+        "SUCCESS" { $logEntry | ForEach-Object { Write-Host $_ -ForegroundColor Green } }
+        default   { $logEntry | ForEach-Object { Write-Host $_ -ForegroundColor White } }
+    }
+
+    if ($global:LogTextFile) {
+        Add-Content -Path $global:LogTextFile -Value $logEntry
+    }
+
+    Invoke-SmartM365TeamsNotificationFromLog -Message $Message -Level $Level
+}
+
+
+function Get-SmartM365ModuleDiagnosticText {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [switch]$IncludeAvailable
+    )
+
+    $module = @(Get-Module -Name $Name | Sort-Object Version -Descending | Select-Object -First 1)[0]
+    $state = 'loaded'
+    if (-not $module -and $IncludeAvailable) {
+        $module = @(Get-Module -ListAvailable -Name $Name | Sort-Object Version -Descending | Select-Object -First 1)[0]
+        $state = 'available'
+    }
+
+    if (-not $module) {
+        return ("{0}: not found" -f $Name)
+    }
+
+    $version = if ($module.Version) { $module.Version.ToString() } else { 'unknown' }
+    $displayName = if (-not [string]::IsNullOrWhiteSpace([string]$module.Name)) { [string]$module.Name } else { $Name }
+    $text = ("{0}: {1} ({2})" -f $displayName, $version, $state)
+    if (-not [string]::IsNullOrWhiteSpace([string]$module.Path)) {
+        $text = "{0}; Path={1}" -f $text, $module.Path
+    }
+    return $text
+}
+
+function Write-SmartM365LoadedModuleVersions {
+    [CmdletBinding()]
+    param(
+        [string]$Header = 'Loaded module versions:',
+        [string[]]$ModuleNames = @(
+            'SmartM365.Core',
+            'SmartM365-WindowsPowerShell5',
+            'Microsoft.Graph.Authentication',
+            'Microsoft.Graph.Users',
+            'Microsoft.Graph.Groups',
+            'Microsoft.Graph.Identity.DirectoryManagement',
+            'Microsoft.Graph.DeviceManagement',
+            'Microsoft.Graph.Devices',
+            'Microsoft.Graph.Reports',
+            'ExchangeOnlineManagement',
+            'ActiveDirectory'
+        )
+    )
+
+    $names = New-Object 'System.Collections.Generic.List[string]'
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($name in $ModuleNames) {
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        if ($seen.Add($name)) { $names.Add($name) }
+    }
+
+    foreach ($module in @(Get-Module | Where-Object { $_.Name -like 'SmartM365*' -or $_.Name -like 'Microsoft.Graph*' -or $_.Name -eq 'ExchangeOnlineManagement' -or $_.Name -eq 'ActiveDirectory' } | Sort-Object Name)) {
+        if ($module -and $seen.Add([string]$module.Name)) { $names.Add([string]$module.Name) }
+    }
+
+    $diagnostics = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($name in $names) {
+        $module = @(Get-Module -Name $name | Sort-Object Version -Descending | Select-Object -First 1)[0]
+        if (-not $module) { continue }
+        $diagnostics.Add((Get-SmartM365ModuleDiagnosticText -Name $name))
+    }
+
+    if ($diagnostics.Count -eq 0) { return }
+
+    WriteLog -Message $Header -Level 'INFO'
+    foreach ($diagnostic in $diagnostics) {
+        WriteLog -Message ("  {0}" -f $diagnostic) -Level 'INFO'
+    }
+}
+function Get-SmartM365ScriptVersionFromFile {
+    [CmdletBinding()]
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return '' }
+
+    try {
+        $content = [System.IO.File]::ReadAllText($Path)
+        $match = [regex]::Match($content, '(?im)^[ \t]*\.VERSION[ \t]*\r?\n[ \t]*(?<Version>[^\r\n]+)')
+        if ($match.Success) {
+            return $match.Groups['Version'].Value.Trim()
+        }
+    }
+    catch {
+    }
+
+    return ''
+}
+
+function Write-SmartM365BrandBanner {
+    [CmdletBinding()]
+    param()
+
+    $bannerLines = @(
+        '================================================================================',
+        ' SmartM365 by WorkplaceCloudHub',
+        ' Website : https://workplacecloudhub.com',
+        ' GitHub  : https://github.com/khda79/workplacecloudhub.com',
+        '================================================================================'
+    )
+
+    $bannerAlreadyShown = Get-Variable -Name SmartM365BrandBannerConsoleShown -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    if (-not [bool]$bannerAlreadyShown) {
+        Set-Variable -Name SmartM365BrandBannerConsoleShown -Scope Global -Value $true
+        Microsoft.PowerShell.Utility\Write-Host $bannerLines[0] -ForegroundColor DarkCyan
+        Microsoft.PowerShell.Utility\Write-Host $bannerLines[1] -ForegroundColor Cyan
+        Microsoft.PowerShell.Utility\Write-Host $bannerLines[2] -ForegroundColor Yellow
+        Microsoft.PowerShell.Utility\Write-Host $bannerLines[3] -ForegroundColor Yellow
+        Microsoft.PowerShell.Utility\Write-Host $bannerLines[4] -ForegroundColor DarkCyan
+    }
+
+    $logTextFile = [string](Get-Variable -Name LogTextFile -Scope Global -ValueOnly -ErrorAction SilentlyContinue)
+    $loggedPath = [string](Get-Variable -Name SmartM365BrandBannerLoggedPath -Scope Global -ValueOnly -ErrorAction SilentlyContinue)
+    if (-not [string]::IsNullOrWhiteSpace($logTextFile) -and $loggedPath -ne $logTextFile) {
+        Add-Content -Path $logTextFile -Value $bannerLines
+        Set-Variable -Name SmartM365BrandBannerLoggedPath -Scope Global -Value $logTextFile
+    }
+}
+function Write-SmartM365CompletionBanner {
+    [CmdletBinding()]
+    param(
+        [ValidateSet('Auto', 'Success', 'Failed', 'CompletedWithWarnings', 'Cancelled')]
+        [string]$Status = 'Auto',
+        [string]$ScriptName = '',
+        [AllowNull()][Nullable[datetime]]$StartedAt = $null,
+        [AllowNull()][Nullable[datetime]]$EndedAt = $null,
+        [int]$WarningCount = -1,
+        [int]$ErrorCount = -1,
+        [int]$GeneratedCsvFiles = -1,
+        [string]$LogPath = ''
+    )
+    $Status = Get-SmartM365InventoryCompletionStatus -Status $Status -ErrorRecord $null
+    $lifecycle = Get-Variable SmartM365InventoryRun -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    if ($lifecycle -and -not $lifecycle.Finalizing) {
+        $lifecycle.PendingBanner=@{}; foreach($key in $PSBoundParameters.Keys){$lifecycle.PendingBanner[$key]=$PSBoundParameters[$key]}
+        $lifecycle.PendingBanner.Status=$Status
+        return
+    }
+    $scriptNameVariable = Get-Variable -Name SmartM365ScriptName -Scope Global -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrWhiteSpace($ScriptName) -and $scriptNameVariable) { $ScriptName = [string]$scriptNameVariable.Value }
+    $startedAtVariable = Get-Variable -Name SmartM365ExecutionStartTime -Scope Global -ErrorAction SilentlyContinue
+    if (($null -eq $StartedAt -or $StartedAt -eq [datetime]::MinValue) -and $startedAtVariable) { $StartedAt = [datetime]$startedAtVariable.Value }
+    $warningVariable = Get-Variable -Name SmartM365WarningCount -Scope Global -ErrorAction SilentlyContinue
+    if ($WarningCount -lt 0) { $WarningCount = if ($warningVariable) { [int]$warningVariable.Value } else { 0 } }
+    $errorVariable = Get-Variable -Name SmartM365ErrorCount -Scope Global -ErrorAction SilentlyContinue
+    if ($ErrorCount -lt 0) { $ErrorCount = if ($errorVariable) { [int]$errorVariable.Value } else { 0 } }
+    $csvVariable = Get-Variable -Name csvGeneratedPaths -Scope Global -ErrorAction SilentlyContinue
+    if ($GeneratedCsvFiles -lt 0) { $GeneratedCsvFiles = if ($csvVariable -and $csvVariable.Value) { @($csvVariable.Value).Count } else { 0 } }
+    $logVariable = Get-Variable -Name LogTextFile -Scope Global -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrWhiteSpace($LogPath) -and $logVariable) { $LogPath = [string]$logVariable.Value }
+
+
+    if ($null -eq $EndedAt -or $EndedAt -eq [datetime]::MinValue) { $EndedAt = Get-Date }
+    if ($null -eq $StartedAt -or $StartedAt -eq [datetime]::MinValue) { $StartedAt = $EndedAt }
+    if ([string]::IsNullOrWhiteSpace($ScriptName)) { $ScriptName = 'SmartM365' }
+    if ($Status -eq 'Auto') {
+        $Status = if ($ErrorCount -gt 0) { 'Failed' } elseif ($WarningCount -gt 0) { 'CompletedWithWarnings' } else { 'Success' }
+    }
+
+    $statusLabel = switch ($Status) {
+        'Failed' { 'FAILED' }
+        'Cancelled' { 'CANCELLED' }
+        'CompletedWithWarnings' { 'COMPLETED WITH WARNINGS' }
+        default { 'SUCCESS' }
+    }
+    $title = switch ($Status) {
+        'Failed' { 'Execution failed' }
+        'Cancelled' { 'Execution cancelled' }
+        'CompletedWithWarnings' { 'Execution completed with warnings' }
+        default { 'Execution completed' }
+    }
+    $statusColor = switch ($Status) {
+        'Failed' { 'Red' }
+        'Cancelled' { 'Yellow' }
+        'CompletedWithWarnings' { 'Yellow' }
+        default { 'Green' }
+    }
+    $duration = $EndedAt - $StartedAt
+    $durationText = '{0:00}:{1:00}:{2:00}' -f ([int][Math]::Floor($duration.TotalHours)), $duration.Minutes, $duration.Seconds
+    $effectiveLogPath = if ([string]::IsNullOrWhiteSpace($LogPath)) { '' } else { [string]$LogPath }
+    $runKey = '{0}|{1}|{2}' -f $ScriptName, $StartedAt.Ticks, $effectiveLogPath
+    $existingRunKey = [string](Get-Variable -Name SmartM365CompletionBannerRunKey -Scope Global -ValueOnly -ErrorAction SilentlyContinue)
+    if ($existingRunKey -eq $runKey) { return }
+
+    $lines = @(
+        '================================================================================',
+        (' SmartM365 by WorkplaceCloudHub - {0}' -f $title),
+        (' Script    : {0}' -f $ScriptName),
+        (' Status    : {0}' -f $statusLabel),
+        (' Duration  : {0}' -f $durationText),
+        (' Warnings  : {0}' -f $WarningCount),
+        (' Errors    : {0}' -f $ErrorCount),
+        (' CSV files : {0}' -f $GeneratedCsvFiles)
+    )
+    if (-not [string]::IsNullOrWhiteSpace($effectiveLogPath)) { $lines += (' Log       : {0}' -f $effectiveLogPath) }
+    $lines += '================================================================================'
+
+    Set-Variable -Name SmartM365CompletionBannerRunKey -Scope Global -Value $runKey
+    Microsoft.PowerShell.Utility\Write-Host $lines[0] -ForegroundColor DarkCyan
+    Microsoft.PowerShell.Utility\Write-Host $lines[1] -ForegroundColor Cyan
+    for ($i = 2; $i -lt ($lines.Count - 1); $i++) {
+        Microsoft.PowerShell.Utility\Write-Host $lines[$i] -ForegroundColor $(if ($lines[$i] -like ' Status*') { $statusColor } else { 'Gray' })
+    }
+    Microsoft.PowerShell.Utility\Write-Host $lines[-1] -ForegroundColor DarkCyan
+
+    if (-not [string]::IsNullOrWhiteSpace($effectiveLogPath)) {
+        try {
+            $logFolder = Split-Path -Path $effectiveLogPath -Parent
+            if (-not [string]::IsNullOrWhiteSpace($logFolder) -and -not (Test-Path -LiteralPath $logFolder)) {
+                New-Item -ItemType Directory -Path $logFolder -Force | Out-Null
+            }
+            Add-Content -LiteralPath $effectiveLogPath -Value $lines -Encoding UTF8
+        }
+        catch {
+            Microsoft.PowerShell.Utility\Write-Warning ("SmartM365 completion banner could not be written to '{0}': {1}" -f $effectiveLogPath, $_.Exception.Message)
+        }
+    }
+}
+function Write-SmartM365ExecutionContext {
+    [CmdletBinding()]
+    param(
+        [string]$ScriptName = $global:SmartM365ScriptName,
+        [string]$ScriptVersion = '',
+        [string]$ProfileKey = $global:SmartM365ProfileKey,
+        [string]$TenantKey = $global:SmartM365TenantKey,
+        [string]$OrganizationKey = $global:SmartM365OrganizationKey,
+        [string]$EnvironmentKey = $global:SmartM365EnvironmentKey,
+        [string]$TenantId = $global:SmartM365TenantId,
+        [string]$OutputPath = $global:BasePath,
+        [string]$ScriptPath = ''
+    )
+
+    $now = Get-Date
+    $context = [ordered]@{}
+
+    if (-not [string]::IsNullOrWhiteSpace($ScriptName)) { $context['ScriptName'] = $ScriptName }
+    if (-not [string]::IsNullOrWhiteSpace($ScriptVersion)) { $context['ScriptVersion'] = $ScriptVersion }
+    if (-not [string]::IsNullOrWhiteSpace($ProfileKey)) { $context['ProfileKey'] = $ProfileKey }
+    if (-not [string]::IsNullOrWhiteSpace($TenantKey)) { $context['TenantKey'] = $TenantKey }
+    if (-not [string]::IsNullOrWhiteSpace($OrganizationKey)) { $context['OrganizationKey'] = $OrganizationKey }
+    if (-not [string]::IsNullOrWhiteSpace($EnvironmentKey)) { $context['EnvironmentKey'] = $EnvironmentKey }
+    if (-not [string]::IsNullOrWhiteSpace($TenantId)) { $context['TenantId'] = $TenantId }
+
+    $context['StartTimeLocal'] = $now.ToString('yyyy-MM-dd HH:mm:ss zzz')
+    $context['StartTimeUtc'] = $now.ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ssZ')
+
+    try {
+        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+        if ($identity -and -not [string]::IsNullOrWhiteSpace($identity.Name)) {
+            $context['User'] = $identity.Name
+        }
+
+        $principal = New-Object -TypeName System.Security.Principal.WindowsPrincipal -ArgumentList $identity
+        $context['RunAsAdmin'] = $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+    }
+    catch {
+        if (-not [string]::IsNullOrWhiteSpace($env:USERNAME)) {
+            $context['User'] = ('{0}\{1}' -f $env:USERDOMAIN, $env:USERNAME).Trim('\')
+        }
+        $context['RunAsAdmin'] = 'Unknown'
+    }
+
+    $context['MachineName'] = [Environment]::MachineName
+    $context['PowerShellVersion'] = $PSVersionTable.PSVersion.ToString()
+    $context['PowerShellEdition'] = $PSVersionTable.PSEdition
+    $context['ProcessId'] = $PID
+    $context['Process64Bit'] = [Environment]::Is64BitProcess
+    $context['OS64Bit'] = [Environment]::Is64BitOperatingSystem
+
+    try {
+        $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+        $context['OperatingSystem'] = ('{0} {1}' -f $operatingSystem.Caption, $operatingSystem.Version).Trim()
+    }
+    catch {
+        $context['OperatingSystem'] = [Environment]::OSVersion.VersionString
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ScriptPath)) { $context['ScriptPath'] = $ScriptPath }
+    try { $context['WorkingDirectory'] = (Get-Location).Path } catch {}
+    if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $context['OutputPath'] = $OutputPath }
+    if (-not [string]::IsNullOrWhiteSpace($global:LogPath)) { $context['LogPath'] = $global:LogPath }
+    if (-not [string]::IsNullOrWhiteSpace($global:LogTextFile)) { $context['LogTextFile'] = $global:LogTextFile }
+    if (-not [string]::IsNullOrWhiteSpace($global:logTranscriptFile)) { $context['TranscriptFile'] = $global:logTranscriptFile }
+
+    Write-SmartM365BrandBanner
+    WriteLog -Message 'Execution context:' -Level 'INFO'
+    foreach ($key in $context.Keys) {
+        $value = $context[$key]
+        if ($null -eq $value) { continue }
+        if ($value -is [string] -and [string]::IsNullOrWhiteSpace($value)) { continue }
+        WriteLog -Message ('  {0}: {1}' -f $key, $value) -Level 'INFO'
+    }
+    Write-SmartM365LoadedModuleVersions
+}
+
+function Complete-SmartM365ExecutionContext {
+    [CmdletBinding()]
+    param(
+        [ValidateSet('Auto', 'Success', 'Failed', 'CompletedWithWarnings', 'Cancelled')]
+        [string]$Status = 'Auto',
+        [AllowNull()]$ErrorRecord = $null,
+        [string]$FailureStage = ''
+    )
+
+    $Status = Get-SmartM365InventoryCompletionStatus -Status $Status -ErrorRecord $ErrorRecord
+    $lifecycle = Get-Variable SmartM365InventoryRun -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    if ($lifecycle -and -not $lifecycle.Finalizing) {
+        $lifecycle.PendingCompletion=@{}; foreach($key in $PSBoundParameters.Keys){$lifecycle.PendingCompletion[$key]=$PSBoundParameters[$key]}
+        $lifecycle.PendingCompletion.Status=$Status
+        $global:SmartM365ExecutionStatus=$Status
+        return
+    }
+    if ($global:SmartM365ExecutionSummaryWritten) { return }
+    $global:SmartM365ExecutionSummaryWritten = $true
+
+    $ended = Get-Date
+    $started = if ($global:SmartM365ExecutionStartTime) { [datetime]$global:SmartM365ExecutionStartTime } else { $ended }
+    $duration = $ended - $started
+    $durationText = '{0:00}:{1:00}:{2:00}' -f ([int][Math]::Floor($duration.TotalHours)), $duration.Minutes, $duration.Seconds
+
+    $warningCount = if ($null -ne $global:SmartM365WarningCount) { [int]$global:SmartM365WarningCount } else { 0 }
+    $errorCount = if ($null -ne $global:SmartM365ErrorCount) { [int]$global:SmartM365ErrorCount } else { 0 }
+
+    $hasFailure = $null -ne $ErrorRecord -or $errorCount -gt 0
+    $automaticStatus = $Status -eq 'Auto'
+    if ($Status -eq 'Auto') {
+        if ($hasFailure) {
+            $Status = 'Failed'
+        }
+        elseif ($warningCount -gt 0) {
+            $Status = 'CompletedWithWarnings'
+        }
+        else {
+            $Status = 'Success'
+        }
+    }
+    $global:SmartM365ExecutionStatus = $Status
+    $cmdbReceiptPath=$null
+    if(Get-Command Complete-SmartM365CmdbSourceReceipt -ErrorAction SilentlyContinue){
+        try{$receiptStatus=if($hasFailure){'Failed'}else{$Status};$cmdbReceiptPath=Complete-SmartM365CmdbSourceReceipt -Status $receiptStatus -ErrorCount $errorCount}
+        catch{WriteLog -Message ('Source completion proof failed; native CSVs are preserved: {0}' -f $_.Exception.Message) -Level WARNING}
+    }
+    $warningCount = [int]$global:SmartM365WarningCount
+    if($automaticStatus -and $Status -eq 'Success' -and $warningCount -gt 0){$Status='CompletedWithWarnings';$global:SmartM365ExecutionStatus=$Status}
+
+    $summary = [ordered]@{
+        Status            = $Status
+        Duration          = $durationText
+        Started           = $started.ToString('yyyy-MM-dd HH:mm:ss zzz')
+        Ended             = $ended.ToString('yyyy-MM-dd HH:mm:ss zzz')
+        ScriptName        = $global:SmartM365ScriptName
+        ProfileKey       = $global:SmartM365ProfileKey
+        TenantKey         = $global:SmartM365TenantKey
+        OrganizationKey   = $global:SmartM365OrganizationKey
+        EnvironmentKey    = $global:SmartM365EnvironmentKey
+        TenantId          = $global:SmartM365TenantId
+        OutputPath        = $global:BasePath
+        LogTextFile       = $global:LogTextFile
+        TranscriptFile    = $global:logTranscriptFile
+        GeneratedCsvFiles = if ($global:csvGeneratedPaths) { @($global:csvGeneratedPaths).Count } else { 0 }
+        Warnings          = $warningCount
+        Errors            = $errorCount
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($FailureStage)) {
+        $summary['FailureStage'] = $FailureStage
+    }
+
+    if ($null -ne $ErrorRecord) {
+        $failureMessage = if ($ErrorRecord -is [System.Management.Automation.ErrorRecord] -and $ErrorRecord.Exception) {
+            $ErrorRecord.Exception.Message
+        }
+        elseif ($ErrorRecord.Exception) {
+            $ErrorRecord.Exception.Message
+        }
+        else {
+            [string]$ErrorRecord
+        }
+        if (-not [string]::IsNullOrWhiteSpace($failureMessage)) {
+            $summary['FailureMessage'] = $failureMessage
+        }
+    }
+
+    if ($global:SmartM365SharePointUploadedFiles) {
+        $summary['SharePointUploads'] = @($global:SmartM365SharePointUploadedFiles).Count
+    }
+
+    WriteLog -Message 'Execution summary:' -Level 'INFO'
+    foreach ($key in $summary.Keys) {
+        $value = $summary[$key]
+        if ($null -eq $value) { continue }
+        if ($value -is [string] -and [string]::IsNullOrWhiteSpace($value)) { continue }
+        WriteLog -Message ('  {0}: {1}' -f $key, $value) -Level 'INFO'
+    }
+
+    try {
+    # Upload run log files after the execution summary is written, so SharePoint keeps the final log content.
+    $logUploadCandidates = @($global:LogTextFile, $global:logTranscriptFile)
+    if($cmdbReceiptPath){$logUploadCandidates+=$cmdbReceiptPath}
+    $logUploadCandidates+=@($script:SmartM365SourceReceiptUploadPaths)
+    if ($global:SmartM365MailHtmlFiles) { $logUploadCandidates += @($global:SmartM365MailHtmlFiles) }
+    $logUploadCandidates = $logUploadCandidates |
+        Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
+        Sort-Object -Unique
+    if ($Status -eq 'Cancelled') { $logUploadCandidates=@() }
+    $logUploadStartCount = if ($global:SmartM365SharePointUploadedFiles) { @($global:SmartM365SharePointUploadedFiles).Count } else { 0 }
+    foreach ($logUploadCandidate in $logUploadCandidates) {
+        if (Test-SmartM365SourceReceiptMirrorBlocked -Path $logUploadCandidate) { continue }
+        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $logUploadCandidate | Out-Null
+    }
+    $logUploadEndCount = if ($global:SmartM365SharePointUploadedFiles) { @($global:SmartM365SharePointUploadedFiles).Count } else { $logUploadStartCount }
+    if ($logUploadEndCount -gt $logUploadStartCount) {
+        WriteLog -Message ('Run log SharePoint uploads: {0}' -f ($logUploadEndCount - $logUploadStartCount)) -Level 'INFO'
+        if (-not [string]::IsNullOrWhiteSpace([string]$global:LogTextFile) -and (Test-Path -LiteralPath $global:LogTextFile -PathType Leaf)) {
+            Invoke-SmartM365SharePointCsvUpload -LocalFilePath $global:LogTextFile | Out-Null
+        }
+    }
+    }
+    finally {
+        Write-SmartM365CompletionBanner `
+            -Status $Status `
+            -ScriptName $global:SmartM365ScriptName `
+            -StartedAt $started `
+            -EndedAt $ended `
+            -WarningCount $warningCount `
+            -ErrorCount $errorCount `
+            -GeneratedCsvFiles $summary.GeneratedCsvFiles `
+            -LogPath $global:LogTextFile
+    }
+}
+
+function Invoke-SmartM365TeamsNotificationFromLog {
+    [CmdletBinding()]
+    param(
+        [string]$Message,
+        [string]$Level = 'INFO'
+    )
+
+    if ($script:SmartM365TeamsNotificationInProgress) { return }
+
+    $normalizedLevel = if ([string]::IsNullOrWhiteSpace($Level)) { 'INFO' } else { $Level.ToUpperInvariant() }
+    $isError = $normalizedLevel -eq 'ERROR'
+    $isTerminalSuccess = $normalizedLevel -eq 'SUCCESS' -and $Message -match '(?i)\b(completed|finished|complete|terminated|termine)\b' -and $Message -notmatch '(?i)\bpreflight completed\b'
+    if (-not $isError -and -not $isTerminalSuccess) { return }
+
+    $dedupeKey = '{0}|{1}' -f $normalizedLevel, $Message
+    if ($null -eq $script:SmartM365TeamsNotificationLogKeys) {
+        $script:SmartM365TeamsNotificationLogKeys = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    }
+    if (-not $script:SmartM365TeamsNotificationLogKeys.Add($dedupeKey)) { return }
+
+    $scriptName = if ($global:SmartM365ScriptName) {
+        $global:SmartM365ScriptName
+    }
+    elseif ($global:LogTextFile) {
+        [System.IO.Path]::GetFileNameWithoutExtension($global:LogTextFile)
+    }
+    elseif ($PSCommandPath) {
+        [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
+    }
+    else {
+        'SmartM365'
+    }
+
+    $facts = @{
+        Script     = $scriptName
+        Computer   = $env:COMPUTERNAME
+        LogFile    = $global:LogTextFile
+        Transcript = $global:logTranscriptFile
+    }
+    if (-not $isError) {
+        $facts['Result summary'] = $Message
+        if ($global:csvGeneratedPaths) {
+            $facts['Generated CSV files'] = @($global:csvGeneratedPaths).Count
+        }
+        if ($global:csvFilePath1) {
+            $facts['Timestamped CSV'] = $global:csvFilePath1
+        }
+        if ($global:csvFilePath3) {
+            $facts['Latest CSV'] = $global:csvFilePath3
+        }
+    }
+
+    $title = if ($isError) { "SmartM365 error - $scriptName" } else { "SmartM365 completed - $scriptName" }
+    $helpUrl = ''
+    if ($isError) {
+        $prompt = "Help troubleshoot this SmartM365 PowerShell script error. Script: $scriptName. Computer: $env:COMPUTERNAME. Error: $Message. Log: $global:LogTextFile"
+        $helpUrl = 'https://chat.openai.com/?q=' + [System.Uri]::EscapeDataString($prompt)
+    }
+
+    try {
+        $script:SmartM365TeamsNotificationInProgress = $true
+        Send-SmartM365TeamsNotification -Title $title -Message $Message -Level $(if ($isError) { 'ERROR' } else { 'SUCCESS' }) -Facts $facts -HelpUrl $helpUrl | Out-Null
+    }
+    catch {
+    }
+    finally {
+        $script:SmartM365TeamsNotificationInProgress = $false
+    }
+}
+
+function Send-SmartM365TeamsNotification {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [string]$WebhookUrl = "",
+        [Parameter(Mandatory = $true)][string]$Title,
+        [Parameter(Mandatory = $true)][string]$Message,
+        [ValidateSet('INFO','SUCCESS','WARNING','ERROR')]
+        [string]$Level = 'INFO',
+        [ValidateSet('Auto','Alerts','Infos')]
+        [string]$Channel = 'Auto',
+        [hashtable]$Facts,
+        [string]$ResultSummary = "",
+        [string]$HelpUrl = "",
+        [switch]$ThrowOnError
+    )
+
+    if (Test-SmartM365InterruptedRun) { return }; try {
+        $effectiveChannel = if ($Channel -ne 'Auto') {
+            $Channel
+        }
+        elseif ($Level -eq 'ERROR') {
+            'Alerts'
+        }
+        else {
+            'Infos'
+        }
+
+        if (-not $PSBoundParameters.ContainsKey('WebhookUrl')) {
+            $moduleLocalConfig = Get-ModuleLocalConfig
+            $teamsEnabled = [bool](Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'EnableTeamsNotifications' -DefaultValue $false)
+            if (-not $teamsEnabled) {
+                WriteLog -Message 'Teams notification skipped: EnableTeamsNotifications is not enabled.' -Level 'INFO'
+                return $false
+            }
+
+            $webhookConfigName = if ($effectiveChannel -eq 'Alerts') { 'TeamsAlertsWebhookUrl' } else { 'TeamsInfosWebhookUrl' }
+            $WebhookUrl = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name $webhookConfigName -DefaultValue ''
+            if ([string]::IsNullOrWhiteSpace($WebhookUrl)) {
+                $WebhookUrl = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'TeamsWebhookUrl' -DefaultValue $WebhookUrl
+            }
+        }
+
+        if ([string]::IsNullOrWhiteSpace($WebhookUrl)) {
+            WriteLog -Message 'Teams notification skipped: TeamsAlertsWebhookUrl/TeamsInfosWebhookUrl is not configured.' -Level 'INFO'
+            return $false
+        }
+
+        $themeColors = @{
+            INFO    = '0078D4'
+            SUCCESS = '107C10'
+            WARNING = 'FFB900'
+            ERROR   = 'D13438'
+        }
+
+        $factList = New-Object System.Collections.Generic.List[hashtable]
+        $factList.Add(@{ name = 'Level'; value = $Level }) | Out-Null
+        $factList.Add(@{ name = 'Timestamp'; value = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') }) | Out-Null
+        $factList.Add(@{ name = 'Computer'; value = $env:COMPUTERNAME }) | Out-Null
+
+        $summaryFactNames = @('Result summary', 'ResultSummary', 'Summary')
+        $hasSummaryFact = $false
+        $summaryFromFacts = ''
+        if ($null -ne $Facts) {
+            foreach ($summaryFactName in $summaryFactNames) {
+                if ($Facts.ContainsKey($summaryFactName)) {
+                    $summaryFromFacts = [string]$Facts[$summaryFactName]
+                    break
+                }
+            }
+            $hasSummaryFact = $Facts.ContainsKey('Result summary')
+        }
+        if ($effectiveChannel -eq 'Infos' -and -not $hasSummaryFact) {
+            $summaryText = if (-not [string]::IsNullOrWhiteSpace($ResultSummary)) {
+                $ResultSummary
+            }
+            elseif (-not [string]::IsNullOrWhiteSpace($summaryFromFacts)) {
+                $summaryFromFacts
+            }
+            else {
+                $Message
+            }
+            if ($summaryText.Length -gt 600) {
+                $summaryText = $summaryText.Substring(0, 597) + '...'
+            }
+            $factList.Add(@{ name = 'Result summary'; value = $summaryText }) | Out-Null
+        }
+
+        if ($null -ne $Facts) {
+            foreach ($key in @($Facts.Keys | Sort-Object)) {
+                $value = $Facts[$key]
+                if ($null -eq $value) { continue }
+                $factList.Add(@{ name = [string]$key; value = [string]$value }) | Out-Null
+            }
+        }
+
+        $payload = @{
+            '@type'    = 'MessageCard'
+            '@context' = 'https://schema.org/extensions'
+            summary    = $Title
+            themeColor = $themeColors[$Level]
+            title      = $Title
+            text       = $Message
+            sections   = @(@{ markdown = $true; facts = @($factList) })
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($HelpUrl)) {
+            $payload['potentialAction'] = @(
+                @{
+                    '@type' = 'OpenUri'
+                    name    = 'Get AI help'
+                    targets = @(@{ os = 'default'; uri = $HelpUrl })
+                }
+            )
+        }
+
+        $json = $payload | ConvertTo-Json -Depth 10
+        Invoke-RestMethod -Method POST -Uri $WebhookUrl -Body $json -ContentType 'application/json' -TimeoutSec 180 -ErrorAction Stop | Out-Null
+        return $true
+    }
+    catch {
+        if ($ThrowOnError) { throw }
+        WriteLog -Message ("Teams notification failed: {0}" -f $_.Exception.Message) -Level 'WARNING'
+        return $false
+    }
+}
+
+function Test-FileLocked {
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        $fs = [System.IO.File]::Open($Path, 'Open', 'ReadWrite', 'None')
+        $fs.Close()
+        return $false
+    } catch {
+        return $true
+    }
+}
+
+function RemoveOldFiles {
+    param (
+        [Parameter(Mandatory)][Alias('FolderPath')][string]$Path,
+        [Alias('FilePattern')][string]$Filter = "*.log",
+        [Alias('MaxFiles')][int]$KeepCount = 10,
+        [string[]]$ExcludeFiles = @(),
+        [string]$LogFile,
+        # Optional exact name regex: a -Filter prefix also matches longer families (Name_* and Name_Archive_*).
+        [string]$NamePattern = ''
+    )
+
+    if (Test-SmartM365InterruptedRun) { return }; if (-not (Test-Path -LiteralPath $Path)) { return }
+    if ([string]::IsNullOrWhiteSpace($LogFile) -and -not [string]::IsNullOrWhiteSpace([string]$global:LogTextFile)) {
+        $LogFile = [string]$global:LogTextFile
+    }
+    $writeCleanupLog = {
+        param([Parameter(Mandatory)][string]$Message)
+
+        if ([string]::IsNullOrWhiteSpace($LogFile)) { return }
+        try {
+            Add-Content -LiteralPath $LogFile -Value ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message) -ErrorAction Stop
+        }
+        catch {
+            Write-Verbose ("Cleanup log write skipped for '{0}': {1}" -f $LogFile, $_.Exception.Message)
+        }
+    }
+
+
+    # Normalize the exclusion list as full paths, case-insensitive
+    $excludeSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($ex in $ExcludeFiles) {
+        try {
+            $resolved = Resolve-Path -LiteralPath $ex -ErrorAction Stop
+            [void]$excludeSet.Add($resolved.ProviderPath)
+        } catch {
+            [void]$excludeSet.Add($ex)
+        }
+    }
+
+    # Add globally generated CSV files
+    if ($global:csvGeneratedPaths) {
+        foreach ($csvPath in $global:csvGeneratedPaths) {
+            [void]$excludeSet.Add($csvPath)
+        }
+    }
+
+    # Ajouter les fichiers de log globaux
+    foreach ($varName in @('logTranscriptFile','logTextFile')) {
+        $v = Get-Variable -Name $varName -Scope Global -ErrorAction SilentlyContinue
+        if ($v -and $v.Value) {
+            try {
+                $resolved = Resolve-Path -LiteralPath $v.Value -ErrorAction Stop
+                [void]$excludeSet.Add($resolved.ProviderPath)
+            } catch {
+                [void]$excludeSet.Add($v.Value)
+            }
+        }
+    }
+
+    $files = Get-ChildItem -LiteralPath $Path -Filter $Filter -File |
+             Where-Object { [string]::IsNullOrEmpty($NamePattern) -or $_.Name -match $NamePattern } |
+             Sort-Object LastWriteTime -Descending
+
+    $filesToDelete = $files | Where-Object { -not $excludeSet.Contains($_.FullName) } |
+                              Select-Object -Skip $KeepCount
+
+    foreach ($file in $filesToDelete) {
+        if (Test-FileLocked -Path $file.FullName) {
+            & $writeCleanupLog "[SKIP] Locked file: $($file.Name)"
+            continue
+        }
+
+        try {
+            if ($file.Attributes -band [IO.FileAttributes]::ReadOnly) {
+                $file.Attributes = $file.Attributes -bxor [IO.FileAttributes]::ReadOnly
+            }
+        } catch {
+            & $writeCleanupLog "[SKIP] Cannot clear ReadOnly on $($file.Name): $($_.Exception.Message)"
+            continue
+        }
+
+        try {
+            Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+            & $writeCleanupLog "Deleted old file: $($file.Name)"
+        } catch {
+            & $writeCleanupLog "[SKIP] Failed to delete $($file.Name): $($_.Exception.Message)"
+        }
+    }
+}
+
+function Remove-SmartM365TimestampedFilesOlderThan {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][Alias('Path')][string]$FolderPath,
+        [Alias('Filter')][string]$FilePattern = '*',
+        [ValidateRange(1, 3650)][int]$RetentionDays = 7,
+        [string[]]$ExcludeFiles = @(),
+        [switch]$RequireCurrentRunPublication,
+        [datetime]$ReferenceTime = (Get-Date),
+        [string]$LogFile
+    )
+
+    if (Test-SmartM365InterruptedRun) { return }; if (-not (Test-Path -LiteralPath $FolderPath -PathType Container)) { return }
+    if ([string]::IsNullOrWhiteSpace($LogFile) -and -not [string]::IsNullOrWhiteSpace([string]$global:LogTextFile)) {
+        $LogFile = [string]$global:LogTextFile
+    }
+
+    $writeCleanupLog = {
+        param([Parameter(Mandatory)][string]$Message)
+        if ([string]::IsNullOrWhiteSpace($LogFile)) { return }
+        try {
+            Add-Content -LiteralPath $LogFile -Value ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message) -ErrorAction Stop
+        }
+        catch {
+            Write-Verbose ("Timestamp retention log write skipped for '{0}': {1}" -f $LogFile, $_.Exception.Message)
+        }
+    }
+
+    $generatedCsvPaths = @()
+    $generatedPathsVariable = Get-Variable -Name csvGeneratedPaths -Scope Global -ErrorAction SilentlyContinue
+    if ($generatedPathsVariable -and $generatedPathsVariable.Value) { $generatedCsvPaths = @($generatedPathsVariable.Value) }
+    $excludeSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($excludedPath in @($ExcludeFiles) + $generatedCsvPaths) {
+        if ([string]::IsNullOrWhiteSpace([string]$excludedPath)) { continue }
+        try {
+            $resolvedPath = (Resolve-Path -LiteralPath $excludedPath -ErrorAction Stop).ProviderPath
+            [void]$excludeSet.Add($resolvedPath)
+        }
+        catch {
+            try { [void]$excludeSet.Add([IO.Path]::GetFullPath([string]$excludedPath)) }
+            catch { [void]$excludeSet.Add([string]$excludedPath) }
+        }
+    }
+
+    if ($RequireCurrentRunPublication) {
+        $resolvedFolderPath = [IO.Path]::GetFullPath($FolderPath).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+        $currentRunPublicationFound = $false
+        foreach ($publishedPath in $generatedCsvPaths) {
+            if ([string]::IsNullOrWhiteSpace([string]$publishedPath) -or -not (Test-Path -LiteralPath $publishedPath -PathType Leaf)) { continue }
+            $publishedDirectory = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath([string]$publishedPath)).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+            if ([string]::Equals($publishedDirectory, $resolvedFolderPath, [StringComparison]::OrdinalIgnoreCase)) {
+                $currentRunPublicationFound = $true
+                break
+            }
+        }
+        if (-not $currentRunPublicationFound) {
+            & $writeCleanupLog ("Timestamp retention skipped: no current-run published CSV was registered in '{0}'." -f $FolderPath)
+            return
+        }
+    }
+
+    $cutoff = $ReferenceTime.AddDays(-$RetentionDays)
+    $timestampPattern = '(?<!\d)(?<Timestamp>\d{8}[-_]\d{4}(?:\d{2})?)(?!\d)'
+    [string[]]$timestampFormats = @('yyyyMMdd_HHmmss', 'yyyyMMdd-HHmmss', 'yyyyMMdd_HHmm', 'yyyyMMdd-HHmm')
+    $deletedCount = 0
+    $deletedBytes = [int64]0
+    $skippedWithoutTimestamp = 0
+    $failedCount = 0
+
+    foreach ($file in @(Get-ChildItem -LiteralPath $FolderPath -Filter $FilePattern -File -ErrorAction SilentlyContinue)) {
+        if ($excludeSet.Contains($file.FullName)) { continue }
+        if ($file.BaseName -match '(?i)(?:^|[_-])(?:History|Cache|Resume)(?:[_-]|$)') { continue }
+
+        $fileTimestamp = [datetime]::MinValue
+        $timestampFound = $false
+        $matches = [regex]::Matches($file.BaseName, $timestampPattern)
+        for ($index = $matches.Count - 1; $index -ge 0; $index--) {
+            $candidateTimestamp = [datetime]::MinValue
+            if ([datetime]::TryParseExact(
+                    $matches[$index].Groups['Timestamp'].Value,
+                    $timestampFormats,
+                    [Globalization.CultureInfo]::InvariantCulture,
+                    [Globalization.DateTimeStyles]::None,
+                    [ref]$candidateTimestamp)) {
+                $fileTimestamp = $candidateTimestamp
+                $timestampFound = $true
+                break
+            }
+        }
+
+        if (-not $timestampFound) {
+            $skippedWithoutTimestamp++
+            continue
+        }
+        if ($fileTimestamp -ge $cutoff) { continue }
+
+        if (Test-FileLocked -Path $file.FullName) {
+            $failedCount++
+            & $writeCleanupLog ("[SKIP] Locked timestamped file: {0}" -f $file.Name)
+            continue
+        }
+
+        try {
+            if ($file.Attributes -band [IO.FileAttributes]::ReadOnly) {
+                $file.Attributes = $file.Attributes -bxor [IO.FileAttributes]::ReadOnly
+            }
+            if ($PSCmdlet.ShouldProcess($file.FullName, "Delete timestamped file older than $RetentionDays day(s)")) {
+                $fileLength = [int64]$file.Length
+                Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+                $deletedCount++
+                $deletedBytes += $fileLength
+            }
+        }
+        catch {
+            $failedCount++
+            & $writeCleanupLog ("[SKIP] Failed to delete timestamped file {0}: {1}" -f $file.Name, $_.Exception.Message)
+        }
+    }
+
+    & $writeCleanupLog ("Timestamp retention completed: folder='{0}'; pattern='{1}'; retentionDays={2}; deleted={3}; deletedBytes={4}; skippedWithoutValidTimestamp={5}; failures={6}." -f $FolderPath, $FilePattern, $RetentionDays, $deletedCount, $deletedBytes, $skippedWithoutTimestamp, $failedCount)
+}
+
+function Remove-SmartM365TimestampedDirectoriesOlderThan {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$RootPath,
+        [string]$DirectoryPattern = '*',
+        [ValidateRange(1, 3650)][int]$RetentionDays = 7,
+        [string[]]$ExcludeDirectories = @(),
+        [datetime]$ReferenceTime = (Get-Date),
+        [string]$LogFile
+    )
+
+    if (Test-SmartM365InterruptedRun) { return }; if (-not (Test-Path -LiteralPath $RootPath -PathType Container)) { return }
+    if ([string]::IsNullOrWhiteSpace($LogFile) -and -not [string]::IsNullOrWhiteSpace([string]$global:LogTextFile)) {
+        $LogFile = [string]$global:LogTextFile
+    }
+    $writeCleanupLog = {
+        param([Parameter(Mandatory)][string]$Message)
+        if ([string]::IsNullOrWhiteSpace($LogFile)) { return }
+        try { Add-Content -LiteralPath $LogFile -Value ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message) -ErrorAction Stop }
+        catch { Write-Verbose ("Timestamp directory retention log write skipped for '{0}': {1}" -f $LogFile, $_.Exception.Message) }
+    }
+
+    $excludeSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($excludedPath in $ExcludeDirectories) {
+        if ([string]::IsNullOrWhiteSpace([string]$excludedPath)) { continue }
+        try { [void]$excludeSet.Add((Resolve-Path -LiteralPath $excludedPath -ErrorAction Stop).ProviderPath) }
+        catch {
+            try { [void]$excludeSet.Add([IO.Path]::GetFullPath([string]$excludedPath)) }
+            catch { [void]$excludeSet.Add([string]$excludedPath) }
+        }
+    }
+
+    $cutoff = $ReferenceTime.AddDays(-$RetentionDays)
+    [string[]]$timestampFormats = @('yyyyMMdd_HHmmss', 'yyyyMMdd-HHmmss')
+    $directoryNamePattern = '^(?<Timestamp>\d{8}[-_]\d{6})(?:-\d+)?$'
+    $deletedCount = 0
+    $failedCount = 0
+
+    foreach ($directory in @(Get-ChildItem -LiteralPath $RootPath -Filter $DirectoryPattern -Directory -ErrorAction SilentlyContinue)) {
+        if ($excludeSet.Contains($directory.FullName)) { continue }
+        $match = [regex]::Match($directory.Name, $directoryNamePattern)
+        if (-not $match.Success) { continue }
+        $directoryTimestamp = [datetime]::MinValue
+        if (-not [datetime]::TryParseExact($match.Groups['Timestamp'].Value, $timestampFormats, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$directoryTimestamp)) { continue }
+        if ($directoryTimestamp -ge $cutoff) { continue }
+
+        try {
+            if ($PSCmdlet.ShouldProcess($directory.FullName, "Delete timestamped directory older than $RetentionDays day(s)")) {
+                Remove-Item -LiteralPath $directory.FullName -Recurse -Force -ErrorAction Stop
+                $deletedCount++
+            }
+        }
+        catch {
+            $failedCount++
+            & $writeCleanupLog ("[SKIP] Failed to delete timestamped directory {0}: {1}" -f $directory.Name, $_.Exception.Message)
+        }
+    }
+
+    & $writeCleanupLog ("Timestamp directory retention completed: root='{0}'; pattern='{1}'; retentionDays={2}; deleted={3}; failures={4}." -f $RootPath, $DirectoryPattern, $RetentionDays, $deletedCount, $failedCount)
+}
+
+function EnsureExchangePSSnapinLoaded {
+    [CmdletBinding()]
+    param (
+        [string]$SnapinName = "Microsoft.Exchange.Management.PowerShell.SnapIn",
+        [string[]]$RequiredCommands = @("Get-Mailbox"),
+        [switch]$ViewEntireForest
+    )
+
+    # Check if the PSSnapin is registered on the server
+    if (-not (Get-PSSnapin $SnapinName -Registered -ErrorAction SilentlyContinue)) {
+        Write-Error "The Exchange Management PSSnapin '$SnapinName' is not registered on this server."
+        Write-Error "This script must be run on an Exchange 2016 server where the Management Tools are installed."
+        return $false
+    }
+
+    # Check if the PSSnapin is already loaded in the current session
+    if (-not (Get-PSSnapin $SnapinName -ErrorAction SilentlyContinue)) {
+        Write-Verbose "The Exchange PSSnapin '$SnapinName' is not loaded in the current session. Attempting to load it..."
+        try {
+            Add-PSSnapin $SnapinName -ErrorAction Stop
+            Write-Verbose "The Exchange PSSnapin was loaded successfully."
+        }
+        catch {
+            Write-Error "Failed to load the Exchange PSSnapin '$SnapinName'. Error: $($_.Exception.Message)"
+            Write-Error "Ensure you are running this script on an Exchange 2016 server and have the necessary permissions."
+            Write-Error "Alternatively, try running this script from the Exchange Management Shell or use a script that connects via PowerShell Remoting to localhost."
+            return $false
+        }
+    } else {
+        Write-Verbose "The Exchange PSSnapin '$SnapinName' is already loaded."
+    }
+
+    $missingCommands = @()
+    foreach ($commandName in @($RequiredCommands | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+        if (-not (Get-Command -Name $commandName -ErrorAction SilentlyContinue)) {
+            $missingCommands += $commandName
+        }
+    }
+
+    if ($missingCommands.Count -gt 0) {
+        Write-Error ("The following Exchange cmdlet(s) are still not available after attempting to load the snap-in: {0}" -f ($missingCommands -join ', '))
+        Write-Error "This could indicate an issue with the Exchange Management Tools installation or the selected Exchange snap-in."
+        return $false
+    }
+
+    if ($ViewEntireForest) {
+        try {
+            Set-ADServerSettings -ViewEntireForest $true -ErrorAction Stop
+            if (Get-Command WriteLog -ErrorAction SilentlyContinue) {
+                WriteLog -Message "Set-ADServerSettings -ViewEntireForest $true applied successfully."
+            }
+        }
+        catch {
+            Write-Error "Failed to apply 'Set-ADServerSettings -ViewEntireForest $true'. Message: $($_.Exception.Message)"
+            return $false
+        }
+    }
+
+    return $true
+}
+function Get-SmartM365MailLogFolder {
+    [CmdletBinding()]
+    param()
+
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace([string]$global:LogPath)) {
+        $logPathCandidate = [string]$global:LogPath
+        if ([System.IO.Path]::GetExtension($logPathCandidate) -eq '.log') {
+            try { $logPathCandidate = Split-Path -Path $logPathCandidate -Parent } catch {}
+        }
+        $candidates += $logPathCandidate
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$global:LogTextFile)) {
+        try { $candidates += (Split-Path -Path ([string]$global:LogTextFile) -Parent) } catch {}
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$global:logTranscriptFile)) {
+        try { $candidates += (Split-Path -Path ([string]$global:logTranscriptFile) -Parent) } catch {}
+    }
+
+    foreach ($candidate in @($candidates | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+        try {
+            if (-not (Test-Path -LiteralPath $candidate)) {
+                New-Item -Path $candidate -ItemType Directory -Force -ErrorAction Stop | Out-Null
+            }
+            return $candidate
+        }
+        catch {
+            try { WriteLog -Message ("Mail log folder is not writable: {0}. {1}" -f $candidate, $_.Exception.Message) -Level "WARNING" } catch {}
+        }
+    }
+
+    return $null
+}
+
+function ConvertTo-SmartM365SafeFileName {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][string]$Text,
+        [int]$MaxLength = 90
+    )
+
+    $safe = if ([string]::IsNullOrWhiteSpace($Text)) { 'SmartM365-Mail' } else { [string]$Text }
+    foreach ($invalid in [System.IO.Path]::GetInvalidFileNameChars()) {
+        $safe = $safe.Replace([string]$invalid, '_')
+    }
+    $safe = [regex]::Replace($safe, '\s+', ' ').Trim()
+    if ($safe.Length -gt $MaxLength) { $safe = $safe.Substring(0, $MaxLength).Trim() }
+    if ([string]::IsNullOrWhiteSpace($safe)) { $safe = 'SmartM365-Mail' }
+    return $safe
+}
+
+function Save-SmartM365MailHtmlCopy {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Subject,
+        [Parameter(Mandatory)][string]$BodyHtml
+    )
+
+    try {
+        $folder = Get-SmartM365MailLogFolder
+        if ([string]::IsNullOrWhiteSpace($folder)) { return $null }
+
+        $timestamp = Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'
+        $safeSubject = ConvertTo-SmartM365SafeFileName -Text $Subject
+        $path = Join-Path -Path $folder -ChildPath ("{0}_{1}.htm" -f $timestamp, $safeSubject)
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($path, $BodyHtml, $utf8NoBom)
+
+        if (-not $global:SmartM365MailHtmlFiles) {
+            $global:SmartM365MailHtmlFiles = New-Object System.Collections.ArrayList
+        }
+        [void]$global:SmartM365MailHtmlFiles.Add($path)
+        WriteLog -Message ("Mail HTML copy saved: {0}" -f $path) -Level "INFO"
+        return $path
+    }
+    catch {
+        WriteLog -Message ("Mail HTML copy failed: {0}" -f $_.Exception.Message) -Level "ERROR"
+        throw
+    }
+}
+
+function New-SmartM365MailFilesHtmlSection {
+    [CmdletBinding()]
+    param([string[]]$Files)
+
+    $existingFiles = @($Files | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -Unique)
+    if ($existingFiles.Count -eq 0) { return '' }
+
+    $rows = @()
+    foreach ($path in $existingFiles) {
+        $item = Get-Item -LiteralPath $path -ErrorAction SilentlyContinue
+        if ($null -eq $item) { continue }
+        $label = ConvertTo-SmartM365EmailHtmlText $item.Name
+        $locationHtml = (Get-SmartM365MailFileLocationHtml -FilePath $item.FullName).Html
+        $sizeKb = [Math]::Round(($item.Length / 1KB), 1)
+        $rows += "<tr><td style=`"border-top:1px solid #e2e8f0;padding:5px 7px;font-size:10px;color:#334155;`">$label</td><td style=`"border-top:1px solid #e2e8f0;padding:5px 7px;font-size:10px;color:#334155;word-break:break-all;`">$locationHtml</td><td align=`"right`" style=`"border-top:1px solid #e2e8f0;padding:5px 7px;font-size:10px;color:#334155;white-space:nowrap;`">$sizeKb KB</td></tr>"
+    }
+
+    if ($rows.Count -eq 0) { return '' }
+    return @"
+<div style="margin-top:18px;">
+  <div style="font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Technical files</div>
+  <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0;">
+    <tr><th align="left" style="background:#f8fafc;padding:5px 7px;font-size:10px;color:#475569;text-transform:uppercase;">File</th><th align="left" style="background:#f8fafc;padding:5px 7px;font-size:10px;color:#475569;text-transform:uppercase;">Location</th><th align="right" style="background:#f8fafc;padding:5px 7px;font-size:10px;color:#475569;text-transform:uppercase;">Size</th></tr>
+    $($rows -join "`n")
+  </table>
+</div>
+"@
+}
+
+function Get-SmartM365SharePointUploadRecordForLocalFile {
+    [CmdletBinding()]
+    param([string]$FilePath)
+
+    if ([string]::IsNullOrWhiteSpace($FilePath) -or -not $global:SmartM365SharePointUploadedFiles) { return $null }
+
+    $normalizedPath = [string]$FilePath
+    try {
+        $normalizedPath = [System.IO.Path]::GetFullPath($FilePath)
+    }
+    catch {
+        $normalizedPath = [string]$FilePath
+    }
+
+    $matches = @($global:SmartM365SharePointUploadedFiles | Where-Object {
+        $recordPath = [string]$_.LocalFilePath
+        if ([string]::IsNullOrWhiteSpace($recordPath)) { return $false }
+
+        $normalizedRecordPath = $recordPath
+        try {
+            $normalizedRecordPath = [System.IO.Path]::GetFullPath($recordPath)
+        }
+        catch {
+            $normalizedRecordPath = $recordPath
+        }
+
+        $normalizedRecordPath -ieq $normalizedPath
+    })
+
+    if ($matches.Count -eq 0) { return $null }
+    return $matches[-1]
+}
+
+function Get-SmartM365MailFileLocationHtml {
+    [CmdletBinding()]
+    param([string]$FilePath)
+
+    $uploadRecord = Get-SmartM365SharePointUploadRecordForLocalFile -FilePath $FilePath
+    if ($uploadRecord -and -not [string]::IsNullOrWhiteSpace([string]$uploadRecord.WebUrl)) {
+        $escapedUrl = ConvertTo-SmartM365EmailHtmlText ([string]$uploadRecord.WebUrl)
+        $displayText = [string]$uploadRecord.SharePointPath
+        if ([string]::IsNullOrWhiteSpace($displayText)) { $displayText = [string]$uploadRecord.WebUrl }
+        $escapedDisplayText = ConvertTo-SmartM365EmailHtmlText $displayText
+        return [pscustomobject]@{
+            Html = "<a href=`"$escapedUrl`" style=`"color:#075985;text-decoration:underline;`">$escapedDisplayText</a>"
+            HasSharePointLocation = $true
+        }
+    }
+    elseif ($uploadRecord -and -not [string]::IsNullOrWhiteSpace([string]$uploadRecord.SharePointPath)) {
+        return [pscustomobject]@{
+            Html = ConvertTo-SmartM365EmailHtmlText ([string]$uploadRecord.SharePointPath)
+            HasSharePointLocation = $true
+        }
+    }
+
+    return [pscustomobject]@{
+        Html = ConvertTo-SmartM365EmailHtmlText ([string]$FilePath)
+        HasSharePointLocation = $false
+    }
+}
+
+function Convert-SmartM365MailBodyLocalPathsToSharePointLinks {
+    [CmdletBinding()]
+    param([AllowNull()][string]$BodyHtml)
+
+    if ([string]::IsNullOrWhiteSpace($BodyHtml) -or -not $global:SmartM365SharePointUploadedFiles) { return $BodyHtml }
+
+    $updatedBodyHtml = [string]$BodyHtml
+    foreach ($uploadRecord in @($global:SmartM365SharePointUploadedFiles)) {
+        $localPath = [string]$uploadRecord.LocalFilePath
+        if ([string]::IsNullOrWhiteSpace($localPath)) { continue }
+
+        $location = Get-SmartM365MailFileLocationHtml -FilePath $localPath
+        if (-not $location.HasSharePointLocation) { continue }
+
+        $pathVariants = @(
+            $localPath,
+            (ConvertTo-SmartM365EmailHtmlText $localPath)
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+        foreach ($pathVariant in $pathVariants) {
+            $updatedBodyHtml = [regex]::Replace(
+                $updatedBodyHtml,
+                [regex]::Escape($pathVariant),
+                [System.Text.RegularExpressions.MatchEvaluator]{ param($match) $location.Html }
+            )
+        }
+    }
+
+    return $updatedBodyHtml
+}
+function Add-SmartM365MailFilesSection {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][string]$BodyHtml,
+        [string[]]$Files
+    )
+
+    $section = New-SmartM365MailFilesHtmlSection -Files $Files
+    if ([string]::IsNullOrWhiteSpace($section)) { return $BodyHtml }
+
+    if ([string]::IsNullOrWhiteSpace($BodyHtml)) { return $section }
+    if ($BodyHtml -match '(?is)</body>') {
+        return ([regex]::Replace($BodyHtml, '(?is)</body>', ($section + "`n</body>"), 1))
+    }
+    return ([string]$BodyHtml + "`n" + $section)
+}
+
+
+function ConvertToRecipientArray {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Recipients  # Recipients string, supports ';' or ',' separators
+    )
+    return @($Recipients) -split '[;,]\s*' | Where-Object { $_ -and $_.Trim() -ne '' }
+}
+
+function Test-SmartM365ConfiguredValue {
+    [CmdletBinding()]
+    param([AllowNull()]$Value)
+
+    if ($Value -isnot [string]) { return ($null -ne $Value) }
+
+    $normalizedValue = $Value.Trim()
+    if ([string]::IsNullOrWhiteSpace($normalizedValue)) { return $false }
+    if ($normalizedValue -in @('__USE_GLOBAL__', 'USE_GLOBAL')) { return $false }
+    if ($normalizedValue -match '^0{8}-0{4}-0{4}-0{4}-0{12}$') { return $false }
+    if ($normalizedValue -match '^0{40}$') { return $false }
+
+    return $true
+}
+
+function Get-SmartM365ExceptionDetails {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Exception)
+
+    $messages = New-Object System.Collections.Generic.List[string]
+    $current = $Exception
+    while ($null -ne $current) {
+        if (-not [string]::IsNullOrWhiteSpace($current.Message)) {
+            $messages.Add($current.Message)
+        }
+        $current = $current.InnerException
+    }
+
+    if ($messages.Count -eq 0) {
+        return [string]$Exception
+    }
+
+    return ($messages | Select-Object -Unique) -join " | "
+}
+
+function Connect-SmartM365GraphAppOnly {
+    [CmdletBinding()]
+    param(
+        [string]$AppId,
+        [string]$TenantId,
+        [string]$Thumbprint,
+        [string]$Purpose = 'Microsoft Graph'
+    )
+
+    try {
+        if (-not (Get-Command -Name Invoke-MgGraphRequest -ErrorAction SilentlyContinue)) {
+            Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+        }
+
+        $moduleLocalConfig = Get-ModuleLocalConfig
+        if (-not (Test-SmartM365ConfiguredValue -Value $AppId)) {
+            $AppId = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'AppId' -DefaultValue ''
+        }
+        if (-not (Test-SmartM365ConfiguredValue -Value $TenantId)) {
+            $TenantId = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'TenantId' -DefaultValue ''
+        }
+        if (-not (Test-SmartM365ConfiguredValue -Value $Thumbprint)) {
+            $Thumbprint = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'Thumbprint' -DefaultValue ''
+        }
+        if (-not (Test-SmartM365ConfiguredValue -Value $Thumbprint)) {
+            $Thumbprint = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'Thumb' -DefaultValue ''
+        }
+
+        if (-not (Test-SmartM365ConfiguredValue -Value $AppId) -or
+            -not (Test-SmartM365ConfiguredValue -Value $TenantId) -or
+            -not (Test-SmartM365ConfiguredValue -Value $Thumbprint)) {
+            WriteLog -Message ("{0} skipped: Graph app-only connection values are missing (AppId, TenantId, Thumb/Thumbprint)." -f $Purpose) -Level "WARNING"
+            return $false
+        }
+
+        WriteLog -Message ("Connecting to Microsoft Graph for {0}." -f $Purpose) -Level "INFO"
+        try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $false } catch {}
+        Connect-MgGraph -ClientId $AppId -TenantId $TenantId -CertificateThumbprint $Thumbprint -NoWelcome -ErrorAction Stop | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $true
+        return ($null -ne (Get-MgContext -ErrorAction SilentlyContinue))
+    }
+    catch {
+        WriteLog -Message ("{0} skipped: failed to connect Microsoft Graph: {1}" -f $Purpose, (Get-SmartM365ExceptionDetails -Exception $_.Exception)) -Level "WARNING"
+        return $false
+    }
+}
+
+function ConvertTo-SmartM365GraphRecipient {
+    [CmdletBinding()]
+    param([string[]]$Recipients)
+
+    @($Recipients | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object {
+        @{ emailAddress = @{ address = $_.Trim() } }
+    })
+}
+
+function ConvertTo-SmartM365GraphFileAttachment {
+    [CmdletBinding()]
+    param([string[]]$Attachments)
+
+    $graphAttachments = @()
+    foreach ($attachmentPath in @($Attachments | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+        if (-not (Test-Path -LiteralPath $attachmentPath -PathType Leaf)) { continue }
+        $file = Get-Item -LiteralPath $attachmentPath -ErrorAction Stop
+        if ($file.Length -gt 3MB) {
+            throw ("Graph mail attachment '{0}' is larger than 3 MB. Large attachments require an upload session." -f $file.FullName)
+        }
+        $graphAttachments += @{
+            '@odata.type' = '#microsoft.graph.fileAttachment'
+            name          = $file.Name
+            contentType   = 'application/octet-stream'
+            contentBytes  = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($file.FullName))
+        }
+    }
+    return $graphAttachments
+}
+
+function Send-SmartM365GraphMail {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$From,
+        [Parameter(Mandatory)][string]$To,
+        [string]$Cc = "",
+        [Parameter(Mandatory)][string]$Subject,
+        [Parameter(Mandatory)][string]$BodyHtml,
+        [string[]]$Attachments,
+        [switch]$AllowAttachments,
+        [switch]$SkipHtmlCopy,
+        [ValidateSet('Auto','Report','Error','Maintenance')][string]$MailPurpose = 'Auto',
+        [string]$AppId = $global:AppId,
+        [string]$TenantId = $global:TenantId,
+        [string]$Thumbprint = $global:Thumbprint
+    )
+
+    if (-not (Test-SmartM365ConfiguredValue -Value $Thumbprint)) { $Thumbprint = $global:Thumb }
+
+    $toArray = ConvertToRecipientArray -Recipients $To
+    $ccArray = if ($Cc) { ConvertToRecipientArray -Recipients $Cc } else { @() }
+    if (-not $toArray -or [string]::IsNullOrWhiteSpace($From)) {
+        throw "Send-SmartM365GraphMail: missing required parameters (From/To)."
+    }
+
+    if (-not (Connect-SmartM365GraphAppOnly -AppId $AppId -TenantId $TenantId -Thumbprint $Thumbprint -Purpose 'Graph mail')) {
+        throw "Send-SmartM365GraphMail: Microsoft Graph app-only connection failed."
+    }
+
+    $graphAttachmentPaths = @($Attachments | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) })
+    if ($graphAttachmentPaths.Count -gt 0) {
+        $BodyHtml = Add-SmartM365MailFilesSection -BodyHtml $BodyHtml -Files $graphAttachmentPaths
+        if (-not $AllowAttachments) {
+            WriteLog -Message 'Graph mail attachments are disabled by default; referenced files were added to the mail body instead.' -Level 'INFO'
+            $graphAttachmentPaths = @()
+        }
+    }
+
+    $BodyHtml = Convert-SmartM365MailBodyLocalPathsToSharePointLinks -BodyHtml $BodyHtml
+    $Subject = Format-SmartM365MailSubject -Subject $Subject
+    $BodyHtml = ConvertTo-SmartM365EmailBody -BodyHtml $BodyHtml -Subject $Subject -Category 'SmartM365'
+    if (-not $SkipHtmlCopy) { Save-SmartM365MailHtmlCopy -Subject $Subject -BodyHtml $BodyHtml | Out-Null }
+    $route = Resolve-SmartM365MaintenanceMailRecipientRoute -To $To -Cc $Cc -MailPurpose $MailPurpose
+    $toArray = @(ConvertToRecipientArray $route.To)
+    $ccArray = @(if ($route.Cc) { ConvertToRecipientArray $route.Cc })
+    $message = @{
+        subject      = $Subject
+        body         = @{ contentType = 'HTML'; content = $BodyHtml }
+        # Always a JSON array: a single recipient would otherwise be unrolled into an object (Graph 400).
+        toRecipients = @(ConvertTo-SmartM365GraphRecipient -Recipients $toArray)
+    }
+    if ($ccArray.Count -gt 0) { $message['ccRecipients'] = @(ConvertTo-SmartM365GraphRecipient -Recipients $ccArray) }
+    $graphAttachments = @(ConvertTo-SmartM365GraphFileAttachment -Attachments $graphAttachmentPaths)
+    if ($graphAttachments.Count -gt 0) { $message['attachments'] = $graphAttachments }
+
+    $body = @{ message = $message; saveToSentItems = $false } | ConvertTo-Json -Depth 12
+    $encodedFrom = [System.Uri]::EscapeDataString($From)
+    Invoke-MgGraphRequest -Method POST -Uri ("https://graph.microsoft.com/v1.0/users/{0}/sendMail" -f $encodedFrom) -Body $body -ContentType 'application/json' | Out-Null
+    WriteLog -Message ("Graph mail sent from {0} to {1}" -f $From, ($toArray -join ';')) -Level "SUCCESS"
+}
+
+function ConvertTo-SmartM365EmailHtmlText {
+    [CmdletBinding()]
+    param([AllowNull()]$Value)
+
+    if ($null -eq $Value) { return '' }
+    return [System.Net.WebUtility]::HtmlEncode([string]$Value)
+}
+
+
+function ConvertTo-SmartM365ConfigBoolean {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]$Value,
+        [bool]$DefaultValue = $false
+    )
+
+    if ($null -eq $Value) { return $DefaultValue }
+    if ($Value -is [bool]) { return [bool]$Value }
+
+    $text = ([string]$Value).Trim()
+    if ([string]::IsNullOrWhiteSpace($text) -or $text -in @('__USE_GLOBAL__','USE_GLOBAL')) { return $DefaultValue }
+
+    switch -Regex ($text.ToLowerInvariant()) {
+        '^(true|1|yes|y|on)$' { return $true }
+        '^(false|0|no|n|off)$' { return $false }
+        default { return $DefaultValue }
+    }
+}
+
+function Get-SmartM365MailBrandingConfig {
+    [CmdletBinding()]
+    param()
+
+    $moduleLocalConfig = Get-ModuleLocalConfig
+    $callerLocalConfig = Get-SmartM365CallerLocalConfig
+
+    function Get-MailBrandingValue {
+        param([string]$Name, [AllowNull()]$DefaultValue = $null)
+        $value = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name $Name -DefaultValue $DefaultValue
+        return Get-ModuleLocalConfigValue -Config $callerLocalConfig -Name $Name -DefaultValue $value
+    }
+
+    $enabledValue = Get-MailBrandingValue -Name 'MailBrandingEnabled' -DefaultValue $true
+    $maxLogoKbValue = Get-MailBrandingValue -Name 'MailClientLogoMaxKB' -DefaultValue 200
+    $maxLogoKb = 200
+    if ($null -ne $maxLogoKbValue) { [void][int]::TryParse([string]$maxLogoKbValue, [ref]$maxLogoKb) }
+    if ($maxLogoKb -lt 1) { $maxLogoKb = 200 }
+
+    return [pscustomobject]@{
+        Enabled = ConvertTo-SmartM365ConfigBoolean -Value $enabledValue -DefaultValue $true
+        ClientName = [string](Get-MailBrandingValue -Name 'MailClientName' -DefaultValue '')
+        ClientLogoPath = [string](Get-MailBrandingValue -Name 'MailClientLogoPath' -DefaultValue '')
+        ClientLogoMaxKB = $maxLogoKb
+        PowerBiEnabled = ConvertTo-SmartM365ConfigBoolean -Value (Get-MailBrandingValue -Name 'MailPowerBiEnabled' -DefaultValue $false) -DefaultValue $false
+        PowerBiUrl = [string](Get-MailBrandingValue -Name 'MailPowerBiUrl' -DefaultValue '')
+        PowerBiLogoPath = [string](Get-MailBrandingValue -Name 'MailPowerBiLogoPath' -DefaultValue 'Config/Branding/Assets/SmartPowerBI-logo.png')
+        PowerBiLinkText = [string](Get-MailBrandingValue -Name 'MailPowerBiLinkText' -DefaultValue 'Click here to open the Power BI dashboard')
+        # Product footer is fixed: never read from the global or tenant configuration.
+        FooterProductName = 'workplacecloudhub.com'
+        FooterWebsiteUrl = 'https://workplacecloudhub.com/'
+        FooterGitHubLabel = 'khda79/workplacecloudhub.com'
+        FooterGitHubUrl = 'https://github.com/khda79/workplacecloudhub.com'
+    }
+}
+
+function ConvertTo-SmartM365MailLogoDataUri {
+    [CmdletBinding()]
+    param(
+        [string]$Path,
+        [int]$MaxKB = 200
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+
+    $resolvedPath = Resolve-SmartM365ConfigValue -Value $Path
+    if ([string]::IsNullOrWhiteSpace($resolvedPath) -or -not (Test-Path -LiteralPath $resolvedPath -PathType Leaf)) {
+        WriteLog -Message ("Mail branding logo file not found: {0}" -f $Path) -Level 'WARNING'
+        return ''
+    }
+
+    try {
+        $item = Get-Item -LiteralPath $resolvedPath -ErrorAction Stop
+        $maxBytes = [int64]$MaxKB * 1KB
+        if ($item.Length -gt $maxBytes) {
+            WriteLog -Message ("Mail branding logo skipped because it is larger than {0} KB: {1}" -f $MaxKB, $item.FullName) -Level 'WARNING'
+            return ''
+        }
+
+        $extension = [System.IO.Path]::GetExtension($item.FullName).TrimStart('.').ToLowerInvariant()
+        $contentType = switch ($extension) {
+            'png'  { 'image/png' }
+            'jpg'  { 'image/jpeg' }
+            'jpeg' { 'image/jpeg' }
+            'gif'  { 'image/gif' }
+            'svg'  { 'image/svg+xml' }
+            default { 'application/octet-stream' }
+        }
+
+        $bytes = [System.IO.File]::ReadAllBytes($item.FullName)
+        return ('data:{0};base64,{1}' -f $contentType, [Convert]::ToBase64String($bytes))
+    }
+    catch {
+        WriteLog -Message ("Mail branding logo could not be read: {0}" -f $_.Exception.Message) -Level 'WARNING'
+        return ''
+    }
+}
+
+function Add-SmartM365MailBranding {
+    [CmdletBinding()]
+    param([AllowNull()][string]$BodyHtml)
+
+    if ([string]::IsNullOrWhiteSpace($BodyHtml)) { $BodyHtml = '' }
+    if ($BodyHtml -match 'SmartM365MailBranding:v1') { return Add-SmartM365MailExecutionFooter -BodyHtml $BodyHtml }
+
+    $branding = Get-SmartM365MailBrandingConfig
+    $clientName = ConvertTo-SmartM365EmailHtmlText $branding.ClientName
+    $productName = ConvertTo-SmartM365EmailHtmlText $branding.FooterProductName
+    $websiteUrl = ConvertTo-SmartM365EmailHtmlText $branding.FooterWebsiteUrl
+    $githubLabel = ConvertTo-SmartM365EmailHtmlText $branding.FooterGitHubLabel
+    $githubUrl = ConvertTo-SmartM365EmailHtmlText $branding.FooterGitHubUrl
+
+    $clientHtml = ''
+    $powerBiHtml = ''
+    if ($branding.Enabled) {
+        $logoDataUri = ConvertTo-SmartM365MailLogoDataUri -Path $branding.ClientLogoPath -MaxKB $branding.ClientLogoMaxKB
+        if (-not [string]::IsNullOrWhiteSpace($logoDataUri)) {
+            $safeLogoDataUri = ConvertTo-SmartM365EmailHtmlText $logoDataUri
+            $clientHtml = "<img src=`"$safeLogoDataUri`" alt=`"$clientName`" width=`"92`" style=`"display:block;margin:0 auto;width:92px;max-width:92px;height:auto;border:0;outline:none;text-decoration:none;`" />"
+        }
+        elseif (-not [string]::IsNullOrWhiteSpace($clientName)) {
+            $clientHtml = "<span style=`"font-size:16px;line-height:22px;color:#0f172a;font-weight:700;`">$clientName</span>"
+        }
+
+        if ($branding.PowerBiEnabled -and -not [string]::IsNullOrWhiteSpace($branding.PowerBiUrl)) {
+            $powerBiUri = $null
+            if ($branding.PowerBiUrl -notmatch '^https://' -or $branding.PowerBiUrl -match '[\r\n]' -or
+                -not [uri]::TryCreate($branding.PowerBiUrl, [UriKind]::Absolute, [ref]$powerBiUri) -or
+                [string]::IsNullOrWhiteSpace($powerBiUri.Host)) {
+                WriteLog -Message 'Mail Power BI link ignored: MailPowerBiUrl must be an absolute https:// URL.' -Level 'WARNING'
+            }
+            else {
+                $powerBiUrl = ConvertTo-SmartM365EmailHtmlText $branding.PowerBiUrl
+                $powerBiLinkText = ConvertTo-SmartM365EmailHtmlText $branding.PowerBiLinkText
+                # Relative Power BI assets are rooted at SmartM365, independent of the caller's working directory.
+                $powerBiLogoPath = Resolve-SmartM365ConfigValue -Value $branding.PowerBiLogoPath
+                if (-not [string]::IsNullOrWhiteSpace($powerBiLogoPath) -and -not [IO.Path]::IsPathRooted($powerBiLogoPath)) {
+                    $powerBiLogoPath = Join-Path (Join-Path $PSScriptRoot '../../../..') $powerBiLogoPath
+                }
+                $powerBiLogoDataUri = ConvertTo-SmartM365MailLogoDataUri -Path $powerBiLogoPath -MaxKB $branding.ClientLogoMaxKB
+                if (-not [string]::IsNullOrWhiteSpace($powerBiLogoDataUri)) {
+                    $safePowerBiLogoDataUri = ConvertTo-SmartM365EmailHtmlText $powerBiLogoDataUri
+                    $powerBiHtml = @"
+<a href="$powerBiUrl" target="_blank" rel="noopener"><img src="$safePowerBiLogoDataUri" alt="Power BI" height="48" style="height:48px;width:auto;border:0;outline:none;text-decoration:none;" /></a><br />
+"@
+                }
+                $powerBiHtml += @"
+<a href="$powerBiUrl" target="_blank" rel="noopener" style="font-family:Segoe UI,Arial,sans-serif;font-size:12px;line-height:18px;color:#ffffff;text-decoration:underline;">$powerBiLinkText</a>
+"@
+                $powerBiHtml = @"
+<table role="presentation" align="right" width="144" border="0" cellpadding="0" cellspacing="0" style="width:144px;margin:0;border:0;border-radius:0;border-collapse:collapse;background:transparent;">
+  <tr><td align="center" valign="middle" style="padding:0;border:0;background:transparent;text-align:center;font-size:12px;line-height:18px;">$powerBiHtml</td></tr>
+</table>
+"@
+            }
+        }
+    }
+    $headerHtml = '<!-- SmartM365MailBranding:v1 -->'
+    if ($branding.Enabled -and -not [string]::IsNullOrWhiteSpace($clientHtml)) {
+        $headerHtml += @"
+<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;margin:0;border:0;border-radius:0;border-collapse:collapse;background:#f4f6f8;">
+  <tr><td align="center" style="padding:16px 24px 0 24px;border:0;background:#f4f6f8;text-align:center;">$clientHtml</td></tr>
+</table>
+"@
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($powerBiHtml)) {
+        # The shared template exposes its title content without changing title/meta markup.
+        $titleMatch = [regex]::Match($BodyHtml, '(?is)<!-- SmartM365MailTitle:start -->(?<Content>.*?)<!-- SmartM365MailTitle:end -->')
+        $titleStart = -1
+        $titleLength = 0
+        if ($titleMatch.Success) {
+            $titleStart = $titleMatch.Groups['Content'].Index
+            $titleLength = $titleMatch.Groups['Content'].Length
+        }
+        else {
+            # Preserved reports use a hero div instead of the shared title cell.
+            # Match its closing div by depth so nested subtitle/status divs stay intact.
+            $heroMatch = [regex]::Match($BodyHtml, '(?is)<div\b[^>]*\bclass\s*=\s*["'']hero["''][^>]*>')
+            if ($heroMatch.Success) {
+                $contentStart = $heroMatch.Index + $heroMatch.Length
+                $depth = 1
+                foreach ($tag in [regex]::Matches($BodyHtml.Substring($contentStart), '(?is)</?div\b[^>]*>')) {
+                    if ($tag.Value -match '^</') { $depth-- } else { $depth++ }
+                    if ($depth -eq 0) {
+                        $titleStart = $contentStart
+                        $titleLength = $tag.Index
+                        break
+                    }
+                }
+            }
+        }
+        if ($titleStart -ge 0) {
+            $titleContent = $BodyHtml.Substring($titleStart, $titleLength)
+            $titleLayout = @"
+<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;margin:0;border:0;border-radius:0;border-collapse:collapse;background:transparent;">
+  <tr>
+    <td align="left" valign="middle" style="padding:0 24px 0 0;border:0;background:transparent;color:#ffffff;text-align:left;vertical-align:middle;">$titleContent</td>
+    <td align="right" valign="middle" width="144" style="width:144px;padding:0;border:0;background:transparent;color:#ffffff;text-align:right;vertical-align:middle;">$powerBiHtml</td>
+  </tr>
+</table>
+"@
+            $BodyHtml = $BodyHtml.Substring(0, $titleStart) + $titleLayout + $BodyHtml.Substring($titleStart + $titleLength)
+        }
+        else {
+            # Arbitrary HTML without a known title region keeps a separate dark link band.
+            $headerHtml += @"
+<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;margin:0;border:0;border-radius:0;border-collapse:collapse;background:#0f172a;">
+  <tr><td align="right" style="padding:20px 24px;border:0;background:#0f172a;text-align:right;">$powerBiHtml</td></tr>
+</table>
+"@
+        }
+    }
+
+    $footerHtml = @"
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:0 0 18px 0;border-collapse:collapse;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="760" cellpadding="0" cellspacing="0" style="width:760px;max-width:760px;border-collapse:collapse;">
+        <tr>
+          <td style="padding:12px 20px;color:#64748b;font-family:Segoe UI,Arial,sans-serif;font-size:11px;line-height:16px;text-align:center;">
+            <strong style="color:#334155;">$productName</strong><br />
+            <a href="$websiteUrl" style="color:#2563eb;text-decoration:none;">$websiteUrl</a><br />
+            <a href="$githubUrl" style="color:#2563eb;text-decoration:none;">$githubLabel</a>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+"@
+
+    if ($BodyHtml -match '(?is)<body\b[^>]*>') {
+        $branded = [regex]::Replace($BodyHtml, '(?is)(<body\b[^>]*>)', ('$1' + "`n" + $headerHtml.Replace('$', '$$')), 1)
+        if ($branded -match '(?is)</body>') {
+            $branded = [regex]::Replace($branded, '(?is)</body>', ($footerHtml + "`n" + '</body>'), 1)
+            return Add-SmartM365MailExecutionFooter -BodyHtml $branded
+        }
+        return Add-SmartM365MailExecutionFooter -BodyHtml ($branded + "`n" + $footerHtml)
+    }
+
+    return Add-SmartM365MailExecutionFooter -BodyHtml ($headerHtml + "`n" + $BodyHtml + "`n" + $footerHtml)
+}
+function New-SmartM365EmailKpiGridHtml {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object[]]$Cards, [int[]]$RowSizes = @(4))
+    $rows = New-Object 'System.Collections.Generic.List[string]'
+    $index = 0
+    foreach ($rowSize in $RowSizes) {
+        if ($rowSize -lt 1 -or $index -ge $Cards.Count) { continue }
+        $cells = New-Object 'System.Collections.Generic.List[string]'
+        for ($i = 0; $i -lt $rowSize -and $index -lt $Cards.Count; $i++) {
+            $card = $Cards[$index++]
+            $spanAttribute = if ($card.Span -gt 1) { ' colspan="2"' } else { '' }
+            $width = if ($card.Span -gt 1) { '50%' } else { '25%' }
+            $fontSize = if ($card.PSObject.Properties['FontSize']) { [int]$card.FontSize } else { 28 }
+            $cells.Add(@"
+<td$spanAttribute valign="top" style="width:$width;border:1px solid $($card.Border);border-radius:8px;padding:14px;background:$($card.Background);color:#334155;">
+  <div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:800;">$(ConvertTo-SmartM365EmailHtmlText $card.Label)</div>
+  <div style="font-size:$($fontSize)px;line-height:32px;font-weight:800;margin-top:4px;white-space:nowrap;color:$($card.Accent);">$(ConvertTo-SmartM365EmailHtmlText $card.Value)</div>
+  <div style="font-size:12px;color:#64748b;margin-top:2px;">$(ConvertTo-SmartM365EmailHtmlText $card.Detail)</div>
+</td>
+"@)
+        }
+        $rows.Add(('  <tr>{0}</tr>' -f ($cells.ToArray() -join "`r`n")))
+    }
+    while ($index -lt $Cards.Count) {
+        $card = $Cards[$index++]
+        $rows.Add(('  <tr><td valign="top" style="border:1px solid {0};padding:14px;background:{1};color:{2};">{3}: {4}</td></tr>' -f $card.Border,$card.Background,$card.Accent,(ConvertTo-SmartM365EmailHtmlText $card.Label),(ConvertTo-SmartM365EmailHtmlText $card.Value)))
+    }
+    return @"
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border-spacing:8px;table-layout:fixed;border:0;font-size:12px;">
+$($rows.ToArray() -join "`r`n")
+</table>
+"@
+}
+
+function New-SmartM365EmailTableHtml {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string[]]$Headers, [Parameter(Mandatory)][object[]]$Rows, [int[]]$NoWrapColumns = @())
+    $head = @($Headers | ForEach-Object { '<th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;color:#475569;text-transform:uppercase;">{0}</th>' -f (ConvertTo-SmartM365EmailHtmlText $_) }) -join "`r`n"
+    $body = foreach ($row in $Rows) {
+        if ($NoWrapColumns.Count -eq 0) {
+            $cells = @($row | ForEach-Object { '<td style="border-bottom:1px solid #eef2f7;padding:9px 10px;color:#334155;word-break:break-word;">{0}</td>' -f (ConvertTo-SmartM365EmailHtmlText $_) }) -join "`r`n"
+        } else {
+            $renderedCells = New-Object 'System.Collections.Generic.List[string]'
+            $rowValues = @($row)
+            for ($column = 0; $column -lt $rowValues.Count; $column++) {
+                $cellStyle = if ($NoWrapColumns -contains $column) { ' nowrap="nowrap" style="border-bottom:1px solid #eef2f7;padding:9px 10px;color:#334155;white-space:nowrap;word-break:normal;"' } else { ' style="border-bottom:1px solid #eef2f7;padding:9px 10px;color:#334155;word-break:break-word;"' }
+                $renderedCells.Add(('<td{0}>{1}</td>' -f $cellStyle,(ConvertTo-SmartM365EmailHtmlText $rowValues[$column])))
+            }
+            $cells = $renderedCells.ToArray() -join "`r`n"
+        }
+        "<tr>$cells</tr>"
+    }
+    return "<table role=`"presentation`" cellpadding=`"0`" cellspacing=`"0`" style=`"width:100%;border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;`"><tr>$head</tr>$($body -join "`r`n")</table>"
+}
+
+function New-SmartM365EmailBody {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Title,
+        [string]$Category = 'SmartM365',
+        [ValidateSet('Info','Success','Warning','Error')]
+        [string]$Severity = 'Info',
+        [string]$Message,
+        [hashtable]$SummaryData,
+        [array]$SummaryRows,
+        [array]$PathRows,
+        [array]$Sections,
+        [string]$ActionTitle,
+        [string]$ActionHtml,
+        [string]$BodyHtml,
+        [string]$Tenant,
+        [string]$HostName = $env:COMPUTERNAME,
+        [string]$GeneratedAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz'),
+        [string]$StatusBadge,
+        [string]$Duration,
+        [string]$Footer = 'This automated message was generated by SmartM365.'
+    )
+
+    $palette = @{
+        Info    = @{ Bg = '#eff6ff'; Border = '#bfdbfe'; Accent = '#2563eb'; Title = '#1d4ed8'; Text = '#1e3a8a' }
+        Success = @{ Bg = '#ecfdf5'; Border = '#bbf7d0'; Accent = '#16a34a'; Title = '#166534'; Text = '#14532d' }
+        Warning = @{ Bg = '#fff7ed'; Border = '#fed7aa'; Accent = '#f97316'; Title = '#9a3412'; Text = '#7c2d12' }
+        Error   = @{ Bg = '#fef2f2'; Border = '#fecaca'; Accent = '#dc2626'; Title = '#991b1b'; Text = '#7f1d1d' }
+    }
+    $colors = $palette[$Severity]
+
+    $htmlTitle = ConvertTo-SmartM365EmailHtmlText $Title
+    $htmlCategory = ConvertTo-SmartM365EmailHtmlText $Category
+    $htmlTenant = ConvertTo-SmartM365EmailHtmlText $Tenant
+    $htmlHostName = ConvertTo-SmartM365EmailHtmlText $HostName
+    $htmlGeneratedAt = ConvertTo-SmartM365EmailHtmlText $GeneratedAt
+    $htmlFooter = ConvertTo-SmartM365EmailHtmlText $Footer
+
+    $metaParts = @()
+    if (-not [string]::IsNullOrWhiteSpace($Tenant)) { $metaParts += "Tenant: $htmlTenant" }
+    if (-not [string]::IsNullOrWhiteSpace($HostName)) { $metaParts += "Host: $htmlHostName" }
+    if (-not [string]::IsNullOrWhiteSpace($GeneratedAt)) { $metaParts += "Generated: $htmlGeneratedAt" }
+    $metaHtml = $metaParts -join ' &nbsp;|&nbsp; '
+    $statusHtml = ''
+    if (-not [string]::IsNullOrWhiteSpace($StatusBadge)) {
+        $safeStatus = ConvertTo-SmartM365EmailHtmlText $StatusBadge
+        $safeDuration = ConvertTo-SmartM365EmailHtmlText $Duration
+        $durationHtml = if ($Duration) { "<span style=`"margin-left:10px;color:#cbd5e1;font-size:12px;`">Duration: $safeDuration</span>" } else { '' }
+        $statusHtml = "<div style=`"margin-top:10px;`"><span style=`"display:inline-block;background:$($colors.Bg);border:1px solid $($colors.Border);color:$($colors.Title);padding:4px 8px;font-size:11px;font-weight:800;`">$safeStatus</span>$durationHtml</div>"
+    }
+
+    $messageHtml = ''
+    if (-not [string]::IsNullOrWhiteSpace($Message)) {
+        $safeMessage = (ConvertTo-SmartM365EmailHtmlText $Message) -replace "(`r`n|`n|`r)", '<br />'
+        $messageHtml = "<tr><td style=`"padding:18px 24px 0 24px;font-size:14px;line-height:21px;color:#334155;`">$safeMessage</td></tr>"
+    }
+
+    $actionSectionHtml = ''
+    if (-not [string]::IsNullOrWhiteSpace($ActionTitle) -or -not [string]::IsNullOrWhiteSpace($ActionHtml)) {
+        $safeActionTitle = if ($ActionTitle) { ConvertTo-SmartM365EmailHtmlText $ActionTitle } else { 'Action' }
+        $actionSectionHtml = @"
+          <tr>
+            <td style="padding:22px 24px 8px 24px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;">
+                <tr>
+                  <td style="background:$($colors.Bg);border:1px solid $($colors.Border);border-left:5px solid $($colors.Accent);padding:12px 14px;border-radius:4px;">
+                    <div style="font-size:14px;font-weight:700;color:$($colors.Title);">$safeActionTitle</div>
+                    <div style="font-size:13px;line-height:19px;color:$($colors.Text);margin-top:4px;">$ActionHtml</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+"@
+    }
+
+    $summarySectionHtml = ''
+    if (($null -ne $SummaryData -and $SummaryData.Count -gt 0) -or ($null -ne $SummaryRows -and $SummaryRows.Count -gt 0)) {
+        $rows = @()
+        if ($null -ne $SummaryRows -and $SummaryRows.Count -gt 0) {
+            foreach ($row in $SummaryRows) {
+                $label = ConvertTo-SmartM365EmailHtmlText $row.Label
+                $value = ConvertTo-SmartM365EmailHtmlText $row.Value
+                $rows += "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;`">$label</td><td align=`"right`" style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:14px;font-weight:700;color:#111827;`">$value</td></tr>"
+            }
+        }
+        else {
+            foreach ($key in $SummaryData.Keys) {
+                $label = ConvertTo-SmartM365EmailHtmlText $key
+                $value = ConvertTo-SmartM365EmailHtmlText $SummaryData[$key]
+                $rows += "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;`">$label</td><td align=`"right`" style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:14px;font-weight:700;color:#111827;`">$value</td></tr>"
+            }
+        }
+        $summaryRowsHtml = $rows -join "`n"
+        $summarySectionHtml = @"
+          <tr>
+            <td style="padding:18px 24px 0 24px;">
+              <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:8px;">Summary</div>
+              <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
+                <tr>
+                  <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Metric</th>
+                  <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Value</th>
+                </tr>
+                $summaryRowsHtml
+              </table>
+            </td>
+          </tr>
+"@
+    }
+
+    $pathSectionHtml = ''
+    if ($null -ne $PathRows -and $PathRows.Count -gt 0) {
+        $pathRowsHtml = foreach ($pathRow in $PathRows) {
+            $label = ConvertTo-SmartM365EmailHtmlText $pathRow.Label
+            $path = ConvertTo-SmartM365EmailHtmlText $pathRow.Path
+            "<tr><td style=`"width:150px;background:#f8fafc;border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;font-weight:700;color:#334155;`">$label</td><td style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-family:Consolas,'Courier New',monospace;font-size:12px;color:#334155;word-break:break-all;`">$path</td></tr>"
+        }
+        $pathSectionHtml = @"
+          <tr>
+            <td style="padding:18px 24px 0 24px;">
+              <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:8px;">Paths</div>
+              <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
+                $($pathRowsHtml -join "`n")
+              </table>
+            </td>
+          </tr>
+"@
+    }
+
+    $customSectionsHtml = ''
+    if ($null -ne $Sections -and $Sections.Count -gt 0) {
+        $sectionHtmlItems = foreach ($section in $Sections) {
+            $sectionTitle = ConvertTo-SmartM365EmailHtmlText $section.Title
+            @"
+          <tr>
+            <td style="padding:18px 24px 0 24px;">
+              <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:8px;">$sectionTitle</div>
+              $($section.Html)
+            </td>
+          </tr>
+"@
+        }
+        $customSectionsHtml = $sectionHtmlItems -join "`n"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($BodyHtml)) { $BodyHtml = '' }
+
+    return @"
+<!doctype html>
+<!-- SmartM365EmailTemplate:v1 -->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>$htmlTitle</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f6f8;font-family:Segoe UI,Arial,sans-serif;color:#111827;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:24px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="760" cellpadding="0" cellspacing="0" style="width:760px;max-width:760px;background:#ffffff;border:1px solid #d9e2ec;border-radius:6px;overflow:hidden;">
+          <tr>
+            <td style="background:#0f172a;color:#ffffff;padding:20px 24px;">
+              <!-- SmartM365MailTitle:start -->
+              <div style="font-size:12px;text-transform:uppercase;color:#93c5fd;font-weight:700;">$htmlCategory</div>
+              <div style="font-size:24px;line-height:30px;font-weight:700;margin-top:6px;">$htmlTitle</div>
+              <div style="font-size:13px;color:#cbd5e1;margin-top:8px;">$metaHtml</div>
+              $statusHtml
+              <!-- SmartM365MailTitle:end -->
+            </td>
+          </tr>
+          $messageHtml
+          $actionSectionHtml
+          $summarySectionHtml
+          $customSectionsHtml
+          $pathSectionHtml
+          $BodyHtml
+          <tr>
+            <td style="background:#f8fafc;border-top:1px solid #d9e2ec;padding:12px 24px;color:#64748b;font-size:12px;line-height:18px;">
+              $htmlFooter
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+"@
+}
+
+function ConvertTo-SmartM365EmailBody {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][string]$BodyHtml,
+        [string]$Subject = 'SmartM365',
+        [string]$Category = 'SmartM365',
+        [ValidateSet('Info','Success','Warning','Error')]
+        [string]$Severity = 'Info'
+    )
+
+    $effectiveTitle = if (-not [string]::IsNullOrWhiteSpace($Subject)) { $Subject } else { 'SmartM365' }
+    if (-not [string]::IsNullOrWhiteSpace($BodyHtml) -and $BodyHtml -match '(?is)<title>\s*(?<Title>.*?)\s*</title>') {
+        $effectiveTitle = [System.Net.WebUtility]::HtmlDecode($matches['Title'])
+    }
+
+    if ([string]::IsNullOrWhiteSpace($BodyHtml)) {
+        return Add-SmartM365MailBranding -BodyHtml (New-SmartM365EmailBody -Title $effectiveTitle -Category $Category -Severity $Severity)
+    }
+
+    if ($BodyHtml -match 'SmartM365EmailTemplate:v1') {
+        return Add-SmartM365MailBranding -BodyHtml $BodyHtml
+    }
+
+    $legacyHtml = [string]$BodyHtml
+    $styleBlocks = @()
+    foreach ($match in [regex]::Matches($legacyHtml, '(?is)<style\b[^>]*>.*?</style>')) {
+        $styleBlocks += $match.Value
+    }
+    $styleHtml = $styleBlocks -join "`n"
+
+    if ($legacyHtml -match '(?is)<body\b[^>]*>(?<Body>.*?)</body>') {
+        $legacyHtml = $matches['Body']
+    }
+    else {
+        $legacyHtml = [regex]::Replace($legacyHtml, '(?is)<!doctype[^>]*>|<html\b[^>]*>|</html>|<head\b[^>]*>.*?</head>', '')
+    }
+    $legacyHtml = $legacyHtml.Trim()
+
+    $wrappedBody = @"
+          <tr>
+            <td style="padding:18px 24px 22px 24px;font-size:13px;line-height:19px;color:#334155;">
+              $styleHtml
+              $legacyHtml
+            </td>
+          </tr>
+"@
+
+    return Add-SmartM365MailBranding -BodyHtml (New-SmartM365EmailBody -Title $effectiveTitle -Category $Category -Severity $Severity -BodyHtml $wrappedBody)
+}
+
+function NewSimpleEmailBody {
+    param(
+        [string]$Title,
+        [string]$Message = "See attached report(s) for details."
+    )
+
+    return New-SmartM365EmailBody -Title $Title -Category 'SmartM365 Report' -Message $Message
+}
+
+function ConvertBytesToSizeString {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][long]$Bytes)
+
+    if ($Bytes -lt 1KB) { return "$Bytes B" }
+    elseif ($Bytes -lt 1MB) { return ("{0:N2} KB" -f ($Bytes / 1KB)) }
+    elseif ($Bytes -lt 1GB) { return ("{0:N2} MB" -f ($Bytes / 1MB)) }
+    elseif ($Bytes -lt 1TB) { return ("{0:N2} GB" -f ($Bytes / 1GB)) }
+    else { return ("{0:N2} TB" -f ($Bytes / 1TB)) }
+}
+
+function GetFileList {
+    <#
+        Returns a summary of files (counts, total size, errors) and details for each file.
+        Each file is analyzed and the summary + file list is returned.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string[]]$Files,  # File paths, folders, or wildcard patterns
+        [switch]$Recurse,                        # If a folder is passed, recurse into it
+        [switch]$ComputeHash                     # (optional) compute SHA256 hashes (slower)
+    )
+
+    $resolved = New-Object System.Collections.Generic.List[string]
+
+    foreach ($f in $Files) {
+        if (-not $f) { continue }
+
+        if (Test-Path -LiteralPath $f -PathType Leaf) {
+            $resolved.Add((Resolve-Path -LiteralPath $f).Path) | Out-Null
+            continue
+        }
+
+        if (Test-Path -LiteralPath $f -PathType Container) {
+            $items = Get-ChildItem -LiteralPath $f -File -Recurse:$Recurse -ErrorAction SilentlyContinue
+            foreach ($i in $items) { $resolved.Add($i.FullName) | Out-Null }
+            continue
+        }
+
+        $parent = Split-Path -Path $f -Parent
+        $leaf   = Split-Path -Path $f -Leaf
+        if ([string]::IsNullOrWhiteSpace($parent)) { $parent = '.' }
+        if (Test-Path -LiteralPath $parent) {
+            $items = Get-ChildItem -Path $parent -Filter $leaf -File -Recurse:$Recurse -ErrorAction SilentlyContinue
+            foreach ($i in $items) { $resolved.Add($i.FullName) | Out-Null }
+        }
+    }
+
+    $resolved = $resolved | Sort-Object -Unique
+
+    $countOK   = 0
+    $countErr  = 0
+    $sizeTotal = 0
+    $fileList  = @()
+
+    foreach ($path in $resolved) {
+        try {
+            $item = Get-Item -LiteralPath $path -ErrorAction Stop
+            $hash = $null
+            if ($ComputeHash) {
+                $hash = (Get-FileHash -Path $path -Algorithm SHA256 -ErrorAction SilentlyContinue).Hash
+            }
+            $fileList += [PSCustomObject]@{
+                'FileName'      = $item.Name
+                'FullPath'      = $item.FullName
+                'FullName'      = $item.FullName   # <-- This property is required for CSV row count
+                'Size'          = $item.Length
+                'SizeString'    = ConvertBytesToSizeString -Bytes $item.Length
+                'CreationTime'  = $item.CreationTime
+                'LastWriteTime' = $item.LastWriteTime
+                'Hash'          = $hash
+            }
+            $countOK++
+            $sizeTotal += [int64]$item.Length
+        }
+        catch {
+            $countErr++
+        }
+    }
+
+    $summary = [PSCustomObject]@{
+        'Files (count)' = $countOK
+        'Total size'    = ConvertBytesToSizeString -Bytes $sizeTotal
+        'Errors'        = $countErr
+        'Files'         = $fileList
+    }
+
+    return $summary
+}
+
+function NewTableEmailBody {
+    param(
+        [string]$Title,
+        [hashtable]$SummaryData,
+        [string]$Message
+    )
+
+    return New-SmartM365EmailBody -Title $Title -Category 'SmartM365 Report' -Message $Message -SummaryData $SummaryData
+}
+
+function NewTableFilesEmailBody {
+    param(
+        [string]$Title,
+        [hashtable]$SummaryData,
+        [array]$Files,
+        [string]$Message
+    )
+
+    foreach ($file in $Files) {
+        if ($file.FileName -match '\.csv$') {
+            try {
+                $rowCount = (Get-Content $file.FullName | Measure-Object -Line).Lines - 1
+                WriteLog "Row count for '$($file.FileName)': $rowCount" "INFO"
+            }
+            catch {
+                $rowCount = "N/A"
+                WriteLog "Failed to count rows in '$($file.FileName)': $_" "ERROR"
+            }
+            $file | Add-Member -NotePropertyName RowCount -NotePropertyValue $rowCount -Force
+        }
+        else {
+            $file | Add-Member -NotePropertyName RowCount -NotePropertyValue "" -Force
+        }
+    }
+
+    $fileRows = foreach ($file in $Files) {
+        $fileName = ConvertTo-SmartM365EmailHtmlText $file.FileName
+        $size = ConvertTo-SmartM365EmailHtmlText $file.SizeString
+        $rowCount = ConvertTo-SmartM365EmailHtmlText $file.RowCount
+        $creationTime = ConvertTo-SmartM365EmailHtmlText $file.CreationTime
+        $lastWriteTime = ConvertTo-SmartM365EmailHtmlText $file.LastWriteTime
+        $hash = ConvertTo-SmartM365EmailHtmlText $file.Hash
+        "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;`">$fileName</td><td style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;`">$size</td><td align=`"right`" style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;`">$rowCount</td><td style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;`">$creationTime</td><td style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;`">$lastWriteTime</td><td style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-family:Consolas,'Courier New',monospace;font-size:12px;color:#334155;word-break:break-all;`">$hash</td></tr>"
+    }
+
+    $fileDetailsHtml = @"
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
+  <tr>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">File name</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Size</th>
+    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Rows</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Created</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Modified</th>
+    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Hash</th>
+  </tr>
+  $($fileRows -join "`n")
+</table>
+"@
+
+    $sections = @([pscustomobject]@{ Title = 'File details'; Html = $fileDetailsHtml })
+    return New-SmartM365EmailBody -Title $Title -Category 'SmartM365 Report' -Message $Message -SummaryData $SummaryData -Sections $sections
+}
+
+function SendEmailHtmlReport {
+    [CmdletBinding()]
+    param(
+        [string]$SmtpServer = "",
+        [int]$SmtpPort = 25,                                 # Default SMTP port
+        [ValidateSet("Graph","SMTP","Both")]
+        [string]$SendMailMode = "",
+        [string]$From = "",
+        [string]$To = "",
+        [string]$Cc = "",                                    # Default CC (empty) team@example.com
+        [string]$Subject = "SmartM365 Report",                         # Default subject
+        [string]$BodyHtml,                                   # HTML body (required)
+        [string[]]$Attachments,                              # Attachments
+        [switch]$AllowAttachments,
+        [switch]$VerboseLog,
+        [ValidateSet('Auto','Report','Error','Maintenance')][string]$MailPurpose = 'Auto',
+        [ValidateSet('Report','Operational')][string]$DeliveryClass = 'Report'
+    )
+
+    if (Test-SmartM365InterruptedRun) { return }; try {
+        $moduleLocalConfig = Get-ModuleLocalConfig
+        $callerLocalConfig = Get-SmartM365CallerLocalConfig
+        foreach ($configName in @('SendMailMode','SmtpServer','From','To','Cc','Subject')) {
+            if (-not $PSBoundParameters.ContainsKey($configName)) {
+                $defaultValue = Get-Variable -Name $configName -ValueOnly
+                if ($configName -eq 'To') {
+                    $defaultValue = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'ErrorMailTo' -DefaultValue $defaultValue
+                }
+                $configValue = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name $configName -DefaultValue $defaultValue
+                $configValue = Get-ModuleLocalConfigValue -Config $callerLocalConfig -Name $configName -DefaultValue $configValue
+                Set-Variable -Name $configName -Value $configValue -Scope Local
+            }
+        }
+
+        # Recipients
+        if ($MailPurpose -eq 'Error') {
+            $errorRoute = Resolve-SmartM365MaintenanceMailRecipientRoute -To $To -Cc $Cc -MailPurpose Error
+            $To = $errorRoute.To
+            $Cc = ''
+        }
+
+        $Subject = Add-SmartM365MaxItemsSubjectPrefix -Subject $Subject
+        $Subject = Format-SmartM365MailSubject -Subject $Subject
+        $BodyHtml = Add-SmartM365MaxItemsMailBanner -BodyHtml $BodyHtml
+
+        $toArray = ConvertToRecipientArray -Recipients $To
+        $ccArray = if ($Cc) { ConvertToRecipientArray -Recipients $Cc } else { @() }
+
+        if (-not $toArray -or [string]::IsNullOrWhiteSpace($From)) {
+            throw "SendEmailHtmlReport: missing required parameters (From/To)."
+        }
+
+        # Dynamic subject: from <title> if Subject is empty, else default
+        if ([string]::IsNullOrWhiteSpace($Subject)) {
+            if ($BodyHtml -match '<title>(.*?)</title>') {
+                $Subject = $matches[1]
+                if ($PSBoundParameters.ContainsKey('VerboseLog')) {
+                    WriteLog -Message "Subject was empty, set from HTML title: $Subject" -Level "INFO"
+                }
+            } else {
+                $Subject = "SmartM365"
+                if ($PSBoundParameters.ContainsKey('VerboseLog')) {
+                    WriteLog -Message "Subject was empty and no <title> found, set to default: $Subject" -Level "INFO"
+                }
+            }
+        }
+
+        # Filter attachments that exist and list them in the mail body by default.
+        $atts = @()
+        foreach ($a in ($Attachments | Where-Object { $_ })) {
+            if (Test-Path $a) { $atts += $a }
+        }
+        if ($atts.Count -gt 0) {
+            $BodyHtml = Add-SmartM365MailFilesSection -BodyHtml $BodyHtml -Files $atts
+            if (-not $AllowAttachments) {
+                WriteLog -Message 'Email attachments are disabled by default; referenced files were added to the mail body instead.' -Level 'INFO'
+                $atts = @()
+            }
+        }
+        $BodyHtml = Convert-SmartM365MailBodyLocalPathsToSharePointLinks -BodyHtml $BodyHtml
+        $BodyHtml = ConvertTo-SmartM365EmailBody -BodyHtml $BodyHtml -Subject $Subject -Category 'SmartM365'
+        Save-SmartM365MailHtmlCopy -Subject $Subject -BodyHtml $BodyHtml | Out-Null
+        $effectiveSendMailMode = $SendMailMode
+        if ([string]::IsNullOrWhiteSpace($effectiveSendMailMode)) {
+            $effectiveSendMailMode = if ([string]::IsNullOrWhiteSpace($SmtpServer)) { 'Graph' } else { 'SMTP' }
+        }
+        $effectiveSendMailMode = $effectiveSendMailMode.Trim()
+        if ($effectiveSendMailMode -notin @('Graph','SMTP','Both')) {
+            throw "SendEmailHtmlReport: unsupported SendMailMode '$effectiveSendMailMode'. Use Graph, SMTP, or Both."
+        }
+
+        $deferredMessage = @{ From=$From; To=($toArray -join ';'); Cc=($ccArray -join ';'); Subject=$Subject; BodyHtml=$BodyHtml; SendMailMode=$effectiveSendMailMode; SmtpServer=$SmtpServer; SmtpPort=$SmtpPort }
+        if (Add-SmartM365DeferredReport -Message $deferredMessage -Attachments $atts -MailPurpose $MailPurpose -DeliveryClass $DeliveryClass) { return }
+
+        $mailParams = @{
+            SmtpServer  = $SmtpServer
+            Port        = $SmtpPort
+            From        = $From
+            To          = $toArray
+            Subject     = $Subject
+            Body        = $BodyHtml
+            BodyAsHtml  = $true
+            ErrorAction = 'Stop'
+        }
+        if ($ccArray.Count -gt 0) { $mailParams['Cc'] = $ccArray }
+        if ($atts.Count   -gt 0) { $mailParams['Attachments'] = $atts }
+
+        if ($effectiveSendMailMode -eq 'Graph') {
+            Send-SmartM365GraphMail -From $From -To ($toArray -join ';') -Cc ($ccArray -join ';') -Subject $Subject -BodyHtml $BodyHtml -Attachments $atts -AllowAttachments:$AllowAttachments -SkipHtmlCopy -MailPurpose $MailPurpose
+            if ($PSBoundParameters.ContainsKey('VerboseLog')) {
+                WriteLog -Message 'Email sent via Microsoft Graph using the live recipient policy.' -Level "SUCCESS"
+            }
+            return
+        }
+
+        if ($effectiveSendMailMode -eq 'SMTP') {
+            if ([string]::IsNullOrWhiteSpace($SmtpServer)) { throw 'SendEmailHtmlReport: SmtpServer is required when SendMailMode is SMTP.' }
+            Set-SmartM365SmtpMaintenanceRecipient -MailParameters $mailParams -MailPurpose $MailPurpose
+            Send-MailMessage @mailParams
+            if ($PSBoundParameters.ContainsKey('VerboseLog')) {
+                WriteLog -Message "Email sent to $($mailParams.To -join ';') via $($SmtpServer):$SmtpPort" -Level "SUCCESS"
+            }
+            return
+        }
+
+        try {
+            Send-SmartM365GraphMail -From $From -To ($toArray -join ';') -Cc ($ccArray -join ';') -Subject $Subject -BodyHtml $BodyHtml -Attachments $atts -AllowAttachments:$AllowAttachments -SkipHtmlCopy -MailPurpose $MailPurpose
+            if ($PSBoundParameters.ContainsKey('VerboseLog')) {
+                WriteLog -Message 'Email sent via Microsoft Graph using the live recipient policy.' -Level "SUCCESS"
+            }
+            return
+        }
+        catch {
+            WriteLog -Message ("Graph mail failed; falling back to SMTP: {0}" -f $_.Exception.Message) -Level "WARNING"
+            if ([string]::IsNullOrWhiteSpace($SmtpServer)) { throw 'SendEmailHtmlReport: Graph mail failed and SMTP fallback is unavailable because SmtpServer is empty.' }
+            Set-SmartM365SmtpMaintenanceRecipient -MailParameters $mailParams -MailPurpose $MailPurpose
+            Send-MailMessage @mailParams
+            if ($PSBoundParameters.ContainsKey('VerboseLog')) {
+                WriteLog -Message "Email sent to $($mailParams.To -join ';') via $($SmtpServer):$SmtpPort after Graph fallback" -Level "SUCCESS"
+            }
+            return
+        }
+    }
+    catch {
+        WriteLog -Message ("SendEmailHtmlReport failed: {0}" -f $_.Exception.Message) -Level "ERROR"
+        throw
+    }
+}
+
+function SendFileListEmailReport {
+    <#
+        If -Files is provided and not empty, calls GetFileList, builds the HTML report, and sends it.
+        If -Files is null or empty, sends only the message as the email body.
+        Parameters:
+            -Files      : array of files/folders/patterns (optional)
+            -Title      : email subject/title
+            -Message    : optional message at the bottom
+            -Recurse    : optional, recursive search
+            -ComputeHash: optional, SHA256 hash
+    #>
+    [CmdletBinding()]
+    param(
+        [string[]]$Files,
+        [Parameter(Mandatory)][string]$Title,
+        [string]$Message,
+        [switch]$Recurse,
+        [switch]$ComputeHash
+    )
+
+    if (-not $Files -or $Files.Count -eq 0) {
+        # No files: send only the message
+        $body = NewSimpleEmailBody -Title $Title -Message $Message
+        SendEmailHtmlReport -Subject $Title -BodyHtml $body
+        return
+    }
+
+    # Inventory
+    $summary = GetFileList -Files $Files -Recurse:$Recurse -ComputeHash:$ComputeHash
+
+    # Prepare summary hashtable (excluding the Files property)
+    $summaryData = @{
+        "Files (count)" = $summary.'Files (count)'
+        "Total size"    = $summary.'Total size'
+        "Errors"        = $summary.Errors
+    }
+
+    # Generate HTML body
+    $body = NewTableFilesEmailBody -Title $Title `
+        -SummaryData $summaryData `
+        -Files $summary.Files `
+        -Message $Message
+
+    # Send the email
+    SendEmailHtmlReport -BodyHtml $body
+}
+
+function TestSharePath {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) {
+        WriteLog -Message "The share '$Path' is not available. Stopping the script." -Level "ERROR"
+        throw "The share '$Path' is not available."
+    }
+}
+
+function ConvertFrom-SmartM365JwtPayload {
+    [CmdletBinding()]
+    param([string]$AccessToken)
+
+    if ([string]::IsNullOrWhiteSpace($AccessToken)) { return $null }
+    $parts = $AccessToken.Split('.')
+    if ($parts.Count -lt 2) { return $null }
+    $payload = $parts[1].Replace('-', '+').Replace('_', '/')
+    switch ($payload.Length % 4) {
+        2 { $payload += '==' }
+        3 { $payload += '=' }
+        1 { return $null }
+    }
+    try {
+        $json = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload))
+        return $json | ConvertFrom-Json
+    }
+    catch {
+        return $null
+    }
+}
+
+function Get-SmartM365GraphGrantedPermissionValues {
+    [CmdletBinding()]
+    param([string]$GraphAccessToken)
+
+    $granted = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+
+    if (-not [string]::IsNullOrWhiteSpace($GraphAccessToken)) {
+        $claims = ConvertFrom-SmartM365JwtPayload -AccessToken $GraphAccessToken
+        foreach ($role in @($claims.roles)) { if (-not [string]::IsNullOrWhiteSpace([string]$role)) { [void]$granted.Add([string]$role) } }
+        foreach ($scope in @(([string]$claims.scp) -split '\s+')) { if (-not [string]::IsNullOrWhiteSpace($scope)) { [void]$granted.Add($scope) } }
+        return @($granted)
+    }
+
+    $context = $null
+    try { $context = Get-MgContext -ErrorAction SilentlyContinue } catch { $context = $null }
+    if ($null -eq $context) { return @($granted) }
+
+    foreach ($scope in @($context.Scopes)) { if (-not [string]::IsNullOrWhiteSpace([string]$scope)) { [void]$granted.Add([string]$scope) } }
+
+    $clientId = [string]$context.ClientId
+    if ([string]::IsNullOrWhiteSpace($clientId)) { return @($granted) }
+
+    try {
+        $escapedClientId = $clientId.Replace("'", "''")
+        $appResponse = Invoke-MgGraphRequest -Method GET -Uri ("https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId eq '{0}'&`$select=id,appId,displayName" -f $escapedClientId) -OutputType PSObject -ErrorAction Stop
+        $appServicePrincipal = @($appResponse.value) | Select-Object -First 1
+        if ($null -eq $appServicePrincipal -or [string]::IsNullOrWhiteSpace([string]$appServicePrincipal.id)) { return @($granted) }
+
+        $graphResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId eq '00000003-0000-0000-c000-000000000000'&`$select=id,appRoles" -OutputType PSObject -ErrorAction Stop
+        $graphServicePrincipal = @($graphResponse.value) | Select-Object -First 1
+        if ($null -eq $graphServicePrincipal -or [string]::IsNullOrWhiteSpace([string]$graphServicePrincipal.id)) { return @($granted) }
+
+        $roleLookup = @{}
+        foreach ($role in @($graphServicePrincipal.appRoles)) {
+            if ($null -ne $role.id -and -not [string]::IsNullOrWhiteSpace([string]$role.value)) {
+                $roleLookup[[string]$role.id] = [string]$role.value
+            }
+        }
+
+        $assignments = Invoke-MgGraphRequest -Method GET -Uri ("https://graph.microsoft.com/v1.0/servicePrincipals/{0}/appRoleAssignments?`$top=999" -f $appServicePrincipal.id) -OutputType PSObject -ErrorAction Stop
+        foreach ($assignment in @($assignments.value)) {
+            if ([string]$assignment.resourceId -ne [string]$graphServicePrincipal.id) { continue }
+            $roleId = [string]$assignment.appRoleId
+            if ($roleLookup.ContainsKey($roleId)) { [void]$granted.Add($roleLookup[$roleId]) }
+        }
+    }
+    catch {
+        WriteLog -Message ("Preflight Graph app role lookup could not be completed: {0}" -f $_.Exception.Message) -Level "WARNING"
+    }
+
+    return @($granted)
+}
+function Invoke-SmartM365Preflight {
+    [CmdletBinding()]
+    param(
+        [string]$ScriptName = $MyInvocation.MyCommand.Name,
+        [string[]]$RequiredModules = @(),
+        [switch]$SkipMissingModuleInstall,
+        [ValidateSet('CurrentUser','AllUsers')]
+        [string]$InstallModuleScope = 'CurrentUser',
+        [string]$InstallModuleRepository = 'PSGallery',
+        [string[]]$RequiredCommands = @(),
+        [string[]]$OutputPaths = @(),
+        [string[]]$GraphProbeUris = @(),
+        [string[]]$RequiredGraphApplicationPermissions = @(),
+        [string]$GraphAccessToken,
+        [string[]]$ExchangeOnlineProbeCommands = @(),
+        [switch]$RequireActiveDirectoryRead,
+        [switch]$RequireExchangeOnPrem,
+        [switch]$SkipOutputPathCreation
+    )
+
+    $failures = New-Object System.Collections.Generic.List[string]
+    WriteLog -Message ("Preflight started for {0}" -f $ScriptName) -Level "INFO"
+
+    foreach ($moduleName in @($RequiredModules | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+        if ($moduleName -eq 'ImportExcel') {
+            try {
+                Initialize-SmartM365ImportExcel -Scope $InstallModuleScope -Repository $InstallModuleRepository -InstallIfMissing:(-not $SkipMissingModuleInstall) -SkipRepositoryRepair:$SkipMissingModuleInstall | Out-Null
+            } catch { $failures.Add("Required ImportExcel startup check failed: $($_.Exception.Message)") }
+            continue
+        }
+        $availableModule = Get-Module -ListAvailable -Name $moduleName | Sort-Object Version -Descending | Select-Object -First 1
+        if ($null -eq $availableModule) {
+            $nonInstallableModules = @('ActiveDirectory')
+            if ($SkipMissingModuleInstall -or $moduleName -in $nonInstallableModules) {
+                $failures.Add("Required PowerShell module not found: $moduleName")
+                continue
+            }
+            if (-not (Get-Command -Name Install-Module -ErrorAction SilentlyContinue)) {
+                $failures.Add("Required PowerShell module not found and Install-Module is unavailable: $moduleName")
+                continue
+            }
+            try {
+                WriteLog -Message ("Preflight module missing; installing {0} from {1} with Scope={2}." -f $moduleName, $InstallModuleRepository, $InstallModuleScope) -Level "WARNING"
+                Install-Module -Name $moduleName -Scope $InstallModuleScope -Repository $InstallModuleRepository -Force -AllowClobber -ErrorAction Stop
+                $availableModule = Get-Module -ListAvailable -Name $moduleName | Sort-Object Version -Descending | Select-Object -First 1
+                if ($null -eq $availableModule) { throw "Install-Module completed but module was not found in module paths." }
+                WriteLog -Message ("Preflight module installed: {0} {1}; Path={2}" -f $availableModule.Name, $availableModule.Version, $availableModule.Path) -Level "SUCCESS"
+            }
+            catch {
+                $failures.Add("Required PowerShell module '$moduleName' could not be installed: $($_.Exception.Message)")
+                continue
+            }
+        }
+
+        try {
+            Import-Module -Name $moduleName -ErrorAction Stop
+            WriteLog -Message ("Preflight module OK: {0}" -f (Get-SmartM365ModuleDiagnosticText -Name $moduleName -IncludeAvailable)) -Level "INFO"
+        }
+        catch {
+            $failures.Add("Required PowerShell module '$moduleName' could not be imported: $($_.Exception.Message)")
+        }
+    }
+    foreach ($commandName in @($RequiredCommands | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+        if (-not (Get-Command -Name $commandName -ErrorAction SilentlyContinue)) {
+            $failures.Add("Required PowerShell command not found: $commandName")
+        }
+        else {
+            WriteLog -Message ("Preflight command OK: {0}" -f $commandName) -Level "INFO"
+        }
+    }
+
+    foreach ($path in @($OutputPaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+        $probePath=$null
+        try {
+            if (-not (Test-Path -LiteralPath $path)) {
+                if ($SkipOutputPathCreation) {
+                    $failures.Add("Output path does not exist: $path")
+                    continue
+                }
+                $null = New-Item -Path $path -ItemType Directory -Force -ErrorAction Stop
+            }
+
+            $probePath = [IO.Path]::Combine($path, ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.tmp'))
+            Set-Content -LiteralPath $probePath -Value "SmartM365 preflight" -Encoding UTF8 -ErrorAction Stop
+            Remove-Item -LiteralPath $probePath -Force -ErrorAction Stop
+            WriteLog -Message ("Preflight output path writable: {0}" -f $path) -Level "INFO"
+        }
+        catch {
+            $failures.Add("Output path is not writable: $path. $($_.Exception.Message)")
+        }
+        finally {
+            if ($probePath -and (Test-Path -LiteralPath $probePath)) {
+                try { Remove-Item -LiteralPath $probePath -Force -ErrorAction Stop }
+                catch { Write-Warning "Preflight probe cleanup failed: $($_.Exception.Message)" }
+            }
+        }
+    }
+
+    if ($RequireActiveDirectoryRead) {
+        try {
+            if (-not (Get-Command -Name Get-ADForest -ErrorAction SilentlyContinue)) {
+                throw "Get-ADForest is not available."
+            }
+            $null = Get-ADForest -ErrorAction Stop
+            WriteLog -Message "Preflight Active Directory read OK: Get-ADForest" -Level "INFO"
+        }
+        catch {
+            $failures.Add("Active Directory read preflight failed: $($_.Exception.Message)")
+        }
+    }
+
+    if ($RequireExchangeOnPrem) {
+        try {
+            if (Get-Command -Name EnsureExchangePSSnapinLoaded -ErrorAction SilentlyContinue) {
+                if (-not (EnsureExchangePSSnapinLoaded)) {
+                    throw "Exchange on-premises PowerShell snap-in is not ready."
+                }
+            }
+            if (Get-Command -Name Get-ExchangeServer -ErrorAction SilentlyContinue) {
+                $null = Get-ExchangeServer -ErrorAction Stop | Select-Object -First 1
+            }
+            else {
+                throw "Get-ExchangeServer is not available."
+            }
+            WriteLog -Message "Preflight Exchange on-premises read OK: Get-ExchangeServer" -Level "INFO"
+        }
+        catch {
+            $failures.Add("Exchange on-premises preflight failed: $($_.Exception.Message)")
+        }
+    }
+
+    $requiredGraphPermissions = @($RequiredGraphApplicationPermissions | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+    if ($requiredGraphPermissions.Count -gt 0) {
+        WriteLog -Message ("Preflight minimum Graph application permissions: {0}" -f ($requiredGraphPermissions -join ', ')) -Level "INFO"
+        try {
+            $grantedGraphPermissions = @(Get-SmartM365GraphGrantedPermissionValues -GraphAccessToken $GraphAccessToken)
+            foreach ($permissionName in $requiredGraphPermissions) {
+                if ($grantedGraphPermissions -notcontains $permissionName) {
+                    $failures.Add("Missing Microsoft Graph application permission: $permissionName")
+                }
+                else {
+                    WriteLog -Message ("Preflight Graph permission declared and granted: {0}" -f $permissionName) -Level "INFO"
+                }
+            }
+        }
+        catch {
+            $failures.Add("Graph application permission validation failed: $($_.Exception.Message)")
+        }
+    }
+    if ($GraphProbeUris.Count -gt 0) {
+        $useAccessToken = -not [string]::IsNullOrWhiteSpace($GraphAccessToken)
+        if (-not $useAccessToken) {
+            try {
+                if (-not (Get-Command -Name Invoke-MgGraphRequest -ErrorAction SilentlyContinue)) {
+                    throw "Invoke-MgGraphRequest is not available."
+                }
+                $context = Get-MgContext -ErrorAction SilentlyContinue
+                if ($null -eq $context) {
+                    throw "Microsoft Graph is not connected."
+                }
+            }
+            catch {
+                $failures.Add("Microsoft Graph connection preflight failed: $($_.Exception.Message)")
+            }
+        }
+
+        if ($useAccessToken -or $null -ne (Get-MgContext -ErrorAction SilentlyContinue)) {
+            foreach ($uri in $GraphProbeUris) {
+                if ([string]::IsNullOrWhiteSpace($uri)) { continue }
+                try {
+                    if ($useAccessToken) {
+                        $headers = @{ Authorization = "Bearer $GraphAccessToken" }
+                        $null = Invoke-RestMethod -Method GET -Uri $uri -Headers $headers -TimeoutSec 180 -ErrorAction Stop
+                    }
+                    else {
+                        $null = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
+                    }
+                    WriteLog -Message ("Preflight Graph permission OK: {0}" -f $uri) -Level "INFO"
+                }
+                catch {
+                    $failures.Add("Graph permission probe failed for '$uri': $($_.Exception.Message)")
+                }
+            }
+        }
+    }
+
+    foreach ($commandName in @($ExchangeOnlineProbeCommands | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+        try {
+            if (-not (Get-Command -Name $commandName -ErrorAction SilentlyContinue)) {
+                throw "Command is not available."
+            }
+            switch ($commandName) {
+                "Get-Mailbox" { $null = & $commandName -ResultSize 1 -ErrorAction Stop }
+                "Get-EXOMailbox" { $null = & $commandName -ResultSize 1 -ErrorAction Stop }
+                "Get-MigrationBatch" { $null = & $commandName -ResultSize 1 -ErrorAction Stop }
+                default { $null = & $commandName -ErrorAction Stop | Select-Object -First 1 }
+            }
+            WriteLog -Message ("Preflight Exchange Online RBAC OK: {0}" -f $commandName) -Level "INFO"
+        }
+        catch {
+            $failures.Add("Exchange Online RBAC probe failed for '$commandName': $($_.Exception.Message)")
+        }
+    }
+
+    if ($failures.Count -gt 0) {
+        foreach ($failure in $failures) {
+            WriteLog -Message ("Preflight failed: {0}" -f $failure) -Level "ERROR"
+        }
+        throw ("SmartM365 preflight failed for {0}: {1}" -f $ScriptName, ($failures -join " | "))
+    }
+
+    WriteLog -Message ("Preflight completed for {0}" -f $ScriptName) -Level "SUCCESS"
+    return $true
+}
+
+function InitializeScriptEnvironment {
+    param(
+        [string]$OutputPathInit,
+        [string]$OutputPath,
+        [string]$LogFileName,
+        [string]$CallerScriptPath
+    )
+
+    $lifecycle = Get-Variable SmartM365InventoryRun -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    if ($lifecycle) { $lifecycle.Initialized=$true }
+    $CallerScriptPath = [string]$CallerScriptPath
+    $callerScriptPath = if ([string]::IsNullOrWhiteSpace($CallerScriptPath)) { '' } else { $CallerScriptPath }
+    if ([string]::IsNullOrWhiteSpace($callerScriptPath)) {
+        try {
+            foreach ($frame in (Get-PSCallStack)) {
+                if ([string]::IsNullOrWhiteSpace([string]$frame.ScriptName)) { continue }
+                if ($frame.ScriptName -eq $PSCommandPath) { continue }
+                if ($frame.ScriptName -notlike '*.ps1') { continue }
+                $callerScriptPath = [string]$frame.ScriptName
+                break
+            }
+        }
+        catch {
+            $callerScriptPath = ''
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($OutputPathInit) -and -not [string]::IsNullOrWhiteSpace($OutputPath)) {
+        $OutputPathInit = $OutputPath
+    }
+
+    if ([string]::IsNullOrWhiteSpace($OutputPathInit)) {
+        Write-Warning "InitializeScriptEnvironment requires OutputPathInit/OutputPath from the script local.json."
+        throw "InitializeScriptEnvironment requires OutputPathInit/OutputPath from the script local.json."
+    }
+
+    try {
+        if (-not (Test-Path -LiteralPath $OutputPathInit)) {
+            New-Item -Path $OutputPathInit -ItemType Directory -Force -ErrorAction Stop | Out-Null
+            WriteLog -Message "Created missing output directory: $OutputPathInit"
+        }
+    }
+    catch {
+        WriteLog -Message "Failed to create or access output directory '$OutputPathInit': $_" -Level "ERROR"
+        throw
+    }
+
+    $moduleLocalConfig = Get-ModuleLocalConfig
+    $logAllRootPath = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'LogAllRootPath' -DefaultValue ''
+    if ([string]::IsNullOrWhiteSpace($logAllRootPath)) {
+        Write-Warning "InitializeScriptEnvironment requires LogAllRootPath from Config\SmartM365.global.local.json."
+        throw "InitializeScriptEnvironment requires LogAllRootPath from Config\SmartM365.global.local.json."
+    }
+    $global:SmartM365ExecutionStartTime = Get-Date
+    $global:SmartM365ExecutionSummaryWritten = $false
+    $global:SmartM365WarningCount = 0
+    $global:SmartM365ErrorCount = 0
+    $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    Initialize-SmartM365DefaultCsvValidationRules
+    $global:BasePath = $OutputPathInit
+	$global:SmartM365ScriptName = $LogFileName
+	$global:LogPath = Join-Path -Path $logAllRootPath -ChildPath $LogFileName
+
+	try {
+		if (-not (Test-Path -Path $global:LogPath)) {
+			New-Item -Path $global:LogPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
+		}
+	} catch {
+		Write-Error "Failed to create the log directory at path '$global:LogPath'. Error details: $_"
+		throw "Script execution stopped due to failure in creating the log directory."
+	}
+
+    $global:LogTextFile = Join-Path $global:LogPath "$LogFileName-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log"
+    $global:logTranscriptFile = Join-Path $global:LogPath "$LogFileName-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss')_Transcript.log"
+
+    try {
+        $callerMaxItemsVariable = Get-Variable -Name MaxItems -Scope 1 -ErrorAction SilentlyContinue
+        if ($callerMaxItemsVariable -and $null -ne $callerMaxItemsVariable.Value -and [int]$callerMaxItemsVariable.Value -gt 0) {
+            Set-SmartM365MaxItemsMode -MaxItems ([int]$callerMaxItemsVariable.Value)
+        }
+    }
+    catch { }
+    if ($global:RetentionMaxLogs -gt 0) {
+        RemoveOldFiles -FolderPath $global:LogPath -FilePattern "$LogFileName*.log" -MaxFiles $global:RetentionMaxLogs
+    }
+    $scriptVersion = Get-SmartM365ScriptVersionFromFile -Path $callerScriptPath
+    $global:SmartM365ScriptFileName = if ([string]::IsNullOrWhiteSpace($callerScriptPath)) { $LogFileName } else { [System.IO.Path]::GetFileName($callerScriptPath) }
+    $global:SmartM365ScriptVersion = $scriptVersion
+    Write-SmartM365ExecutionContext -ScriptName $LogFileName -ScriptVersion $scriptVersion -OutputPath $OutputPathInit -ScriptPath $callerScriptPath
+    Write-host  "Environment initialized successfully."
+
+    return $OutputPathInit
+}
+
+function ExportAndCopyCsv {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string]$BaseFileName,
+
+        [Parameter(Mandatory)]
+        [string]$OutputPath,
+
+        [Parameter(Mandatory)]
+        [string]$GlobalPath,
+
+        [Parameter(Mandatory)]
+        [array]$Data,
+
+        [Parameter()]
+        [switch]$NoTypeInformation = $true,
+
+        [Parameter()]
+        [ValidateSet("ASCII", "BigEndianUnicode", "Default", "OEM", "Unicode", "UTF7", "UTF8", "UTF32")]
+        [string]$Encoding = "UTF8",
+
+        [Parameter()]
+        [char]$Delimiter,
+
+        [Parameter()]
+        [switch]$NoTenantKey,
+
+        [Parameter()]
+        [switch]$NoMaxItemsRowLimit,
+
+        [Parameter()]
+        [switch]$SkipWeeklyHistory
+    )
+
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $runBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName $BaseFileName
+    $global:csvFilePath1 = Join-Path $OutputPath "$runBaseFileName`_$timestamp.csv"
+    $global:csvFilePath2 = Join-Path $OutputPath "$runBaseFileName.csv"
+    $global:csvFilePath3 = Join-Path $GlobalPath "$runBaseFileName.csv"
+    if (-not $NoMaxItemsRowLimit) {
+        $Data = @(Limit-SmartM365RowsForMaxItems -Data $Data)
+    }
+    elseif (Test-SmartM365MaxItemsMode) {
+        WriteLog -Message ("MaxItems={0}: preserving all {1} export row(s) because -NoMaxItemsRowLimit was requested." -f (Get-SmartM365MaxItemsValue), @($Data).Count) -Level 'INFO'
+    }
+    if (-not $NoTenantKey) {
+        $tenantCsv = Add-SmartM365TenantKeyToCsvData -Data $Data
+        $Data = @($tenantCsv.Data)
+    }
+    if (Test-SmartM365MaxItemsMode) {
+        WriteLog -Message ("MaxItems test CSV publication active. CSV paths are suffixed with {0}; standard Power BI filenames are not updated." -f (Get-SmartM365MaxItemsSuffix)) -Level 'WARNING'
+    }
+
+    Assert-SmartM365CsvDataCompleteness -Data $Data -BaseFileName $BaseFileName -TimestampedPath $global:csvFilePath1 -LatestPath $global:csvFilePath3
+
+    # Init global exclusion set
+    if (-not $global:csvGeneratedPaths) {
+        $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    }
+
+    $effectiveDelimiter = if ($PSBoundParameters.ContainsKey('Delimiter')) { [string]$Delimiter } else { ',' }
+
+    # Export with timestamp
+    try {
+        Write-SmartM365CsvAtomically -Data $Data -Path $csvFilePath1 -Encoding $Encoding -Delimiter $effectiveDelimiter -NoTypeInformation:$NoTypeInformation -NoTenantKey
+        WriteLog -Message "CSV export to: $csvFilePath1"
+        [void]$global:csvGeneratedPaths.Add($csvFilePath1)
+    } catch {
+        WriteLog -Message "Failed to export to: $csvFilePath1 - $_" -Level Error
+        throw
+    }
+
+    # Copy to fixed name in output path
+    try {
+        Copy-SmartM365FileAtomically -SourcePath $csvFilePath1 -DestinationPath $csvFilePath2
+        WriteLog -Message "CSV copied to: $csvFilePath2"
+        [void]$global:csvGeneratedPaths.Add($csvFilePath2)
+    } catch {
+        WriteLog -Message "Failed to copy to: $csvFilePath2 - $_" -Level Error
+        throw
+    }
+
+    # Create global directory if it doesn't exist
+    if (-not (Test-Path -Path $GlobalPath)) {
+        try {
+            New-Item -Path $GlobalPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
+            WriteLog -Message "Created missing directory: $GlobalPath"
+        } catch {
+            WriteLog -Message "Failed to create directory: $GlobalPath - $_" -Level Error
+            throw
+        }
+    }
+
+    $maxRetries = 3
+    $retryDelaySec = 10
+    $attempt = 0
+    $globalCopyDone = $false
+    while (-not $globalCopyDone -and $attempt -lt $maxRetries) {
+        $attempt++
+        try {
+            Copy-SmartM365FileAtomically -SourcePath $csvFilePath2 -DestinationPath $csvFilePath3
+            WriteLog -Message "CSV copied to global path: $csvFilePath3"
+            [void]$global:csvGeneratedPaths.Add($csvFilePath3)
+            $globalCopyDone = $true
+        } catch {
+            if ($attempt -lt $maxRetries) {
+                WriteLog -Message "Copy to global path failed (attempt $attempt/$maxRetries), retrying in $retryDelaySec s... - $_" -Level Warning
+                Start-Sleep -Seconds $retryDelaySec
+            }
+            else {
+                WriteLog -Message "Failed to copy to global path after $maxRetries attempts: $csvFilePath3 - $_" -Level Error
+                throw
+            }
+        }
+    }
+
+    if ($global:RetentionMaxCSV -gt 0) {
+        RemoveOldFiles -FolderPath $OutputPath -FilePattern "$BaseFileName`_*.csv" -NamePattern ('^' + [regex]::Escape($BaseFileName) + '(?:_MAXITEMS-\d+)?_\d{8}_\d{6}\.csv$') -MaxFiles $global:RetentionMaxCSV
+    }
+
+    Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath1 | Out-Null
+    Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath3
+
+    $historySourcePath = $csvFilePath3
+    if ($SkipWeeklyHistory) {
+        WriteLog -Message 'Automatic WeeklyHistory publication skipped for this CSV; the caller will publish the validated dataset group.' -Level 'INFO'
+    }
+    elseif (Test-SmartM365MaxItemsMode) {
+        WriteLog -Message 'WeeklyHistory publication skipped because MaxItems test mode is active.' -Level 'WARNING'
+    }
+    else {
+        Invoke-SmartM365WeeklyInventoryHistoryForCsv -SourceFiles @($historySourcePath) -TimestampedPath $csvFilePath1
+    }
+
+    # Final log
+    WriteLog -Message "CSV export completed: $csvFilePath1"
+}
+
+function ExportAndCopyCsvFromConvert {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string]$BaseFileName,
+
+        [Parameter(Mandatory)]
+        [string]$OutputPath,
+
+        [Parameter(Mandatory)]
+        [string]$GlobalPath,
+
+        [Parameter(Mandatory)]
+        [array]$Data,
+
+        [Parameter()]
+        [switch]$NoTypeInformation = $true,
+
+        [Parameter()]
+        [ValidateSet("ASCII", "BigEndianUnicode", "Default", "OEM", "Unicode", "UTF7", "UTF8", "UTF32")]
+        [string]$Encoding = "UTF8",
+
+        [Parameter()]
+        [string]$Delimiter = ",",
+
+        [Parameter()]
+        [switch]$NoTenantKey,
+
+        [Parameter()]
+        [switch]$SkipWeeklyHistory
+    )
+
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $runBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName $BaseFileName
+    $global:csvFilePath1 = Join-Path $OutputPath "$runBaseFileName`_$timestamp.csv"
+    $global:csvFilePath2 = Join-Path $OutputPath "$runBaseFileName.csv"
+    $global:csvFilePath3 = Join-Path $GlobalPath "$runBaseFileName.csv"
+    $Data = @(Limit-SmartM365RowsForMaxItems -Data $Data)
+    if (-not $NoTenantKey) {
+        $tenantCsv = Add-SmartM365TenantKeyToCsvData -Data $Data
+        $Data = @($tenantCsv.Data)
+    }
+    if (Test-SmartM365MaxItemsMode) {
+        WriteLog -Message ("MaxItems test CSV publication active. CSV paths are suffixed with {0}; standard Power BI filenames are not updated." -f (Get-SmartM365MaxItemsSuffix)) -Level 'WARNING'
+    }
+
+    Assert-SmartM365CsvDataCompleteness -Data $Data -BaseFileName $BaseFileName -TimestampedPath $global:csvFilePath1 -LatestPath $global:csvFilePath3
+
+    # Init global exclusion set
+    if (-not $global:csvGeneratedPaths) {
+        $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    }
+
+    try {
+        try {
+            Write-SmartM365CsvAtomically -Data $Data -Path $csvFilePath1 -Encoding $Encoding -Delimiter $Delimiter -NoTypeInformation:$NoTypeInformation -NoTenantKey
+            WriteLog -Message "CSV exported to: $csvFilePath1"
+            [void]$global:csvGeneratedPaths.Add($csvFilePath1)
+        } catch {
+            WriteLog -Message "Failed to export CSV to: $csvFilePath1 - $_" -Level Error
+            throw
+        }
+
+        try {
+            Copy-SmartM365FileAtomically -SourcePath $csvFilePath1 -DestinationPath $csvFilePath2
+            WriteLog -Message "CSV copied to: $csvFilePath2"
+            [void]$global:csvGeneratedPaths.Add($csvFilePath2)
+        } catch {
+            WriteLog -Message "Failed to copy CSV to: $csvFilePath2 - $_" -Level Error
+            throw
+        }
+
+        if (-not (Test-Path -Path $GlobalPath)) {
+            try {
+                New-Item -Path $GlobalPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
+                WriteLog -Message "Created missing directory: $GlobalPath"
+            } catch {
+                WriteLog -Message "Failed to create directory: $GlobalPath - $_" -Level Error
+                throw
+            }
+        }
+
+        $maxRetries = 3
+        $retryDelaySec = 10
+        $attempt = 0
+        $globalCopyDone = $false
+        while (-not $globalCopyDone -and $attempt -lt $maxRetries) {
+            $attempt++
+            try {
+                Copy-SmartM365FileAtomically -SourcePath $csvFilePath1 -DestinationPath $csvFilePath3
+                WriteLog -Message "CSV copied to global path: $csvFilePath3"
+                [void]$global:csvGeneratedPaths.Add($csvFilePath3)
+                $globalCopyDone = $true
+            } catch {
+                if ($attempt -lt $maxRetries) {
+                    WriteLog -Message "Copy to global path failed (attempt $attempt/$maxRetries), retrying in $retryDelaySec s... - $_" -Level Warning
+                    Start-Sleep -Seconds $retryDelaySec
+                }
+                else {
+                    WriteLog -Message "Failed to copy to global path after $maxRetries attempts: $csvFilePath3 - $_" -Level Error
+                    throw
+                }
+            }
+        }
+
+        if ($global:RetentionMaxCSV -gt 0) {
+            RemoveOldFiles -FolderPath $OutputPath -FilePattern "$BaseFileName`_*.csv" -NamePattern ('^' + [regex]::Escape($BaseFileName) + '(?:_MAXITEMS-\d+)?_\d{8}_\d{6}\.csv$') -MaxFiles $global:RetentionMaxCSV
+        }
+
+        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath1 | Out-Null
+        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath3
+
+        $historySourcePath = $csvFilePath3
+        if ($SkipWeeklyHistory) {
+            WriteLog -Message 'Automatic WeeklyHistory publication skipped for this CSV; the caller will publish the validated dataset group.' -Level 'INFO'
+        }
+        elseif (Test-SmartM365MaxItemsMode) {
+            WriteLog -Message 'WeeklyHistory publication skipped because MaxItems test mode is active.' -Level 'WARNING'
+        }
+        else {
+            Invoke-SmartM365WeeklyInventoryHistoryForCsv -SourceFiles @($historySourcePath) -TimestampedPath $csvFilePath1
+        }
+
+    } catch {
+        WriteLog -Message "Unexpected error during CSV export process: $_" -Level Error
+        throw
+    }
+}
+function NewRemoteScheduledTaskAndWait {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string]$RemoteComputerName,
+
+        [Parameter(Mandatory)]
+        [string]$TaskName,
+
+        [Parameter(Mandatory)]
+        [string]$ScriptPathOnShare,
+
+        [Parameter()]
+        [string]$TriggerTime,
+
+        [Parameter()]
+        [string]$KeyFileName = "",
+
+        [Parameter()]
+        [string]$CredentialUserName = "DOMAIN\svc_account"
+    )
+
+    # Default TriggerTime to current time + 1 minute if not provided
+    if (-not $TriggerTime) {
+        $TriggerTime = (Get-Date).AddMinutes(1).ToString("HH:mm")
+        Write-Log "TriggerTime not provided. Defaulting to $TriggerTime"
+    }
+
+    try {
+        if (-not $PSBoundParameters.ContainsKey('CredentialUserName')) {
+            $moduleLocalConfig = Get-ModuleLocalConfig
+            $CredentialUserName = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'CredentialUserName' -DefaultValue $CredentialUserName
+        }
+
+        Write-Log "Loading credentials from key file '$KeyFileName'"
+
+        $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+        $keyFilePath = Join-Path $scriptDir $KeyFileName
+
+        if (!(Test-Path $keyFilePath)) {
+            throw "Key file '$keyFilePath' not found."
+        }
+
+        $securePassword = Get-Content $keyFilePath | ConvertTo-SecureString
+        $credential = New-Object System.Management.Automation.PSCredential ($CredentialUserName, $securePassword)
+
+        Write-Log "Starting task creation on $RemoteComputerName"
+
+        $username = $credential.UserName
+        $password = $credential.GetNetworkCredential().Password
+        $escapedScriptPath = $ScriptPathOnShare.Replace('"', '""')
+        $command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$escapedScriptPath`""
+        $taskNameEscaped = "`"$TaskName`""
+
+        $createArgs = "/Create /S $RemoteComputerName /TN $taskNameEscaped /TR `"$command`" /SC ONCE /ST $TriggerTime /RU `"$username`" /RP `"$password`" /RL HIGHEST /F"
+        $runArgs = "/Run /S $RemoteComputerName /TN $taskNameEscaped"
+        $queryArgs = "/Query /S $RemoteComputerName /TN $taskNameEscaped /FO LIST /V"
+
+        Write-Log "Creating task with schtasks.exe"
+        $create = Start-Process -FilePath "schtasks.exe" -ArgumentList $createArgs -NoNewWindow -Wait -PassThru
+        if ($create.ExitCode -ne 0) {
+            throw "Failed to create task. ExitCode: $($create.ExitCode)"
+        }
+
+        Write-Log "Running task"
+        $run = Start-Process -FilePath "schtasks.exe" -ArgumentList $runArgs -NoNewWindow -Wait -PassThru
+        if ($run.ExitCode -ne 0) {
+            throw "Failed to start task. ExitCode: $($run.ExitCode)"
+        }
+
+        Write-Log "Waiting for task to complete..."
+        $maxWait = 600
+        $elapsed = 0
+        do {
+            Start-Sleep -Seconds 5
+            $elapsed += 5
+            $output = & schtasks.exe $queryArgs
+            $lastRunResult = ($output | Where-Object { $_ -like "Last Run Result*" }) -replace "Last Run Result:\s*", ""
+        } while ($lastRunResult -eq "0x41301" -and $elapsed -lt $maxWait)
+
+        Write-Log "Task completed with result: $lastRunResult"
+
+        $success = $lastRunResult -eq "0x0"
+        if ($success) {
+            Write-Log "Task executed successfully on $RemoteComputerName"
+        } else {
+            Write-Log "Task failed with code $lastRunResult" "ERROR"
+        }
+
+        return @{
+            Computer = $RemoteComputerName
+            TaskName = $TaskName
+            ResultCode = $lastRunResult
+            Success = $success
+            LogFile = $global:LogTextFile
+        }
+    }
+    catch {
+        Write-Log "ERROR: $($_.Exception.Message)" "ERROR"
+        return @{
+            Computer = $RemoteComputerName
+            TaskName = $TaskName
+            Success = $false
+            Error = $_.Exception.Message
+            LogFile = $global:LogTextFile
+        }
+    }
+}
+
+
+
+#region SmartM365 cloud session compatibility
+function Connect-SmartM365CloudSession {
+    param (
+        [string]$AppId,
+        [string]$Thumbprint,
+        [string]$TenantId,
+        [bool]$ExchangeOnline = $true,
+        [bool]$Graph = $true,
+        [string[]]$GraphScopes = @("User.Read.All", "Directory.Read.All")
+    )
+    $exchangeSuccess = $false
+    $graphSuccess = $false
+
+	#$AppId     = "00000000-0000-0000-0000-000000000000"
+	#$TenantId  = "00000000-0000-0000-0000-000000000000"
+	#$Thumb     = "0000000000000000000000000000000000000000"
+	#$OrgDomain = "contoso.onmicrosoft.com"
+	#Connect-MgGraph -ClientId $AppId -TenantId $TenantId -CertificateThumbprint $Thumb -NoWelcome
+	#Connect-ExchangeOnline -AppId $AppId -Organization $OrgDomain -CertificateThumbprint $Thumb -ShowBanner:$false
+
+    $useCertAuth = $AppId -and $Thumbprint -and $TenantId
+
+    if ($Graph) {
+        try {
+            if (-not (Get-Module -Name Microsoft.Graph.Authentication)) {
+                if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
+                    throw "Required module 'Microsoft.Graph.Authentication' is not installed."
+                }
+                WriteLog "Loading Graph Authentication module: Microsoft.Graph.Authentication..." "INFO"
+                Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+            }
+
+            $scopeToModuleMap = @{
+                "User.Read.All"         = "Microsoft.Graph.Users"
+                "Device.Read.All"       = "Microsoft.Graph.Devices"
+                "Group.Read.All"        = "Microsoft.Graph.Groups"
+                "Reports.Read.All"      = "Microsoft.Graph.Reports"
+                "Policy.Read.All"       = "Microsoft.Graph.Policies"
+                "Organization.Read.All" = "Microsoft.Graph.Organization"
+            }
+
+            $modulesToImport = $GraphScopes | ForEach-Object {
+                if ($scopeToModuleMap.ContainsKey($_)) {
+                    $scopeToModuleMap[$_]
+                }
+            } | Select-Object -Unique
+            foreach ($module in $modulesToImport) {
+                if (-not (Get-Module -Name $module)) {
+                    $availableModule = Get-Module -ListAvailable -Name $module | Sort-Object Version -Descending | Select-Object -First 1
+                    if (-not $availableModule) {
+                        throw "Required Graph submodule '$module' is not installed."
+                    }
+                    WriteLog "Loading Graph submodule: $module..." "INFO"
+                    Import-Module $availableModule.Path -ErrorAction Stop
+                }
+            }
+        } catch {
+            WriteLog "Failed to load Microsoft.Graph submodules: $($_.Exception.Message)" "ERROR"
+            return
+        }
+    }
+
+	if ($ExchangeOnline) {
+		try {
+			if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
+				WriteLog "Loading ExchangeOnlineManagement module..." "INFO"
+				Import-Module ExchangeOnlineManagement -ErrorAction Stop
+			}
+		} catch {
+			WriteLog "Failed to load ExchangeOnlineManagement module: $($_.Exception.Message)" "ERROR"
+			return
+		}
+    }
+
+    if ($Graph) {
+        try {
+            WriteLog "Connecting to Microsoft Graph..." "INFO"
+            try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $false } catch {}
+            if ($useCertAuth) {
+                Connect-MgGraph -ClientId $AppId -TenantId $TenantId -CertificateThumbprint $Thumbprint -Scopes $GraphScopes -NoWelcome -ErrorAction Stop; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $true
+            } else {
+                Connect-MgGraph -Scopes $GraphScopes -NoWelcome -ErrorAction Stop; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $true
+            }
+
+            $context = Get-MgContext -ErrorAction SilentlyContinue
+            if ($null -eq $context) {
+                throw "Microsoft Graph connection did not return a context."
+            }
+            WriteLog "Microsoft Graph connection successful." "SUCCESS"
+            $graphSuccess = $true
+        } catch {
+            WriteLog "Failed to connect to Microsoft Graph: $(Get-SmartM365ExceptionDetails -Exception $_.Exception)" "ERROR"
+        }
+    }
+
+    if ($ExchangeOnline) {
+        try {
+            WriteLog "Connecting to Exchange Online..." "INFO"
+            try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Exchange -Owned $false } catch {}
+            if ($useCertAuth) {
+                Connect-ExchangeOnline -AppId $AppId -CertificateThumbprint $Thumbprint -Organization $TenantId; Set-SmartM365InventoryConnectionOwnership -Connection Exchange -Owned $true
+            } else {
+                Connect-ExchangeOnline -ShowProgress:$true -ShowBanner:$false; Set-SmartM365InventoryConnectionOwnership -Connection Exchange -Owned $true
+            }
+            WriteLog "Exchange Online connection successful." "SUCCESS"
+            $exchangeSuccess = $true
+        } catch {
+            WriteLog "Failed to connect to Exchange Online: $($_.Exception.Message)" "ERROR"
+        }
+    }
+
+    return @{
+        ExchangeOnlineConnected = $exchangeSuccess
+        GraphConnected = $graphSuccess
+    }
+}
+
+function Disconnect-SmartM365CloudSession {
+    param (
+        [bool]$ExchangeOnline = $true,
+        [bool]$Graph = $true,
+        [bool]$VerboseDisconnect = $false
+    )
+
+    if ($ExchangeOnline) {
+        try {
+            if ($VerboseDisconnect) { WriteLog "Disconnecting from Exchange Online..." "INFO" }
+            Disconnect-ExchangeOnline -Confirm:$false; Set-SmartM365InventoryConnectionOwnership -Connection Exchange -Owned $false
+            if ($VerboseDisconnect) { WriteLog "Disconnected from Exchange Online." "SUCCESS" }
+        } catch {
+            if ($VerboseDisconnect) { WriteLog "Failed to disconnect from Exchange Online: $($_.Exception.Message)" "WARNING" }
+        }
+    }
+
+    if ($Graph) {
+        try {
+            if ($VerboseDisconnect) { WriteLog "Disconnecting from Microsoft Graph..." "INFO" }
+            if ($null -eq (Get-MgContext -ErrorAction SilentlyContinue)) {
+                if ($VerboseDisconnect) { WriteLog "No active Microsoft Graph session to disconnect." "INFO" }
+                return
+            }
+            Disconnect-MgGraph -ErrorAction Stop | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $false
+            if ($VerboseDisconnect) { WriteLog "Disconnected from Microsoft Graph." "SUCCESS" }
+        } catch {
+            if ($VerboseDisconnect) { WriteLog "Failed to disconnect from Microsoft Graph: $($_.Exception.Message)" "WARNING" }
+        }
+    }
+}
+
+#endregion
+
+#region SmartM365 SharePoint CSV upload compatibility
+
+function ConvertTo-GraphDrivePath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    (($Path -split '[\\/]' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) |
+        ForEach-Object { [System.Uri]::EscapeDataString($_) }) -join '/'
+}
+
+function Test-SmartM365ConfiguredValue {
+    [CmdletBinding()]
+    param([AllowNull()]$Value)
+
+    if ($Value -isnot [string]) {
+        return ($null -ne $Value)
+    }
+
+    $normalizedValue = $Value.Trim()
+    if ([string]::IsNullOrWhiteSpace($normalizedValue)) { return $false }
+    if ($normalizedValue -in @('__USE_GLOBAL__', 'USE_GLOBAL')) { return $false }
+    if ($normalizedValue -match '^0{8}-0{4}-0{4}-0{4}-0{12}$') { return $false }
+    if ($normalizedValue -match '^0{40}$') { return $false }
+
+    return $true
+}
+
+function Connect-SmartM365GraphForSharePointUpload {
+    [CmdletBinding()]
+    param(
+        [string]$AppId,
+        [string]$TenantId,
+        [string]$Thumbprint
+    )
+
+    try {
+        if (-not (Get-Command -Name Invoke-MgGraphRequest -ErrorAction SilentlyContinue)) {
+            Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+        }
+
+        $context = Get-MgContext -ErrorAction SilentlyContinue
+        if ($null -ne $context) {
+            return $true
+        }
+
+        $moduleLocalConfig = Get-ModuleLocalConfig
+        if (-not (Test-SmartM365ConfiguredValue -Value $AppId)) {
+            $AppId = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'AppId' -DefaultValue ''
+        }
+        if (-not (Test-SmartM365ConfiguredValue -Value $TenantId)) {
+            $TenantId = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'TenantId' -DefaultValue ''
+        }
+        if (-not (Test-SmartM365ConfiguredValue -Value $Thumbprint)) {
+            $Thumbprint = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'Thumbprint' -DefaultValue ''
+        }
+        if (-not (Test-SmartM365ConfiguredValue -Value $Thumbprint)) {
+            $Thumbprint = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'Thumb' -DefaultValue ''
+        }
+
+        if (-not (Test-SmartM365ConfiguredValue -Value $AppId) -or
+            -not (Test-SmartM365ConfiguredValue -Value $TenantId) -or
+            -not (Test-SmartM365ConfiguredValue -Value $Thumbprint)) {
+            WriteLog -Message "SharePoint upload skipped: Graph app-only connection values are missing (AppId, TenantId, Thumb/Thumbprint)." -Level "WARNING"
+            return $false
+        }
+
+        WriteLog -Message "Connecting to Microsoft Graph for SharePoint upload." -Level "INFO"
+        Connect-MgGraph -ClientId $AppId -TenantId $TenantId -CertificateThumbprint $Thumbprint -NoWelcome -ErrorAction Stop | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $true
+
+        $context = Get-MgContext -ErrorAction SilentlyContinue
+        if ($null -eq $context) {
+            WriteLog -Message "SharePoint upload skipped: Microsoft Graph connection did not return a context." -Level "WARNING"
+            return $false
+        }
+
+        WriteLog -Message "Microsoft Graph connected for SharePoint upload." -Level "SUCCESS"
+        return $true
+    }
+    catch {
+        WriteLog -Message ("SharePoint upload skipped: failed to connect Microsoft Graph: {0}" -f $_.Exception.Message) -Level "WARNING"
+        return $false
+    }
+}
+
+function Get-SmartM365GraphRetryAfterSeconds {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$ErrorRecord,
+        [int]$DefaultSeconds = 15,
+        [int]$MaximumSeconds = 300
+    )
+
+    $retryAfter = $null
+    try {
+        if ($ErrorRecord.Exception.Response -and $ErrorRecord.Exception.Response.Headers) {
+            $headerValues = $ErrorRecord.Exception.Response.Headers.GetValues('Retry-After')
+            $retryAfter = @($headerValues | Select-Object -First 1)[0]
+        }
+    }
+    catch {}
+
+    if ([string]::IsNullOrWhiteSpace([string]$retryAfter)) {
+        try { $retryAfter = $ErrorRecord.Exception.Data['Retry-After'] } catch {}
+    }
+
+    $seconds = 0
+    if ($retryAfter -and [int]::TryParse([string]$retryAfter, [ref]$seconds) -and $seconds -gt 0) {
+        return [math]::Min($seconds, $MaximumSeconds)
+    }
+
+    return [math]::Min([math]::Max(1, $DefaultSeconds), $MaximumSeconds)
+}
+
+# SharePoint maintenance answers 403 serviceReadOnly ("Database Is Read Only") for a few minutes; other 403s are final.
+function Test-SmartM365SharePointReadOnlyError {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$ErrorRecord,
+        [AllowNull()][Nullable[int]]$StatusCode
+    )
+
+    if ($StatusCode -ne 403) { return $false }
+    $details = [string]$ErrorRecord.Exception.Message
+    try {
+        if ($ErrorRecord.ErrorDetails -and -not [string]::IsNullOrWhiteSpace([string]$ErrorRecord.ErrorDetails.Message)) {
+            $details = $details + ' ' + [string]$ErrorRecord.ErrorDetails.Message
+        }
+    }
+    catch {}
+    try {
+        $response = $ErrorRecord.Exception.Response
+        if ($response -is [System.Net.Http.HttpResponseMessage] -and $null -ne $response.Content) {
+            $details = $details + ' ' + $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        }
+    }
+    catch {}
+    return ($details -match '(?i)serviceReadOnly')
+}
+
+function Invoke-SmartM365GraphRestWithRetry {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateSet('GET','POST','PUT','PATCH','DELETE')][string]$Method,
+        [Parameter(Mandatory)][string]$Uri,
+        [AllowNull()]$Body = $null,
+        [string]$ContentType = 'application/json',
+        [int]$MaxAttempts = 4,
+        [int]$DefaultRetrySeconds = 15,
+        [int]$MaximumRetrySeconds = 300,
+        [string]$Operation = 'Graph request',
+        [hashtable]$AdditionalHeaders = @{}
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            $params = @{
+                Method      = $Method
+                Uri         = $Uri
+                ErrorAction = 'Stop'
+            }
+            if (-not $params.ContainsKey('Headers')) { $params.Headers = @{} }
+            foreach ($header in $AdditionalHeaders.Keys) {
+                if ($header -ieq 'Authorization') { throw 'Authorization cannot be overridden by transition headers.' }
+                $params.Headers[$header] = $AdditionalHeaders[$header]
+            }
+            if ($null -ne $Body) { $params.Body = $Body }
+            if (-not [string]::IsNullOrWhiteSpace($ContentType)) { $params.ContentType = $ContentType }
+            return Invoke-MgGraphRequest @params
+        }
+        catch {
+            $statusCode = $null
+            try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
+            $message = [string]$_.Exception.Message
+            $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable' -or (Test-SmartM365SharePointReadOnlyError -ErrorRecord $_ -StatusCode $statusCode)
+            if (-not $isTransient -or $attempt -ge $MaxAttempts) {
+                $responseBody = $null
+                try {
+                    if ($_.Exception.Response) {
+                        $errorResponse = $_.Exception.Response
+                        if ($errorResponse -is [System.Net.Http.HttpResponseMessage]) {
+                            if ($errorResponse.Content) {
+                                $responseBody = $errorResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                            }
+                        }
+                        else {
+                            $responseStream = $errorResponse.GetResponseStream()
+                            if ($responseStream) {
+                                $reader = New-Object System.IO.StreamReader($responseStream)
+                                try { $responseBody = $reader.ReadToEnd() } finally { $reader.Dispose() }
+                            }
+                        }
+                    }
+                } catch {}
+                try {
+                    if ([string]::IsNullOrWhiteSpace($responseBody) -and $_.ErrorDetails -and -not [string]::IsNullOrWhiteSpace([string]$_.ErrorDetails.Message)) {
+                        $responseBody = [string]$_.ErrorDetails.Message
+                    }
+                } catch {}
+                $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
+                $errorText = if (-not [string]::IsNullOrWhiteSpace($responseBody)) {
+                    "{0} failed. Method={1}; Status={2}; Error={3}; Body={4}" -f $Operation, $Method, $statusText, $message, $responseBody
+                } else { "{0} failed. Method={1}; Status={2}; Error={3}. No response body was returned." -f $Operation, $Method, $statusText, $message }
+                $failure = [IO.IOException]::new($errorText, $_.Exception)
+                if ($statusCode) { $failure.Data['StatusCode'] = $statusCode }
+                throw $failure
+            }
+
+            $delay = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds ($DefaultRetrySeconds * $attempt) -MaximumSeconds $MaximumRetrySeconds
+            $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
+            WriteLog -Message ("{0} transient failure. Status={1}; attempt {2}/{3}; retrying in {4}s." -f $Operation, $statusText, $attempt, $MaxAttempts, $delay) -Level "WARNING"
+            Start-Sleep -Seconds $delay
+        }
+    }
+}
+
+function Invoke-SmartM365SharePointLargeFileUpload {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$LocalFilePath,
+        [Parameter(Mandatory)][string]$DriveId,
+        [Parameter(Mandatory)][string]$TargetPath,
+        [int]$ChunkSizeBytes = 10485760
+    )
+
+    $fileInfo = Get-Item -LiteralPath $LocalFilePath -ErrorAction Stop
+    $sessionBody = @{
+        item = @{
+            '@microsoft.graph.conflictBehavior' = 'replace'
+        }
+    } | ConvertTo-Json -Depth 5
+    $sessionUri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}:/createUploadSession" -f $DriveId, $TargetPath
+    $session = Invoke-SmartM365GraphRestWithRetry -Method POST -Uri $sessionUri -Body $sessionBody -ContentType 'application/json' -Operation 'Create SharePoint upload session'
+    if ($null -eq $session -or [string]::IsNullOrWhiteSpace([string]$session.uploadUrl)) {
+        throw "SharePoint upload session did not return an uploadUrl."
+    }
+
+    $chunkMultiple = 327680
+    if (($ChunkSizeBytes % $chunkMultiple) -ne 0) {
+        $ChunkSizeBytes = [int]([math]::Floor($ChunkSizeBytes / $chunkMultiple) * $chunkMultiple)
+        if ($ChunkSizeBytes -lt $chunkMultiple) { $ChunkSizeBytes = $chunkMultiple }
+    }
+
+    $uploadUrl = [string]$session.uploadUrl
+    $lastUploadResponse = $null
+    $stream = [System.IO.File]::OpenRead($LocalFilePath)
+    try {
+        $fileSize = [int64]$stream.Length
+        $buffer = New-Object byte[] $ChunkSizeBytes
+        $offset = [int64]0
+        while ($offset -lt $fileSize) {
+            $remaining = $fileSize - $offset
+            # Select the Int64 overload before narrowing the bounded buffer read size.
+            $readSize = [int][math]::Min([int64]$ChunkSizeBytes, [int64]$remaining)
+            $bytesRead = $stream.Read($buffer, 0, $readSize)
+            if ($bytesRead -le 0) { break }
+
+            $chunk = New-Object byte[] $bytesRead
+            [System.Array]::Copy($buffer, 0, $chunk, 0, $bytesRead)
+            $rangeEnd = $offset + $bytesRead - 1
+            $uploaded = $false
+            for ($attempt = 1; -not $uploaded -and $attempt -le 4; $attempt++) {
+                $response = $null
+                $responseBody = $null
+                $statusCode = $null
+                try {
+                    $headers = @{ 'Content-Range' = ("bytes {0}-{1}/{2}" -f $offset, $rangeEnd, $fileSize) }
+                    $putParams = @{
+                        Method      = 'PUT'
+                        Uri         = $uploadUrl
+                        Headers     = $headers
+                        ContentType = 'application/octet-stream'
+                        Body        = $chunk
+                        # A silent endpoint fails the chunk instead of holding the run.
+                        TimeoutSec  = 300
+                        ErrorAction = 'Stop'
+                    }
+                    $invokeWebRequestCommand = Get-Command Invoke-WebRequest -ErrorAction Stop
+                    if ($invokeWebRequestCommand.Parameters.ContainsKey('UseBasicParsing')) {
+                        $putParams.UseBasicParsing = $true
+                    }
+                    if ($invokeWebRequestCommand.Parameters.ContainsKey('SkipHttpErrorCheck')) {
+                        $putParams.SkipHttpErrorCheck = $true
+                    }
+
+                    $response = Invoke-WebRequest @putParams
+                    $statusCode = [int]$response.StatusCode
+                    $responseBody = [string]$response.Content
+
+                    if ($statusCode -lt 200 -or $statusCode -gt 299) {
+                        throw ("SharePoint chunk upload failed. Status={0}. Body: {1}" -f $statusCode, $responseBody)
+                    }
+
+                    if (-not [string]::IsNullOrWhiteSpace($responseBody)) {
+                        try { $lastUploadResponse = $responseBody | ConvertFrom-Json -ErrorAction Stop } catch { $lastUploadResponse = $responseBody }
+                    }
+                    $uploaded = $true
+                }
+                catch {
+                    try {
+                        if ($_.Exception.Response) {
+                            $errorResponse = $_.Exception.Response
+                            if ($errorResponse -is [System.Net.Http.HttpResponseMessage]) {
+                                $statusCode = [int]$errorResponse.StatusCode
+                                if ($errorResponse.Content) {
+                                    $responseBody = $errorResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                                }
+                            }
+                            else {
+                                $statusCode = [int]$errorResponse.StatusCode
+                                $responseStream = $errorResponse.GetResponseStream()
+                                if ($responseStream) {
+                                    $reader = New-Object System.IO.StreamReader($responseStream)
+                                    try { $responseBody = $reader.ReadToEnd() } finally { $reader.Dispose() }
+                                }
+                            }
+                        }
+                    } catch {}
+                    try {
+                        if ([string]::IsNullOrWhiteSpace($responseBody) -and $_.ErrorDetails -and -not [string]::IsNullOrWhiteSpace([string]$_.ErrorDetails.Message)) {
+                            $responseBody = [string]$_.ErrorDetails.Message
+                        }
+                    } catch {}
+                    $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $_.Exception.Message -match 'timeout|temporarily unavailable|throttl' -or (Test-SmartM365SharePointReadOnlyError -ErrorRecord $_ -StatusCode $statusCode)
+                    if (-not $isTransient -or $attempt -ge 4) {
+                        $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
+                        $rangeText = "bytes {0}-{1}/{2}" -f $offset, $rangeEnd, $fileSize
+                        if (-not [string]::IsNullOrWhiteSpace($responseBody)) {
+                            throw ("SharePoint chunk upload failed. Status={0}. Range={1}. Error={2}. Body={3}" -f $statusText, $rangeText, $_.Exception.Message, $responseBody)
+                        }
+                        throw ("SharePoint chunk upload failed. Status={0}. Range={1}. Error={2}. No response body was returned." -f $statusText, $rangeText, $_.Exception.Message)
+                    }
+                    $delay = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds (10 * $attempt) -MaximumSeconds 300
+                    $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
+                    WriteLog -Message ("SharePoint chunk upload transient failure. Status={0}; attempt {1}/4; retrying in {2}s." -f $statusText, $attempt, $delay) -Level "WARNING"
+                    Start-Sleep -Seconds $delay
+                }
+                finally {
+                    if ($null -ne $response -and $response -is [System.IDisposable]) { $response.Dispose() }
+                }
+            }
+
+            $offset += $bytesRead
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+    return $lastUploadResponse
+}
+function ConvertTo-SmartM365SharePointDataRootPath {
+    [CmdletBinding()]
+    param([AllowNull()][string]$TargetFolderPath)
+
+    if ([string]::IsNullOrWhiteSpace($TargetFolderPath)) { return $TargetFolderPath }
+
+    $normalized = ([string]$TargetFolderPath -replace '\\', '/').Trim('/')
+    if ($normalized -match '^(?<Parent>.*?)(?:/)?CSV$') {
+        $parent = [string]$matches['Parent']
+        if ([string]::IsNullOrWhiteSpace($parent)) { return 'DATA' }
+        return ($parent.TrimEnd('/') + '/DATA')
+    }
+
+    return $normalized
+}
+
+function Get-SmartM365SharePointRelativeFilePath {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$LocalFilePath)
+
+    try { $normalizedPath = [System.IO.Path]::GetFullPath($LocalFilePath) }
+    catch { $normalizedPath = [string]$LocalFilePath }
+
+    $normalizedPath = $normalizedPath -replace '/', '\'
+    foreach ($rootName in @('DATA-LAST','DATA-ALL','LOG-ALL')) {
+        $match = [regex]::Match($normalizedPath, ('\\' + [regex]::Escape($rootName) + '\\'), [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if ($match.Success) {
+            $relativePath = $normalizedPath.Substring($match.Index + 1)
+            return (($relativePath -replace '\\', '/').Trim('/'))
+        }
+    }
+
+    return [System.IO.Path]::GetFileName($LocalFilePath)
+}
+
+function Add-SmartM365SharePointUploadRecord {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$LocalFilePath,
+        [Parameter(Mandatory)][string]$SharePointPath,
+        [Parameter(Mandatory)][string]$DriveId,
+        [AllowNull()]$DriveItem
+    )
+
+    $fileInfo = Get-Item -LiteralPath $LocalFilePath -ErrorAction Stop
+    $record = [pscustomobject][ordered]@{
+        LocalFilePath  = $fileInfo.FullName
+        FileName       = $fileInfo.Name
+        SharePointPath = $SharePointPath
+        WebUrl         = if ($DriveItem -and $DriveItem.webUrl) { [string]$DriveItem.webUrl } else { '' }
+        DriveId        = $DriveId
+        ItemId         = if ($DriveItem -and $DriveItem.id) { [string]$DriveItem.id } else { '' }
+        Size           = $fileInfo.Length
+        UploadedAt     = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
+    }
+
+    if (-not $global:SmartM365SharePointUploadedFiles) {
+        $global:SmartM365SharePointUploadedFiles = New-Object System.Collections.ArrayList
+    }
+    [void]$global:SmartM365SharePointUploadedFiles.Add($record)
+    return $record
+}
+
+function Invoke-SmartM365SharePointCsvUpload {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$LocalFilePath,
+        [bool]$Enabled = [bool]$global:EnableSharePointUpload,
+        [string]$SiteHostname = $global:SharePointSiteHostname,
+        [string]$SitePath = $global:SharePointSitePath,
+        [string]$LibraryDisplayName = $global:SharePointLibraryDisplayName,
+        [string]$TargetFolderPath = $global:SharePointTargetFolderPath,
+        [string]$AppId = $global:AppId,
+        [string]$TenantId = $global:TenantId,
+        [string]$Thumbprint = $(if ($global:Thumbprint) { $global:Thumbprint } else { $global:Thumb })
+    )
+
+    if (Test-SmartM365InterruptedRun) { return }; if (-not $Enabled) { return }
+    $collectorPolicies = Get-Variable -Name SmartM365CollectorUploadPolicies -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    if ($null -ne $collectorPolicies) {
+        $uploadConfig = Get-SmartM365EffectiveModuleGlobalConfig
+        $category = Get-SmartM365SharePointUploadCategory -Path $LocalFilePath -DataAllRoot $uploadConfig.DataAllRootPath -DataLastRoot $uploadConfig.LatestCsvFolderPath -LogAllRoot $uploadConfig.LogAllRootPath
+        $collectorRoots = Get-Variable -Name SmartM365CollectorUploadRoots -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+        if ($collectorRoots) {
+            $specificCategory = Get-SmartM365SharePointUploadCategory -Path $LocalFilePath -DataAllRoot $collectorRoots.DataAllRoot -DataLastRoot $collectorRoots.DataLastRoot -LogAllRoot $collectorRoots.LogAllRoot
+            if ($specificCategory) { $category = $specificCategory }
+        }
+        # Final artifacts have an explicit role even when their local paths are custom.
+        $knownLogPaths = @((Get-Variable LogTextFile -Scope Global -ValueOnly -ErrorAction SilentlyContinue), (Get-Variable logTranscriptFile -Scope Global -ValueOnly -ErrorAction SilentlyContinue))
+        $knownLogPaths += @(Get-Variable SmartM365MailHtmlFiles -Scope Global -ValueOnly -ErrorAction SilentlyContinue)
+        $knownReceipts = @(Get-Variable SmartM365SourceReceiptUploadPaths -Scope Script -ValueOnly -ErrorAction SilentlyContinue)
+        $artifactCategory = Get-SmartM365KnownUploadArtifactCategory -Path $LocalFilePath -LogPaths $knownLogPaths -ReceiptPaths $knownReceipts
+        if ($artifactCategory) { $category = $artifactCategory }
+        if ($category -and -not (Test-SmartM365CollectorUploadEnabled -Category $category -Policies $collectorPolicies -RunEnabled $Enabled)) { return }
+    }
+    if (-not (Test-Path -LiteralPath $LocalFilePath)) {
+        WriteLog -Message "SharePoint upload skipped: local file not found: $LocalFilePath" -Level "WARNING"
+        return
+    }
+    if ([string]::IsNullOrWhiteSpace($SiteHostname) -or [string]::IsNullOrWhiteSpace($SitePath) -or [string]::IsNullOrWhiteSpace($LibraryDisplayName) -or [string]::IsNullOrWhiteSpace($TargetFolderPath)) {
+        WriteLog -Message "SharePoint upload skipped: SharePointSiteHostname, SharePointSitePath, SharePointLibraryDisplayName or SharePointTargetFolderPath is missing." -Level "WARNING"
+        return
+    }
+    if (-not (Connect-SmartM365GraphForSharePointUpload -AppId $AppId -TenantId $TenantId -Thumbprint $Thumbprint)) {
+        Set-SmartM365SharePointUploadOutcome -Path $LocalFilePath -Failed
+        return
+    }
+
+    try {
+        if ($null -eq $script:SmartM365SharePointDriveIdCache) { $script:SmartM365SharePointDriveIdCache = @{} }
+
+        $driveCacheKey = '{0}|{1}|{2}' -f $SiteHostname, $SitePath, $LibraryDisplayName
+        if ($script:SmartM365SharePointDriveIdCache.ContainsKey($driveCacheKey)) {
+            $driveId = $script:SmartM365SharePointDriveIdCache[$driveCacheKey]
+        }
+        else {
+            $site = Invoke-SmartM365GraphRestWithRetry -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}:{1}" -f $SiteHostname, $SitePath) -Operation 'Resolve SharePoint site'
+            $drives = Invoke-SmartM365GraphRestWithRetry -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}/drives" -f $site.id) -Operation 'Resolve SharePoint document libraries'
+            $driveList = @($drives.value)
+            $normalize = { param($Text) if ($null -eq $Text) { '' } else { ([string]$Text).Normalize([System.Text.NormalizationForm]::FormD) -replace '\p{M}', '' } }
+            $drive = @($driveList | Where-Object { $_.name -ieq $LibraryDisplayName } | Select-Object -First 1)[0]
+            if (-not $drive) {
+                $targetNorm = & $normalize $LibraryDisplayName
+                $drive = @($driveList | Where-Object { (& $normalize $_.name) -ieq $targetNorm } | Select-Object -First 1)[0]
+            }
+            if (-not $drive) {
+                $available = ($driveList | ForEach-Object { $_.name }) -join ' | '
+                WriteLog -Message "SharePoint upload skipped: document library '$LibraryDisplayName' not found. Available drives: $available" -Level "WARNING"
+                Set-SmartM365SharePointUploadOutcome -Path $LocalFilePath -Failed
+                return
+            }
+            $driveId = $drive.id
+            $script:SmartM365SharePointDriveIdCache[$driveCacheKey] = $driveId
+        }
+
+        $fileInfo = Get-Item -LiteralPath $LocalFilePath -ErrorAction Stop
+        $targetRootPath = ConvertTo-SmartM365SharePointDataRootPath -TargetFolderPath $TargetFolderPath
+        $relativeFilePath = Get-SmartM365SharePointRelativeFilePath -LocalFilePath $fileInfo.FullName
+        $sharePointPath = (($targetRootPath.TrimEnd('/')) + '/' + $relativeFilePath.TrimStart('/'))
+        $targetPath = ConvertTo-GraphDrivePath $sharePointPath
+        $compareWeeklyManifest = $fileInfo.Name -ieq 'manifest.json.txt' -and $fileInfo.Directory.Parent -and $fileInfo.Directory.Parent.Name -ieq 'WeeklyHistory'
+        if ($fileInfo.Name.EndsWith('.json.txt', [StringComparison]::OrdinalIgnoreCase) -and (Get-SmartM365JsonTransportPolicy).Mode -eq 'JsonText') {
+            $null = Read-SmartM365JsonDocument -Path $fileInfo.FullName
+            $transition = Invoke-SmartM365SharePointJsonNameTransition -LocalFilePath $fileInfo.FullName -DriveId $driveId -EncodedTargetPath $targetPath -Request {
+                param($method,$uri,$body,$headers)
+                Invoke-SmartM365GraphRestWithRetry -Method $method -Uri $uri -Body $body -AdditionalHeaders $headers -Operation 'Transition SharePoint JSON name'
+            } -Download {
+                param($uri,$destination)
+                Invoke-MgGraphRequest -Method GET -Uri $uri -OutputFilePath $destination -ErrorAction Stop | Out-Null
+            } -CompareLocalContent:$compareWeeklyManifest
+            if ($transition.Status -ne 'NoLegacy') {
+                WriteLog -Message ("SharePoint JSON name transition: {0}; {1}" -f $transition.Status, $sharePointPath) -Level 'INFO'
+            }
+            if ($compareWeeklyManifest -and $transition.Status -eq 'NoLegacy' -and $transition.ContentMatchesLocal) {
+                return [pscustomobject]@{ SharePointPath = $sharePointPath; SkippedUnchanged = $true }
+            }
+        } elseif ($fileInfo.Extension -eq '.json' -and (Get-SmartM365JsonTransportPolicy).Mode -eq 'JsonText') {
+            throw 'Legacy JSON upload refused during JsonText deployment; the owning producer must publish its preferred file first.'
+        }
+        $largeUploadThresholdBytes = 250MB
+        $uploadedItem = $null
+
+        if ($fileInfo.Length -gt $largeUploadThresholdBytes) {
+            WriteLog -Message ("SharePoint large file upload started: {0} ({1:N1} MB)" -f $sharePointPath, ($fileInfo.Length / 1MB))
+            $uploadedItem = Invoke-SmartM365SharePointLargeFileUpload -LocalFilePath $fileInfo.FullName -DriveId $driveId -TargetPath $targetPath
+        }
+        else {
+            $bytes = [System.IO.File]::ReadAllBytes($fileInfo.FullName)
+            $uri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}:/content" -f $driveId, $targetPath
+            $uploadedItem = Invoke-SmartM365GraphRestWithRetry -Method PUT -Uri $uri -Body $bytes -ContentType 'application/octet-stream' -Operation 'Upload SharePoint file'
+        }
+
+        if (-not $uploadedItem -or (-not $uploadedItem.webUrl -and -not $uploadedItem.id)) {
+            $itemUri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}" -f $driveId, $targetPath
+            $uploadedItem = Invoke-SmartM365GraphRestWithRetry -Method GET -Uri $itemUri -Operation 'Resolve uploaded SharePoint file'
+        }
+
+        $record = Add-SmartM365SharePointUploadRecord -LocalFilePath $fileInfo.FullName -SharePointPath $sharePointPath -DriveId $driveId -DriveItem $uploadedItem
+        Set-SmartM365SharePointUploadOutcome -Path $LocalFilePath
+        if (-not [string]::IsNullOrWhiteSpace($record.WebUrl)) {
+            WriteLog -Message ("SharePoint file uploaded: {0} ({1})" -f $record.SharePointPath, $record.WebUrl) -Level "INFO"
+        }
+        else {
+            WriteLog -Message ("SharePoint file uploaded: {0}" -f $record.SharePointPath) -Level "INFO"
+        }
+        return $record
+    }
+    catch {
+        Set-SmartM365SharePointUploadOutcome -Path $LocalFilePath -Failed
+        WriteLog -Message ("SharePoint upload failed but script continues: {0}" -f $_.Exception.Message) -Level "WARNING"
+    }
+}
+function Remove-SmartM365SharePointFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$LocalFilePath,
+        [bool]$Enabled = [bool]$global:EnableSharePointUpload,
+        [string]$SiteHostname = $global:SharePointSiteHostname,
+        [string]$SitePath = $global:SharePointSitePath,
+        [string]$LibraryDisplayName = $global:SharePointLibraryDisplayName,
+        [string]$TargetFolderPath = $global:SharePointTargetFolderPath,
+        [string]$AppId = $global:AppId,
+        [string]$TenantId = $global:TenantId,
+        [string]$Thumbprint = $(if ($global:Thumbprint) { $global:Thumbprint } else { $global:Thumb })
+    )
+
+    if (-not $Enabled) { return $false }
+    if ([string]::IsNullOrWhiteSpace($SiteHostname) -or [string]::IsNullOrWhiteSpace($SitePath) -or [string]::IsNullOrWhiteSpace($LibraryDisplayName) -or [string]::IsNullOrWhiteSpace($TargetFolderPath)) {
+        WriteLog -Message "SharePoint deletion skipped: SharePointSiteHostname, SharePointSitePath, SharePointLibraryDisplayName or SharePointTargetFolderPath is missing." -Level "WARNING"
+        return $false
+    }
+    if (-not (Connect-SmartM365GraphForSharePointUpload -AppId $AppId -TenantId $TenantId -Thumbprint $Thumbprint)) {
+        return $false
+    }
+
+    try {
+        if ($null -eq $script:SmartM365SharePointDriveIdCache) { $script:SmartM365SharePointDriveIdCache = @{} }
+
+        $driveCacheKey = '{0}|{1}|{2}' -f $SiteHostname, $SitePath, $LibraryDisplayName
+        if ($script:SmartM365SharePointDriveIdCache.ContainsKey($driveCacheKey)) {
+            $driveId = $script:SmartM365SharePointDriveIdCache[$driveCacheKey]
+        }
+        else {
+            $site = Invoke-SmartM365GraphRestWithRetry -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}:{1}" -f $SiteHostname, $SitePath) -Operation 'Resolve SharePoint site for deletion'
+            $drives = Invoke-SmartM365GraphRestWithRetry -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}/drives" -f $site.id) -Operation 'Resolve SharePoint document libraries for deletion'
+            $driveList = @($drives.value)
+            $normalize = { param($Text) if ($null -eq $Text) { '' } else { ([string]$Text).Normalize([System.Text.NormalizationForm]::FormD) -replace '\p{M}', '' } }
+            $drive = @($driveList | Where-Object { $_.name -ieq $LibraryDisplayName } | Select-Object -First 1)[0]
+            if (-not $drive) {
+                $targetNorm = & $normalize $LibraryDisplayName
+                $drive = @($driveList | Where-Object { (& $normalize $_.name) -ieq $targetNorm } | Select-Object -First 1)[0]
+            }
+            if (-not $drive) {
+                $available = ($driveList | ForEach-Object { $_.name }) -join ' | '
+                throw "Document library '$LibraryDisplayName' not found. Available drives: $available"
+            }
+            $driveId = $drive.id
+            $script:SmartM365SharePointDriveIdCache[$driveCacheKey] = $driveId
+        }
+
+        $targetRootPath = ConvertTo-SmartM365SharePointDataRootPath -TargetFolderPath $TargetFolderPath
+        $relativeFilePath = Get-SmartM365SharePointRelativeFilePath -LocalFilePath $LocalFilePath
+        $sharePointPath = (($targetRootPath.TrimEnd('/')) + '/' + $relativeFilePath.TrimStart('/'))
+        $targetPath = ConvertTo-GraphDrivePath $sharePointPath
+        $uri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}" -f $driveId, $targetPath
+
+        try {
+            Invoke-SmartM365GraphRestWithRetry -Method DELETE -Uri $uri -ContentType '' -Operation 'Delete stale SharePoint file' | Out-Null
+            WriteLog -Message ("SharePoint file deleted: {0}" -f $sharePointPath) -Level "INFO"
+            return $true
+        }
+        catch {
+            if ([string]$_.Exception.Message -match 'Status=404') {
+                WriteLog -Message ("SharePoint file already absent: {0}" -f $sharePointPath) -Level "INFO"
+                return $true
+            }
+            throw
+        }
+    }
+    catch {
+        WriteLog -Message ("SharePoint deletion failed but script continues: {0}" -f $_.Exception.Message) -Level "WARNING"
+        return $false
+    }
+}
+#endregion
+
+#region SmartM365 cleanup compatibility
+function Remove-SmartM365SharePointTimestampedCsvOlderThan {
+    # Applies the server retention of run copies to SharePoint: the timestamped copies of one CSV or
+    # workbook (<prefix>_yyyyMMdd_HHmmss.csv|.xlsx, same extension, same SharePoint folder) older
+    # than RetentionDays are deleted. Latest copies and WeeklyHistory never match the pattern.
+    # Minute stamps (yyyyMMdd-HHmm) are accepted, as by the server-side timestamp retention.
+    # Failures only produce warnings.
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$TimestampedPath,
+        [ValidateRange(1, 3650)][int]$RetentionDays = 7,
+        [datetime]$ReferenceTime = (Get-Date),
+        [bool]$Enabled = [bool]$global:EnableSharePointUpload,
+        [string]$SiteHostname = $global:SharePointSiteHostname,
+        [string]$SitePath = $global:SharePointSitePath,
+        [string]$LibraryDisplayName = $global:SharePointLibraryDisplayName,
+        [string]$TargetFolderPath = $global:SharePointTargetFolderPath,
+        [string]$AppId = $global:AppId,
+        [string]$TenantId = $global:TenantId,
+        [string]$Thumbprint = $(if ($global:Thumbprint) { $global:Thumbprint } else { $global:Thumb })
+    )
+
+    $result = [pscustomobject]@{ Deleted = 0; Failed = 0; Kept = 0 }
+    if (-not $Enabled) { return $result }
+    $currentName = [IO.Path]::GetFileName($TimestampedPath)
+    $nameMatch = [regex]::Match($currentName, '^(?<Prefix>.+)_(?<Stamp>\d{8}[-_]\d{4}(?:\d{2})?)\.(?<Extension>csv|xlsx)$', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if (-not $nameMatch.Success) { return $result }
+    if ([string]::IsNullOrWhiteSpace($SiteHostname) -or [string]::IsNullOrWhiteSpace($SitePath) -or [string]::IsNullOrWhiteSpace($LibraryDisplayName) -or [string]::IsNullOrWhiteSpace($TargetFolderPath)) { return $result }
+    if (-not (Connect-SmartM365GraphForSharePointUpload -AppId $AppId -TenantId $TenantId -Thumbprint $Thumbprint)) { return $result }
+
+    try {
+        if ($null -eq $script:SmartM365SharePointDriveIdCache) { $script:SmartM365SharePointDriveIdCache = @{} }
+        $driveCacheKey = '{0}|{1}|{2}' -f $SiteHostname, $SitePath, $LibraryDisplayName
+        if ($script:SmartM365SharePointDriveIdCache.ContainsKey($driveCacheKey)) {
+            $driveId = $script:SmartM365SharePointDriveIdCache[$driveCacheKey]
+        }
+        else {
+            $site = Invoke-SmartM365GraphRestWithRetry -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}:{1}" -f $SiteHostname, $SitePath) -Operation 'Resolve SharePoint site for retention'
+            $drives = Invoke-SmartM365GraphRestWithRetry -Method GET -Uri ("https://graph.microsoft.com/v1.0/sites/{0}/drives" -f $site.id) -Operation 'Resolve SharePoint document libraries for retention'
+            $normalize = { param($Text) if ($null -eq $Text) { '' } else { ([string]$Text).Normalize([System.Text.NormalizationForm]::FormD) -replace '\p{M}', '' } }
+            $drive = @(@($drives.value) | Where-Object { $_.name -ieq $LibraryDisplayName -or (& $normalize $_.name) -ieq (& $normalize $LibraryDisplayName) } | Select-Object -First 1)
+            if ($drive.Count -eq 0) { throw "Document library '$LibraryDisplayName' not found." }
+            $driveId = $drive[0].id
+            $script:SmartM365SharePointDriveIdCache[$driveCacheKey] = $driveId
+        }
+
+        $targetRootPath = ConvertTo-SmartM365SharePointDataRootPath -TargetFolderPath $TargetFolderPath
+        $relativeFilePath = Get-SmartM365SharePointRelativeFilePath -LocalFilePath $TimestampedPath
+        $sharePointPath = (($targetRootPath.TrimEnd('/')) + '/' + $relativeFilePath.TrimStart('/'))
+        $folderPath = $sharePointPath.Substring(0, $sharePointPath.LastIndexOf('/'))
+        $pattern = '^' + [regex]::Escape($nameMatch.Groups['Prefix'].Value) + '_(?<Stamp>\d{8}[-_]\d{4}(?:\d{2})?)\.' + [regex]::Escape($nameMatch.Groups['Extension'].Value) + '$'
+        $cutoff = $ReferenceTime.AddDays(-$RetentionDays)
+        $formats = [string[]]@('yyyyMMdd_HHmmss', 'yyyyMMdd-HHmmss', 'yyyyMMdd_HHmm', 'yyyyMMdd-HHmm')
+        $expired = New-Object System.Collections.ArrayList
+        $uri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}:/children?`$select=id,name,file&`$top=999" -f $driveId, (ConvertTo-GraphDrivePath $folderPath)
+        while (-not [string]::IsNullOrWhiteSpace($uri)) {
+            $page = Invoke-SmartM365GraphRestWithRetry -Method GET -Uri $uri -Operation 'List SharePoint timestamped CSV copies'
+            foreach ($item in @($page.value)) {
+                if ($null -eq $item -or -not $item.PSObject.Properties['file'] -or $null -eq $item.file) { continue }
+                $itemName = [string]$item.name
+                $itemMatch = [regex]::Match($itemName, $pattern, [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+                if (-not $itemMatch.Success -or $itemName -ieq $currentName) { continue }
+                $stamp = [datetime]::MinValue
+                if (-not [datetime]::TryParseExact($itemMatch.Groups['Stamp'].Value, $formats, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$stamp)) { continue }
+                if ($stamp -lt $cutoff) { [void]$expired.Add($item) } else { $result.Kept++ }
+            }
+            $nextLink = $page.PSObject.Properties['@odata.nextLink']
+            $uri = if ($null -ne $nextLink) { [string]$nextLink.Value } else { '' }
+        }
+
+        foreach ($item in $expired) {
+            if (-not $PSCmdlet.ShouldProcess(($folderPath + '/' + $item.name), 'Delete expired SharePoint timestamped CSV')) { continue }
+            $itemUri = "https://graph.microsoft.com/v1.0/drives/{0}/items/{1}" -f $driveId, $item.id
+            try {
+                Invoke-SmartM365GraphRestWithRetry -Method DELETE -Uri $itemUri -ContentType '' -Operation 'Delete expired SharePoint timestamped CSV' | Out-Null
+                $deleteResult = [pscustomobject]@{ Success = $true; Message = '' }
+            }
+            catch {
+                $deleteResult = [pscustomobject]@{ Success = ([string]$_.Exception.Message -match 'Status=404'); Message = [string]$_.Exception.Message }
+            }
+            if ($deleteResult.Success) { $result.Deleted++ }
+            else {
+                $result.Failed++
+                WriteLog -Message ("SharePoint retention could not delete {0}/{1}: {2}" -f $folderPath, $item.name, $deleteResult.Message) -Level 'WARNING'
+            }
+        }
+        if ($expired.Count -gt 0) {
+            WriteLog -Message ("SharePoint retention for {0}_*.$($nameMatch.Groups['Extension'].Value) in {1}: {2} copy(ies) older than {3} days deleted, {4} failed, {5} recent kept." -f $nameMatch.Groups['Prefix'].Value, $folderPath, $result.Deleted, $RetentionDays, $result.Failed, $result.Kept) -Level 'INFO'
+        }
+    }
+    catch {
+        $result.Failed++
+        WriteLog -Message ("SharePoint retention skipped for {0}: {1}" -f $currentName, $_.Exception.Message) -Level 'WARNING'
+    }
+    return $result
+}
+function Remove-OldFiles {
+    param (
+        [string]$Path,
+        [string]$Filter = "*.log",
+        [int]$KeepCount = 10,
+        [string[]]$ExcludeFiles = @(),
+        [string]$LogFile
+    )
+
+    try {
+        $files = Get-ChildItem -Path $Path -Filter $Filter | Sort-Object LastWriteTime -Descending
+        $filesToDelete = $files | Where-Object { $ExcludeFiles -notcontains $_.FullName } | Select-Object -Skip $KeepCount
+
+        foreach ($file in $filesToDelete) {
+            Remove-Item $file.FullName -Force
+            "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Deleted old file: $($file.Name)" | Tee-Object -FilePath $LogFile -Append
+        }
+    }
+    catch {
+        "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Error during cleanup: $($_.Exception.Message)" | Tee-Object -FilePath $LogFile -Append
+    }
+}
+
+function Set-SmartM365CoreContext {
+    [CmdletBinding()]
+    param(
+        [string]$RunId,
+        [string]$RunOutputRoot,
+        [string]$LatestOutputRoot,
+        [string]$LogPath,
+        [string]$TenantKey = $global:SmartM365TenantKey,
+        [string]$OrganizationKey = $global:SmartM365OrganizationKey,
+        [string]$EnvironmentKey = $global:SmartM365EnvironmentKey,
+        [string]$TenantId = $global:SmartM365TenantId,
+        [int]$RetentionMaxCsv = 30,
+        [int]$RetentionMaxLogs = 30
+    )
+
+    $script:SmartM365CoreRunId = $RunId
+    $script:SmartM365CoreRunOutputRoot = $RunOutputRoot
+    $script:SmartM365CoreLatestOutputRoot = $LatestOutputRoot
+    $script:SmartM365CoreLogPath = $LogPath
+    $script:SmartM365CoreTenantKey = $TenantKey
+    $script:SmartM365CoreOrganizationKey = $OrganizationKey
+    $script:SmartM365CoreEnvironmentKey = $EnvironmentKey
+    $script:SmartM365CoreTenantId = $TenantId
+    $script:SmartM365CoreRetentionMaxCsv = $RetentionMaxCsv
+    $script:SmartM365CoreRetentionMaxLogs = $RetentionMaxLogs
+    if (-not [string]::IsNullOrWhiteSpace($LogPath)) { $global:LogTextFile = $LogPath }
+}
+
+function Get-SmartM365CoreContextValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [AllowNull()]$DefaultValue = $null
+    )
+
+    $variableName = "SmartM365Core$Name"
+    $variable = Get-Variable -Name $variableName -Scope Script -ErrorAction SilentlyContinue
+    if ($null -ne $variable -and $null -ne $variable.Value) {
+        return $variable.Value
+    }
+
+    return $DefaultValue
+}
+function Get-SmartM365CsvValidationBaseName {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    $name = [System.IO.Path]::GetFileNameWithoutExtension($Path)
+    if ([string]::IsNullOrWhiteSpace($name)) { return '' }
+    $baseName = ($name -replace '_\d{8}[-_]\d{6}$', '')
+    $baseName = ($baseName -replace '_MAXITEMS-\d+$', '')
+    return $baseName
+}
+
+function Get-SmartM365CsvValidationRule {
+    [CmdletBinding()]
+    param([string]$BaseFileName,[string]$TimestampedPath,[string]$LatestPath)
+    $rules = $global:SmartM365CsvValidationRules
+    if ($null -eq $rules -or -not ($rules -is [hashtable])) { return $null }
+    $candidateKeys = New-Object System.Collections.Generic.List[string]
+    foreach ($candidate in @($BaseFileName, $LatestPath, $TimestampedPath)) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        [void]$candidateKeys.Add($candidate)
+        [void]$candidateKeys.Add((Split-Path -Path $candidate -Leaf))
+        $base = Get-SmartM365CsvValidationBaseName -Path $candidate
+        [void]$candidateKeys.Add($base)
+        if (-not [string]::IsNullOrWhiteSpace($base)) {
+            [void]$candidateKeys.Add(($base + '.csv'))
+            foreach ($normalizedBase in @(
+                ($base -replace '_PARTIAL$', ''),
+                ($base -replace '_top100$', ''),
+                (($base -replace '_top100$', '') -replace '_PARTIAL$', '')
+            )) {
+                if (-not [string]::IsNullOrWhiteSpace($normalizedBase)) {
+                    [void]$candidateKeys.Add($normalizedBase)
+                    [void]$candidateKeys.Add(($normalizedBase + '.csv'))
+                }
+            }
+        }
+    }
+    foreach ($key in @($candidateKeys | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+        if ($rules.ContainsKey($key)) { return $rules[$key] }
+    }
+    return $null
+}
+
+function Assert-SmartM365CsvDataCompleteness {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object[]]$Data,
+        [string[]]$Columns = @(),
+        [string]$BaseFileName,
+        [string]$TimestampedPath,
+        [string]$LatestPath
+    )
+
+    $rule = Get-SmartM365CsvValidationRule -BaseFileName $BaseFileName -TimestampedPath $TimestampedPath -LatestPath $LatestPath
+    if ($null -eq $rule) {
+        if ($global:SmartM365RequireCsvValidationRules) {
+            $name = if (-not [string]::IsNullOrWhiteSpace($BaseFileName)) { $BaseFileName } elseif (-not [string]::IsNullOrWhiteSpace($LatestPath)) { Get-SmartM365CsvValidationBaseName -Path $LatestPath } else { Get-SmartM365CsvValidationBaseName -Path $TimestampedPath }
+            throw ("CSV validation rule is missing for '{0}'. DATA-LAST publication is blocked." -f $name)
+        }
+        return
+    }
+
+    $rows = @($Data)
+    $displayName = if ($rule.ContainsKey('Name') -and -not [string]::IsNullOrWhiteSpace([string]$rule.Name)) { [string]$rule.Name } elseif (-not [string]::IsNullOrWhiteSpace($BaseFileName)) { $BaseFileName } elseif (-not [string]::IsNullOrWhiteSpace($LatestPath)) { Get-SmartM365CsvValidationBaseName -Path $LatestPath } else { Get-SmartM365CsvValidationBaseName -Path $TimestampedPath }
+    $allowEmptyDataset = ($rule.ContainsKey('AllowEmptyDataset') -and [bool]$rule.AllowEmptyDataset)
+    $criticalFields = @($rule.CriticalFields | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    $requiredColumns = @($rule.RequiredColumns | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    $expectedRowCount = $null
+    if ($rule.ContainsKey('ExpectedRowCount') -and $null -ne $rule.ExpectedRowCount -and [string]$rule.ExpectedRowCount -ne '') {
+        $expectedRowCount = [int]$rule.ExpectedRowCount
+    }
+    $criticalMissingFailMinRows = 50
+    if ($rule.ContainsKey('CriticalMissingFailMinRows') -and $null -ne $rule.CriticalMissingFailMinRows -and [string]$rule.CriticalMissingFailMinRows -ne '') {
+        $criticalMissingFailMinRows = [int]$rule.CriticalMissingFailMinRows
+    }
+    $criticalMissingFailPercent = 0.5
+    if ($rule.ContainsKey('CriticalMissingFailPercent') -and $null -ne $rule.CriticalMissingFailPercent -and [string]$rule.CriticalMissingFailPercent -ne '') {
+        $criticalMissingFailPercent = [double]$rule.CriticalMissingFailPercent
+    }
+
+    if ($rows.Count -eq 0 -and -not $allowEmptyDataset) {
+        throw ("CSV '{0}' has 0 rows while this dataset is not declared as empty-capable. DATA-LAST publication is blocked." -f $displayName)
+    }
+
+    if ($null -ne $expectedRowCount -and $rows.Count -ne $expectedRowCount) {
+        throw ("CSV '{0}' row count mismatch. Expected {1}, got {2}. DATA-LAST publication is blocked." -f $displayName, $expectedRowCount, $rows.Count)
+    }
+
+    $availableColumns = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($column in @($Columns)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$column)) { [void]$availableColumns.Add([string]$column) }
+    }
+    foreach ($row in @($rows | Select-Object -First 1)) {
+        foreach ($property in @($row.PSObject.Properties.Name)) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$property)) { [void]$availableColumns.Add([string]$property) }
+        }
+    }
+
+    foreach ($column in @($requiredColumns + $criticalFields | Select-Object -Unique)) {
+        if (-not $availableColumns.Contains([string]$column)) {
+            throw ("CSV '{0}' is missing required column '{1}'. DATA-LAST publication is blocked." -f $displayName, $column)
+        }
+    }
+
+    $missingExamples = New-Object System.Collections.Generic.List[string]
+    $missingCriticalRows = 0
+    $rowNumber = 1
+    $thresholdReached = $false
+    foreach ($row in $rows) {
+        $rowHasMissingCriticalField = $false
+        foreach ($field in $criticalFields) {
+            $property = $row.PSObject.Properties[$field]
+            $value = if ($null -ne $property) { $property.Value } else { $null }
+            if ($null -eq $value -or [string]::IsNullOrWhiteSpace([string]$value)) {
+                $rowHasMissingCriticalField = $true
+                if ($missingExamples.Count -lt 10) { [void]$missingExamples.Add(("row {0}, field {1}" -f $rowNumber, $field)) }
+            }
+        }
+        if ($rowHasMissingCriticalField) {
+            $missingCriticalRows++
+            $currentPercent = if ($rows.Count -gt 0) { [math]::Round((100.0 * $missingCriticalRows / $rows.Count), 4) } else { 0 }
+            $rowThresholdHit = ($criticalMissingFailMinRows -gt 0 -and $missingCriticalRows -ge $criticalMissingFailMinRows)
+            $percentThresholdHit = ($criticalMissingFailPercent -gt 0 -and $currentPercent -ge $criticalMissingFailPercent)
+            if ($rowThresholdHit -or $percentThresholdHit) { $thresholdReached = $true; break }
+        }
+        $rowNumber++
+    }
+
+    if ($missingCriticalRows -gt 0) {
+        $missingPercent = if ($rows.Count -gt 0) { [math]::Round((100.0 * $missingCriticalRows / $rows.Count), 4) } else { 0 }
+        $exampleText = ($missingExamples -join '; ')
+        $thresholdText = ("fail thresholds: rows>={0}, percent>={1}%" -f $criticalMissingFailMinRows, $criticalMissingFailPercent)
+        if ($thresholdReached) {
+            throw ("CSV '{0}' has empty critical business fields in at least {1}/{2} row(s), {3}%. {4}. Examples: {5}. DATA-LAST publication is blocked." -f $displayName, $missingCriticalRows, $rows.Count, $missingPercent, $thresholdText, $exampleText)
+        }
+        WriteLog -Message ("CSV validation warning for '{0}': empty critical business fields in {1}/{2} row(s), {3}%. {4}. Examples: {5}. DATA-LAST publication continues." -f $displayName, $missingCriticalRows, $rows.Count, $missingPercent, $thresholdText, $exampleText) -Level 'WARNING'
+        return
+    }
+
+    WriteLog -Message ("CSV validation passed for '{0}'. Rows: {1}; CriticalFields: {2}" -f $displayName, $rows.Count, ($criticalFields -join ', '))
+}
+function Add-SmartM365CsvValidationRule {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][hashtable]$Rules,
+        [Parameter(Mandatory)][string]$BaseFileName,
+        [Parameter(Mandatory)][string[]]$CriticalFields,
+        [string[]]$RequiredColumns = @(),
+        [switch]$AllowEmptyDataset,
+        [string]$Name = '',
+        [int]$CriticalMissingFailMinRows = 50,
+        [double]$CriticalMissingFailPercent = 0.5
+    )
+
+    $ruleName = if ([string]::IsNullOrWhiteSpace($Name)) { $BaseFileName } else { $Name }
+    $Rules[$BaseFileName] = @{
+        Name                       = $ruleName
+        CriticalFields             = @($CriticalFields)
+        RequiredColumns            = @($RequiredColumns)
+        AllowEmptyDataset          = [bool]$AllowEmptyDataset
+        CriticalMissingFailMinRows = [int]$CriticalMissingFailMinRows
+        CriticalMissingFailPercent = [double]$CriticalMissingFailPercent
+    }
+}
+function Initialize-SmartM365DefaultCsvValidationRules {
+    [CmdletBinding()]
+    param()
+
+    if ($global:SmartM365CsvValidationRules -isnot [hashtable]) {
+        $global:SmartM365CsvValidationRules = @{}
+    }
+
+    $rules = $global:SmartM365CsvValidationRules
+    $add = { param($Base,$Fields,$AllowEmpty) Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName $Base -CriticalFields $Fields -AllowEmptyDataset:$AllowEmpty }
+
+    & $add 'AD_HealthCheck' @('Forest','Domain','Category','Check','Status') $false
+    & $add 'AD_Inventory_DailySummary' @('SnapshotDate','GeneratedAt') $false
+    & $add 'AD_Users_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $true
+    & $add 'AD_Computers_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $true
+    & $add 'AD_Groups_AllDomains' @('DomainName','SamAccountName','DistinguishedName','ObjectGUID') $true
+    & $add 'AD_OUs_AllDomains' @('DomainName','Name','DistinguishedName') $true
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'AD_Contacts_AllDomains' -CriticalFields @('DomainName','ObjectGUID') -RequiredColumns @('ObjectType','Name','DistinguishedName','DisplayName','ProxyAddresses','Mail') -AllowEmptyDataset
+    & $add 'AD_Users_DailyStats' @('Date','DomainName') $false
+    & $add 'AD_Computers_DailyStats' @('Date','DomainName') $false
+    & $add 'AD_Users_DuplicateUPN' @('UserPrincipalName','SamAccountName','DistinguishedName') $true
+    & $add 'AD_Users_DuplicateSMTP' @('SmtpAddress','UserPrincipalName','SamAccountName','DistinguishedName') $true
+    & $add 'AD_Users_DuplicateRemoteRoutingAddress' @('NormalizedRemoteRoutingAddress','UserPrincipalName','SamAccountName','DistinguishedName') $true
+    & $add 'AD_Users_RemoteRoutingIssues' @('IssueType','ExpectedRemoteRoutingDomain','UserPrincipalName','SamAccountName','DistinguishedName') $true
+
+    & $add 'Exchange_EXO_AcceptedDomains' @('Name','DomainName','DomainType') $false
+    & $add 'Exchange_EXO_Mailboxes_AllDomains' @('UserPrincipalName','PrimarySmtpAddress','MailboxGuid') $false
+    & $add 'Exchange_EXO_Mailboxes_AllDomains_Archive' @('UserPrincipalName','PrimarySmtpAddress') $false
+    & $add 'Exchange_EXO_Mailboxes_AllDomains_Stats' @('UserPrincipalName','PrimarySmtpAddress','TotalItemSizeGB','ItemCount') $false
+    & $add 'Exchange_EXO_Mailboxes_AllDomains_Permissions' @('UserPrincipalName','PrimarySmtpAddress') $false
+    & $add 'Exchange_EXO_MailboxCalendarPermissions_AllDomains' @('Mailbox','User','AccessRights') $false
+    & $add 'Exchange_EXO_MailboxCalendarPermissions_Errors' @('Index','Message') $true
+    & $add 'Exchange_OnPrem_MailboxCalendarPermissions_AllDomains' @('Mailbox','User','AccessRights') $false
+    & $add 'Exchange_OnPrem_MailboxCalendarPermissions_Errors' @('Index','Message') $true
+    & $add 'Exchange_EXO_MigrationJobs' @('BatchName','BatchStatus') $true
+    & $add 'Exchange_Mailboxes_AllSources_PermissionsByUser' @('ResolvedUser','PrimarySMTPaddress','Source') $true
+    & $add 'M365_Backup_ProtectedMailboxes' @('ProtectionUnitId','Status') $true
+
+    & $add 'Exchange_OnPrem_Mailboxes_AllDomains' @('DomainName','SamAccountName','PrimarySMTPaddress','ObjectGUID') $false
+    & $add 'Exchange_OnPrem_Mailboxes_AllDomains_OnlyADPermission' @('DomainName','SamAccountName','PrimarySMTPaddress','ObjectGUID') $false
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Exchange_OnPrem_RemoteMailboxes_AllDomains' -CriticalFields @('ObjectGuid') -RequiredColumns @('DomainName','SamAccountName','PrimarySmtpAddress','RecipientTypeDetails','CollectedAtUtc') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
+    & $add 'Exchange_OnPrem_Mailboxes_DailyStats' @('Date','DomainName') $false
+    & $add 'Exchange_OnPrem_Mailboxes_DailyStats_Summary' @('DomainName','TotalMailboxCount') $false
+    & $add 'Exchange_OnPrem_MailboxCollectionIssues' @('IssueIndex','Category','Operation','Message') $true
+    & $add 'Exchange_OnPrem_ProxyAddresses_Check' @('Identity','PrimaryAddress','ExpectedAddress','Status') $false
+    & $add 'Exchange_OnPrem_ProxyAddresses_Summary' @('Summary','Count') $false
+    & $add 'Exchange_OnPrem_Servers_Inventory' @('Name','Fqdn','ServerRole') $false
+    & $add 'Exchange_OnPrem_Servers_Inventory_Summary' @('ScriptName','RunId','ExchangeServersCount') $false
+    & $add 'Exchange_OnPrem_Servers_RemoteAccess' @('ExchangeServerName','ComputerNameTried') $false
+    & $add 'Exchange_OnPrem_Servers_Compute' @('ExchangeServerName','ComputerNameTried','CollectionStatus') $false
+    & $add 'Exchange_OnPrem_Servers_LogicalDisks' @('ExchangeServerName','ComputerNameTried','DeviceId','CollectionStatus') $false
+    & $add 'Exchange_OnPrem_Servers_DiskDrives' @('ExchangeServerName','ComputerNameTried','Index','CollectionStatus') $false
+    & $add 'Exchange_OnPrem_Infrastructure_PerServerSummary' @('ExchangeServerName','ServerRole') $false
+    & $add 'Exchange_OnPrem_MigrationReadiness_Config' @('Category','ObjectName','Setting','CollectionStatus') $false
+
+    & $add 'M365_Users_Active' @('User principal name','Object Id','AccountEnabled') $false
+    & $add 'M365_Users_Activity' @('RunId','UserPrincipalName','ReportRefreshDate') $false
+    & $add 'M365_Mailbox_Usage' @('RunId','User Principal Name','Report Refresh Date') $false
+    & $add 'M365_OneDrive_Usage' @('RunId','Site Id','Report Refresh Date') $false
+    & $add 'M365_SharePoint_SiteUsage' @('RunId','Site Id','Report Refresh Date') $false
+    & $add 'M365_Apps_Activations' @('RunId','User Principal Name','Report Refresh Date') $false
+    & $add 'M365_Teams_UserActivity' @('RunId','User Principal Name','Report Refresh Date') $false
+    & $add 'M365_Email_Activity' @('RunId','User Principal Name','Report Refresh Date') $false
+    & $add 'M365_Entra_VerifiedDomains' @('Id','IsVerified') $false
+    & $add 'M365_Entra_AzureADConnect_SyncHealth' @('CheckName','Status','ExportDateTime','RunId') $false
+
+    & $add 'M365_Licenses_Users' @('Id','User principal name','UserId','SkuId','SkuPartNumber') $false
+    & $add 'M365_Licenses_ServicePlans' @('Id','User principal name','SkuId','PlanId','PlanName') $false
+    & $add 'M365_Licenses_UserServicePlanStates' @('TenantKey','UserId','SkuId','PlanId','StateCode') $false
+    & $add 'M365_Licenses_ServicePlans_Catalog' @('SkuId','SkuPartNumber','PlanId','PlanName') $false
+    & $add 'M365_Licenses_Tenant' @('Id','TenantSkuPartNumber') $false
+    & $add 'M365_Licenses_Groups' @('Id','GroupId','GroupDisplayName') $true
+
+    & $add 'M365_Entra_Devices' @('ObjectId','DeviceId','DisplayName') $false
+    & $add 'M365_Entra_Devices_RegisteredPending' @('ObjectId','DeviceId','DisplayName') $true
+    & $add 'M365_Entra_Devices_HardwareIdConflicts' @('HardwareId','DeviceCount') $true
+    & $add 'M365_Entra_Devices_HardwareIdConflicts_RegisteredPending' @('HardwareId','ObjectId','DeviceId') $true
+    & $add 'M365_Entra_Devices_RemovalCandidates' @('HardwareId','CandidateObjectId','PrimaryObjectId','Reason') $true
+
+    & $add 'Intune_Devices_Inventory' @('Device ID','Device name','Azure AD Device ID') $false
+    & $add 'Intune_Devices_Compliance' @('DeviceName') $false
+    & $add 'Intune_Devices_BIOS' @('ManagedDeviceId','DeviceName','AzureADDeviceId') $false
+    & $add 'Intune_Devices_LocalSystem' @('DeviceName','DeviceId','AzureADDeviceId') $false
+    & $add 'Intune_Autopilot_Devices' @('Autopilot ID','Serial number') $false
+    & $add 'Intune_Devices_UpgradeEligibility_Summary' @('ReportType','ExportDateTime') $false
+    & $add 'Intune_Devices_UpgradeEligibility_DuplicatesByName' @('DuplicateKey','DuplicateCount','NormalizedDeviceName','ExportDateTime') $true
+    & $add 'Intune_Devices_Win11Readiness' @('DeviceName','GraphId','RunId') $false
+    & $add 'Intune_WindowsUpdate_Status' @('PolicyId','DeviceId','DeviceName','AggregateState') $false
+    & $add 'Intune_AutopatchAlerts_Detail' @('AlertName','Severity','SourceReport') $true
+    & $add 'Intune_AutopatchAlerts_Summary' @('AlertName','Severity','SourceReport') $true
+    & $add 'Intune_AutopatchAlerts_PolicySummary' @('PolicyId','PolicyName') $true
+    & $add 'Intune_DiscoveredApps_Summary' @('AppId','AppName','Platform') $false
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Intune_DiscoveredApps_AppDeviceRelations' -CriticalFields @('AppId','DeviceId') -RequiredColumns @('TenantKey') -AllowEmptyDataset
+    & $add 'Intune_RBAC_GroupMembers' @('Country','IntuneRole','GroupName','GroupFound') $false
+
+    & $add 'M365_SPO_Sites' @('RunId','SiteUrl','Status') $false
+    & $add 'M365_SPO_Lists' @('RunId','SiteUrl','ListId','Status') $true
+    & $add 'M365_SPO_Permissions' @('RunId','SiteUrl','Status') $true
+    & $add 'M365_SPO_ExternalSharing' @('RunId','SiteUrl','SharingSignal','Status') $true
+    & $add 'M365_Teams_Teams' @('RunId','TeamId','TeamDisplayName','Status') $true
+    & $add 'M365_Teams_Members' @('RunId','TeamId','UserId','Role','Status') $true
+    & $add 'M365_Teams_Guests' @('RunId','TeamId','UserId','Status') $true
+    & $add 'M365_Teams_Channels' @('RunId','TeamId','ChannelId','ChannelDisplayName','Status') $true
+
+    WriteLog -Message ("SmartM365 CSV validation rules loaded: {0}" -f $rules.Count) -Level 'INFO'
+}
+function Add-SmartM365TenantKeyToCsvData {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object[]]$Data,
+        [string[]]$Columns = @(),
+        [string]$TenantKey = [string](Get-SmartM365CoreContextValue -Name 'TenantKey' -DefaultValue $global:SmartM365TenantKey),
+        [string]$OrganizationKey = [string](Get-SmartM365CoreContextValue -Name 'OrganizationKey' -DefaultValue $global:SmartM365OrganizationKey),
+        [string]$EnvironmentKey = [string](Get-SmartM365CoreContextValue -Name 'EnvironmentKey' -DefaultValue $global:SmartM365EnvironmentKey),
+        [string]$TenantId = [string](Get-SmartM365CoreContextValue -Name 'TenantId' -DefaultValue $global:SmartM365TenantId)
+    )
+
+    $identityValues = [ordered]@{
+        TenantKey      = $TenantKey
+        OrganizationKey = $OrganizationKey
+        EnvironmentKey = $EnvironmentKey
+        TenantId        = $TenantId
+    }
+    foreach ($identityName in @($identityValues.Keys)) {
+        foreach ($row in @($Data)) {
+            if ($null -eq $row) { continue }
+            $rowIdentity = $null
+            if ($row -is [System.Collections.IDictionary]) {
+                foreach ($key in $row.Keys) {
+                    if ([string]$key -ieq $identityName) { $rowIdentity = $row[$key]; break }
+                }
+            }
+            else {
+                $property = $row.PSObject.Properties[$identityName]
+                if ($null -ne $property) { $rowIdentity = $property.Value }
+            }
+            if ([string]::IsNullOrWhiteSpace([string]$rowIdentity)) { continue }
+            if ([string]::IsNullOrWhiteSpace([string]$identityValues[$identityName])) {
+                $identityValues[$identityName] = [string]$rowIdentity
+            }
+            elseif ([string]$rowIdentity -ine [string]$identityValues[$identityName]) {
+                throw "CSV identity conflict in '$identityName'. Publication is blocked; source rows must match the active context and each other."
+            }
+        }
+    }
+    foreach ($requiredIdentityName in @('TenantKey', 'OrganizationKey', 'EnvironmentKey')) {
+        if ([string]::IsNullOrWhiteSpace([string]$identityValues[$requiredIdentityName])) {
+            throw "$requiredIdentityName is required for SmartM365 CSV exports. Initialize the tenant context or use -NoTenantKey for an intentionally identity-neutral export."
+        }
+    }
+
+    $identityColumns = @('TenantKey', 'OrganizationKey', 'EnvironmentKey', 'TenantId')
+    $tenantData = @(
+        foreach ($row in @($Data)) {
+            if ($null -eq $row) { continue }
+            $values = [ordered]@{}
+            foreach ($identityName in $identityColumns) { $values[$identityName] = [string]$identityValues[$identityName] }
+            if ($row -is [System.Collections.IDictionary]) {
+                foreach ($key in $row.Keys) {
+                    $name = [string]$key
+                    if ($identityColumns -icontains $name -or $values.Contains($name)) { continue }
+                    $values[$name] = $row[$key]
+                }
+            }
+            else {
+                foreach ($property in $row.PSObject.Properties) {
+                    if ($identityColumns -icontains $property.Name -or $values.Contains($property.Name)) { continue }
+                    $values[$property.Name] = $property.Value
+                }
+            }
+            [pscustomobject]$values
+        }
+    )
+
+    $tenantColumns = if (@($Columns).Count -gt 0 -or @($tenantData).Count -eq 0) {
+        @($identityColumns) + @($Columns | Where-Object { $identityColumns -inotcontains $_ })
+    }
+    else { @() }
+
+    return [pscustomobject]@{
+        Data            = $tenantData
+        Columns         = $tenantColumns
+        TenantKey       = [string]$identityValues.TenantKey
+        OrganizationKey = [string]$identityValues.OrganizationKey
+        EnvironmentKey  = [string]$identityValues.EnvironmentKey
+        TenantId        = [string]$identityValues.TenantId
+        WasApplied      = $true
+    }
+}
+function Add-SmartM365TenantKey {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, ValueFromPipeline)][AllowNull()]$InputObject,
+        [string]$TenantKey = [string](Get-SmartM365CoreContextValue -Name 'TenantKey' -DefaultValue $global:SmartM365TenantKey),
+        [string]$OrganizationKey = [string](Get-SmartM365CoreContextValue -Name 'OrganizationKey' -DefaultValue $global:SmartM365OrganizationKey),
+        [string]$EnvironmentKey = [string](Get-SmartM365CoreContextValue -Name 'EnvironmentKey' -DefaultValue $global:SmartM365EnvironmentKey),
+        [string]$TenantId = [string](Get-SmartM365CoreContextValue -Name 'TenantId' -DefaultValue $global:SmartM365TenantId)
+    )
+
+    process {
+        if ($null -eq $InputObject) { return }
+        $tenantCsv = Add-SmartM365TenantKeyToCsvData -Data @($InputObject) -TenantKey $TenantKey -OrganizationKey $OrganizationKey -EnvironmentKey $EnvironmentKey -TenantId $TenantId
+        foreach ($row in @($tenantCsv.Data)) { Write-Output $row }
+    }
+}
+function Repair-SmartM365CsvTenantKeySchema {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [char]$Delimiter = ',',
+        [ValidateSet("ASCII", "BigEndianUnicode", "Default", "OEM", "Unicode", "UTF7", "UTF8", "UTF32")]
+        [string]$Encoding = 'UTF8'
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    $header = [string](Get-Content -LiteralPath $Path -TotalCount 1 -ErrorAction Stop)
+    if ([string]::IsNullOrWhiteSpace($header)) { return $false }
+    $d = [regex]::Escape([string]$Delimiter)
+    $identityHeaderPattern = '^\s*"?TenantKey"?\s*' + $d + '\s*"?OrganizationKey"?\s*' + $d + '\s*"?EnvironmentKey"?\s*' + $d + '\s*"?TenantId"?(\s*' + $d + '|\s*$)'
+    if ($header -match $identityHeaderPattern) { return $false }
+
+    foreach ($requiredIdentityName in @('TenantKey', 'OrganizationKey', 'EnvironmentKey')) {
+        $value = [string](Get-SmartM365CoreContextValue -Name $requiredIdentityName -DefaultValue (Get-Variable -Name ("SmartM365{0}" -f $requiredIdentityName) -Scope Global -ValueOnly -ErrorAction SilentlyContinue))
+        if ([string]::IsNullOrWhiteSpace($value)) { throw "Cannot migrate CSV '$Path': $requiredIdentityName is missing from the active context." }
+    }
+
+    $rows = @(Import-Csv -LiteralPath $Path -Delimiter $Delimiter)
+    if ($rows.Count -gt 0) {
+        $columns = @($rows[0].PSObject.Properties.Name)
+        Write-SmartM365CsvAtomically -Data $rows -Path $Path -Columns $columns -Encoding $Encoding -Delimiter ([string]$Delimiter)
+    }
+    else {
+        $parent = Split-Path -Path $Path -Parent
+        if ([string]::IsNullOrWhiteSpace($parent)) { $parent = (Get-Location).Path }
+        $tempPath = [IO.Path]::Combine($parent, ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.tmp'))
+        try {
+            $separatorCount = ([regex]::Matches($header, $d)).Count
+            $fakeRow = (@('x') * ($separatorCount + 1)) -join ([string]$Delimiter)
+            $probe = @(@($header, $fakeRow) | ConvertFrom-Csv -Delimiter $Delimiter)
+            $existingColumns = if ($probe.Count -gt 0) { @($probe[0].PSObject.Properties.Name) } else { @($header.Trim('"')) }
+            $identityColumns = @('TenantKey', 'OrganizationKey', 'EnvironmentKey', 'TenantId')
+            $newColumns = @($identityColumns) + @($existingColumns | Where-Object { $identityColumns -inotcontains $_ })
+            $newHeader = ($newColumns | ForEach-Object { '"' + ($_ -replace '"', '""') + '"' }) -join ([string]$Delimiter)
+            Set-Content -LiteralPath $tempPath -Value $newHeader -Encoding $Encoding -ErrorAction Stop
+            Start-SmartM365SourcePublication -Path $Path
+            Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
+            Register-SmartM365SourceCsv -Path $Path
+        }
+        finally { if (Test-Path -LiteralPath $tempPath) { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue } }
+    }
+
+    Write-Verbose ("Migrated CSV to SmartM365 identity-first schema: {0}" -f $Path)
+    return $true
+}
+function Write-SmartM365CsvAtomically {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object[]]$Data,
+        [Parameter(Mandatory)][string]$Path,
+        [string[]]$Columns = @(),
+        [ValidateSet("ASCII", "BigEndianUnicode", "Default", "OEM", "Unicode", "UTF7", "UTF8", "UTF32")]
+        [string]$Encoding = "UTF8",
+        [string]$Delimiter = ",",
+        [switch]$NoTypeInformation = $true,
+        [switch]$NoTenantKey
+    )
+
+    if (-not $NoTenantKey) {
+        $tenantCsv = Add-SmartM365TenantKeyToCsvData -Data $Data -Columns $Columns
+        $Data = @($tenantCsv.Data)
+        $Columns = @($tenantCsv.Columns)
+    }
+
+    Assert-SmartM365CsvDataCompleteness -Data $Data -Columns $Columns -TimestampedPath $Path -LatestPath $Path
+
+    $parent = Split-Path -Path $Path -Parent
+    if ([string]::IsNullOrWhiteSpace($parent)) { $parent = (Get-Location).Path }
+    if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path -LiteralPath $parent)) {
+        New-Item -Path $parent -ItemType Directory -Force | Out-Null
+    }
+
+    $leaf = Split-Path -Path $Path -Leaf
+    $tempPath = Join-Path -Path $parent -ChildPath ("{0}.tmp.{1}" -f $leaf, [guid]::NewGuid().ToString("N"))
+
+    try {
+        $rows = @($Data)
+        if ($rows.Count -eq 0 -and $Columns.Count -gt 0) {
+            $header = ($Columns | ForEach-Object { '"' + ($_ -replace '"', '""') + '"' }) -join $Delimiter
+            Set-Content -LiteralPath $tempPath -Value $header -Encoding $Encoding -ErrorAction Stop
+        }
+        else {
+            $exportParams = @{
+                Path        = $tempPath
+                Encoding    = $Encoding
+                Delimiter   = $Delimiter
+                ErrorAction = 'Stop'
+            }
+            if ($NoTypeInformation) { $exportParams.NoTypeInformation = $true }
+            if ($Columns.Count -gt 0) {
+                $rows | Select-Object -Property $Columns | Export-Csv @exportParams
+            }
+            else {
+                $rows | Export-Csv @exportParams
+            }
+        }
+
+        Start-SmartM365SourcePublication -Path $Path
+        Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
+        Register-SmartM365SourceCsv -Path $Path
+    }
+    finally {
+        if (Test-Path -LiteralPath $tempPath) {
+            Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Copy-SmartM365FileAtomically {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$DestinationPath
+    )
+
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
+        throw "Atomic copy source file not found: $SourcePath"
+    }
+
+    $destinationParent = Split-Path -Path $DestinationPath -Parent
+    if ([string]::IsNullOrWhiteSpace($destinationParent)) { $destinationParent = (Get-Location).Path }
+    if (-not (Test-Path -LiteralPath $destinationParent)) {
+        New-Item -Path $destinationParent -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    }
+
+    $temporaryPath = [IO.Path]::Combine($destinationParent, ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.tmp'))
+    try {
+        Copy-Item -LiteralPath $SourcePath -Destination $temporaryPath -Force -ErrorAction Stop
+        Start-SmartM365SourcePublication -Path $DestinationPath
+        Move-Item -LiteralPath $temporaryPath -Destination $DestinationPath -Force -ErrorAction Stop
+        Register-SmartM365SourceCsv -Path $DestinationPath
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Add-SmartM365CsvRowsAtomically {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object[]]$Data,
+        [Parameter(Mandatory)][string]$Path,
+        [string[]]$Columns = @(),
+        [ValidateSet("ASCII", "BigEndianUnicode", "Default", "OEM", "Unicode", "UTF7", "UTF8", "UTF32")]
+        [string]$Encoding = "UTF8",
+        [string]$Delimiter = ",",
+        [switch]$NoTenantKey
+    )
+
+    if (-not $NoTenantKey) {
+        $tenantCsv = Add-SmartM365TenantKeyToCsvData -Data $Data -Columns $Columns
+        $Data = @($tenantCsv.Data)
+        $Columns = @($tenantCsv.Columns)
+    }
+    Assert-SmartM365CsvDataCompleteness -Data $Data -TimestampedPath $Path -LatestPath $Path
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        Write-SmartM365CsvAtomically -Data $Data -Path $Path -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoTenantKey
+        return
+    }
+    if (@($Data).Count -eq 0) { return }
+
+    $parent = Split-Path -Path $Path -Parent
+    if ([string]::IsNullOrWhiteSpace($parent)) { $parent = (Get-Location).Path }
+    $temporaryPath = [IO.Path]::Combine($parent, ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.tmp'))
+    try {
+        $appendRows = if ($Columns.Count -gt 0) { @($Data) | Select-Object -Property $Columns } else { @($Data) }
+        $existingHeader = [string](Get-Content -LiteralPath $Path -TotalCount 1 -ErrorAction Stop)
+        $expectedHeader = [string]($appendRows | ConvertTo-Csv -NoTypeInformation -Delimiter $Delimiter | Select-Object -First 1)
+        if ($existingHeader.TrimStart([char]0xFEFF) -cne $expectedHeader.TrimStart([char]0xFEFF)) {
+            throw "CSV append schema differs from the existing header: $Path"
+        }
+        Copy-Item -LiteralPath $Path -Destination $temporaryPath -Force -ErrorAction Stop
+        $appendRows | Export-Csv -LiteralPath $temporaryPath -NoTypeInformation -Encoding $Encoding -Delimiter $Delimiter -Append -ErrorAction Stop
+        Start-SmartM365SourcePublication -Path $Path
+        Move-Item -LiteralPath $temporaryPath -Destination $Path -Force -ErrorAction Stop
+        Register-SmartM365SourceCsv -Path $Path
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Write-SmartM365TextAtomically {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Content,
+        [ValidateSet("ASCII", "BigEndianUnicode", "Default", "OEM", "Unicode", "UTF7", "UTF8", "UTF32")]
+        [string]$Encoding = "UTF8"
+    )
+
+    $parent = Split-Path -Path $Path -Parent
+    if ([string]::IsNullOrWhiteSpace($parent)) { $parent = (Get-Location).Path }
+    if (-not (Test-Path -LiteralPath $parent)) {
+        New-Item -Path $parent -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    }
+    $temporaryPath = [IO.Path]::Combine($parent, ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.tmp'))
+    try {
+        Set-Content -LiteralPath $temporaryPath -Value $Content -Encoding $Encoding -ErrorAction Stop
+        Start-SmartM365SourcePublication -Path $Path
+        Move-Item -LiteralPath $temporaryPath -Destination $Path -Force -ErrorAction Stop
+        Register-SmartM365SourceCsv -Path $Path
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Publish-SmartM365Csv {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object[]]$Data,
+        [Parameter(Mandatory)][string]$TimestampedPath,
+        [string]$LatestPath,
+        [string[]]$Columns = @(),
+        [ValidateSet("ASCII", "BigEndianUnicode", "Default", "OEM", "Unicode", "UTF7", "UTF8", "UTF32")]
+        [string]$Encoding = "UTF8",
+        [string]$Delimiter = ",",
+        [int]$RetentionMaxCsv = -1,
+        [ValidateRange(0, 3650)][int]$SharePointRetentionDays = 7,
+        [switch]$NoSharePointUpload,
+        [switch]$NoTenantKey
+    )
+
+    $Data = @(Limit-SmartM365RowsForMaxItems -Data $Data)
+    if (-not $NoTenantKey) {
+        $tenantCsv = Add-SmartM365TenantKeyToCsvData -Data $Data -Columns $Columns
+        $Data = @($tenantCsv.Data)
+        $Columns = @($tenantCsv.Columns)
+    }
+    if (Test-SmartM365MaxItemsMode) {
+        $TimestampedPath = Add-SmartM365MaxItemsSuffixToCsvPath -Path $TimestampedPath
+        if (-not [string]::IsNullOrWhiteSpace($LatestPath)) { $LatestPath = Add-SmartM365MaxItemsSuffixToCsvPath -Path $LatestPath }
+        WriteLog -Message ("MaxItems test CSV publication active. CSV paths are suffixed with {0}; standard Power BI filenames are not updated." -f (Get-SmartM365MaxItemsSuffix)) -Level 'WARNING'
+    }
+
+    Assert-SmartM365CsvDataCompleteness -Data $Data -Columns $Columns -TimestampedPath $TimestampedPath -LatestPath $LatestPath
+
+    Write-SmartM365CsvAtomically -Data $Data -Path $TimestampedPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoTenantKey:$NoTenantKey
+    WriteLog -Message ("CSV exported to: {0}" -f $TimestampedPath)
+
+    if (-not $global:csvGeneratedPaths) {
+        $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    }
+    [void]$global:csvGeneratedPaths.Add($TimestampedPath)
+
+    $publishedPath = $TimestampedPath
+    if (-not [string]::IsNullOrWhiteSpace($LatestPath)) {
+        Write-SmartM365CsvAtomically -Data $Data -Path $LatestPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoTenantKey:$NoTenantKey
+        WriteLog -Message ("CSV latest copy written to: {0}" -f $LatestPath)
+        [void]$global:csvGeneratedPaths.Add($LatestPath)
+        $publishedPath = $LatestPath
+    }
+
+    if ($RetentionMaxCsv -lt 0 -and $global:RetentionMaxCSV) {
+        $RetentionMaxCsv = [int]$global:RetentionMaxCSV
+    }
+    if ($RetentionMaxCsv -gt 0) {
+        $timestampedFolder = Split-Path -Path $TimestampedPath -Parent
+        $timestampedName = [System.IO.Path]::GetFileNameWithoutExtension($TimestampedPath)
+        $retentionPrefix = $timestampedName -replace '_\d{8}[-_]\d{6}$', ''
+        if (-not [string]::IsNullOrWhiteSpace($timestampedFolder) -and -not [string]::IsNullOrWhiteSpace($retentionPrefix)) {
+            RemoveOldFiles -Path $timestampedFolder -Filter "$retentionPrefix`_*.csv" -NamePattern ('^' + [regex]::Escape($retentionPrefix) + '_\d{8}[-_]\d{6}\.csv$') -KeepCount $RetentionMaxCsv -LogFile $global:LogTextFile
+        }
+    }
+
+    $sharePointUploads = @()
+    if (-not $NoSharePointUpload) {
+        $uploadCandidates = @($TimestampedPath)
+        if (-not [string]::IsNullOrWhiteSpace($LatestPath)) { $uploadCandidates += $LatestPath }
+        foreach ($uploadCandidate in @($uploadCandidates | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)) {
+            if (-not (Test-Path -LiteralPath $uploadCandidate)) { continue }
+            $uploadRecord = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $uploadCandidate
+            if ($uploadRecord) { $sharePointUploads += $uploadRecord }
+        }
+        # Only after this run's copy is on SharePoint: same retention there as on the server.
+        $timestampedFullPath = [IO.Path]::GetFullPath($TimestampedPath)
+        $timestampedUploaded = @($sharePointUploads | Where-Object { [string]::Equals([IO.Path]::GetFullPath([string]$_.LocalFilePath), $timestampedFullPath, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+        if ($timestampedUploaded -and $SharePointRetentionDays -gt 0) {
+            Remove-SmartM365SharePointTimestampedCsvOlderThan -TimestampedPath $TimestampedPath -RetentionDays $SharePointRetentionDays | Out-Null
+        }
+    }
+
+    if (Test-SmartM365MaxItemsMode) {
+        WriteLog -Message 'WeeklyHistory publication skipped because MaxItems test mode is active.' -Level 'WARNING'
+    }
+    else {
+        Invoke-SmartM365WeeklyInventoryHistoryForCsv -SourceFiles @($publishedPath) -TimestampedPath $TimestampedPath
+    }
+
+    return New-Object psobject -Property @{
+        TimestampedPath = $TimestampedPath
+        LatestPath      = $LatestPath
+        PublishedPath   = $publishedPath
+        SharePointUploads = $sharePointUploads
+    }
+}
+
+function Export-SmartM365Csv {
+    [CmdletBinding(DefaultParameterSetName = 'ByBaseName')]
+    param(
+        [Parameter(Mandatory, ParameterSetName = 'ByBaseName')]
+        [string]$BaseFileName,
+        [Parameter(Mandatory, ParameterSetName = 'ByBaseName')]
+        [string]$OutputPath,
+        [Parameter(Mandatory, ParameterSetName = 'ByBaseName')]
+        [string]$GlobalPath,
+        [Parameter(Mandatory, ParameterSetName = 'ByPath')]
+        [string]$TimestampedPath,
+        [Parameter(ParameterSetName = 'ByPath')]
+        [string]$LatestPath,
+        [Parameter(Mandatory)]
+        [AllowNull()][AllowEmptyCollection()][object[]]$Data,
+        [string[]]$Columns = @(),
+        [ValidateSet("ASCII", "BigEndianUnicode", "Default", "OEM", "Unicode", "UTF7", "UTF8", "UTF32")]
+        [string]$Encoding = "UTF8",
+        [string]$Delimiter = ",",
+        [switch]$NoSharePointUpload,
+        [switch]$NoTenantKey
+    )
+
+    if ($PSCmdlet.ParameterSetName -eq 'ByBaseName') {
+        $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+        $TimestampedPath = Join-Path $OutputPath "$BaseFileName`_$timestamp.csv"
+        $LatestPath = Join-Path $GlobalPath "$BaseFileName.csv"
+    }
+
+    Publish-SmartM365Csv -Data $Data -TimestampedPath $TimestampedPath -LatestPath $LatestPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoSharePointUpload:$NoSharePointUpload -NoTenantKey:$NoTenantKey
+}
+
+#endregion
+
+# SIG # Begin signature block
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBVXDNQTpzrtNR/
+# pMTSPQGKC6smskznB9Ll1ri5WyvwZqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
+# b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
+# ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
+# VQQDDBV3b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRh
+# Y3RAd29ya3BsYWNlY2xvdWRodWIuY29tMIIBojANBgkqhkiG9w0BAQEFAAOCAY8A
+# MIIBigKCAYEAse6XztERSyHn9DVqj8Rdv0qjc5owqvgAIGaYxBmfiQuoM48Fo4Xt
+# 1ovi9brLUtf55G4XgthNPCoanxfCRRg30IVRxaDfdPXJzYmgsM5tXlsuNU49lE7E
+# PJk3+jEOgSCt8NKzmVPKpNRG0NmK0a8wm12cceYZOZlSYE0+ZtT6wy5PQQjMUqIx
+# XnGjt4H0nfgZZa7D4FyARKOVg/Xr9sUq5jIn3zszvg4jjeb4b0DKJtfbHukhWc2Y
+# oVFgswxVBXCWIaBnfF/cjqMfK/CaToT2trVb4hG4qcQ31s1nR4keoRaOw/vyd6ap
+# rEtCsT22N/Jx0dz7fIo1tVyvIaVcHdN9LW3chn0en0OKZ6Ke1OH9wf2prl4KA6Ww
+# VzrAZrOlXTAItdK7D9kKO/HeJd4PZvO53oy1LdmMGLSz3OLB9e5q7yo8rfqi5Ka9
+# KzM2CrSzz1yphn/H90wz7Q2pm4FIlWdcj86A/0kmhYg+5Wqqbg1drrPXu4nEBwWN
+# /dzoGtKZKHTdAgMBAAGjgZYwgZMwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoG
+# CCsGAQUFBwMDMD8GA1UdEQQ4MDaBHWNvbnRhY3RAd29ya3BsYWNlY2xvdWRodWIu
+# Y29tghV3b3JrcGxhY2VjbG91ZGh1Yi5jb20wDAYDVR0TAQH/BAIwADAdBgNVHQ4E
+# FgQUXIOOADQM78XfPAncirgCECedg9gwDQYJKoZIhvcNAQELBQADggGBADhZUB2R
+# 5J/Jw030xodhEWeCQ0vnJRaiEsjOxuArQREKH3lCrQ3UsUVl292d6LnQUSTH/jF7
+# rovEZ+JN2GQ/LCrXRaCuwCEGZKzlSEbtYWhfwDyj6GpIPq8Y4SeXyjdq4/rrI1bm
+# iTK4Sq7EoBlGJuX6l2nfvx1tTioSr11FoDfllJR7EYawRj9hBFJ0gG0b2SuYZMgW
+# gaDKefcnJDmOwcRNAZUII0ss8EeyANukWSkNN5ILZ+iKDpQgZxgDLPTiRguCyx45
+# PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
+# Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
+# dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC4QilW+iX+mV1es2LhsTTZ
+# zwyfec8xrrOUlzIwCa6ECjANBgkqhkiG9w0BAQEFAASCAYBP+dYslX0sM46AsqYO
+# ZgajTNsw+yAoIHs89ymfTvae9ELUpz09UY7iokrWbpdTVwvfzXOcFuJH1QoIYjG5
+# 4k9IH2appiDD9ijxzKy7aWtNavDYV6iny46cFpsGcD/gAJQxZf58zyMhFifMBMPn
+# xX+u41dTQ8QKoN1ohrnyJggJ0DkbC63yL6dBpDUe3VoF+KlophqnQhtDHPBgGkB/
+# Y1vdfV7DZ76TamYCZtp+yXCiAd7r9Jl+apagPAhgh1bPspmPrz9UuKSr0EaSwA0U
+# 00/OPgVZsqv44h/Ct2bqqXsMGSh7smsPaRWa3qrw/R7jjDdkWFRP+j2exHNuzEt1
+# xalGLxamYsYTrT8cO//ygefQT/ZlKSi0UtrE8+HBUsPnTlYgPtZLjRVCrvSzZcde
+# qaekDjR3V349SI23dzj6/NyU1I5+x85BTTV/TCQVnwlCiMkHQ8+HMH5fyeaD2chx
+# iM0iEP/zo8cZFUNYojhOgD9DnI+vm2lux6c6fiNSowymMb8=
+# SIG # End signature block

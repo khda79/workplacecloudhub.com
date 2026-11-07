@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "tables": [
+    {
+      "table": "Endpoint Protection Policy", "file": "EndpointProtectionPolicy.csv",
+      "stagingIncludesTenantKey": true, "uniqueKey": ["Policy Key"], "allowEmpty": false,
+      "columns": [
+        {"name":"TenantKey","type":"string"}, {"name":"Policy Key","type":"string"},
+        {"name":"Policy Version","type":"string"}, {"name":"Scope ID","type":"string"},
+        {"name":"Device Source IDs","type":"string"}, {"name":"Role","type":"string"},
+        {"name":"Expected Product","type":"string"}, {"name":"Expected Mode","type":"string"},
+        {"name":"Evidence Product Name","type":"string"}, {"name":"Exception Reason","type":"string"},
+        {"name":"Max Observation Age Hours","type":"double"}
+      ]
+    },
+    {
+      "table": "Endpoint Protection Evidence", "file": "EndpointProtectionEvidence.csv",
+      "stagingIncludesTenantKey": true, "uniqueKey": ["Endpoint Protection Key"], "allowEmpty": true,
+      "columns": [
+        {"name":"TenantKey","type":"string"}, {"name":"Endpoint Protection Key","type":"string"},
+        {"name":"Device Source ID","type":"string"}, {"name":"Country","type":"string"},
+        {"name":"Policy Version","type":"string"}, {"name":"Scope ID","type":"string"},
+        {"name":"Role","type":"string"}, {"name":"Expected Product","type":"string"},
+        {"name":"Expected Mode","type":"string"}, {"name":"Evaluation State","type":"string"},
+        {"name":"Evaluation Reason","type":"string"}, {"name":"Registration State","type":"string"},
+        {"name":"Evidence Source","type":"string"}, {"name":"Observation UTC","type":"dateTime"},
+        {"name":"Freshness","type":"string"}, {"name":"Exception Reason","type":"string"}
+      ]
+    }
+  ]
+}

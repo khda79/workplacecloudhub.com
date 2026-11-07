@@ -1,0 +1,265 @@
+/// Native source facet migrated from FactWindowsUpdateAlert; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Update Alert Evidence'
+	lineageTag: 5ce74dc0-cd50-4a61-8d31-e229ed2c9a52
+
+	/// Windows Update report rows in the frozen collection; a device can contribute more than one row. Migrated without changing the source calculation.
+	measure 'Native Windows update alert records' = (COALESCE(COUNTROWS('Native Update Alert Evidence'),0))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 2cf7b5c4-d618-45a9-a17b-bb649f540329
+
+	/// Distinct source device identifiers represented in Windows Update report rows. Migrated without changing the source calculation.
+	measure 'Native Devices with Windows update alerts' = (COALESCE(DISTINCTCOUNTNOBLANK('Native Update Alert Evidence'[DeviceId]),0))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: bbe4159e-72c3-4d18-9f53-3ea49c8ca2be
+
+	/// Windows Update report rows whose current device update status is explicitly Needs attention. Migrated without changing the source calculation.
+	measure 'Native Windows update alerts needing attention' = (CALCULATE([Native Windows update alert records],KEEPFILTERS('Native Update Alert Evidence'[CurrentDeviceUpdateStatus] = "Needs attention")))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 00b3d154-03fa-45ad-8771-f83f7a994add
+
+	/// Share of Windows Update evidence records by aggregate state. Migrated without changing the source calculation.
+	measure 'Native Update aggregate state rate' = (DIVIDE([Native Windows update alert records], CALCULATE([Native Windows update alert records], REMOVEFILTERS('Native Update Alert Evidence'[AggregateState]))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 9ea08a78-4a1c-4a3e-8832-5d3e35f7d78e
+
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
+	measure 'Native Context Rows · Native Update Alert Evidence' = (COUNTROWS('Native Update Alert Evidence'))
+		formatString: #,0
+		isHidden
+		lineageTag: b1a631f9-b433-47a5-96c7-44cddc5344a2
+
+	/// Read-only report utility applying the disconnected primary-user selector to source-qualified device rows.
+	measure 'Primary user row match · Native Update Alert Evidence' = VAR PresentRows = IF(ISFILTERED('Primary User Selection'[Primary user]), CALCULATE(COUNTROWS('Native Update Alert Evidence'), KEEPFILTERS(TREATAS(VALUES('Primary User Selection'[Primary user]), 'Native Update Alert Evidence'[Primary User (report)]))), COUNTROWS('Native Update Alert Evidence')) RETURN IF(PresentRows>0,1,BLANK())
+		formatString: 0
+		isHidden
+		lineageTag: 00757c49-80d8-45b0-ba10-6252e5738945
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 5a2e4f90-35cb-480c-9e03-866f17ac343e
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 69c1543c-cd1a-485a-9377-01c17461c4d8
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 22374060-5801-4ee0-afc3-ea15d1d4dff4
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 0599ef7d-dba7-4845-b016-4d1a7be78a90
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column TenantUpdateAlertKey
+		dataType: string
+		isHidden
+		lineageTag: 5cd4e9dd-9745-4c1b-8c1d-55f9c9df2f95
+		summarizeBy: none
+		sourceColumn: TenantUpdateAlertKey
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column SourceReport
+		dataType: string
+		lineageTag: d1d100a6-6d5c-4da2-995f-06364fbbb6ab
+		summarizeBy: none
+		sourceColumn: SourceReport
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column DeviceId
+		dataType: string
+		lineageTag: b03937ec-94a3-487a-a846-d085f06f9d7b
+		summarizeBy: none
+		sourceColumn: DeviceId
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column DeviceName
+		dataType: string
+		lineageTag: 650ecaf5-e2cb-419c-bca9-a224b2ddeddb
+		summarizeBy: none
+		sourceColumn: DeviceName
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column PolicyId
+		dataType: string
+		lineageTag: 9a1178be-ef2e-41f3-b095-cf8ec23aa575
+		summarizeBy: none
+		sourceColumn: PolicyId
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column EventDateTimeUTC
+		dataType: string
+		lineageTag: c780e783-4416-450c-b82a-cd6859b223d1
+		summarizeBy: none
+		sourceColumn: EventDateTimeUTC
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column LastWUScanTimeUTC
+		dataType: string
+		lineageTag: 779a1ea7-e9a1-4b2e-8fd0-5556ef9e531a
+		summarizeBy: none
+		sourceColumn: LastWUScanTimeUTC
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column AggregateState
+		dataType: string
+		lineageTag: 7ca942ff-3c2f-4153-8f56-84e7c67733a0
+		summarizeBy: none
+		sourceColumn: AggregateState
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column CurrentDeviceUpdateStatus
+		dataType: string
+		lineageTag: 54e32f55-0ecd-4c91-ba82-5b1ff44a1cf7
+		summarizeBy: none
+		sourceColumn: CurrentDeviceUpdateStatus
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column LatestAlertMessage
+		dataType: string
+		lineageTag: cb0e0274-a0d6-4c27-8be4-3f2397fd521e
+		summarizeBy: none
+		sourceColumn: LatestAlertMessage
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 5ad5f7b3-73b9-4545-80ec-e8a5344c3fe4
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column SourceSystem
+		dataType: string
+		lineageTag: e4547528-7371-402f-9def-853b4a43e0da
+		summarizeBy: none
+		sourceColumn: SourceSystem
+
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 9ce4b224-85af-4707-ab45-5ee7babd3b3f
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	/// Observed primary user, exact source ID and tenant/batch matching only; used by the report search.
+	column 'Primary User (report)' =
+			VAR _t='Native Update Alert Evidence'[TenantKey]
+			VAR _b='Native Update Alert Evidence'[Loaded Batch ID]
+			VAR _gkey='Native Update Alert Evidence'[DeviceId]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _native=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Native Device Evidence'[TenantDeviceKey],'Native Device Evidence'[SourceDeviceId],_gkey,'Native Device Evidence'[TenantKey],_t,'Native Device Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _fromNative=IF(NOT ISBLANK(_native),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Native Device Key],_native,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=IF(NOT ISBLANK(_resolved)&&NOT ISBLANK(_fromNative)&&_resolved<>_fromNative,BLANK(),COALESCE(_resolved,_fromNative))
+			VAR _upn=COALESCE(BLANK(),IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+			RETURN IF(ISBLANK(_upn)||TRIM(_upn)="","Not resolved",_upn)
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 85204efd-bbc6-47b6-bd77-f49d25924649
+
+	/// Qualified SAM of the primary user; never inferred from UPN text.
+	column 'Primary User SAM (report)' =
+			VAR _t='Native Update Alert Evidence'[TenantKey]
+			VAR _b='Native Update Alert Evidence'[Loaded Batch ID]
+			VAR _gkey='Native Update Alert Evidence'[DeviceId]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _native=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Native Device Evidence'[TenantDeviceKey],'Native Device Evidence'[SourceDeviceId],_gkey,'Native Device Evidence'[TenantKey],_t,'Native Device Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _fromNative=IF(NOT ISBLANK(_native),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Native Device Key],_native,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=IF(NOT ISBLANK(_resolved)&&NOT ISBLANK(_fromNative)&&_resolved<>_fromNative,BLANK(),COALESCE(_resolved,_fromNative))
+			VAR _upn=COALESCE(BLANK(),IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+			VAR _sam=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User SAM],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			RETURN COALESCE(_sam,IF(NOT ISBLANK(_upn),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[UserPrincipalName],_upn,'Native User Evidence'[TenantKey],_t,'Native User Evidence'[Loaded Batch ID],_b,BLANK())),"Not resolved")
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: b919969e-7871-4547-b1f8-710c16818faa
+
+	/// Last Windows console user observed at collection. Does not mean current user or last RDP session.
+	column 'Last Console User (report)' =
+			VAR _t='Native Update Alert Evidence'[TenantKey]
+			VAR _b='Native Update Alert Evidence'[Loaded Batch ID]
+			VAR _gkey='Native Update Alert Evidence'[DeviceId]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _native=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Native Device Evidence'[TenantDeviceKey],'Native Device Evidence'[SourceDeviceId],_gkey,'Native Device Evidence'[TenantKey],_t,'Native Device Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _fromNative=IF(NOT ISBLANK(_native),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Native Device Key],_native,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=IF(NOT ISBLANK(_resolved)&&NOT ISBLANK(_fromNative)&&_resolved<>_fromNative,BLANK(),COALESCE(_resolved,_fromNative))
+			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			RETURN IF(_status="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon User],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())),"Not observed")
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: c62466b2-93a5-400a-a4a5-af1ea441ae95
+
+	/// Source-qualified time of last observed console logon; unknown remains blank.
+	column 'Last Console Logon UTC (report)' =
+			VAR _t='Native Update Alert Evidence'[TenantKey]
+			VAR _b='Native Update Alert Evidence'[Loaded Batch ID]
+			VAR _gkey='Native Update Alert Evidence'[DeviceId]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _native=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Native Device Evidence'[TenantDeviceKey],'Native Device Evidence'[SourceDeviceId],_gkey,'Native Device Evidence'[TenantKey],_t,'Native Device Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _fromNative=IF(NOT ISBLANK(_native),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Native Device Key],_native,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=IF(NOT ISBLANK(_resolved)&&NOT ISBLANK(_fromNative)&&_resolved<>_fromNative,BLANK(),COALESCE(_resolved,_fromNative))
+			RETURN IF(IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon UTC],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm
+		displayFolder: Report identity context
+		lineageTag: f0a1e7f2-e0e2-4ce9-81a9-c92f63a868c4
+
+	/// Preserves source status and timestamp qualification, including stale/missing/error evidence.
+	column 'Console Logon Qualification (report)' =
+			VAR _t='Native Update Alert Evidence'[TenantKey]
+			VAR _b='Native Update Alert Evidence'[Loaded Batch ID]
+			VAR _gkey='Native Update Alert Evidence'[DeviceId]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _native=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Native Device Evidence'[TenantDeviceKey],'Native Device Evidence'[SourceDeviceId],_gkey,'Native Device Evidence'[TenantKey],_t,'Native Device Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _fromNative=IF(NOT ISBLANK(_native),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Native Device Key],_native,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=IF(NOT ISBLANK(_resolved)&&NOT ISBLANK(_fromNative)&&_resolved<>_fromNative,BLANK(),COALESCE(_resolved,_fromNative))
+			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _quality=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Quality],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			RETURN IF(ISBLANK(_status),"No matched system observation",_status&" · "&_quality)
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 5bc7bd48-274c-4617-9c5d-588458e369e6
+
+	partition 'Native Update Alert Evidence' = m
+		mode: import
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactWindowsUpdateAlert.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantUpdateAlertKey", dataType="String"], [name="SourceReport", dataType="String"], [name="DeviceId", dataType="String"], [name="DeviceName", dataType="String"], [name="PolicyId", dataType="String"], [name="EventDateTimeUTC", dataType="String"], [name="LastWUScanTimeUTC", dataType="String"], [name="AggregateState", dataType="String"], [name="CurrentDeviceUpdateStatus", dataType="String"], [name="LatestAlertMessage", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="SourceSystem", dataType="String"]}))
+				in
+				    Readers[Finish](BusinessRows)
+

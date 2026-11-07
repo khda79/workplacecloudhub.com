@@ -1,0 +1,93 @@
+/// Disconnected content-storage operational signal catalog backed by current private SharePoint and OneDrive evidence.
+table 'Content Storage Operational Signals'
+	lineageTag: a8982587-c2ed-4908-b768-3c05800a3d3b
+
+	/// Affected container or source count for the selected content-storage signal.
+	measure 'Content Signal Affected' = VAR _s = SELECTEDVALUE('Content Storage Operational Signals'[Signal Sort]) RETURN SWITCH(_s, 1, CALCULATE([Content Containers], 'Content Storage Evidence'[Service] = "SharePoint", 'Content Storage Evidence'[Storage Pressure] IN {"Critical 90%+", "High 80-90%"}), 2, CALCULATE([Content Containers], 'Content Storage Evidence'[Service] = "OneDrive", 'Content Storage Evidence'[Storage Pressure] IN {"Critical 90%+", "High 80-90%"}), 3, CALCULATE([Content Containers], 'Content Storage Evidence'[Service] = "SharePoint", 'Content Storage Evidence'[Activity State] = "Inactive 180D+", 'Content Storage Evidence'[Storage Used GB] >= 10), 4, CALCULATE([Content Containers], 'Content Storage Evidence'[Service] = "OneDrive", 'Content Storage Evidence'[Activity State] = "Inactive 180D+", 'Content Storage Evidence'[Storage Used GB] >= 10), 5, [Orphaned SharePoint Sites], 6, [OneDrive Accounts Without Activity Evidence], 7, [Stale Content Sources], 8, CALCULATE([Content Containers], 'Content Storage Evidence'[Service] = "SharePoint", 'Content Storage Evidence'[Activity State] = "Inactive 180D+"), 9, CALCULATE([Content Containers], 'Content Storage Evidence'[Service] = "OneDrive", 'Content Storage Evidence'[Activity State] = "Inactive 180D+"))
+		formatString: #,0
+		displayFolder: Content | Signals
+		lineageTag: fc91aec9-07b3-4d4c-94de-e1832f125e3a
+
+	/// Relevant covered population for the selected content-storage signal.
+	measure 'Content Signal Covered' = VAR _s = SELECTEDVALUE('Content Storage Operational Signals'[Signal Sort]) RETURN SWITCH(_s, 1, [SharePoint Sites], 2, [OneDrive Accounts], 3, [SharePoint Sites], 4, [OneDrive Accounts], 5, [SharePoint Sites], 6, [OneDrive Accounts], 7, [Content Services], 8, [SharePoint Sites], 9, [OneDrive Accounts])
+		formatString: #,0
+		displayFolder: Content | Signals
+		lineageTag: bccd1729-9c31-4d95-9ce3-af33e447c582
+
+	/// Affected share of the covered content population for the selected signal.
+	measure 'Content Signal Affected (%)' = DIVIDE([Content Signal Affected], [Content Signal Covered])
+		formatString: 0.0%
+		displayFolder: Content | Signals
+		lineageTag: 9af874c5-583e-420b-a7de-a6fff8e7832b
+
+	/// Affected content containers or evidence sources for the selected signal.
+	measure 'Affected Content' = [Content Signal Affected]
+		formatString: #,0
+		displayFolder: Content | Signals
+		lineageTag: 4f0b8ef0-5be6-4234-b80c-3e7824028195
+
+	/// Covered content population for the selected signal.
+	measure 'Covered Content' = [Content Signal Covered]
+		formatString: #,0
+		displayFolder: Content | Signals
+		lineageTag: dbb96e87-dc89-4043-ba03-ef06735ba58f
+
+	/// Affected share of the covered population for the selected signal.
+	measure 'Affected Content (%)' = [Content Signal Affected (%)]
+		formatString: 0.0%
+		displayFolder: Content | Signals
+		lineageTag: 14f1a547-ff35-4f1a-a36f-d8238fce70cb
+
+	column 'Signal Sort'
+		dataType: int64
+		formatString: #,0
+		lineageTag: e4542273-5d62-4ffc-8a44-b7b59c00c2ec
+		summarizeBy: none
+		sourceColumn: Signal Sort
+
+	column 'Severity Label'
+		dataType: string
+		lineageTag: 7f226249-87d8-478f-9b3b-533b11aec730
+		sourceColumn: Severity Label
+
+	column Signal
+		dataType: string
+		lineageTag: 4de7e10a-c201-4580-b191-d3e96845ebfd
+		sourceColumn: Signal
+
+	column 'Risk Category'
+		dataType: string
+		lineageTag: ec38fbaa-aaee-492c-a3ba-29d49a27231b
+		sourceColumn: Risk Category
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: 5b3fd005-c266-4dd6-96b7-b75ccc31d6ac
+		sourceColumn: Recommended Action
+
+	column 'Evidence Source'
+		dataType: string
+		lineageTag: d6182434-2ad1-4034-baac-62758ceff790
+		sourceColumn: Evidence Source
+
+	partition 'Content Storage Operational Signals Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(
+				        type table [#"Signal Sort" = Int64.Type, #"Severity Label" = text, Signal = text, #"Risk Category" = text, #"Recommended Action" = text, #"Evidence Source" = text],
+				        {
+				            {1, "High", "SharePoint sites at 80% or more of quota", "Capacity", "Reclaim storage or extend quota after validating business need.", "SharePoint inventory"},
+				            {2, "High", "OneDrive accounts at 80% or more of quota", "Capacity", "Plan cleanup or capacity before accounts reach their quota.", "OneDrive usage"},
+				            {3, "High", "Large inactive SharePoint sites", "Lifecycle and cost", "Validate retention, then archive or remove obsolete content.", "SharePoint inventory"},
+				            {4, "High", "Large inactive OneDrive accounts", "Lifecycle and cost", "Validate owner and retention, then archive or remove obsolete content.", "OneDrive usage"},
+				            {5, "High", "Orphaned SharePoint sites", "Ownership", "Assign an accountable owner before lifecycle or storage action.", "SharePoint inventory"},
+				            {6, "Medium", "OneDrive accounts without activity evidence", "Evidence gap", "Refresh or reconcile usage evidence before lifecycle action.", "OneDrive usage"},
+				            {7, "Medium", "Stale content usage sources", "Data freshness", "Refresh stale usage exports before lifecycle or capacity decisions.", "Content usage sources"},
+				            {8, "Medium", "SharePoint sites inactive for more than 180 days", "Lifecycle", "Confirm business need, retention, and archive or retirement eligibility.", "SharePoint inventory"},
+				            {9, "Medium", "OneDrive accounts inactive for more than 180 days", "Lifecycle", "Review owner status, retention, and deprovisioning eligibility.", "OneDrive usage"}
+				        }
+				    )
+				in
+				    Source
+

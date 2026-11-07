@@ -1,0 +1,211 @@
+/// Hidden product and evidence metadata utility table.
+table 'Report Metadata'
+	isHidden
+	lineageTag: 96c75a83-a101-4521-83c4-4fc2b02b7d79
+
+	/// Text summary of active reporting-period and geography filters.
+	measure 'Active Filter Summary' = "Reporting period: " & COALESCE(SELECTEDVALUE('Date'[Reporting Period]), "All") & " · Country: " & COALESCE(SELECTEDVALUE('Country Selection'[Country]), "All")
+		formatString: @
+		displayFolder: Measures
+		lineageTag: 014cd9aa-8e27-4292-9607-547258ebf9d1
+
+	/// Current local beta product version.
+	measure 'Report Version' = SELECTEDVALUE('Report Metadata'[Product Version], "1.0.0-beta.1")
+		formatString: @
+		displayFolder: Measures
+		lineageTag: e196a172-7d71-4269-ba98-2d17908225e2
+
+	/// Disabled until a separately approved versioned composite-index definition exists.
+	measure 'Workplace Health Index' = BLANK()
+		formatString: 0.0
+		displayFolder: Measures
+		lineageTag: 05967176-9c28-41de-9904-6556a6861ec1
+
+	/// Device-page evidence and active-scope summary.
+	measure 'Device Evidence Ribbon Text' = "Private current device evidence · Windows history " & FORMAT(DISTINCTCOUNT('Windows Lifecycle Trend Evidence'[Snapshot Week]), "0") & " weeks · Endpoint history " & FORMAT(DISTINCTCOUNT('Endpoint Experience Trend Evidence'[Snapshot Week]), "0") & " weeks"
+		formatString: @
+		displayFolder: Measures
+		lineageTag: b4aa9299-265f-4200-b64a-53fb5aaf3e07
+
+	/// Security-page evidence and active-scope summary.
+	measure 'Security Evidence Ribbon Text' = "Prepared security evidence · qualification is not a health guarantee · " & [Active Filter Summary]
+		formatString: @
+		displayFolder: Measures
+		lineageTag: 1c3efa02-0071-4c48-b168-05c3ba7b4663
+
+	/// Service-page evidence and active-scope summary.
+	measure 'Service Evidence Ribbon Text' = "Prepared service evidence · observed scope only · " & [Active Filter Summary]
+		formatString: @
+		displayFolder: Measures
+		lineageTag: 0276a36d-a2d7-4476-bcc9-248dd818dd2e
+
+	/// Evidence ribbon for the real private workforce and identity evidence domain.
+	measure 'User Evidence Ribbon Text' = "Private current workforce evidence · Activity coverage " & FORMAT ( [Activity Evidence Coverage], "0.0%" ) & " · " & FORMAT ( DISTINCTCOUNT ( 'User Activity History Evidence'[Week Label] ), "0" ) & " observed weeks"
+		formatString: @
+		displayFolder: Measures
+		lineageTag: c8e6518d-d602-4c03-b849-97e76d638287
+
+	/// Preserves the original dynamic evidence status together with the footer scope after removal of the duplicate ribbon.
+	measure 'Combined User Evidence Ribbon Text' = [User Evidence Ribbon Text] & UNICHAR(10) & "Evidence scope: prepared private snapshot · missing evidence is not zero · filters stay active across views · full detail available in task views."
+		displayFolder: Report footer
+		lineageTag: 771bd587-825b-494c-a45a-f904ad66c34a
+
+	/// Preserves the original dynamic evidence status together with the footer scope after removal of the duplicate ribbon.
+	measure 'Combined Device Evidence Ribbon Text' = [Device Evidence Ribbon Text] & UNICHAR(10) & "Evidence scope: prepared private snapshot · missing evidence is not zero · filters stay active across views · full detail available in task views."
+		displayFolder: Report footer
+		lineageTag: 6419c96c-92ed-4a44-8656-500affbf531b
+
+	/// Unfiltered table-vote majority (ties use the smallest ID); empty tables explicitly unobservable.
+	measure 'Loaded Batch Banner' =
+			VAR _all = ALL('Loaded Batch Audit')
+			VAR _known = FILTER(_all, [Loaded Rows] > 0 && NOT ISBLANK([Loaded Batch ID]))
+			VAR _ids = DISTINCT(SELECTCOLUMNS(_known, "Id", [Loaded Batch ID]))
+			VAR _votes = ADDCOLUMNS(_ids, "Tables", VAR _id = [Id] RETURN COUNTROWS(FILTER(_known, [Loaded Batch ID] = _id)))
+			VAR _winner = TOPN(1, _votes, [Tables], DESC, [Id], ASC)
+			VAR _majority = CONCATENATEX(_winner, [Id], "")
+			VAR _other = COUNTROWS(FILTER(_known, [Loaded Batch ID] <> _majority))
+			VAR _empty = COUNTROWS(FILTER(_all, [Loaded Rows] = 0 || ISBLANK([Loaded Rows])))
+			VAR _missing = COUNTROWS(FILTER(_all, [Loaded Rows] > 0 && ISBLANK([Loaded Batch ID])))
+			RETURN
+			IF(COUNTROWS(_ids) > 1, "Mixed batches | Majority: " & _majority & " | Other tables: " & FORMAT(_other,"0"),
+			   IF(COUNTROWS(_ids) = 1, "Batch: " & _majority, "Batch: Not observed"))
+			& " | Empty tables: " & FORMAT(COALESCE(_empty,0),"0")
+			& IF(_missing > 0, " | Missing provenance: " & FORMAT(_missing,"0"), "")
+			& " | Readiness unavailable: " & FORMAT(COALESCE(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Availability]="Not available"),0),"0")
+			& " | Valid empty: " & FORMAT(COALESCE(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Availability]="Valid empty"),0),"0")
+		formatString: @
+		lineageTag: da192672-ca2e-42ed-aec6-10f2888f8c89
+
+	/// Single batch ID observed across imported nonempty evidence tables; blank for mixed or unavailable lineage.
+	measure 'Dataset Loaded Batch ID' =
+			VAR _known = FILTER(ALL('Loaded Batch Audit'), 'Loaded Batch Audit'[Loaded Rows] > 0 && NOT ISBLANK('Loaded Batch Audit'[Loaded Batch ID]))
+			VAR _ids = DISTINCT(SELECTCOLUMNS(_known, "Id", 'Loaded Batch Audit'[Loaded Batch ID]))
+			RETURN IF(COUNTROWS(_ids) = 1, CONCATENATEX(_ids, [Id], ""), BLANK())
+		isHidden
+		displayFolder: Report presentation
+		lineageTag: c2ed3b99-0925-440a-8edf-8eb9fa8ba419
+
+	/// Loaded batch UTC timestamp converted to Europe/Paris calendar date; not the age of each underlying collector.
+	measure 'Dataset Batch Date Paris' =
+			VAR _id = [Dataset Loaded Batch ID]
+			VAR _utc = IF(LEN(_id) >= 15, IFERROR(DATE(VALUE(LEFT(_id,4)),VALUE(MID(_id,5,2)),VALUE(MID(_id,7,2))) + TIME(VALUE(MID(_id,10,2)),VALUE(MID(_id,12,2)),VALUE(MID(_id,14,2))), BLANK()))
+			VAR _year = YEAR(_utc)
+			VAR _march = DATE(_year,3,31)
+			VAR _october = DATE(_year,10,31)
+			VAR _start = _march - MOD(WEEKDAY(_march,2),7) + TIME(1,0,0)
+			VAR _end = _october - MOD(WEEKDAY(_october,2),7) + TIME(1,0,0)
+			VAR _offset = IF(_utc >= _start && _utc < _end,2,1)
+			RETURN IF(NOT ISBLANK(_utc), INT(_utc + DIVIDE(_offset,24)))
+		formatString: yyyy-MM-dd
+		isHidden
+		displayFolder: Report presentation
+		lineageTag: 6ee0e66c-51f7-4409-a5f3-05dee7e3bb42
+
+	/// Current Europe/Paris calendar date using UTC and European daylight-saving rules.
+	measure 'Dataset Today Paris' =
+			VAR _utc = UTCNOW()
+			VAR _year = YEAR(_utc)
+			VAR _march = DATE(_year,3,31)
+			VAR _october = DATE(_year,10,31)
+			VAR _start = _march - MOD(WEEKDAY(_march,2),7) + TIME(1,0,0)
+			VAR _end = _october - MOD(WEEKDAY(_october,2),7) + TIME(1,0,0)
+			RETURN INT(_utc + DIVIDE(IF(_utc >= _start && _utc < _end,2,1),24))
+		formatString: yyyy-MM-dd
+		isHidden
+		displayFolder: Report presentation
+		lineageTag: 01735abd-aad6-46db-942b-be4f790017c8
+
+	/// Loaded batch date (Europe/Paris) and ID, independent of page filters. Mixed lineage remains explicit.
+	measure 'Dataset Footer' =
+			VAR _id = [Dataset Loaded Batch ID]
+			RETURN IF(NOT ISBLANK(_id), "Dataset: " & FORMAT([Dataset Batch Date Paris], "MM/dd/yyyy", "en-US") & " | " & _id, [Loaded Batch Banner])
+		displayFolder: Report presentation
+		lineageTag: 30622803-4848-4fed-9cf0-ffc867151cca
+
+	/// Red only when selected batch UTC age exceeds 74 hours (a Friday batch stays normal over the weekend). Missing or mixed provenance is amber here; the separate Mixed batches alert is unchanged.
+	measure 'Dataset Footer Color' = VAR _age=[Dataset Batch Age Hours] RETURN IF(ISBLANK(_age), "#805400", IF(_age>74, "#B42318", "#334155"))
+		formatString: @
+		isHidden
+		displayFolder: Dataset freshness
+		lineageTag: 095e9fc6-a57d-4e30-b653-fbb371a79bc0
+
+	/// Compact executive display only. Full unknown-evidence qualification remains on license detail pages and original measure.
+	measure 'Executive F1 F3 Recovery' =
+			VAR _label = [License Selected F1 F3 Recovery Label]
+			VAR _at = SEARCH(" (Unknown:",_label,1,0)
+			RETURN IF(_label = "Unknown", BLANK(), IF(_at > 0,LEFT(_label,_at-1),_label))
+		displayFolder: Executive display
+		lineageTag: 4c89d86c-8ad0-444d-9967-c3f8db69877a
+
+	/// Compact executive display only. Full unknown-evidence qualification remains on license detail pages and original measure.
+	measure 'Executive E3 Recovery' =
+			VAR _label = [License Selected E3 Recovery Label]
+			VAR _at = SEARCH(" (Unknown:",_label,1,0)
+			RETURN IF(_label = "Unknown", BLANK(), IF(_at > 0,LEFT(_label,_at-1),_label))
+		displayFolder: Executive display
+		lineageTag: d96d12ad-eee7-43fa-9dcf-fa7e4b4d48b0
+
+	/// Compact executive display only. Full unknown-evidence qualification remains on license detail pages and original measure.
+	measure 'Executive E5 Recovery' =
+			VAR _label = [License Selected E5 Recovery Label]
+			VAR _at = SEARCH(" (Unknown:",_label,1,0)
+			RETURN IF(_label = "Unknown", BLANK(), IF(_at > 0,LEFT(_label,_at-1),_label))
+		displayFolder: Executive display
+		lineageTag: 20c2e7de-e559-4a5d-b3c9-e8f6e62a2c55
+
+	/// Compact executive display only. Full unknown-evidence qualification remains on license detail pages and original measure.
+	measure 'Executive E3 to F3 Recovery' =
+			VAR _label = [License Selected E3 Review Label]
+			VAR _at = SEARCH(" (Unknown:",_label,1,0)
+			RETURN IF(_label = "Unknown", BLANK(), IF(_at > 0,LEFT(_label,_at-1),_label))
+		displayFolder: Executive display
+		lineageTag: 138f1b6e-d861-4ecf-8d00-d216feab9352
+
+	/// Red only when selected batch UTC age exceeds 74 hours (a Friday batch stays normal over the weekend). Missing or mixed provenance is amber here; the separate Mixed batches alert is unchanged.
+	measure 'Dataset Batch Timestamp UTC' =
+			VAR _id = [Dataset Loaded Batch ID]
+			VAR _stamp = IF(LEN(_id)>=19 && MID(_id,9,1)="T" && MID(_id,19,1)="Z",
+			    IFERROR(DATE(VALUE(LEFT(_id,4)),VALUE(MID(_id,5,2)),VALUE(MID(_id,7,2))) +
+			        TIME(VALUE(MID(_id,10,2)),VALUE(MID(_id,12,2)),VALUE(MID(_id,14,2))) +
+			        DIVIDE(VALUE(MID(_id,16,3)),86400000),BLANK()))
+			RETURN IF(NOT ISBLANK(_stamp) && FORMAT(_stamp,"yyyyMMdd") & "T" & FORMAT(_stamp,"HHmmss") = LEFT(_id,15), _stamp)
+		formatString: yyyy-MM-dd HH:mm:ss
+		isHidden
+		displayFolder: Dataset freshness
+		lineageTag: bf8019b9-9521-444f-b2db-8b9ade085f2f
+
+	/// Red only when selected batch UTC age exceeds 74 hours (a Friday batch stays normal over the weekend). Missing or mixed provenance is amber here; the separate Mixed batches alert is unchanged.
+	measure 'Dataset Batch Age Hours' = VAR _stamp=[Dataset Batch Timestamp UTC] RETURN IF(NOT ISBLANK(_stamp), DIVIDE(ROUND((UTCNOW()-_stamp)*86400000,0),3600000))
+		formatString: 0.00
+		isHidden
+		displayFolder: Dataset freshness
+		lineageTag: 707b7945-aa72-40dc-969b-2aa80ec2ba9f
+
+	/// Business attribute Product Version.
+	column 'Product Version'
+		dataType: string
+		lineageTag: d246ddf8-9091-47ed-8183-5b2de994069a
+		sourceColumn: Product Version
+
+	/// Business attribute Evidence Disclaimer.
+	column 'Evidence Disclaimer'
+		dataType: string
+		lineageTag: 49977362-4315-4bc3-b2a1-d40fd9d3f17e
+		sourceColumn: Evidence Disclaimer
+
+	/// Business attribute Copyright Notice.
+	column 'Copyright Notice'
+		dataType: string
+		lineageTag: 1d7c1a9d-1bca-4d9b-bf53-e5822c67d97f
+		sourceColumn: Copyright Notice
+
+	partition 'Report Metadata Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [#"Product Version" = nullable text, #"Evidence Disclaimer" = nullable text, #"Copyright Notice" = nullable text], {
+				        {"1.0.0-beta.1", "Governed prepared evidence. Reported scope only; missing evidence is not healthy zero.", "© 2026 WorkplaceCloudHub"}
+				    })
+				in
+				    Source
+

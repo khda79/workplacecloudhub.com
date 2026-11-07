@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "standard": "ISO 3166-1 current assigned alpha-2",
+  "retrievedDate": "2026-10-09",
+  "rowCount": 249,
+  "sourceURLs": {
+    "codes": "https://www.ripe.net/community/internet-governance/internet-technical-community/the-rir-system/list-of-country-codes-and-rirs/",
+    "names": "https://unstats.un.org/unsd/methodology/m49/overview/",
+    "standard": "https://www.iso.org/iso-3166-country-codes.html"
+  },
+  "validation": {
+    "uniqueAlpha2": 249,
+    "uniqueAlpha3": 249,
+    "unOverlap": 248,
+    "unOnlyCodes": [],
+    "ripeOnlyCodes": [
+      "TW"
+    ],
+    "alpha3Disagreements": 0
+  },
+  "displayOverrides": {
+    "GB": "United Kingdom",
+    "US": "United States",
+    "NL": "Netherlands"
+  },
+  "taiwanDisplayCaseOnly": true,
+  "compatibilityAlias": {
+    "UK": "GB"
+  },
+  "aliasIncludedAsISORow": false,
+  "unknownValuePolicy": "Blank or Unknown remains Unknown; an unmapped two-letter code remains visible as Code XX (unmapped); existing full-name values are preserved.",
+  "runtimeSource": "Frozen rows embedded in an Import M partition. No Web.Contents, File.Contents or inventory dependency.",
+  "maintenance": "A newly observed existing ISO code is resolved automatically. Future ISO code/name changes require a reviewed reference update; runtime does not silently download updates.",
+  "scope": "Tenant-neutral reference data only. This artifact contains ISO country codes and public display names, without inventory records, operational paths or deployment qualification. Report bindings and runtime validation are separate."
+}

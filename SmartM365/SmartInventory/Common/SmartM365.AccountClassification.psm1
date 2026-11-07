@@ -1,0 +1,353 @@
+# Account-classification rules are tenant configuration: the real rules live in the git-ignored
+# Config/AccountClassification.local.json(.txt); only the neutral .template is published.
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$jsonTransportManifest = Join-Path $PSScriptRoot '..\..\Modules\SmartM365.Core\SmartM365.JsonTransport.psd1'
+# A standalone copy (test harness) has no SmartM365 deployment around it: paths are then used as given.
+if (Test-Path -LiteralPath $jsonTransportManifest -PathType Leaf) { Import-Module $jsonTransportManifest -MinimumVersion '1.1.0' -ErrorAction Stop }
+
+function Get-SmartM365AccountClassificationDefaultPath {
+    [CmdletBinding()]
+    param()
+    return (Join-Path (Split-Path -Parent $PSScriptRoot) 'Config\AccountClassification.local.json')
+}
+
+function Resolve-SmartM365AccountClassificationPath {
+    # Returns the existing file for a logical or physical path. As with the SmartM365 JSON
+    # transport, <name>.json.txt is preferred to <name>.json.
+    [CmdletBinding()]
+    param([string]$Path = (Get-SmartM365AccountClassificationDefaultPath))
+
+    # The private file follows SmartInventoryConfigRootPath when it is set; the template stays in the code folder.
+    if ($Path -match '\.json(\.txt)?$' -and (Get-Command ConvertTo-SmartM365InventoryConfigLocation -ErrorAction SilentlyContinue)) {
+        $Path = ConvertTo-SmartM365InventoryConfigLocation -Path $Path
+    }
+    $candidates = if ($Path -match '\.json$') { @("$Path.txt", $Path) } else { @($Path) }
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return (Resolve-Path -LiteralPath $candidate).ProviderPath }
+    }
+    # Never fall back to the template: generic rules would silently reclassify the population.
+    throw ("Account classification configuration not found: {0}. Create the private file from AccountClassification.local.json.template and adapt its rules to the tenant before use." -f ($candidates -join ' or '))
+}
+
+function ConvertTo-SmartM365CaseInsensitiveValue {
+    # ConvertFrom-Json -AsHashtable returns case-sensitive dictionaries; the former
+    # Import-PowerShellDataFile result was case-insensitive, so lookups keep that behavior.
+    param([AllowNull()]$Value)
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        $result = [hashtable]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($key in $Value.Keys) { $result[[string]$key] = ConvertTo-SmartM365CaseInsensitiveValue $Value[$key] }
+        return $result
+    }
+    if ($Value -is [System.Collections.IList] -and $Value -isnot [string]) {
+        return ,@(foreach ($item in $Value) { ConvertTo-SmartM365CaseInsensitiveValue $item })
+    }
+    return $Value
+}
+
+function Read-SmartM365AccountClassification {
+    [CmdletBinding()]
+    param([string]$Path = (Get-SmartM365AccountClassificationDefaultPath))
+
+    $resolvedPath = Resolve-SmartM365AccountClassificationPath -Path $Path
+    $text = [IO.File]::ReadAllText($resolvedPath, [Text.UTF8Encoding]::new($false, $true))
+    $config = ConvertTo-SmartM365CaseInsensitiveValue ($text | ConvertFrom-Json -AsHashtable -Depth 20)
+    if ($config -isnot [hashtable]) { throw "Account classification configuration must be a JSON object: $resolvedPath" }
+    if ([string]$config['SchemaVersion'] -ne '1.0') {
+        throw ("Unsupported account classification configuration schema: {0}" -f $config['SchemaVersion'])
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$config['RuleVersion'])) { throw "Account classification RuleVersion is required: $resolvedPath" }
+    $config['SourcePath'] = $resolvedPath
+    return $config
+}
+
+function Get-SmartM365IntegrationFallback {
+    # Evaluates the private DirectoryRules.IntegrationFallback rules in order: the first rule whose
+    # Domains contains the short domain, and whose optional CountryIn/CountryNotIn condition holds, wins.
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [AllowEmptyCollection()][object[]]$Rules = @(),
+        [AllowEmptyString()][string]$DomainNameShort,
+        [AllowEmptyString()][string]$Country,
+        [Parameter(Mandatory)][string]$Default
+    )
+    $domainClean = ([string]$DomainNameShort).Trim().ToUpperInvariant()
+    $countryClean = ([string]$Country).Trim().ToUpperInvariant()
+    foreach ($rule in @($Rules)) {
+        if (@($rule['Domains'] | ForEach-Object { ([string]$_).ToUpperInvariant() }) -notcontains $domainClean) { continue }
+        if ($rule.ContainsKey('CountryIn') -and @($rule['CountryIn'] | ForEach-Object { ([string]$_).ToUpperInvariant() }) -notcontains $countryClean) { continue }
+        if ($rule.ContainsKey('CountryNotIn') -and @($rule['CountryNotIn'] | ForEach-Object { ([string]$_).ToUpperInvariant() }) -contains $countryClean) { continue }
+        return [string]$rule['Result']
+    }
+    return $Default
+}
+
+function Get-SmartM365AccountPopulation {
+    # Maps an AD AccountType to its governed population through the Population section:
+    # Human, Non-human, or Review required for any type the rules do not list explicitly.
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][AllowNull()]$PopulationRules,
+        [AllowNull()][object]$AccountType
+    )
+    $normalizedType = ([string]$AccountType).Trim()
+    if ($PopulationRules.Human -contains $normalizedType) { return 'Human' }
+    if ($PopulationRules.NonHuman -contains $normalizedType) { return 'Non-human' }
+    return 'Review required'
+}
+
+function Assert-SmartM365DirectoryRuleConfiguration {
+    # The organization-specific directory rules are private configuration; a missing section stops the caller.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable]$Configuration)
+    if (-not $Configuration.ContainsKey('DirectoryRules')) { throw ("Account classification configuration has no DirectoryRules section: {0}" -f $Configuration['SourcePath']) }
+    $rules = $Configuration['DirectoryRules']
+    foreach ($name in 'IntegrationFallback', 'HeadquartersOuContains', 'Windows11OutOfScopeDomains') {
+        if (-not $rules.ContainsKey($name)) { throw "DirectoryRules.$name is required." }
+    }
+    foreach ($name in 'Users', 'Computers', 'Default', 'ComputerCountryOuSuffix') {
+        if (-not $rules['IntegrationFallback'].ContainsKey($name)) { throw "DirectoryRules.IntegrationFallback.$name is required." }
+    }
+    foreach ($rule in @($rules['IntegrationFallback']['Users']) + @($rules['IntegrationFallback']['Computers'])) {
+        if ($null -eq $rule) { continue }
+        if (-not $rule.ContainsKey('Domains') -or -not $rule.ContainsKey('Result') -or [string]::IsNullOrWhiteSpace([string]$rule['Result'])) { throw 'Each DirectoryRules integration fallback rule needs Domains and Result.' }
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$rules['IntegrationFallback']['Default'])) { throw 'DirectoryRules.IntegrationFallback.Default is required.' }
+}
+
+function Get-SmartM365ExternalAccountTypeSource {
+    # Returns the validated ExternalAccountTypeSource section, or $null when it is absent or disabled:
+    # by default only the SWI rules classify accounts. All source names and values are tenant configuration.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable]$Configuration)
+    if (-not $Configuration.ContainsKey('ExternalAccountTypeSource')) { return $null }
+    $source = $Configuration['ExternalAccountTypeSource']
+    if ($source -isnot [hashtable]) { throw 'ExternalAccountTypeSource must be a JSON object.' }
+    if (-not [bool]$source['Enabled']) { return $null }
+    foreach ($name in 'File', 'KeyColumn', 'TypeColumn', 'GenericColumn') {
+        if ([string]::IsNullOrWhiteSpace([string]$source[$name])) { throw "ExternalAccountTypeSource.$name is required when the source is enabled." }
+    }
+    foreach ($name in 'TypeMap', 'KeepRulesTypes') {
+        if ($source.ContainsKey($name) -and $source[$name] -isnot [hashtable]) { throw "ExternalAccountTypeSource.$name must be a JSON object." }
+    }
+    $warnAgeDays = 7
+    if ($source.ContainsKey('WarnAgeDays')) {
+        if (-not [int]::TryParse([string]$source['WarnAgeDays'], [ref]$warnAgeDays) -or $warnAgeDays -lt 1) { throw 'ExternalAccountTypeSource.WarnAgeDays must be a positive integer.' }
+    }
+    $map = [hashtable]::new([StringComparer]::OrdinalIgnoreCase)
+    if ($source['TypeMap']) { foreach ($key in $source['TypeMap'].Keys) { $map[([string]$key).Trim()] = ([string]$source['TypeMap'][$key]).Trim() } }
+    $keep = [hashtable]::new([StringComparer]::OrdinalIgnoreCase)
+    if ($source['KeepRulesTypes']) { foreach ($key in $source['KeepRulesTypes'].Keys) { $keep[([string]$key).Trim()] = @($source['KeepRulesTypes'][$key] | ForEach-Object { ([string]$_).Trim() }) } }
+    $trueValues = if ($source.ContainsKey('GenericTrueValues')) { @($source['GenericTrueValues'] | ForEach-Object { ([string]$_).Trim() }) } else { @('True') }
+    $genericTypes = if ($source.ContainsKey('GenericAppliesToTypes')) { @($source['GenericAppliesToTypes'] | ForEach-Object { ([string]$_).Trim() }) } else { @('') }
+    [pscustomobject]@{
+        File = ([string]$source['File']).Trim()
+        KeyColumn = ([string]$source['KeyColumn']).Trim()
+        TypeColumn = ([string]$source['TypeColumn']).Trim()
+        GenericColumn = ([string]$source['GenericColumn']).Trim()
+        GenericTrueValues = $trueValues
+        GenericAppliesToTypes = $genericTypes
+        TypeMap = $map
+        KeepRulesTypes = $keep
+        NonItStaffTypes = @($source['NonItStaffTypes'] | Where-Object { $_ } | ForEach-Object { ([string]$_).Trim() })
+        WarnAgeDays = $warnAgeDays
+    }
+}
+
+function Resolve-SmartM365ExternalAccountType {
+    # Applies the external source to one account, in order: a type outside GenericAppliesToTypes wins
+    # (mapped through TypeMap, otherwise kept as named by the source); then a true generic flag gives
+    # Generic Account; then a mapped type, unless the SWI rules type is listed in KeepRulesTypes; an empty
+    # type, or no source row, keeps the SWI rules type.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Source,
+        [AllowNull()]$Row,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$RulesAccountType
+    )
+    $rules = [pscustomobject]@{ AccountType = $RulesAccountType; Source = 'SWI rules' }
+    if ($null -eq $Row) { return $rules }
+    $typeProperty = $Row.PSObject.Properties[$Source.TypeColumn]
+    $genericProperty = $Row.PSObject.Properties[$Source.GenericColumn]
+    $type = if ($null -ne $typeProperty) { ([string]$typeProperty.Value).Trim() } else { '' }
+    $generic = if ($null -ne $genericProperty) { ([string]$genericProperty.Value).Trim() } else { '' }
+    $isGeneric = @($Source.GenericTrueValues | Where-Object { $_ -ieq $generic }).Count -gt 0
+    $genericApplies = @($Source.GenericAppliesToTypes | Where-Object { $_ -ieq $type }).Count -gt 0
+    $mapped = if ($type -and $Source.TypeMap.ContainsKey($type)) { $Source.TypeMap[$type] } else { $type }
+    if ($type -and -not $genericApplies) { return [pscustomobject]@{ AccountType = $mapped; Source = 'External source' } }
+    if ($isGeneric) { return [pscustomobject]@{ AccountType = 'Generic Account'; Source = 'External source' } }
+    if (-not $type) { return $rules }
+    if ($Source.KeepRulesTypes.ContainsKey($type) -and @($Source.KeepRulesTypes[$type] | Where-Object { $_ -ieq $RulesAccountType }).Count -gt 0) { return $rules }
+    return [pscustomobject]@{ AccountType = $mapped; Source = 'External source' }
+}
+
+Export-ModuleMember -Function Get-SmartM365AccountClassificationDefaultPath, Resolve-SmartM365AccountClassificationPath, Read-SmartM365AccountClassification, Get-SmartM365IntegrationFallback, Get-SmartM365AccountPopulation, Assert-SmartM365DirectoryRuleConfiguration, Get-SmartM365ExternalAccountTypeSource, Resolve-SmartM365ExternalAccountType
+
+# SIG # Begin signature block
+# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCPWYJYfTqhnuvb
+# m3o5CWpiwpmqLQqBI19Z/UvmAlszgqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
+# b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
+# ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
+# VQQDDBV3b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRh
+# Y3RAd29ya3BsYWNlY2xvdWRodWIuY29tMIIBojANBgkqhkiG9w0BAQEFAAOCAY8A
+# MIIBigKCAYEAse6XztERSyHn9DVqj8Rdv0qjc5owqvgAIGaYxBmfiQuoM48Fo4Xt
+# 1ovi9brLUtf55G4XgthNPCoanxfCRRg30IVRxaDfdPXJzYmgsM5tXlsuNU49lE7E
+# PJk3+jEOgSCt8NKzmVPKpNRG0NmK0a8wm12cceYZOZlSYE0+ZtT6wy5PQQjMUqIx
+# XnGjt4H0nfgZZa7D4FyARKOVg/Xr9sUq5jIn3zszvg4jjeb4b0DKJtfbHukhWc2Y
+# oVFgswxVBXCWIaBnfF/cjqMfK/CaToT2trVb4hG4qcQ31s1nR4keoRaOw/vyd6ap
+# rEtCsT22N/Jx0dz7fIo1tVyvIaVcHdN9LW3chn0en0OKZ6Ke1OH9wf2prl4KA6Ww
+# VzrAZrOlXTAItdK7D9kKO/HeJd4PZvO53oy1LdmMGLSz3OLB9e5q7yo8rfqi5Ka9
+# KzM2CrSzz1yphn/H90wz7Q2pm4FIlWdcj86A/0kmhYg+5Wqqbg1drrPXu4nEBwWN
+# /dzoGtKZKHTdAgMBAAGjgZYwgZMwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoG
+# CCsGAQUFBwMDMD8GA1UdEQQ4MDaBHWNvbnRhY3RAd29ya3BsYWNlY2xvdWRodWIu
+# Y29tghV3b3JrcGxhY2VjbG91ZGh1Yi5jb20wDAYDVR0TAQH/BAIwADAdBgNVHQ4E
+# FgQUXIOOADQM78XfPAncirgCECedg9gwDQYJKoZIhvcNAQELBQADggGBADhZUB2R
+# 5J/Jw030xodhEWeCQ0vnJRaiEsjOxuArQREKH3lCrQ3UsUVl292d6LnQUSTH/jF7
+# rovEZ+JN2GQ/LCrXRaCuwCEGZKzlSEbtYWhfwDyj6GpIPq8Y4SeXyjdq4/rrI1bm
+# iTK4Sq7EoBlGJuX6l2nfvx1tTioSr11FoDfllJR7EYawRj9hBFJ0gG0b2SuYZMgW
+# gaDKefcnJDmOwcRNAZUII0ss8EeyANukWSkNN5ILZ+iKDpQgZxgDLPTiRguCyx45
+# PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
+# Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
+# dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
+# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
+# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
+# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
+# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
+# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
+# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
+# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
+# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
+# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
+# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
+# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
+# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
+# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
+# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
+# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
+# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
+# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
+# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
+# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
+# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
+# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
+# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
+# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
+# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
+# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
+# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
+# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
+# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
+# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
+# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
+# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
+# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
+# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
+# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
+# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
+# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
+# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
+# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
+# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
+# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
+# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
+# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
+# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
+# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
+# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
+# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
+# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
+# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
+# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
+# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
+# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
+# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
+# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
+# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
+# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
+# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
+# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
+# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
+# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
+# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
+# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
+# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
+# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
+# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
+# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
+# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
+# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
+# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
+# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
+# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
+# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
+# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
+# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
+# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
+# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
+# hvcNAQkEMSIEIAF4fqkm2Yv29l4Igd/ZRo4fFEXGOSXKiIWvJduTaA5yMA0GCSqG
+# SIb3DQEBAQUABIIBgJRjJEUMd6ecqZbETL8sou3UEPKhrLBEGSZMZFzma7DcZg1m
+# 4+ciHODZpvpV9ePrlJ5iVZB9UJUAlefjT2Er4qjd6QH+Xw/VAd0kYauh7+j4Q7YX
+# eO0TWohIdp4mB4pIkoGmvrYx9mdityryHSCzawIIgtI1zwZXopytc9s3lxyk7ZlN
+# WSiiBLOBHOBZ7SNCkGtjmo3wp5XL/98pIv/YM/eXQ6l4FVaNZ5Yo3mu5VrBmT4X5
+# ssdJeBw0DBQwg4OA+Bh9m8iUpTma2a05Y1iN1GwTGInKv8eWQEV2MpOe74b1zA5u
+# ljqHW0QzPIRK5zNJyFyLWzR7eT1nRrO1wFXTjLAc0OOU6IzEPTBgOjavjVxQMca5
+# aQHeTDcyaSc6tgnp74MUXQp29gS6V/RC8QJndcCcnlBdAmkeGBX+hiWKN2NEoLu9
+# Fo56YgHv5VEN9UBHzfLjeBpos0BU5ES9IYR40022ko2lH0MxpypGIVcdA2D1Njzi
+# 6EyfFC6lt8xGzDTnp6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
+# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjkwMjE1
+# MjJaMC8GCSqGSIb3DQEJBDEiBCC2VcrHhnYtJSCfnX91gw2UFIl5i3MDz8UNGyfq
+# VVi/bzANBgkqhkiG9w0BAQEFAASCAgAQvNjRMmsoB0TyPuuKQRqeVYeEl8MEDlcp
+# oVftOfy8mEKjG7HjKCpb5qimentprLx3jp832v6lFBdE3jhzmr7eLf2Mum+5YBp/
+# wFxUJh5oXRpoGhDgcmlAv7zpuoJC5RZhQ7UT7eikBK53+/XAo5zJoFH/3fTqZmJ9
+# cWBbTbunufkCHvhYN3m93WH6XW1JIaLObpU+vMTktuP/fxHHc2ocl1DZryVU5nep
+# JbM4tMpA8lmXm9s5IEHXTpBx7eS1S/JjIOUxHrxGE3Fb7GWE0alrXbdO22PzWys7
+# H5s2zJBjG/YsMOn36HDbBBPu+ASn9o23Qeza9kv5ugNmPcKF5+m5O21D+GXSEuhO
+# z9WjLxFCHFDLT2FyEGv8s/kITPQQZmA3MJ4XqylVISEp5io7dj5LtR7XfFbB7p1g
+# 2j5yN+TcAHCtZZ7dUIqBKnc/JazrajR4QKRHQxHm69LtxE/rNKakr9WIE6Mnnm1Q
+# UVLuNjVh+TcuP6Nlb5e6IoVyuAdSBDT99/Wsw2vo1LSRa+NuOFPza/7PKz/qwxKw
+# Iu1eBnxlkHGYKjqCA1A0V28Fpm+4ENlUxqmLHJx5thmkA0sOevrjAOZR0IrdLuFX
+# eq6eyoaAMC15QL/4dQrpcTJaUtiD6f+zHem28kR0Rwn3JJBUsEzf7WBYzdc3FokQ
+# qAGLKHxRAw==
+# SIG # End signature block

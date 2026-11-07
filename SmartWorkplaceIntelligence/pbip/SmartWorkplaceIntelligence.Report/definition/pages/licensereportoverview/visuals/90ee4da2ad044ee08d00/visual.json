@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "90ee4da2ad044ee08d00",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 3000,
+    "height": 1080,
+    "width": 1920,
+    "tabOrder": 3000
+  },
+  "visualGroup": {
+    "displayName": "Native · License Assignment",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

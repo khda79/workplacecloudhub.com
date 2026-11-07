@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "f5fc2692f3f5f70933fa",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 4000,
+    "height": 1280,
+    "width": 1920,
+    "tabOrder": 3000
+  },
+  "visualGroup": {
+    "displayName": "Progress",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 1,
+  "tables": [
+    {
+      "table": "Mailbox Migration Exceptions",
+      "file": "MailboxMigrationExceptions.csv",
+      "source": "Optional verified mailbox migration exception register",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantKey",
+        "Decision Key"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "Decision Key",
+          "type": "string"
+        },
+        {
+          "name": "Source Rows",
+          "type": "string"
+        },
+        {
+          "name": "Primary SMTP Address",
+          "type": "string"
+        },
+        {
+          "name": "Retain On-premises",
+          "type": "string"
+        },
+        {
+          "name": "Reason",
+          "type": "string"
+        },
+        {
+          "name": "Decision Owner",
+          "type": "string"
+        },
+        {
+          "name": "Decision Date",
+          "type": "string"
+        },
+        {
+          "name": "Review Date",
+          "type": "string"
+        },
+        {
+          "name": "Source Reference",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Identity",
+          "type": "string"
+        },
+        {
+          "name": "Candidate Identity",
+          "type": "string"
+        },
+        {
+          "name": "Source Domain",
+          "type": "string"
+        },
+        {
+          "name": "Domain Key",
+          "type": "string"
+        },
+        {
+          "name": "Status",
+          "type": "string"
+        },
+        {
+          "name": "Requires Review",
+          "type": "int64"
+        },
+        {
+          "name": "Retained",
+          "type": "int64"
+        },
+        {
+          "name": "Documentation Warnings",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot Date",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Mailbox Migration Exception Summary",
+      "file": "MailboxMigrationExceptionSummary.csv",
+      "source": "Optional verified mailbox migration exception register",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantKey",
+        "Domain Key"
+      ],
+      "allowEmpty": false,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "Domain Key",
+          "type": "string"
+        },
+        {
+          "name": "Source Domain",
+          "type": "string"
+        },
+        {
+          "name": "Source Status",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot Date",
+          "type": "string"
+        },
+        {
+          "name": "Inventory Count",
+          "type": "int64"
+        },
+        {
+          "name": "Retained Count",
+          "type": "int64"
+        },
+        {
+          "name": "Review Count",
+          "type": "int64"
+        },
+        {
+          "name": "Global Review Count",
+          "type": "int64"
+        },
+        {
+          "name": "Remaining Count",
+          "type": "int64"
+        },
+        {
+          "name": "Documentation Warning Count",
+          "type": "int64"
+        },
+        {
+          "name": "Workbook SHA256",
+          "type": "string"
+        },
+        {
+          "name": "Workbook Modified UTC",
+          "type": "string"
+        },
+        {
+          "name": "Captured UTC",
+          "type": "string"
+        },
+        {
+          "name": "Binding SHA256",
+          "type": "string"
+        },
+        {
+          "name": "Source Rows",
+          "type": "int64"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,205 @@
+/// Qualified recovery and E3 to F3 review users from the same SmartInventory snapshot as the daily email.
+table 'License Report Candidates'
+	lineageTag: 3df217b3-0cf3-4102-a298-07053d2d1e7f
+
+	measure 'License Report Recovery Detail Rows' = IF([License Report Snapshot Consistent] = 1, COALESCE(CALCULATE(COUNTROWS('License Report Candidates'), 'License Report Candidates'[Candidate Type] = "Recovery"), 0))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 7ad0534c-1a70-4275-a9ac-958bac69e491
+
+	measure 'License Report Downgrade Detail Rows' = IF([License Report Snapshot Consistent] = 1, COALESCE(CALCULATE(COUNTROWS('License Report Candidates'), 'License Report Candidates'[Candidate Type] = "E3 to F3 review"), 0))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 6019a7c9-b466-4b7d-b262-a0089cb469b1
+
+	/// SAM display resolved by qualified native identity, same tenant and loaded batch. Empty text when no qualified SAM; preserves unresolved source rows in table projections.
+	measure 'SAM · License Report Candidates' = VAR _display = (VAR _key=SELECTEDVALUE('License Report Candidates'[User ID]) VAR _tenant=SELECTEDVALUE('License Report Candidates'[Tenant Key]) VAR _batch=SELECTEDVALUE('License Report Candidates'[Loaded Batch ID]) RETURN IF(NOT ISBLANK(_key),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[SourceUserId],_key,'Native User Evidence'[TenantKey],_tenant,'Native User Evidence'[Loaded Batch ID],_batch))) RETURN IF(COUNTROWS('License Report Candidates') > 0, COALESCE(_display, ""))
+		displayFolder: Private identity display
+		lineageTag: 3d7c8f29-9127-482d-ac69-63c30e1eacc8
+
+	column 'Snapshot ID'
+		dataType: string
+		lineageTag: 8e3e690b-e064-467a-aaf7-bbcecfdb079c
+		sourceColumn: Snapshot ID
+
+	column 'Tenant Key'
+		dataType: string
+		lineageTag: 76335bbb-6cf1-413d-a4de-bbec0603c06a
+		sourceColumn: Tenant Key
+
+	column 'Candidate Type'
+		dataType: string
+		lineageTag: 450f9b6c-c0d3-4f1a-8c06-8cced8902416
+		sourceColumn: Candidate Type
+
+	column Product
+		dataType: string
+		lineageTag: 3f478015-a980-4710-9067-7ab2c7c962b4
+		sourceColumn: Product
+
+	column 'User ID'
+		dataType: string
+		lineageTag: 838ae90d-25eb-471b-806b-4b05cabedeed
+		sourceColumn: User ID
+
+	column 'User Principal Name'
+		dataType: string
+		lineageTag: a363c0bb-958d-4563-9ba4-29dd0d0c77ed
+		sourceColumn: User Principal Name
+
+	column 'Display Name'
+		dataType: string
+		lineageTag: bcb249c1-031f-4966-8b48-10bb220be935
+		sourceColumn: Display Name
+
+	column Reason
+		dataType: string
+		lineageTag: 0f9bfeb6-45e5-4af8-8674-208eb711d375
+		sourceColumn: Reason
+
+	column 'Last AD Activity Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: edf738e8-cff4-4cea-9b35-ee6589f9d750
+		sourceColumn: Last AD Activity Date
+
+	column 'Last M365 Activity Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 2537c44a-00a7-4847-92b8-d15f90f521ee
+		sourceColumn: Last M365 Activity Date
+
+	column 'Primary On Intune PC'
+		dataType: string
+		lineageTag: ad8f1e67-a29f-4958-95ad-a7b0a8966eb8
+		sourceColumn: Primary On Intune PC
+
+	column 'Target Suites'
+		dataType: string
+		lineageTag: 36181e88-798e-46c4-8506-1ab9de127543
+		sourceColumn: Target Suites
+
+	column 'Mailbox Size GB'
+		dataType: double
+		lineageTag: 10a4f507-8493-4a76-bc6d-b77d782fba29
+		summarizeBy: sum
+		sourceColumn: Mailbox Size GB
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column 'OneDrive Used GB'
+		dataType: double
+		lineageTag: 4be98eed-80fb-4ca0-8003-273f83a404be
+		summarizeBy: sum
+		sourceColumn: OneDrive Used GB
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	/// Detail from the E3 to F3 review worksheet; blank for recovery candidates.
+	column 'OneDrive Used Bytes'
+		dataType: int64
+		lineageTag: d28abf72-1262-4a09-87cc-f8b73d076e55
+		summarizeBy: none
+		sourceColumn: OneDrive Used Bytes
+
+	/// Detail from the E3 to F3 review worksheet; blank for recovery candidates.
+	column 'Archive Status'
+		dataType: string
+		lineageTag: 1a512c23-d30b-479c-8d36-d78ca75658c2
+		summarizeBy: none
+		sourceColumn: Archive Status
+
+	/// Detail from the E3 to F3 review worksheet; blank for recovery candidates.
+	column 'Litigation Hold Enabled'
+		dataType: string
+		lineageTag: 37a96c9b-14db-4252-ba80-b9fc7241ed04
+		summarizeBy: none
+		sourceColumn: Litigation Hold Enabled
+
+	/// Detail from the E3 to F3 review worksheet; blank for recovery candidates.
+	column 'Retention Hold Enabled'
+		dataType: string
+		lineageTag: 96ace6f6-001c-434a-b70c-9662e4d7d24f
+		summarizeBy: none
+		sourceColumn: Retention Hold Enabled
+
+	/// Detail from the E3 to F3 review worksheet; blank for recovery candidates.
+	column 'Windows Apps Use 180d'
+		dataType: string
+		lineageTag: 5523a1f1-34b1-41cd-92c7-a355a1e0f613
+		summarizeBy: none
+		sourceColumn: Windows Apps Use 180d
+
+	/// Detail from the E3 to F3 review worksheet; blank for recovery candidates.
+	column 'Mac Apps Use 180d'
+		dataType: string
+		lineageTag: d37d37b3-f194-4a1b-8307-7a75159ae869
+		summarizeBy: none
+		sourceColumn: Mac Apps Use 180d
+
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 6adf7bfb-7ec4-462d-be34-50498017ed86
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	/// Private report scope. Exact unique native identity and one loaded batch; no UPN suffix or display-name inference. Blank when missing or ambiguous.
+	column 'AD Domain' =
+			VAR _batch = 'License Report Candidates'[Loaded Batch ID]
+			VAR _id = TRIM('License Report Candidates'[User ID])
+			VAR _tenant = 'License Report Candidates'[Tenant Key]
+			VAR _users = FILTER(ALL('Native User Evidence'), 'Native User Evidence'[SourceUserId] == _id && 'Native User Evidence'[Loaded Batch ID] == _batch && 'Native User Evidence'[TenantKey] == _tenant)
+			RETURN IF(NOT ISBLANK(_batch) && _id <> "" && COUNTROWS(_users) = 1, MAXX(_users, 'Native User Evidence'[AD Domain]))
+		dataType: string
+		displayFolder: Report scope
+		lineageTag: fc3d5bbe-7366-416f-a791-597652536eaa
+		summarizeBy: none
+
+	/// Private report scope. Exact unique native identity and one loaded batch; no UPN suffix or display-name inference. Blank when missing or ambiguous.
+	column 'Scope Country' =
+			VAR _batch = 'License Report Candidates'[Loaded Batch ID]
+			VAR _id = TRIM('License Report Candidates'[User ID])
+			VAR _tenant = 'License Report Candidates'[Tenant Key]
+			VAR _users = FILTER(ALL('Native User Evidence'), 'Native User Evidence'[SourceUserId] == _id && 'Native User Evidence'[Loaded Batch ID] == _batch && 'Native User Evidence'[TenantKey] == _tenant)
+			RETURN IF(NOT ISBLANK(_batch) && _id <> "" && COUNTROWS(_users) = 1, MAXX(_users, 'Native User Evidence'[CountryCode]))
+		dataType: string
+		displayFolder: Report scope
+		lineageTag: cfd6dbc4-a2dd-4b72-973c-eb2680aaf939
+		summarizeBy: none
+
+	partition 'License Report Candidates Import' = m
+		mode: import
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
+				    Raw = GetLicenseReportCsv("M365_Licenses_ReportCandidates.csv", {"SnapshotId", "TenantKey", "CandidateType", "Product", "UserId", "TenantUserKey", "IdentityJoinStatus", "UserPrincipalName", "DisplayName", "Reason", "LastAdActivityDate", "LastM365ActivityDate", "PrimaryOnIntuneWindowsPc", "TargetSuites", "MailboxSizeGB", "OneDriveUsedGB", "OneDriveUsedBytes", "ArchiveStatus", "LitigationHoldEnabled", "RetentionHoldEnabled", "WindowsAppsUse180d", "MacAppsUse180d"}),
+				    RowCheck = if Table.RowCount(Raw) >= 0 then Raw else error "License report CSV has too few rows",
+				    NonBlank = Table.ReplaceValue(RowCheck, "", null, Replacer.ReplaceValue, {"OneDriveUsedBytes", "MailboxSizeGB", "OneDriveUsedGB", "LastAdActivityDate", "LastM365ActivityDate"}),
+				    Renamed = Table.RenameColumns(NonBlank, {{"SnapshotId", "Snapshot ID"}, {"TenantKey", "Tenant Key"}, {"CandidateType", "Candidate Type"}, {"UserId", "User ID"}, {"UserPrincipalName", "User Principal Name"}, {"DisplayName", "Display Name"}, {"LastAdActivityDate", "Last AD Activity Date"}, {"LastM365ActivityDate", "Last M365 Activity Date"}, {"PrimaryOnIntuneWindowsPc", "Primary On Intune PC"}, {"TargetSuites", "Target Suites"}, {"MailboxSizeGB", "Mailbox Size GB"}, {"OneDriveUsedGB", "OneDrive Used GB"}, {"OneDriveUsedBytes", "OneDrive Used Bytes"}, {"ArchiveStatus", "Archive Status"}, {"LitigationHoldEnabled", "Litigation Hold Enabled"}, {"RetentionHoldEnabled", "Retention Hold Enabled"}, {"WindowsAppsUse180d", "Windows Apps Use 180d"}, {"MacAppsUse180d", "Mac Apps Use 180d"}}),
+				    Selected = Table.RemoveColumns(Renamed, {"TenantUserKey", "IdentityJoinStatus"}),
+				    Typed = Table.TransformColumnTypes(Selected, {{"OneDrive Used Bytes", Int64.Type}, {"Mailbox Size GB", type number}, {"OneDrive Used GB", type number}, {"Last AD Activity Date", type datetime}, {"Last M365 Activity Date", type datetime}}, "en-US")
+				in
+				    Typed)
+				in
+				    Readers[Finish](BusinessRows)
+

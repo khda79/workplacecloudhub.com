@@ -1,0 +1,640 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "displayName": "Remediation Backlog - Reset filters",
+  "name": "2b7bbecd78b9f276a495",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "00cd68835a94969da58a",
+      "041d010638b241a93b75",
+      "10981b221c8a960f14c1",
+      "1152c1c1872e0c28cad3",
+      "1f4fa89b78a1bbef5f32",
+      "23b743ce9f983992c375",
+      "25892e11ee38c2aaed68",
+      "25ac2c2ab9c4b021c9a9",
+      "284ec581484f8090ec12",
+      "2dbf6e50457e1d727e39",
+      "311ee9b02edb510c0508",
+      "36916fe64a62a02ec4b1",
+      "43ebd53b4b5749f123a8",
+      "4633fe6aa32eb8fac0af",
+      "482cd69e6262084a7041",
+      "4c555ad31f25399ab967",
+      "50586fc163f658722ca2",
+      "57ad0a3457a02281b5bd",
+      "6c3a24728344deaad9bd",
+      "7230caf9303037ae262f",
+      "7a3b290f88b09858bf7b",
+      "7f997939eefe3760a804",
+      "859453789d01daaffee6",
+      "8970e9579877b48e6243",
+      "8de31988e7c87179236e",
+      "a1cef3e9fd0ff1c1b81e",
+      "aae12a742f8d8eaa2f4f",
+      "acd6592af94b64388847",
+      "b1bc7673e9451e042982",
+      "b2464e33c6e38057ebd3",
+      "b8c509309cae90ca566e",
+      "be8668d815db07b9231f",
+      "c649ecfffb1b5a9b3884",
+      "d9e666ad2f85deac5728",
+      "df16d58546923d6aa8cf",
+      "e2a7efd881e32a742e50",
+      "e6dd6947db5fbcfe3e88",
+      "e76f6d77fd33e106ac43",
+      "e9e6693bacc970ca9b58",
+      "ed1071b852c6ed6b7dd2",
+      "ee4ded0c706880f25993",
+      "efb926119d5a2d9cfbea",
+      "f8232663528d38885333"
+    ],
+    "suppressActiveSection": true,
+    "suppressDisplay": true
+  },
+  "explorationState": {
+    "version": "1.2",
+    "activeSection": "270d570d0b3c317afd17",
+    "sections": {
+      "270d570d0b3c317afd17": {
+        "visualContainers": {
+          "00cd68835a94969da58a": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "041d010638b241a93b75": {
+            "singleVisual": {
+              "visualType": "slicer",
+              "objects": {
+                "remove": [
+                  {
+                    "object": "general",
+                    "property": "filter"
+                  },
+                  {
+                    "object": "general",
+                    "property": "selfFilter"
+                  }
+                ]
+              }
+            },
+            "highlight": {
+              "selection": []
+            }
+          },
+          "10981b221c8a960f14c1": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "1152c1c1872e0c28cad3": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "1f4fa89b78a1bbef5f32": {
+            "singleVisual": {
+              "visualType": "slicer",
+              "objects": {
+                "remove": [
+                  {
+                    "object": "general",
+                    "property": "filter"
+                  },
+                  {
+                    "object": "general",
+                    "property": "selfFilter"
+                  }
+                ]
+              }
+            },
+            "highlight": {
+              "selection": []
+            }
+          },
+          "23b743ce9f983992c375": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "25892e11ee38c2aaed68": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "25ac2c2ab9c4b021c9a9": {
+            "singleVisual": {
+              "visualType": "slicer",
+              "objects": {
+                "remove": [
+                  {
+                    "object": "general",
+                    "property": "filter"
+                  },
+                  {
+                    "object": "general",
+                    "property": "selfFilter"
+                  }
+                ]
+              }
+            },
+            "highlight": {
+              "selection": []
+            }
+          },
+          "284ec581484f8090ec12": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "2dbf6e50457e1d727e39": {
+            "singleVisual": {
+              "visualType": "slicer",
+              "objects": {
+                "merge": {
+                  "general": [
+                    {
+                      "properties": {
+                        "filter": {
+                          "filter": {
+                            "Version": 2,
+                            "From": [
+                              {
+                                "Name": "s",
+                                "Entity": "Readiness Reading",
+                                "Type": 0
+                              }
+                            ],
+                            "Where": [
+                              {
+                                "Condition": {
+                                  "In": {
+                                    "Expressions": [
+                                      {
+                                        "Column": {
+                                          "Expression": {
+                                            "SourceRef": {
+                                              "Source": "s"
+                                            }
+                                          },
+                                          "Property": "Reading"
+                                        }
+                                      }
+                                    ],
+                                    "Values": [
+                                      [
+                                        {
+                                          "Literal": {
+                                            "Value": "'Daily operations'"
+                                          }
+                                        }
+                                      ]
+                                    ]
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                "remove": [
+                  {
+                    "object": "general",
+                    "property": "selfFilter"
+                  }
+                ]
+              }
+            },
+            "highlight": {
+              "selection": []
+            }
+          },
+          "311ee9b02edb510c0508": {
+            "singleVisual": {
+              "visualType": "slicer",
+              "objects": {
+                "merge": {
+                  "general": [
+                    {
+                      "properties": {
+                        "filter": {
+                          "filter": {
+                            "Version": 2,
+                            "From": [
+                              {
+                                "Name": "s",
+                                "Entity": "Backlog Attribution Selection",
+                                "Type": 0
+                              }
+                            ],
+                            "Where": [
+                              {
+                                "Condition": {
+                                  "In": {
+                                    "Expressions": [
+                                      {
+                                        "Column": {
+                                          "Expression": {
+                                            "SourceRef": {
+                                              "Source": "s"
+                                            }
+                                          },
+                                          "Property": "Mode"
+                                        }
+                                      }
+                                    ],
+                                    "Values": [
+                                      [
+                                        {
+                                          "Literal": {
+                                            "Value": "'In scope'"
+                                          }
+                                        }
+                                      ]
+                                    ]
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                "remove": [
+                  {
+                    "object": "general",
+                    "property": "selfFilter"
+                  }
+                ]
+              }
+            },
+            "highlight": {
+              "selection": []
+            }
+          },
+          "36916fe64a62a02ec4b1": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "43ebd53b4b5749f123a8": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "4633fe6aa32eb8fac0af": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "482cd69e6262084a7041": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "4c555ad31f25399ab967": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "50586fc163f658722ca2": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "57ad0a3457a02281b5bd": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "6c3a24728344deaad9bd": {
+            "singleVisual": {
+              "visualType": "slicer",
+              "objects": {
+                "remove": [
+                  {
+                    "object": "general",
+                    "property": "filter"
+                  },
+                  {
+                    "object": "general",
+                    "property": "selfFilter"
+                  }
+                ]
+              }
+            },
+            "highlight": {
+              "selection": []
+            }
+          },
+          "7230caf9303037ae262f": {
+            "singleVisual": {
+              "visualType": "slicer",
+              "objects": {
+                "merge": {
+                  "general": [
+                    {
+                      "properties": {
+                        "filter": {
+                          "filter": {
+                            "Version": 2,
+                            "From": [
+                              {
+                                "Name": "s",
+                                "Entity": "Backlog Attribution Selection",
+                                "Type": 0
+                              }
+                            ],
+                            "Where": [
+                              {
+                                "Condition": {
+                                  "In": {
+                                    "Expressions": [
+                                      {
+                                        "Column": {
+                                          "Expression": {
+                                            "SourceRef": {
+                                              "Source": "s"
+                                            }
+                                          },
+                                          "Property": "Mode"
+                                        }
+                                      }
+                                    ],
+                                    "Values": [
+                                      [
+                                        {
+                                          "Literal": {
+                                            "Value": "'In scope'"
+                                          }
+                                        }
+                                      ]
+                                    ]
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                "remove": [
+                  {
+                    "object": "general",
+                    "property": "selfFilter"
+                  }
+                ]
+              }
+            },
+            "highlight": {
+              "selection": []
+            }
+          },
+          "7a3b290f88b09858bf7b": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "7f997939eefe3760a804": {
+            "singleVisual": {
+              "visualType": "slicer",
+              "objects": {
+                "remove": [
+                  {
+                    "object": "general",
+                    "property": "filter"
+                  },
+                  {
+                    "object": "general",
+                    "property": "selfFilter"
+                  }
+                ]
+              }
+            },
+            "highlight": {
+              "selection": []
+            }
+          },
+          "859453789d01daaffee6": {
+            "singleVisual": {
+              "visualType": "slicer",
+              "objects": {
+                "remove": [
+                  {
+                    "object": "general",
+                    "property": "filter"
+                  },
+                  {
+                    "object": "general",
+                    "property": "selfFilter"
+                  }
+                ]
+              }
+            },
+            "highlight": {
+              "selection": []
+            }
+          },
+          "8970e9579877b48e6243": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "8de31988e7c87179236e": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "a1cef3e9fd0ff1c1b81e": {
+            "singleVisual": {
+              "visualType": "slicer",
+              "objects": {
+                "remove": [
+                  {
+                    "object": "general",
+                    "property": "filter"
+                  },
+                  {
+                    "object": "general",
+                    "property": "selfFilter"
+                  }
+                ]
+              }
+            },
+            "highlight": {
+              "selection": []
+            }
+          },
+          "aae12a742f8d8eaa2f4f": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "acd6592af94b64388847": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "b1bc7673e9451e042982": {
+            "singleVisual": {
+              "visualType": "slicer",
+              "objects": {
+                "remove": [
+                  {
+                    "object": "general",
+                    "property": "filter"
+                  },
+                  {
+                    "object": "general",
+                    "property": "selfFilter"
+                  }
+                ]
+              }
+            },
+            "highlight": {
+              "selection": []
+            }
+          },
+          "b2464e33c6e38057ebd3": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "b8c509309cae90ca566e": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "be8668d815db07b9231f": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "c649ecfffb1b5a9b3884": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "d9e666ad2f85deac5728": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "df16d58546923d6aa8cf": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "e2a7efd881e32a742e50": {
+            "singleVisual": {
+              "visualType": "slicer",
+              "objects": {
+                "remove": [
+                  {
+                    "object": "general",
+                    "property": "filter"
+                  },
+                  {
+                    "object": "general",
+                    "property": "selfFilter"
+                  }
+                ]
+              }
+            },
+            "highlight": {
+              "selection": []
+            }
+          },
+          "e6dd6947db5fbcfe3e88": {
+            "singleVisual": {
+              "visualType": "slicer",
+              "objects": {
+                "remove": [
+                  {
+                    "object": "general",
+                    "property": "filter"
+                  },
+                  {
+                    "object": "general",
+                    "property": "selfFilter"
+                  }
+                ]
+              }
+            },
+            "highlight": {
+              "selection": []
+            }
+          },
+          "e76f6d77fd33e106ac43": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "e9e6693bacc970ca9b58": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "ed1071b852c6ed6b7dd2": {
+            "singleVisual": {
+              "visualType": "slicer",
+              "objects": {
+                "remove": [
+                  {
+                    "object": "general",
+                    "property": "filter"
+                  },
+                  {
+                    "object": "general",
+                    "property": "selfFilter"
+                  }
+                ]
+              }
+            },
+            "highlight": {
+              "selection": []
+            }
+          },
+          "ee4ded0c706880f25993": {
+            "singleVisual": {
+              "visualType": "slicer",
+              "objects": {
+                "remove": [
+                  {
+                    "object": "general",
+                    "property": "filter"
+                  },
+                  {
+                    "object": "general",
+                    "property": "selfFilter"
+                  }
+                ]
+              }
+            },
+            "highlight": {
+              "selection": []
+            }
+          },
+          "efb926119d5a2d9cfbea": {
+            "highlight": {
+              "selection": []
+            }
+          },
+          "f8232663528d38885333": {
+            "highlight": {
+              "selection": []
+            }
+          }
+        }
+      }
+    }
+  }
+}

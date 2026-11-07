@@ -1,0 +1,89 @@
+{
+  "name": "SmartWorkplaceIntelligence-CorporateCool-8f4e1c.json",
+  "dataColors": [
+    "#0078D4",
+    "#005A9E",
+    "#2B88D8",
+    "#00B7C3",
+    "#107C10",
+    "#FFB900",
+    "#D83B01",
+    "#A4262C"
+  ],
+  "background": "#F4F7FB",
+  "foreground": "#1F2937",
+  "tableAccent": "#005A9E",
+  "good": "#107C10",
+  "neutral": "#FFB900",
+  "bad": "#D83B01",
+  "maximum": "#005A9E",
+  "center": "#DCEAF7",
+  "minimum": "#A4262C",
+  "textClasses": {
+    "callout": {
+      "fontFace": "Segoe UI Semibold",
+      "fontSize": 24,
+      "color": "#005A9E"
+    },
+    "title": {
+      "fontFace": "Segoe UI Semibold",
+      "fontSize": 13,
+      "color": "#1F2937"
+    },
+    "label": {
+      "fontFace": "Segoe UI",
+      "fontSize": 10,
+      "color": "#52606D"
+    }
+  },
+  "visualStyles": {
+    "*": {
+      "*": {
+        "visualHeader": [
+          {
+            "show": false
+          }
+        ],
+        "border": [
+          {
+            "show": true,
+            "color": {
+              "solid": {
+                "color": "#CBD8E5"
+              }
+            },
+            "radius": 12
+          }
+        ],
+        "padding": [
+          {
+            "top": 8,
+            "bottom": 8,
+            "left": 10,
+            "right": 10
+          }
+        ]
+      }
+    },
+    "tableEx": {
+      "*": {
+        "columnHeaders": [
+          {
+            "autoSizeColumnWidth": true,
+            "columnAdjustment": "growToFit"
+          }
+        ]
+      }
+    },
+    "pivotTable": {
+      "*": {
+        "columnHeaders": [
+          {
+            "autoSizeColumnWidth": true,
+            "columnAdjustment": "growToFit"
+          }
+        ]
+      }
+    }
+  }
+}

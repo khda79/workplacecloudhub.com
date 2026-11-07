@@ -1,0 +1,581 @@
+{
+  "version": "1.1.0",
+  "diagrams": [
+    {
+      "ordinal": 0,
+      "scrollPosition": {
+        "x": 0,
+        "y": 0
+      },
+      "nodes": [
+        {
+          "location": {
+            "x": 791.71073483550617,
+            "y": 2648.6633732892278
+          },
+          "nodeIndex": "License Capacity",
+          "nodeLineageTag": "d130ddf7-ab60-4e64-bf9f-551ebbf43ac1",
+          "size": {
+            "height": 296,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 773.2607136213278,
+            "y": 52.000000000000057
+          },
+          "nodeIndex": "Application",
+          "nodeLineageTag": "d1f3699c-ee53-48cc-992b-7cbc1c72b616",
+          "size": {
+            "height": 248,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 2304.9188785880442,
+            "y": 948.24715200691867
+          },
+          "nodeIndex": "Application Installations",
+          "nodeLineageTag": "4ae4d0b8-b058-4f3d-8244-500728a66122",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 769.666773379594,
+            "y": 1419.0690250087662
+          },
+          "nodeIndex": "Backup Coverage",
+          "nodeLineageTag": "6ff34f83-e628-4c63-83f1-e05f560d7a97",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 349.30741610094992,
+            "y": 1695.1821022468757
+          },
+          "nodeIndex": "Collaboration Usage",
+          "nodeLineageTag": "496e1d00-aad0-4076-a684-dd53a03db607",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 421.9724958021568,
+            "y": 0
+          },
+          "nodeIndex": "Content Usage",
+          "nodeLineageTag": "876050b4-5e54-49ee-8780-2a58742b1b8d",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 22.55506543745372,
+            "y": 745.84903989882787
+          },
+          "nodeIndex": "Data Quality Results",
+          "nodeLineageTag": "d5aa0650-5700-4d4a-bec9-b7f923ea072f",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 2304.053676509373,
+            "y": 525.89081033733
+          },
+          "nodeIndex": "Data Source",
+          "nodeLineageTag": "9e42f6a3-e92a-4f33-9251-83ec6f234d62",
+          "size": {
+            "height": 248,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1446.2954026815926,
+            "y": 1952.0504735790093
+          },
+          "nodeIndex": "Date",
+          "nodeLineageTag": "1f7eb698-28ff-4ed6-b87f-601a6f630dab",
+          "size": {
+            "height": 272,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 2036.7517415290722,
+            "y": 1044.9710785392188
+          },
+          "nodeIndex": "Device",
+          "nodeLineageTag": "2ccb13b7-757c-47db-ae93-e73810bffc90",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1403.950991725819,
+            "y": 1079.8646216245897
+          },
+          "nodeIndex": "Device Compliance Snapshots",
+          "nodeLineageTag": "9c70cf6a-32c5-4b3e-95de-d79c4e40037e",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1042.2654469357064,
+            "y": 948.71268333917737
+          },
+          "nodeIndex": "Device Matches",
+          "nodeLineageTag": "7c5eae7f-eb5e-4b2c-a134-3f4ff6f85940",
+          "size": {
+            "height": 296,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 193.52039576395742,
+            "y": 2188.641510480506
+          },
+          "nodeIndex": "Device Snapshots",
+          "nodeLineageTag": "e3842c33-150c-41a5-81b3-1c911130fecc",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 2036.7517415290722,
+            "y": 1422.6034936765077
+          },
+          "nodeIndex": "Endpoint Experience Measurements",
+          "nodeLineageTag": "4240a6f5-fba1-4fae-b6b8-1e5711c892c9",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1220.0390581898946,
+            "y": 1601.6941319094205
+          },
+          "nodeIndex": "Environment",
+          "nodeLineageTag": "1d3b8feb-3795-4911-bfdc-ee7b6a67afa2",
+          "size": {
+            "height": 176,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 81.236040532689515,
+            "y": 1624.9342451788229
+          },
+          "nodeIndex": "Finding Type",
+          "nodeLineageTag": "35d99d18-a07f-428f-9770-711c5911e8cd",
+          "size": {
+            "height": 200,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1215.9314402311486,
+            "y": 272.55809745134746
+          },
+          "nodeIndex": "Findings",
+          "nodeLineageTag": "ecc0ca17-585b-49fc-a054-ad5ac16f1f7e",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 2445.108083198661,
+            "y": 1774.5277943552539
+          },
+          "nodeIndex": "Geography",
+          "nodeLineageTag": "bfdf05ee-b5e6-4ea1-8067-fadd6ad1778f",
+          "size": {
+            "height": 152,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 0,
+            "y": 2662.9978521500948
+          },
+          "nodeIndex": "Group",
+          "nodeLineageTag": "64cfa52b-ee2c-490f-9263-ec01112a5d25",
+          "size": {
+            "height": 152,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1854.6517443511814,
+            "y": 1865.1114916100798
+          },
+          "nodeIndex": "Identity Matches",
+          "nodeLineageTag": "85bfcbff-98bd-46d4-8b3f-794b9b6a3ada",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1016.7832708577943,
+            "y": 1251.3377902398317
+          },
+          "nodeIndex": "License Product",
+          "nodeLineageTag": "cafe31f2-1492-4ce2-acf0-0dc675ef4518",
+          "size": {
+            "height": 176,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1993.0787494602539,
+            "y": 2176.9686775618325
+          },
+          "nodeIndex": "Mailbox",
+          "nodeLineageTag": "db22f113-a7dd-4ebf-a0f7-6247b4947f79",
+          "size": {
+            "height": 200,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 2263.00808602077,
+            "y": 2051.3516058948917
+          },
+          "nodeIndex": "Mailbox Matches",
+          "nodeLineageTag": "81decca5-36a4-4e9c-b200-2adcd88a01c1",
+          "size": {
+            "height": 272,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 501.13804920587211,
+            "y": 2602.8400087805871
+          },
+          "nodeIndex": "Mailbox Permissions",
+          "nodeLineageTag": "a30b913e-c63a-4ed6-a831-e5bb333783ab",
+          "size": {
+            "height": 272,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 2120.763262800278,
+            "y": 2545.7640714060908
+          },
+          "nodeIndex": "Mailbox Snapshots",
+          "nodeLineageTag": "6ccaf1cb-85d2-4d4f-9060-dc16095252cb",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 2160.1757052466833,
+            "y": 1761.4202979642212
+          },
+          "nodeIndex": "Organization",
+          "nodeLineageTag": "9391ce6f-aabb-4d27-8518-d246068c76f0",
+          "size": {
+            "height": 176,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 2853.8336742794181,
+            "y": 1372.3815784590934
+          },
+          "nodeIndex": "Report Metadata",
+          "nodeLineageTag": "4fe39000-5c25-4fbd-b9b0-5321408de88f",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 430.91140710704246,
+            "y": 944.71268333917737
+          },
+          "nodeIndex": "Security Posture Observations",
+          "nodeLineageTag": "93c930c7-82e4-4de8-a5e2-9a68c845a203",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 601.87673743354617,
+            "y": 2252.4836671109983
+          },
+          "nodeIndex": "Service",
+          "nodeLineageTag": "5797ff40-caea-4d65-b99d-59f2a3126708",
+          "size": {
+            "height": 176,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 757.66375777053872,
+            "y": 1778.1273254414095
+          },
+          "nodeIndex": "Service Relationships",
+          "nodeLineageTag": "db426c44-c392-45f7-b649-a3156e9cd0ed",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 333.77626656127296,
+            "y": 1250.5779035092341
+          },
+          "nodeIndex": "Site",
+          "nodeLineageTag": "c6968325-803f-4bf3-9757-2c75021d2977",
+          "size": {
+            "height": 200,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1712.4069211306892,
+            "y": 2339.4678332796689
+          },
+          "nodeIndex": "Source Coverage",
+          "nodeLineageTag": "a7df9cd1-704f-4e00-9bfe-c387ba2501d9",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 807.57509856155991,
+            "y": 474.35634166958874
+          },
+          "nodeIndex": "Source Runs",
+          "nodeLineageTag": "704112aa-34cc-4401-a5c6-cf104880f48d",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1870.3623848003945,
+            "y": 616.8161875624387
+          },
+          "nodeIndex": "Team",
+          "nodeLineageTag": "c732b4db-69fa-4657-a5eb-088ae0af917c",
+          "size": {
+            "height": 152,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1084.1826101776351,
+            "y": 2250.307031619639
+          },
+          "nodeIndex": "Team Memberships",
+          "nodeLineageTag": "7890cac8-60b0-4eac-93d1-8fbb9ce3ef48",
+          "size": {
+            "height": 224,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1628.3953998594834,
+            "y": 1417.5288709016161
+          },
+          "nodeIndex": "Tenant",
+          "nodeLineageTag": "f97233f1-4ee3-4e27-8aab-940f0bcc78fe",
+          "size": {
+            "height": 152,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1461.69214637585,
+            "y": 2398.4068152485984
+          },
+          "nodeIndex": "User",
+          "nodeLineageTag": "8d0790f7-e889-4d3a-bccf-bd9cd547d592",
+          "size": {
+            "height": 248,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1002.9859710560027,
+            "y": 1902.2332812085572
+          },
+          "nodeIndex": "User Activities",
+          "nodeLineageTag": "ad1cf62b-83de-4e2b-a1fe-6a21a16300a0",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1606.2358388381247,
+            "y": 1617.7358620322091
+          },
+          "nodeIndex": "User Device Relationships",
+          "nodeLineageTag": "1e04239e-e018-4147-90b1-bc6e14d4c4d0",
+          "size": {
+            "height": 224,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1669.7629606014395,
+            "y": 2820.7631569181872
+          },
+          "nodeIndex": "User Group Memberships",
+          "nodeLineageTag": "d339bdf8-aa97-4aed-8037-7c88ad6afb89",
+          "size": {
+            "height": 224,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1146.0753747110416,
+            "y": 2648.6633732892278
+          },
+          "nodeIndex": "User License Assignments",
+          "nodeLineageTag": "60c2ff56-3ac7-4ab8-8029-536a1c4e4524",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1517.5908520956978,
+            "y": 605.508279955001
+          },
+          "nodeIndex": "User Snapshots",
+          "nodeLineageTag": "75d62170-7c41-411c-90e4-51570b1a2785",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1794.5768801708327,
+            "y": 943.1725292320275
+          },
+          "nodeIndex": "Windows Lifecycle Assessments",
+          "nodeLineageTag": "9eecc2a2-8c04-40e4-af6d-be8007b5126f",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        }
+      ],
+      "name": "Toutes les tables",
+      "zoomValue": 100,
+      "pinKeyFieldsToTop": false,
+      "showExtraHeaderInfo": false,
+      "hideKeyFieldsWhenCollapsed": false,
+      "tablesLocked": false
+    }
+  ],
+  "selectedDiagram": "Toutes les tables",
+  "defaultDiagram": "Toutes les tables"
+}

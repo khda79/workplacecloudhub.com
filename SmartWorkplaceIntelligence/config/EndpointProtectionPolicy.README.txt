@@ -1,0 +1,86 @@
+Endpoint protection policy: explicit per-tenant activation
+========================================================
+
+The public tenant.local.json.template is not runtime configuration. The existing
+tenant loader supplies the effective private tenant profile to the preparation
+pipeline. Only the allowlisted EndpointProtectionPolicy fields are serialized
+into its run-local JSON. Power BI never reads tenant JSON or credentials.
+
+Enabled=false is the default. It preserves the existing 29-table contract and
+does not generate new CSVs. Existing tenant profiles are not activated automatically.
+When explicitly enabled by an operator for a future reviewed data cycle, the
+pipeline extends its run-local contract to 31 tables and publishes two additional
+tenant-aware, hashed CSVs through the existing batch validation/pointer mechanism:
+  EndpointProtectionPolicy.csv    - reviewed policy, scopes and exceptions
+  EndpointProtectionEvidence.csv  - per-device requirement evaluation
+The global contract and current Power BI model/metrics are unchanged.
+
+Example configuration (synthetic only; choose real requirements with the owner):
+"EndpointProtectionPolicy": {
+  "Enabled": true,
+  "PolicyVersion": "reviewed-v1",
+  "MaxObservationAgeHours": 48,
+  "Requirements": [
+    {"Role":"Antivirus", "Product":"Example AV", "ExpectedMode":"Active",
+     "EvidenceProductName":"Example legacy display", "Reason":""},
+    {"Role":"EDR", "Product":"Example EDR", "ExpectedMode":"Active",
+     "EvidenceProductName":"", "Reason":""}
+  ],
+  "ScopeRules": [
+    {"ScopeId":"defender-antivirus-scope", "DeviceSourceIds":["technical-intune-id"],
+     "Requirements":[
+       {"Role":"Antivirus", "Product":"Microsoft Defender Antivirus",
+        "ExpectedMode":"Active", "EvidenceProductName":"", "Reason":""}
+     ]}
+  ]
+}
+
+Scope requirements REPLACE defaults. This first version supports reviewed explicit
+Intune IDs, not display names, UPNs, wildcard groups or live group lookups. Scope
+overlaps produce Unknown. Rules with IDs absent from the captured inventory are
+preserved in the policy CSV and generate a warning; review them before activation.
+An empty requirement list means Unknown, not exemption. NotRequired requires a
+documented Reason. Only one Active antivirus can be required within one scope.
+Passive is restricted to Defender Antivirus and currently remains Unknown.
+
+Healthy/Gap for Microsoft Defender Antivirus means ONLY the three current raw
+Intune DefenderAgents checks: malware protection and real-time protection enabled,
+and signature update NOT overdue. All three booleans must be explicit; collection
+must be Observed and nonpartial, with a unique technical device key and a fresh
+LastReportedDateTime carrying an explicit UTC offset. It does NOT prove Defender
+for Endpoint onboarding, EDR health, licensing, tamper protection or full security.
+CollectedAtUtc, file dates and preparation time are never substitutes for health
+observation time. Missing data, stale/future time, duplicate observations or
+unconfigured age policy produce Unknown, never a healthy zero.
+
+For other antivirus products, qualified Windows registration can be Detected or
+NotDetected, but Evaluation State remains Unknown: registration is not health.
+The ExpectedThirdPartyAV collector setting remains separate and must agree with
+the policy product, or an explicitly reviewed EvidenceProductName alias. No alias
+is guessed. Product-specific health connectors require a later reviewed extension.
+EDR remains Unknown for ALL providers with these sources. Do not turn missing or
+inactive Defender into a generic protection gap when another product is expected.
+
+Future semantic-model integration must show separately: applicable requirements,
+Healthy, Gap, Unknown, NotApplicable, observation coverage and registration state.
+Use Healthy/(Healthy+Gap) only for qualified applicable observations; show blank
+when that denominator is zero, with Unknown coverage prominently exposed. Do not
+sum requirements as distinct devices. Do not equate NotApplicable with protected.
+Existing Defender control/signals and report visuals still use their old imports;
+replacing their presentation/calculations is a separate activation step.
+
+Offline validation:
+  pwsh -NoProfile -File scripts/Test-EndpointProtectionEvidence.ps1
+Uses only generated synthetic files in an isolated temporary directory. No tenant
+loader, collector, production preparation/publication, network or Desktop action.
+The existing validator and publisher are exercised on a synthetic two-table batch
+under that temporary directory, never on the tenant's DATA-POWERBI.
+
+Activation checklist (separate operator authorization required):
+1. Review and sign/deploy changed scripts through the normal authorized workflow.
+2. Review expected AV/EDR products, scopes, aliases and freshness with tenant owner.
+3. Set the PRIVATE runtime policy explicitly; leave other tenants disabled.
+4. Let the separately authorized next data cycle prepare the extended batch.
+5. Check tenant identity, hashes, Unknown coverage and unmatched scope warnings.
+6. Integrate CSV tables/measures and approved report presentation; refresh Power BI
+   only after separate authorization. Never refresh to test offline code.

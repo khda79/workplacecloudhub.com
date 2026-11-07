@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "a538fb0146f43fbde4ee",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 5000,
+    "height": 1080,
+    "width": 1920,
+    "tabOrder": 5000
+  },
+  "visualGroup": {
+    "displayName": "Backup & Resilience",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

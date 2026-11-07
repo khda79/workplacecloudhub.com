@@ -1,0 +1,25 @@
+/// Common domain selector for both governed daily fact tables.
+table 'Daily Domain'
+	lineageTag: a72482a6-e33f-4d17-b103-d7ec52c05c76
+
+	column 'Domain Key'
+		dataType: string
+		lineageTag: eaeebdd2-cc1d-42e1-9f4d-6e6440a0c9b5
+		sourceColumn: [Domain Key]
+
+	column Domain
+		dataType: string
+		lineageTag: 03fc0d96-1c80-4871-a02c-fd5f4d8e9883
+		sourceColumn: [Domain]
+
+	partition 'Daily Domain' = calculated
+		mode: import
+		source =
+				VAR _history = DISTINCT(UNION(
+				SELECTCOLUMNS(FILTER('Daily Directory Trends','Daily Directory Trends'[Domain Key]<>"__all__"),"Domain Key",'Daily Directory Trends'[Domain Key],"Domain",'Daily Directory Trends'[Domain Name]),
+				SELECTCOLUMNS(FILTER('Daily Mailbox Trends','Daily Mailbox Trends'[Domain Key]<>"__all__"),"Domain Key",'Daily Mailbox Trends'[Domain Key],"Domain",'Daily Mailbox Trends'[Domain Name])))
+				VAR _current = DISTINCT(UNION(SELECTCOLUMNS('AD User Evidence',"Domain",'AD User Evidence'[DomainName]), SELECTCOLUMNS('AD Computer Evidence',"Domain",'AD Computer Evidence'[DomainName]),SELECTCOLUMNS('AD Object Evidence',"Domain",'AD Object Evidence'[DomainName]), SELECTCOLUMNS('User Cleanup Evidence',"Domain",'User Cleanup Evidence'[AD Domain]), SELECTCOLUMNS('Computer Cleanup Evidence',"Domain",'Computer Cleanup Evidence'[AD Domain]), SELECTCOLUMNS('Mailbox Cleanup Evidence',"Domain",'Mailbox Cleanup Evidence'[AD Domain])))
+				VAR _known=SELECTCOLUMNS(_history,"Domain",[Domain])
+				VAR _new=FILTER(EXCEPT(_current,_known),NOT ISBLANK([Domain]) && [Domain]<>"")
+				RETURN UNION(_history,SELECTCOLUMNS(_new,"Domain Key","private:ad:" & LOWER([Domain]),"Domain",[Domain]))
+

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "0453eb72bdf2dcd5e5a8",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 70021,
+    "height": 1080,
+    "width": 1920,
+    "tabOrder": 70021
+  },
+  "visualGroup": {
+    "displayName": "Management & compliance",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

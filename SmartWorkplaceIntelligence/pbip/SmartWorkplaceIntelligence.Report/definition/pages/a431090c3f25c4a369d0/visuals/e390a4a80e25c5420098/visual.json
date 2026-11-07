@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "e390a4a80e25c5420098",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 70278,
+    "height": 1080,
+    "width": 1920,
+    "tabOrder": 70278
+  },
+  "visualGroup": {
+    "displayName": "Autopilot reconciliation",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

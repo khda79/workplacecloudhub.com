@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "d2f1906a4bb74ceda005",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 7000,
+    "height": 1080,
+    "width": 1920,
+    "tabOrder": 7000
+  },
+  "visualGroup": {
+    "displayName": "By AD Domain",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

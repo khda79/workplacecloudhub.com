@@ -1,0 +1,862 @@
+{
+  "schemaVersion": 1,
+  "feature": "SharePointMigration",
+  "workbookSchemaVersion": "6.3",
+  "tables": [
+    {
+      "table": "SPO Migration Plan",
+      "file": "SharePointMigrationPlanEvidence.csv",
+      "projection": "Plan",
+      "stagingIncludesTenantKey": true,
+      "allowEmpty": true,
+      "uniqueKey": [
+        "Operation Key"
+      ],
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Project Key",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot ID",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Operation Key",
+          "type": "string"
+        },
+        {
+          "name": "Migration ID",
+          "type": "string"
+        },
+        {
+          "name": "Source Type",
+          "type": "string"
+        },
+        {
+          "name": "Business Unit",
+          "type": "string"
+        },
+        {
+          "name": "Phase",
+          "type": "string"
+        },
+        {
+          "name": "Project Scope Key",
+          "type": "string"
+        },
+        {
+          "name": "Source Reference",
+          "type": "string"
+        },
+        {
+          "name": "Source URL Aliases",
+          "type": "string"
+        },
+        {
+          "name": "Source Name",
+          "type": "string"
+        },
+        {
+          "name": "Disposition",
+          "type": "string"
+        },
+        {
+          "name": "Execution Status",
+          "type": "string"
+        },
+        {
+          "name": "Validation Status",
+          "type": "string"
+        },
+        {
+          "name": "Validation Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Planned Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Actual Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Target URL",
+          "type": "string"
+        },
+        {
+          "name": "Resolved Target URL",
+          "type": "string"
+        },
+        {
+          "name": "Target Review Status",
+          "type": "string"
+        },
+        {
+          "name": "Target Mapping Level",
+          "type": "string"
+        },
+        {
+          "name": "Target Approval Evidence",
+          "type": "string"
+        },
+        {
+          "name": "Target Observation",
+          "type": "string"
+        },
+        {
+          "name": "Target Precision Status",
+          "type": "string"
+        },
+        {
+          "name": "Source Object Type",
+          "type": "string"
+        },
+        {
+          "name": "Source Scope",
+          "type": "string"
+        },
+        {
+          "name": "Source Qualification",
+          "type": "string"
+        },
+        {
+          "name": "Business Contact",
+          "type": "string"
+        },
+        {
+          "name": "Comments",
+          "type": "string"
+        },
+        {
+          "name": "Permission Strategy",
+          "type": "string"
+        },
+        {
+          "name": "Audience",
+          "type": "string"
+        },
+        {
+          "name": "Source Row",
+          "type": "int64"
+        },
+        {
+          "name": "Source SHA256",
+          "type": "string"
+        },
+        {
+          "name": "Capture UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Native Web Count",
+          "type": "int64"
+        },
+        {
+          "name": "Is Validated",
+          "type": "boolean"
+        },
+        {
+          "name": "Requires Review",
+          "type": "boolean"
+        },
+        {
+          "name": "Present In Register",
+          "type": "boolean"
+        },
+        {
+          "name": "Imported Migration Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Imported Date Meaning",
+          "type": "string"
+        },
+        {
+          "name": "Imported Target Site",
+          "type": "string"
+        },
+        {
+          "name": "Imported Target Library",
+          "type": "string"
+        },
+        {
+          "name": "Imported Target Folder",
+          "type": "string"
+        },
+        {
+          "name": "Legacy Web ID",
+          "type": "string"
+        },
+        {
+          "name": "Next Action",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "SPO Migration Web",
+      "file": "SharePointMigrationWebEvidence.csv",
+      "projection": "Web",
+      "stagingIncludesTenantKey": true,
+      "allowEmpty": true,
+      "uniqueKey": [
+        "Web Key"
+      ],
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Project Key",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot ID",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Web Key",
+          "type": "string"
+        },
+        {
+          "name": "Collection Key",
+          "type": "string"
+        },
+        {
+          "name": "Parent Web Key",
+          "type": "string"
+        },
+        {
+          "name": "Source URL",
+          "type": "string"
+        },
+        {
+          "name": "Source Name",
+          "type": "string"
+        },
+        {
+          "name": "Farm Key",
+          "type": "string"
+        },
+        {
+          "name": "Web Application Key",
+          "type": "string"
+        },
+        {
+          "name": "Coverage Kind",
+          "type": "string"
+        },
+        {
+          "name": "Run ID",
+          "type": "string"
+        },
+        {
+          "name": "Captured UTC",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "SPO Migration Collection",
+      "file": "SharePointMigrationCollectionEvidence.csv",
+      "projection": "Collection",
+      "stagingIncludesTenantKey": true,
+      "allowEmpty": true,
+      "uniqueKey": [
+        "Collection Key"
+      ],
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Project Key",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot ID",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Collection Key",
+          "type": "string"
+        },
+        {
+          "name": "Source URL",
+          "type": "string"
+        },
+        {
+          "name": "Storage Bytes",
+          "type": "int64"
+        },
+        {
+          "name": "Is Fully Covered",
+          "type": "boolean"
+        },
+        {
+          "name": "Is Fully Migrating",
+          "type": "boolean"
+        },
+        {
+          "name": "Captured UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Run ID",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "SPO Migration Legacy Web",
+      "file": "SharePointMigrationLegacyWebEvidence.csv",
+      "projection": "LegacyWeb",
+      "stagingIncludesTenantKey": true,
+      "allowEmpty": true,
+      "uniqueKey": [
+        "Legacy Key"
+      ],
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Project Key",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot ID",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Legacy Key",
+          "type": "string"
+        },
+        {
+          "name": "Legacy ID",
+          "type": "string"
+        },
+        {
+          "name": "Legacy Collection Key",
+          "type": "string"
+        },
+        {
+          "name": "Source URL",
+          "type": "string"
+        },
+        {
+          "name": "Source Name",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "SPO Migration Legacy Collection",
+      "file": "SharePointMigrationLegacyCollectionEvidence.csv",
+      "projection": "LegacyCollection",
+      "stagingIncludesTenantKey": true,
+      "allowEmpty": true,
+      "uniqueKey": [
+        "Legacy Key"
+      ],
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Project Key",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot ID",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Legacy Key",
+          "type": "string"
+        },
+        {
+          "name": "Legacy ID",
+          "type": "string"
+        },
+        {
+          "name": "Source URL",
+          "type": "string"
+        },
+        {
+          "name": "Reported Size",
+          "type": "decimal"
+        }
+      ]
+    },
+    {
+      "table": "SPO Migration Scope",
+      "file": "SharePointMigrationScopeEvidence.csv",
+      "projection": "Scope",
+      "stagingIncludesTenantKey": true,
+      "allowEmpty": true,
+      "uniqueKey": [
+        "Scope Key"
+      ],
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Project Key",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot ID",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Scope Key",
+          "type": "string"
+        },
+        {
+          "name": "Operation Key",
+          "type": "string"
+        },
+        {
+          "name": "Web Key",
+          "type": "string"
+        },
+        {
+          "name": "Collection Key",
+          "type": "string"
+        },
+        {
+          "name": "Coverage Kind",
+          "type": "string"
+        },
+        {
+          "name": "Is Effective",
+          "type": "boolean"
+        },
+        {
+          "name": "Is Direct",
+          "type": "boolean"
+        },
+        {
+          "name": "Effective Disposition",
+          "type": "string"
+        },
+        {
+          "name": "Has Conflict",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "table": "SPO Migration Findings",
+      "file": "SharePointMigrationFindingEvidence.csv",
+      "projection": "Finding",
+      "stagingIncludesTenantKey": true,
+      "allowEmpty": true,
+      "uniqueKey": [
+        "Finding Key"
+      ],
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Project Key",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot ID",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Finding Key",
+          "type": "string"
+        },
+        {
+          "name": "Operation Key",
+          "type": "string"
+        },
+        {
+          "name": "Source Type",
+          "type": "string"
+        },
+        {
+          "name": "Migration ID",
+          "type": "string"
+        },
+        {
+          "name": "Source Name",
+          "type": "string"
+        },
+        {
+          "name": "Severity",
+          "type": "string"
+        },
+        {
+          "name": "Finding Rule",
+          "type": "string"
+        },
+        {
+          "name": "Observed Value",
+          "type": "string"
+        },
+        {
+          "name": "Expected Action",
+          "type": "string"
+        },
+        {
+          "name": "Source Reference",
+          "type": "string"
+        },
+        {
+          "name": "Capture UTC",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "SPO Migration History",
+      "file": "SharePointMigrationHistoryEvidence.csv",
+      "projection": "History",
+      "stagingIncludesTenantKey": true,
+      "allowEmpty": true,
+      "uniqueKey": [
+        "History Key"
+      ],
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Project Key",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot ID",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Operation Key",
+          "type": "string"
+        },
+        {
+          "name": "Migration ID",
+          "type": "string"
+        },
+        {
+          "name": "Source Type",
+          "type": "string"
+        },
+        {
+          "name": "Business Unit",
+          "type": "string"
+        },
+        {
+          "name": "Phase",
+          "type": "string"
+        },
+        {
+          "name": "Project Scope Key",
+          "type": "string"
+        },
+        {
+          "name": "Source Reference",
+          "type": "string"
+        },
+        {
+          "name": "Source URL Aliases",
+          "type": "string"
+        },
+        {
+          "name": "Source Name",
+          "type": "string"
+        },
+        {
+          "name": "Disposition",
+          "type": "string"
+        },
+        {
+          "name": "Execution Status",
+          "type": "string"
+        },
+        {
+          "name": "Validation Status",
+          "type": "string"
+        },
+        {
+          "name": "Validation Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Planned Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Actual Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Target URL",
+          "type": "string"
+        },
+        {
+          "name": "Resolved Target URL",
+          "type": "string"
+        },
+        {
+          "name": "Target Review Status",
+          "type": "string"
+        },
+        {
+          "name": "Target Mapping Level",
+          "type": "string"
+        },
+        {
+          "name": "Target Approval Evidence",
+          "type": "string"
+        },
+        {
+          "name": "Target Observation",
+          "type": "string"
+        },
+        {
+          "name": "Target Precision Status",
+          "type": "string"
+        },
+        {
+          "name": "Source Object Type",
+          "type": "string"
+        },
+        {
+          "name": "Source Scope",
+          "type": "string"
+        },
+        {
+          "name": "Source Qualification",
+          "type": "string"
+        },
+        {
+          "name": "Business Contact",
+          "type": "string"
+        },
+        {
+          "name": "Comments",
+          "type": "string"
+        },
+        {
+          "name": "Permission Strategy",
+          "type": "string"
+        },
+        {
+          "name": "Audience",
+          "type": "string"
+        },
+        {
+          "name": "Source Row",
+          "type": "int64"
+        },
+        {
+          "name": "Source SHA256",
+          "type": "string"
+        },
+        {
+          "name": "Capture UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Native Web Count",
+          "type": "int64"
+        },
+        {
+          "name": "Is Validated",
+          "type": "boolean"
+        },
+        {
+          "name": "Requires Review",
+          "type": "boolean"
+        },
+        {
+          "name": "Present In Register",
+          "type": "boolean"
+        },
+        {
+          "name": "Imported Migration Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Imported Date Meaning",
+          "type": "string"
+        },
+        {
+          "name": "Imported Target Site",
+          "type": "string"
+        },
+        {
+          "name": "Imported Target Library",
+          "type": "string"
+        },
+        {
+          "name": "Imported Target Folder",
+          "type": "string"
+        },
+        {
+          "name": "Legacy Web ID",
+          "type": "string"
+        },
+        {
+          "name": "Next Action",
+          "type": "string"
+        },
+        {
+          "name": "History Key",
+          "type": "string"
+        }
+      ],
+      "historyKey": [
+        "History Key"
+      ],
+      "historyKeyVersion": 1
+    },
+    {
+      "table": "SPO Migration Source Summary",
+      "file": "SharePointMigrationSourceSummary.csv",
+      "projection": "SourceSummary",
+      "stagingIncludesTenantKey": true,
+      "allowEmpty": true,
+      "uniqueKey": [
+        "TenantKey",
+        "Project Key",
+        "Snapshot ID",
+        "Source"
+      ],
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Project Key",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot ID",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Source",
+          "type": "string"
+        },
+        {
+          "name": "Source SHA256",
+          "type": "string"
+        },
+        {
+          "name": "Binding SHA256",
+          "type": "string"
+        },
+        {
+          "name": "Captured UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Age Hours",
+          "type": "decimal"
+        },
+        {
+          "name": "Qualification",
+          "type": "string"
+        },
+        {
+          "name": "Coverage State",
+          "type": "string"
+        },
+        {
+          "name": "Run ID",
+          "type": "string"
+        },
+        {
+          "name": "Review Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Review State",
+          "type": "string"
+        }
+      ]
+    }
+  ],
+  "producers": [
+    {
+      "producer": "SmartM365-SharePoint-OnPrem-Content-Inventory",
+      "receipt": "SmartInventory_SmartM365-SharePoint-OnPrem-Content-Inventory.current.json.txt",
+      "requiredFiles": [
+        "SharePoint_OnPrem_Webs.csv",
+        "SharePoint_OnPrem_SiteCollections.csv",
+        "SharePoint_OnPrem_SiteAdministrators.csv",
+        "SharePoint_OnPrem_CollectionCoverage.csv"
+      ]
+    },
+    {
+      "producer": "SmartM365-SharePoint-OnPrem-Infrastructure-Inventory",
+      "receipt": "SmartInventory_SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.current.json.txt",
+      "requiredFiles": [
+        "SharePoint_OnPrem_Farms.csv",
+        "SharePoint_OnPrem_WebApplications.csv",
+        "SharePoint_OnPrem_WebApplicationZones.csv",
+        "SharePoint_OnPrem_ContentDatabases.csv",
+        "SharePoint_OnPrem_Servers.csv",
+        "SharePoint_OnPrem_ServiceApplications.csv"
+      ]
+    }
+  ]
+}

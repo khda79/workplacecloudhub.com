@@ -1,0 +1,12 @@
+{
+  "SchemaVersion": 1,
+  "TenantKey": "",
+  "TenantId": "",
+  "Qualification": {
+    "Status": "Unqualified",
+    "ReviewedBy": "",
+    "ReviewedUtc": null,
+    "DeclaredConsumersComplete": false
+  },
+  "Consumers": []
+}

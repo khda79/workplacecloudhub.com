@@ -1,0 +1,112 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "574a2eb914cfd99bca91",
+  "displayName": "Native · EXO Mailbox",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "1e918a13d57e3b4d689b",
+      "56fc29e1fc6aac59e488",
+      "8855e6d6b9d6ed227bda",
+      "99c5332ccc8744a3025d",
+      "02043332d0451484c4e1",
+      "e68d2d91aa9a731482da",
+      "fb347f49f7ecd2c8e0dc",
+      "5740e841382be14afc41",
+      "c3c9693eb0537bc19141",
+      "78278c2f54276aa11131",
+      "69f5be10b8497d3ae39a",
+      "7c5d9427b46067c35ee0",
+      "677b0ad814d84ba04de9",
+      "511cd9940fad7d2fb48e",
+      "c303702868269d87f219",
+      "72918b8b9c0595e21ec8"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "1b19e6ba3cf47f2e8398",
+    "sections": {
+      "1b19e6ba3cf47f2e8398": {
+        "visualContainers": {
+          "5740e841382be14afc41": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "c3c9693eb0537bc19141": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "78278c2f54276aa11131": {
+            "singleVisual": {}
+          },
+          "69f5be10b8497d3ae39a": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "7c5d9427b46067c35ee0": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "677b0ad814d84ba04de9": {
+            "singleVisual": {}
+          },
+          "511cd9940fad7d2fb48e": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "c303702868269d87f219": {
+            "singleVisual": {}
+          },
+          "72918b8b9c0595e21ec8": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
+        "visualContainerGroups": {
+          "1e918a13d57e3b4d689b": {
+            "isHidden": true
+          },
+          "56fc29e1fc6aac59e488": {
+            "isHidden": true
+          },
+          "8855e6d6b9d6ed227bda": {
+            "isHidden": true
+          },
+          "99c5332ccc8744a3025d": {
+            "isHidden": true
+          },
+          "02043332d0451484c4e1": {
+            "isHidden": false
+          },
+          "e68d2d91aa9a731482da": {
+            "isHidden": true
+          },
+          "fb347f49f7ecd2c8e0dc": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

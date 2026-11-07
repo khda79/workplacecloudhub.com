@@ -1,0 +1,557 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmarksMetadata/1.0.0/schema.json",
+  "items": [
+    {
+      "name": "licenseEvidenceTabs",
+      "displayName": "License evidence tabs",
+      "children": [
+        "licenseTab0",
+        "licenseTab1",
+        "licenseTab2",
+        "licenseTab3",
+        "licenseTab4",
+        "licenseSharedMailbox",
+        "licenseTab5",
+        "99c1ec3b75a896c83013"
+      ]
+    },
+    {
+      "name": "19ce43f8bd2b195c2c02",
+      "displayName": "Operational Overview views",
+      "children": [
+        "f86782704194785e7a25",
+        "6dea4b3eb24d111c91da",
+        "b79715b976cab1cbba1e",
+        "35db691c11820ece6417",
+        "a2c3dd17588de5b48fa1",
+        "74aee5c489e7e84743eb"
+      ]
+    },
+    {
+      "name": "11e09b8216ce8882de31",
+      "displayName": "Security Posture views",
+      "children": [
+        "f1aab3a89bba4ce981ef",
+        "f34ad4dc030000d32406",
+        "75379572833b52766b1e",
+        "7b417a0209612152f7c6",
+        "6b72e1dd1e0b452b223b",
+        "5355c0e42c86024912d7",
+        "e74759e1aca02a53a602"
+      ]
+    },
+    {
+      "name": "66db00c44c3351a30080",
+      "displayName": "Control & Evidence Explorer views",
+      "children": [
+        "2261b7656bc35d9b5b99",
+        "39b6a2739a857b81b307",
+        "45af0e7f2e128518f279",
+        "fd3dce23ad1bd9f64b52",
+        "bf6c923e89755f8844cb",
+        "39c1f0851190f0d7678a",
+        "7584649a88c6c26282da",
+        "5931fd15d13ce34e515d"
+      ]
+    },
+    {
+      "name": "c8048ebcd0af85b61c3e",
+      "displayName": "Workforce Personas views",
+      "children": [
+        "25e6d056f313dd6f877f",
+        "29bed90270041f004e08",
+        "b3c2e023c7e4f12e6103",
+        "74526e637c30c29ed25d",
+        "35396a058c9adeeb0c90",
+        "8c122b28023f411f7dbe"
+      ]
+    },
+    {
+      "name": "c6756fb062a295da2038",
+      "displayName": "Workforce & Identity views",
+      "children": [
+        "5fdf023724e5e07bc269",
+        "44f42535bf25b0319218",
+        "21a4bf1d75a9d0359bca",
+        "42c41c68ffbe255d45d3",
+        "eb051e4977b3ab266fba",
+        "32597a7da3e21bf809e2"
+      ]
+    },
+    {
+      "name": "0fdc6dcadcbdb974323a",
+      "displayName": "User Explorer views",
+      "children": [
+        "9b2ced68c50bee8805d6",
+        "4626c235bb182321e704",
+        "b8c8b03edcc9c670007b",
+        "0f94d154b3962e799b1c",
+        "2d89fd2cbd198576b7ef",
+        "33fd16b70adf024d1651",
+        "aa04c7f8c8a02dfe0e52",
+        "ae9ab162569ff5b0aef7",
+        "f810abe3a75070f2d164"
+      ]
+    },
+    {
+      "name": "7e5045955fe8537201a9",
+      "displayName": "Data Trust views",
+      "children": [
+        "6c6a63195e6a8179e227",
+        "1dd6b06af88c5782f925",
+        "034758c659d833e660c6",
+        "d1d8c20c7430fdc533f7",
+        "6ab4563141eeb43168d3",
+        "84ce659c9c7903e7eaa8"
+      ]
+    },
+    {
+      "name": "64e431f306384c285019",
+      "displayName": "License Overview views",
+      "children": [
+        "3f365a590f243cb5571d",
+        "93a04f4a65c7fb7bde09",
+        "ca227f19d2422584f250",
+        "2ec17af0371ebe5e08f4"
+      ]
+    },
+    {
+      "name": "aa2d3a454c15876b168a",
+      "displayName": "On-prem Platform & Services views",
+      "children": [
+        "f6d303bf65f938d55815",
+        "ac9d6f601053a0949d65",
+        "ea5bd7c38b427b0fadba"
+      ]
+    },
+    {
+      "name": "547b1fa496b3d3fa17ba",
+      "displayName": "Windows Lifecycle native facets",
+      "children": [
+        "7e7b486129a2916709fc",
+        "82e1a8e0f49ff0413ee3",
+        "555db07a0b233a5d4f6f"
+      ]
+    },
+    {
+      "name": "99e8e0a28199db1d55b9",
+      "displayName": "Mailbox Explorer native facets",
+      "children": [
+        "574a2eb914cfd99bca91",
+        "576d7ea65257c98adb3b",
+        "8abb7345df2657fbc13e"
+      ]
+    },
+    {
+      "name": "8afc41b363136936b092",
+      "displayName": "Service & Content Explorer native facets",
+      "children": [
+        "c66f21c998d211e743ba",
+        "670e591daabdf5ef2df3",
+        "e02a95d10847fb3f7801",
+        "fefdce2520804244979c"
+      ]
+    },
+    {
+      "name": "72730f6964645a116e46",
+      "displayName": "User Explorer native facets",
+      "children": [
+        "63d1fdae2f25ef9126c7",
+        "c7c6871cfba09907d8f4",
+        "be6ffdeca1ed333915d2",
+        "2fd81823ab8ffe3756eb",
+        "210815c144ff1a79e187"
+      ]
+    },
+    {
+      "name": "7f92559daf2e65165901",
+      "displayName": "Applications & Standardization native facets",
+      "children": [
+        "402bc69ea6beb0c64ffa"
+      ]
+    },
+    {
+      "name": "72edd64c132fd165ef95",
+      "displayName": "Data Trust native facets",
+      "children": [
+        "4831039e62b18fcc9a57",
+        "49fe633fd9abfbe2646f",
+        "4bf0fbf4c7103f47f326",
+        "96c0e7f04b88a6fc9b99",
+        "e9441429e76d27c00085"
+      ]
+    },
+    {
+      "name": "2f5ed3a05ace4eff91a8",
+      "displayName": "Device Explorer native facets",
+      "children": [
+        "0a79bc6c18063d0cf8d0",
+        "a0c1fb0a301ea0b36702",
+        "3d3549f3184b62fa8a8e",
+        "c142e181dbae3fcc2b66",
+        "6a47ba1d3e7696337249",
+        "cf91c4fa2c79ae2531cd",
+        "0549f3290c15689fdca6",
+        "02f2055f3301246f8e33",
+        "1fa8ee33b43386ff6b4b"
+      ]
+    },
+    {
+      "name": "10f67adb5070aae0443d",
+      "displayName": "Application Explorer native facets",
+      "children": [
+        "464211e362e2ea0fb407",
+        "d20b64279f7961b31097"
+      ]
+    },
+    {
+      "name": "de631a4dae083d24d73f",
+      "displayName": "Devices & Compliance native facets",
+      "children": [
+        "5b16b6fd174d0336026c",
+        "a96e13348d49db72e478",
+        "44aba87421fd44c799d4"
+      ]
+    },
+    {
+      "name": "21b08d32baffe573517b",
+      "displayName": "Endpoint Experience native facets",
+      "children": [
+        "23b89d80e250b24b40a8"
+      ]
+    },
+    {
+      "name": "a7dc365c51228a207131",
+      "displayName": "License Recovery & Evidence native facets",
+      "children": [
+        "f1476c31fa0bcad2bdd7",
+        "94415ee6b16ebded0324",
+        "7a06d4b8aaec3a7c7c67",
+        "2816652b91432c9e6f3c"
+      ]
+    },
+    {
+      "name": "ccddd9737dbdcec48fa0",
+      "displayName": "Collaboration Adoption Teams & SharePoint view",
+      "children": [
+        "da0fa763a3353935faac"
+      ]
+    },
+    {
+      "name": "e8c29de72fe5df4a5cf1",
+      "displayName": "Cloud Content & Storage Teams & SharePoint view",
+      "children": [
+        "6dc5ccdd8c1a49531d62"
+      ]
+    },
+    {
+      "name": "2d49a77581fd8b656e99",
+      "displayName": "Service & Content Explorer Teams & SharePoint view",
+      "children": [
+        "0039182d7d42bdd60b76"
+      ]
+    },
+    {
+      "name": "5feac082e103e4fbc662",
+      "displayName": "Data Trust Teams & SharePoint view",
+      "children": [
+        "d43e7b681e61e22cb62c"
+      ]
+    },
+    {
+      "name": "9af91354ffcf6065cca1",
+      "displayName": "User Explorer additional details",
+      "children": [
+        "efd3e29f30c5e3e9b6f7",
+        "cd037deffde0b24ca6b2",
+        "a2ce21ff2f567c1d2ca9",
+        "7df139cdf0bb5c8c0c87",
+        "996f233b7f51822b22fb"
+      ]
+    },
+    {
+      "name": "e6dad91ef537f7bb401a",
+      "displayName": "Data Trust additional details",
+      "children": [
+        "59a6484db5b071cf6d52"
+      ]
+    },
+    {
+      "name": "80d83479f6abbd1e246d",
+      "displayName": "Directory & Mailbox Daily Trends views",
+      "children": [
+        "bf6e5721270ee694da00",
+        "87093ec7d4f855fbc6e2",
+        "f1b335d5283503af4c77",
+        "43c8933b8732cd98740b",
+        "bad4096794087b6ee34a"
+      ]
+    },
+    {
+      "name": "5243a16d4ed51a469b3d",
+      "displayName": "Devices & Compliance (Mobile) views",
+      "children": [
+        "fd56d50a7c093d6c7531",
+        "a79ec2fe6afd7834e2c8",
+        "bd9270498203b0e3d7c3",
+        "be16ca8a9db610be27e6",
+        "15e9fb7ff0a121de6d12"
+      ]
+    },
+    {
+      "name": "8d730fd78776e33ec511",
+      "displayName": "Device Explorer (Mobile) views",
+      "children": [
+        "2d2f4b064a9ece2ce394",
+        "48e42432f67a529f90bd",
+        "0082799ad1607d59bc0f",
+        "3f58a94a67b73b4efc20",
+        "339528bbe42bac99a6a0"
+      ]
+    },
+    {
+      "name": "e0e76eb6ae0664cdcaad",
+      "displayName": "Devices & Compliance (PC) views",
+      "children": [
+        "f1741a70a5b3cf46cc62",
+        "9ad22eac22b6a0ea9fde",
+        "58a34cbf10dc26fe918b",
+        "edb421af32a16f709feb",
+        "d7b6f3184b3c4ba88af0",
+        "29bdace156abace1ab4a",
+        "b1556089e3b7e7f7cc5c",
+        "f7f7e9bf32c757e28e39",
+        "b34ba3aa05489af79182"
+      ]
+    },
+    {
+      "name": "852a7efebe91a14e20e6",
+      "displayName": "Device Explorer (PC) views",
+      "children": [
+        "e96fb05e4825711ea244",
+        "27395a3a0a31ee61ffa5",
+        "d85ddbfc9fa91337b41e",
+        "8ead3f41a2cd27b9ad05",
+        "6fdb61f0a6ef98bb96df",
+        "0c4c73a5764e33bf4271",
+        "de9646c80664ce6e4450",
+        "fb1400878210cc366c74",
+        "a937410d330d2deb8d3e",
+        "8f0e224f58d2d785d69e",
+        "4f01b30d49d11aa9a4af",
+        "b79414c268101bdbbacd"
+      ]
+    },
+    {
+      "name": "c824497fae83287f81f7",
+      "displayName": "Windows Lifecycle views",
+      "children": [
+        "6192fab1d636297c57b7",
+        "f0b4977608a64a44044a",
+        "8d3650f3d7bcada7d605",
+        "1b8e5209d87b6e83c61c",
+        "f71efb42c836407b97ba",
+        "70536ff200af8cb17993",
+        "0565bba55db38c4ff954"
+      ]
+    },
+    {
+      "name": "0fd2572e518c65142a5c",
+      "displayName": "Endpoint Experience views",
+      "children": [
+        "26d419ce2a85a5c5a8f6",
+        "1f2ecf90749e3c37cdde",
+        "fb740439fe73f985eed3",
+        "7a510ca910103ec91994",
+        "6c1085e07e6790a8bd60",
+        "7bffba076e1178864fa2"
+      ]
+    },
+    {
+      "name": "e4960d4b9f0f4aa667ea",
+      "displayName": "Applications & Standardization views",
+      "children": [
+        "ba8794ce1f5ebd3a5368",
+        "dc4f924e6d797cb37087",
+        "1871b1aa8cfc7f2dbbcd",
+        "b2bb7a346aab47433676",
+        "90e3c0ebb71dee1ac579"
+      ]
+    },
+    {
+      "name": "2753ae6dc2bc8e57bacc",
+      "displayName": "Application Explorer views",
+      "children": [
+        "a8959365305e8ac3a60b",
+        "a22cacbde8f7c2314116",
+        "fa63da6a7355b615ea9c",
+        "e12c73553b62059ee29d",
+        "0a7cc8be2e7120a52783",
+        "db1b5fbcb5602c44662c",
+        "4ff6a846ac4bfced65d6"
+      ]
+    },
+    {
+      "name": "d32fa28d7ec4e0d061f3",
+      "displayName": "Collaboration Adoption views",
+      "children": [
+        "08731d2b63e595577d5d",
+        "da72d0bd272ba7bef0aa",
+        "dc08bea6bf71a899a804",
+        "b195f475f23ccb60c39d",
+        "e8c4c6c3f58cf5d06d90"
+      ]
+    },
+    {
+      "name": "e46200cacc07998cd753",
+      "displayName": "Service & Content Explorer views",
+      "children": [
+        "b5cd4504b81b3b777d44",
+        "e830a250e50b2e7c591e",
+        "0570c54f7ecb4b755e0f"
+      ]
+    },
+    {
+      "name": "1d2792c20b479b1937a6",
+      "displayName": "Cloud Content & Storage views",
+      "children": [
+        "cf195ec549232813947b",
+        "f89e6dcd356af6acfde3",
+        "31f14e783c828ff63234",
+        "24dd05c03071d8b4a989",
+        "0fb9f39cf78abca51bdf",
+        "457970a110659959bfe1"
+      ]
+    },
+    {
+      "name": "a205e6abde647f4d0f7e",
+      "displayName": "On-prem Content & Storage views",
+      "children": [
+        "0b5c9c84556b60b4b4e5",
+        "c0bc9f6658bf98662a9f",
+        "63bc877f917b600c8bc6",
+        "f3ff7da864f0a21b6f0d"
+      ]
+    },
+    {
+      "name": "d454a3c62b6817bf46a4",
+      "displayName": "Messaging & Hybrid views",
+      "children": [
+        "049e76edb1d7970d3035",
+        "bdb5dd68728351c6ddbd",
+        "7b4390e4c19e503beb3e",
+        "6c617c9d7d117b9e4a84"
+      ]
+    },
+    {
+      "name": "be916b954af453b741c8",
+      "displayName": "On-prem Messaging views",
+      "children": [
+        "81b3c6a335c7c443464f",
+        "394123526d6181ae3275",
+        "e0bde43a409b6a53a4f6",
+        "4ea82eeda2a3b0ceb628",
+        "67cdc52640daa0c7830a",
+        "f2c7df412de98be36aac",
+        "1fe7f990213cf6028650"
+      ]
+    },
+    {
+      "name": "01d0a4bc6552abc55b1c",
+      "displayName": "Mailbox Explorer views",
+      "children": [
+        "f2653784f9c44ae0de92",
+        "21ea28976fa4c20a0f9a",
+        "7e2c268f284b3b230582",
+        "ed79e889e53f4d4ef4e3"
+      ]
+    },
+    {
+      "name": "aaebc3b8f355daf739cd",
+      "displayName": "Backup & Resilience views",
+      "children": [
+        "be6d711197208828f251",
+        "c27328abbf3a0a4bffda",
+        "ceaf9835f512dc5bc6d2",
+        "1ee8ff72849864df5e81",
+        "2a225dd9157c0e933a0d"
+      ]
+    },
+    {
+      "name": "efb4580cbc48dd25be57",
+      "displayName": "Migration to SharePoint Online views",
+      "children": [
+        "2ebfe65d940d54280b48",
+        "b4ee1cd9bb471ee72189",
+        "c24c6297e7f2525451c8",
+        "fe982debf0cc853a50db",
+        "c9704ae646d75fb05a0a"
+      ]
+    },
+    {
+      "name": "02e769191576bed3e42d",
+      "displayName": "Migration to Windows 11 views",
+      "children": [
+        "d299798264b90e8abf7e",
+        "f45be2cfda083dec3ac1",
+        "7dfa266c370effb5ca02",
+        "594bc8fed4a3cb1dffc2",
+        "381c49cae8f3d3da2220",
+        "d56c2c52d407a4a1e49a",
+        "3ee250d1e1a7440eacf6",
+        "8ed348965d8c0192e49b"
+      ]
+    },
+    {
+      "name": "cd25be39121d727a7798",
+      "displayName": "Migration to Exchange Online/SE views",
+      "children": [
+        "15ce8f6c5e51acdacfda",
+        "cc510578e8964b27b57d",
+        "8f22a8b2b8774be8e3a7",
+        "edf2d94d88358acab49d",
+        "63cda3314e52a37654f6",
+        "7bb49d1902ef7ac7dff4",
+        "40d8657878e7527219f7",
+        "02de358ac050c5f9b794",
+        "438c637a9c295b514408"
+      ]
+    },
+    {
+      "name": "0d8b5513d5376284a34b",
+      "displayName": "Remediation Backlog views",
+      "children": [
+        "ae11959bc7c54a994b37",
+        "09d158ba4f44cd99accc"
+      ]
+    },
+    {
+      "name": "f5b7eb4b4986fafd1eba",
+      "displayName": "Remediation Backlog controls",
+      "children": [
+        "2b7bbecd78b9f276a495"
+      ]
+    },
+    {
+      "name": "directoryCleanupViews",
+      "displayName": "Directory Cleanup views",
+      "children": [
+        "cleanupusersbookmark",
+        "cleanupcomputersbookmark",
+        "cleanupmailboxesbookmark"
+      ]
+    },
+    {
+      "name": "c0de3900000000000001",
+      "displayName": "Migration to Intune views",
+      "children": [
+        "c0de3600000000000001",
+        "c0de3600000000000002",
+        "c0de3600000000000003",
+        "c0de3600000000000004",
+        "c0de3600000000000005",
+        "c0de3600000000000006"
+      ]
+    }
+  ]
+}

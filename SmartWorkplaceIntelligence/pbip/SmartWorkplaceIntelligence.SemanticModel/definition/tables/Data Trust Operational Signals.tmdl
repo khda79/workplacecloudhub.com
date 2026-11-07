@@ -1,0 +1,77 @@
+/// Disconnected cross-domain data-trust signal catalog backed by source quality, freshness, coverage, and entity-reconciliation evidence.
+table 'Data Trust Operational Signals'
+	lineageTag: d96dfdc2-f474-40fc-82b4-85a23f73bb2e
+
+	/// Affected source, entity, or workload count for the selected data-trust signal.
+	measure 'Data Trust Signal Affected' = VAR _s = SELECTEDVALUE('Data Trust Operational Signals'[Signal Sort]) RETURN SWITCH(_s, 1, [Sources Requiring Refresh], 2, [Blocked Sources], 3, [Schema Issue Sources], 4, [Unexpected Empty Sources], 5, [Entra Devices in Hardware ID Conflicts], 6, [AD-to-Intune Unmatched Devices], 7, [Entra Device Removal Candidates], 8, [Backup Workload Evidence Gaps], 9, [Backup Policy Scope Anomalies], 10, [Identity Conflicts], 11, [Missing Activity Evidence])
+		formatString: #,0
+		displayFolder: Data Trust | Signals
+		lineageTag: 1fde8941-bea3-480c-bd2d-44d2305f2bec
+
+	/// Relevant covered source or entity population for the selected data-trust signal.
+	measure 'Data Trust Signal Covered' = VAR _s = SELECTEDVALUE('Data Trust Operational Signals'[Signal Sort]) RETURN SWITCH(_s, 1, [Evidence Sources], 2, [Evidence Sources], 3, [Evidence Sources], 4, [Evidence Sources], 5, CALCULATE([Covered Devices], 'Device Operational Signals'[Signal Sort] = 12), 6, [Managed Devices], 7, CALCULATE([Covered Devices], 'Device Operational Signals'[Signal Sort] = 13), 8, 3, 9, [Expected Policy Scope Members], 10, [Eligible AD Identities], 11, [Enabled Workforce Accounts])
+		formatString: #,0
+		displayFolder: Data Trust | Signals
+		lineageTag: 71a7fea3-5fa8-4108-8b21-bb0a33c43768
+
+	/// Affected share of the covered population for the selected data-trust signal.
+	measure 'Data Trust Signal Affected (%)' = DIVIDE([Data Trust Signal Affected], [Data Trust Signal Covered])
+		formatString: 0.0%
+		displayFolder: Data Trust | Signals
+		lineageTag: 9e8fdd30-a345-4d6c-ac5f-ce90c9a72de4
+
+	column 'Signal Sort'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 44719b93-f03b-442c-867a-f69a4fbe2d05
+		summarizeBy: none
+		sourceColumn: Signal Sort
+
+	column 'Severity Label'
+		dataType: string
+		lineageTag: b9e689a1-a32e-4f1c-8910-94b26a2790cc
+		sourceColumn: Severity Label
+
+	column Signal
+		dataType: string
+		lineageTag: cbfe0703-277c-479a-988b-080542dcb255
+		sourceColumn: Signal
+
+	column 'Risk Category'
+		dataType: string
+		lineageTag: 0d1d2be1-1676-48ed-a53c-25a2d5ab13d4
+		sourceColumn: Risk Category
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: 77c2b0d1-6c48-4847-b1c9-e5b69753ff2b
+		sourceColumn: Recommended Action
+
+	column 'Evidence Source'
+		dataType: string
+		lineageTag: 6e6634a9-1b1c-4b4b-bcda-937ac0ad50b5
+		sourceColumn: Evidence Source
+
+	partition 'Data Trust Operational Signals Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(
+				        type table [#"Signal Sort" = Int64.Type, #"Severity Label" = text, Signal = text, #"Risk Category" = text, #"Recommended Action" = text, #"Evidence Source" = text],
+				        {
+				            {1, "High", "Stale evidence sources", "Freshness", "Refresh stale exports before current operational decisions.", "Source inventory"},
+				            {2, "Critical", "Blocked or missing evidence sources", "Availability", "Restore or repair blocked sources before using dependent KPIs.", "Source inventory"},
+				            {3, "High", "Source schema mismatches", "Schema drift", "Reconcile schema drift before refreshing dependent evidence.", "Source inventory"},
+				            {4, "High", "Unexpectedly empty required sources", "Completeness", "Validate collection scope and rerun unexpectedly empty required exports.", "Source inventory"},
+				            {5, "High", "Entra hardware ID conflicts", "Entity integrity", "Resolve duplicate hardware identifiers before enrollment, ownership, or lifecycle decisions.", "Entra device inventory"},
+				            {6, "Medium", "AD-to-Intune unmatched devices", "Entity reconciliation", "Reconcile AD and Intune identity or retire orphaned device records.", "AD + Intune inventory"},
+				            {7, "Medium", "Device removal candidates", "Lifecycle hygiene", "Confirm ownership and activity before retiring stale device records.", "Entra device inventory"},
+				            {8, "High", "Backup workload evidence gaps", "Coverage", "Collect SharePoint and OneDrive backup evidence before assessing protection coverage.", "Backup evidence"},
+				            {9, "High", "Mailbox backup scope anomalies", "Scope reconciliation", "Resolve missing protection units and policy-scope reconciliation anomalies.", "Mailbox backup evidence"},
+				            {10, "High", "AD-to-Entra identity conflicts", "Entity reconciliation", "Resolve ambiguous AD-to-Entra identity matches before access or lifecycle decisions.", "AD + Entra identity evidence"},
+				            {11, "Medium", "Users missing activity evidence", "Coverage", "Restore or validate user-activity collection before inactivity decisions.", "M365 user activity"}
+				        }
+				    )
+				in
+				    Source
+

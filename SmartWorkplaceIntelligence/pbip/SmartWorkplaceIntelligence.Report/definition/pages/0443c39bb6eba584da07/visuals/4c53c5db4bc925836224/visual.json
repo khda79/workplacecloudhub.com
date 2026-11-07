@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "4c53c5db4bc925836224",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 2000,
+    "height": 1080,
+    "width": 1920,
+    "tabOrder": 1000
+  },
+  "visualGroup": {
+    "displayName": "Activity sources & dates",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

@@ -1,0 +1,174 @@
+{
+  "version": 1,
+  "outputLayout": "root-projects",
+  "navigation": {
+    "mode": "tabs",
+    "protectedButtonPages": [],
+    "layoutAdjustments": [],
+    "explorerSelectors": [],
+    "orphanNavigatorVisuals": [
+      {
+        "page": "migration-to-sharepoint-online",
+        "visual": "639bcc87cc19419112e9",
+        "bookmarkGroup": "5ff89d65c9ff68c28dfc",
+        "selectedBookmark": "8b7de51565202c517aff"
+      }
+    ]
+  },
+  "reports": [
+    {
+      "key": "overview",
+      "order": 1,
+      "displayName": "01 · Overview",
+      "pages": [
+        "f0b223aaaa07dc5ad1d0",
+        "74096d393d05fa994d48"
+      ],
+      "fileName": "01 · Overview"
+    },
+    {
+      "key": "daily-trends",
+      "order": 2,
+      "displayName": "02 · Daily Trends",
+      "pages": [
+        "daily-directory-mailbox-trends"
+      ],
+      "fileName": "02 · Daily Trends"
+    },
+    {
+      "key": "licensing",
+      "order": 3,
+      "displayName": "03 · Licensing",
+      "pages": [
+        "e0a71730533d84d5c995",
+        "licensereportoverview"
+      ],
+      "fileName": "03 · Licensing"
+    },
+    {
+      "key": "workforce",
+      "order": 4,
+      "displayName": "04 · Workforce & Identity",
+      "pages": [
+        "9ae7c13f821d4a608e52",
+        "0443c39bb6eba584da07",
+        "3a0fb4ff8eb05c8835b3"
+      ],
+      "fileName": "04 · Workforce & Identity"
+    },
+    {
+      "key": "devices",
+      "order": 5,
+      "displayName": "05 · PC Devices & Compliance",
+      "pages": [
+        "c8ce269962e9453ea038",
+        "a431090c3f25c4a369d0",
+        "0793507e95ae84a32c4a",
+        "d301e56b81a0cf6b1812"
+      ],
+      "fileName": "05 · PC Devices & Compliance"
+    },
+    {
+      "key": "mobile",
+      "order": 6,
+      "displayName": "06 · Mobile Devices & Compliance",
+      "fileName": "06 · Mobile Devices & Compliance",
+      "pages": [
+        "6c639a162734adc6926b",
+        "8e495ef8942de9cd3b1b"
+      ]
+    },
+    {
+      "key": "applications",
+      "order": 7,
+      "displayName": "07 · Applications",
+      "pages": [
+        "5378dc58f5c9b5cf8be9",
+        "a821f7deb92bb3bc4c78"
+      ],
+      "fileName": "07 · Applications"
+    },
+    {
+      "key": "collaboration",
+      "order": 8,
+      "displayName": "08 · Collaboration & SharePoint",
+      "pages": [
+        "b350aa7119b7d76e6a6d",
+        "1c06a6e4c247dd0749aa",
+        "c89dfefb108af0ea8164",
+        "a83c042911de45c59170",
+        "df08428a0c9c23d39f3f"
+      ],
+      "fileName": "08 · Collaboration & SharePoint"
+    },
+    {
+      "key": "messaging",
+      "order": 9,
+      "displayName": "09 · Messaging & Hybrid",
+      "pages": [
+        "71a60a59e0eb52a7a7d0",
+        "on-prem-messaging",
+        "1b19e6ba3cf47f2e8398"
+      ],
+      "fileName": "09 · Messaging & Hybrid"
+    },
+    {
+      "key": "security",
+      "order": 10,
+      "displayName": "10 · Security & Resilience",
+      "pages": [
+        "c801a6e5a6a2683bc55e",
+        "c823af8cf0f8d76eb252",
+        "7e703070ffe685a52305"
+      ],
+      "fileName": "10 · Security & Resilience"
+    },
+    {
+      "key": "migrations",
+      "order": 11,
+      "displayName": "11 · Migrations",
+      "pages": [
+        "migration-to-sharepoint-online",
+        "7b020122c7890360dc36",
+        "736753e8cf8c034002ef"
+      ],
+      "fileName": "11 · Migrations"
+    },
+    {
+      "key": "data-quality",
+      "order": 12,
+      "displayName": "12 · Data Quality & Evidence",
+      "pages": [
+        "6665fb035f086688c22f",
+        "6e8276acf6fa00f4aa6f"
+      ],
+      "fileName": "12 · Data Quality & Evidence"
+    }
+  ],
+  "qualifiedPilot": "licensing",
+  "orphanBookmarkTargets": {
+    "59a6484db5b071cf6d52": [
+      "1a0f34e34dc78b53952d",
+      "4c36bebd2ccac55bb650",
+      "71540081d7e024e59ebd",
+      "ab87863b17fcb4364cf6",
+      "e11fbb34b4e2b18f67ad"
+    ],
+    "7df139cdf0bb5c8c0c87": [
+      "9b19c8692d08d5e85eb7"
+    ],
+    "996f233b7f51822b22fb": [
+      "9b19c8692d08d5e85eb7"
+    ],
+    "a2ce21ff2f567c1d2ca9": [
+      "9b19c8692d08d5e85eb7"
+    ],
+    "cd037deffde0b24ca6b2": [
+      "9b19c8692d08d5e85eb7"
+    ],
+    "efd3e29f30c5e3e9b6f7": [
+      "9b19c8692d08d5e85eb7"
+    ]
+  },
+  "profile": "pc-mobile-32-pages"
+}

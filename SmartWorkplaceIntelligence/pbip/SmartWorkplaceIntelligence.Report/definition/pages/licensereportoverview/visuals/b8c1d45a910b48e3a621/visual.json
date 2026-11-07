@@ -1,0 +1,16 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "b8c1d45a910b48e3a621",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 8000,
+    "height": 1080,
+    "width": 1920,
+    "tabOrder": 8000
+  },
+  "visualGroup": {
+    "displayName": "Shared mailbox licenses",
+    "groupMode": "ScaleMode"
+  }
+}

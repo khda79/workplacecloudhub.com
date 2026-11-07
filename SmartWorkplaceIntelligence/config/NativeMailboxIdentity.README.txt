@@ -1,0 +1,45 @@
+Native mailbox identity qualification (native builder 0.3.12)
+
+Collection completeness and recipient health are separate. Exchange collector
+1.65 retains each conflicting SMTP recipient by nonzero, distinct ObjectGuid.
+It records one qualified warning per retained object. Missing/invalid/repeated
+native identities, lost projections, missing domains and acquisition failures
+remain blocking. Source run/publication fences are unchanged.
+
+FactMailbox and FactMailboxHosting use tenant + source family + native mailbox
+identity, never SMTP, for keys. Changing an address does not change these keys.
+Existing SMTP-derived keys intentionally change once when this code is used.
+References and graph aliases are regenerated together inside the same batch.
+The CSV output schemas and Power BI model are unchanged.
+
+Get-Mailbox and EXO are observed mailbox populations. Get-RemoteMailbox describes
+hybrid recipients, not additional observed Exchange Online mailboxes. A remote
+recipient without a uniquely matched observed mailbox is retained as a finding,
+not added to mailbox/hosting counts. These counts remain observed evidence, not
+a guarantee of physical assets, healthy recipients or complete cloud coverage.
+
+Cross-source matches use a valid nonzero ExchangeGuid against EXO MailboxGuid,
+or an explicitly exported ImmutableId against EXO OnPremisesImmutableId.
+Anchors are opaque case-sensitive bytes; ObjectGuid is never silently converted
+into an assumed source anchor. Matching must be one-to-one within each source.
+Ambiguous, contradictory or convergent technical matches stay unresolved.
+SMTP, names, UPN, OU names and account-enabled state never merge mailbox objects
+or select a winner. A unique EXO match takes precedence for mailbox attributes.
+All source observations remain present in Details.MailboxIdentity.Observations
+in the native build audit (source, native ID, target key, link basis, issues).
+Unresolved recipients and conflicts are exposed through the existing
+FactDataQuality and EntityFinding outputs.
+
+User links use ExternalDirectoryObjectId when supplied. An unmatched technical
+ID never falls back to SMTP. Without that ID, the existing unique user-address
+lookup is allowed only when the mailbox address is not ambiguous across source
+populations. Missing or conflicting evidence never fabricates a user link.
+
+Offline tests: test_mailbox_identity.py, test_native_evidence.py,
+Test-SmartM365ExchangeLocalQualificationOffline.ps1 and native empty-export tests.
+All test inputs are synthetic; no production collector, pipeline, transfer,
+AD/Exchange mutation or Power BI refresh is needed or authorized by the tests.
+
+Deployment is separate. Do not rewrite existing CSVs, force a current receipt,
+clear an unqualified run flag or relabel old outputs as newly qualified. A real
+successful collection and subsequent preparation require separate authorization.

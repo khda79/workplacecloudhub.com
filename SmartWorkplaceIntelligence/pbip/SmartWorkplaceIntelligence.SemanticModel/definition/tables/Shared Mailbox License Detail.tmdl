@@ -1,0 +1,70 @@
+/// Qualified tenant shared mailbox detail reconciled against the license report snapshot; manual review only.
+table 'Shared Mailbox License Detail'
+	lineageTag: e8829115-8486-4d44-83b0-f3a1a133cd72
+
+	column UserId
+		dataType: string
+		lineageTag: 2b9516ef-f5a3-4e06-8da1-6d0d27109404
+		sourceColumn: UserId
+
+	column 'Display Name'
+		dataType: string
+		lineageTag: 780d4759-f4f2-4c87-a8b1-926988c94cfd
+		sourceColumn: Display Name
+
+	column Email
+		dataType: string
+		lineageTag: fb6d4e2f-7372-47af-91f1-297479eb525a
+		sourceColumn: Email
+
+	column License
+		dataType: string
+		lineageTag: b4358a6a-d802-4567-921d-395b32d03b3a
+		sourceColumn: License
+
+	column 'Size GB'
+		dataType: double
+		lineageTag: 0251a5b4-860f-4a15-ad5d-c5641944bb96
+		sourceColumn: Size GB
+
+	column Archive
+		dataType: string
+		lineageTag: 7cb4ccdd-39b1-4378-9a58-56514e2758c0
+		sourceColumn: Archive
+
+	column 'Litigation hold'
+		dataType: string
+		lineageTag: a8e3e612-d7dc-4ef0-b4c4-195b3de15346
+		sourceColumn: Litigation hold
+
+	column 'Retention hold'
+		dataType: string
+		lineageTag: bea57f29-f918-43be-8d32-a1456d42dfe8
+		sourceColumn: Retention hold
+
+	column Review
+		dataType: string
+		lineageTag: 05a92fbc-7269-47f0-a121-dd205caa6e89
+		sourceColumn: Review
+
+	column 'Loaded Batch ID'
+		dataType: string
+		lineageTag: a1475feb-ecf3-4e10-9d76-fe9386d3112c
+		sourceColumn: Loaded Batch ID
+
+	partition 'Shared Mailbox License Detail' = m
+		mode: import
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    Manifest = Readers[GetPreparedBatchManifest](),
+				    Q = Readers[GetLicenseReportQualification](),
+				    Detail = Record.FieldOrDefault(Manifest, "SharedMailboxLicenseDetail", []),
+				    Qualified = Record.FieldOrDefault(Detail, "State", "") = "Qualified" and Q[State] = "Qualified" and Text.From(Record.FieldOrDefault(Detail, "SnapshotId", "")) = Text.From(Q[SnapshotId]),
+				    Rows = if Qualified then Record.FieldOrDefault(Detail, "Rows", {}) else {},
+				    Source = Table.FromRecords(Rows, type table [UserId=nullable text, DisplayName=nullable text, PrimarySmtpAddress=nullable text, License=nullable text, MailboxSizeGB=nullable text, ArchiveStatus=nullable text, LitigationHoldEnabled=nullable text, RetentionHoldEnabled=nullable text, Review=nullable text], MissingField.UseNull),
+				    Renamed = Table.RenameColumns(Source, {{"DisplayName", "Display Name"}, {"PrimarySmtpAddress", "Email"}, {"MailboxSizeGB", "Size GB"}, {"ArchiveStatus", "Archive"}, {"LitigationHoldEnabled", "Litigation hold"}, {"RetentionHoldEnabled", "Retention hold"}}),
+				    Typed = Table.TransformColumns(Renamed, {{"Size GB", each try Number.FromText(_, "en-US") otherwise null, type nullable number}}),
+				    Result = Readers[Finish](Typed)
+				in Result
+

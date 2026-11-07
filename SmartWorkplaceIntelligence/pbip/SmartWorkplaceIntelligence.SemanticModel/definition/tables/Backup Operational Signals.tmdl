@@ -1,0 +1,92 @@
+/// Disconnected backup and resilience operational signal catalog backed by private mailbox protection and policy-scope reconciliation evidence.
+table 'Backup Operational Signals'
+	lineageTag: babe9344-b9cb-4480-b6b6-4a8d0d522350
+
+	/// Affected mailbox, source, or missing-workload count for the selected backup signal.
+	measure 'Backup Signal Affected' = VAR _s = SELECTEDVALUE('Backup Operational Signals'[Signal Sort]) RETURN SWITCH(_s, 1, [Expected Mailboxes Not Protected], 2, [Protected Outside Expected Scope], 3, [Scope Members Without Mailbox], 4, [Disabled Scope Members], 5, [Protection Units With Errors], 6, [Stale Backup Sources], 7, 1, 8, 1)
+		formatString: #,0
+		displayFolder: Backup | Signals
+		lineageTag: fed4c64d-e34e-4246-bbf5-b92dd54c0a65
+
+	/// Relevant covered population for the selected backup signal; blank means the workload is not collected.
+	measure 'Backup Signal Covered' = VAR _s = SELECTEDVALUE('Backup Operational Signals'[Signal Sort]) RETURN SWITCH(_s, 1, [Expected Mailboxes], 2, [Protected Mailboxes], 3, [Expected Policy Scope Members], 4, [Expected Policy Scope Members], 5, [Protected Mailboxes], 6, 2, 7, BLANK(), 8, BLANK())
+		formatString: #,0
+		displayFolder: Backup | Signals
+		lineageTag: c636bd63-6d92-458f-a0c3-d5a9629da91c
+
+	/// Affected share of the covered backup population for the selected signal.
+	measure 'Backup Signal Affected (%)' = DIVIDE([Backup Signal Affected], [Backup Signal Covered])
+		formatString: 0.0%
+		displayFolder: Backup | Signals
+		lineageTag: efe17e2a-c5a1-4918-9d27-55f63b056a93
+
+	/// User-facing signal label that distinguishes unavailable eligible scope from missing protection-unit evidence.
+	measure 'Backup Signal Display' = VAR _signal = SELECTEDVALUE('Backup Operational Signals'[Signal]) RETURN SWITCH(_signal, "SharePoint backup evidence not collected", "SharePoint coverage scope unavailable", "OneDrive backup evidence not collected", "OneDrive coverage scope unavailable", _signal)
+		formatString: @
+		displayFolder: Backup | Signals
+		lineageTag: 716ea945-4aed-452f-b037-8b5088462342
+
+	/// User-facing risk category aligned with the available backup evidence.
+	measure 'Backup Risk Category Display' = VAR _signal = SELECTEDVALUE('Backup Operational Signals'[Signal]) RETURN SWITCH(_signal, "SharePoint backup evidence not collected", "Coverage assessment gap", "OneDrive backup evidence not collected", "Coverage assessment gap", SELECTEDVALUE('Backup Operational Signals'[Risk Category]))
+		formatString: @
+		displayFolder: Backup | Signals
+		lineageTag: 5e2078db-e1da-4c98-9320-afc55d7399ec
+
+	/// User-facing action aligned with observed protection units and unavailable eligible scope.
+	measure 'Backup Recommended Action Display' = VAR _signal = SELECTEDVALUE('Backup Operational Signals'[Signal]) RETURN SWITCH(_signal, "SharePoint backup evidence not collected", "Collect eligible SharePoint policy scope before assessing coverage; protection-unit inventory currently reports 0 protected sites.", "OneDrive backup evidence not collected", "Collect eligible OneDrive policy scope before assessing coverage; protection-unit inventory currently reports 0 protected accounts.", SELECTEDVALUE('Backup Operational Signals'[Recommended Action]))
+		formatString: @
+		displayFolder: Backup | Signals
+		lineageTag: f531fb7c-4b4c-46eb-a59c-1e25a822bf86
+
+	column 'Signal Sort'
+		dataType: int64
+		formatString: #,0
+		lineageTag: eb28f8fb-6529-4b92-901a-72b6b269abef
+		summarizeBy: none
+		sourceColumn: Signal Sort
+
+	column 'Severity Label'
+		dataType: string
+		lineageTag: 1b25c1a7-39f8-4993-9c0b-14732ce2aa94
+		sourceColumn: Severity Label
+
+	column Signal
+		dataType: string
+		lineageTag: 0f9360c4-4adf-4cd6-8d78-2d26f8cf6915
+		sourceColumn: Signal
+
+	column 'Risk Category'
+		dataType: string
+		lineageTag: d9345078-02d2-4b2f-aa9c-647db480c854
+		sourceColumn: Risk Category
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: ac3a4bbc-a4b9-4aa0-8202-c172e0ded124
+		sourceColumn: Recommended Action
+
+	column 'Evidence Source'
+		dataType: string
+		lineageTag: fdeac0c7-d619-4c01-a8ed-a24a6381eb75
+		sourceColumn: Evidence Source
+
+	partition 'Backup Operational Signals Import' = m
+		mode: import
+		source =
+				let
+				    Source = #table(
+				        type table [#"Signal Sort" = Int64.Type, #"Severity Label" = text, Signal = text, #"Risk Category" = text, #"Recommended Action" = text, #"Evidence Source" = text],
+				        {
+				            {1, "High", "Expected mailboxes not protected", "Protection gap", "Add each mailbox to a protection policy and verify a successful protection unit.", "Mailbox protection + policy scope"},
+				            {2, "Medium", "Protected mailboxes outside expected policy scope", "Scope governance", "Confirm policy intent and align protected mailboxes with the governed scope.", "Mailbox protection + policy scope"},
+				            {3, "Medium", "Policy scope members without a mailbox", "Inventory reconciliation", "Reconcile group membership with mailbox inventory or remove invalid scope members.", "Mailbox policy scope"},
+				            {4, "Medium", "Disabled accounts retained in expected policy scope", "Lifecycle governance", "Confirm retention requirements and remove obsolete disabled accounts from policy scope.", "Directory membership + policy scope"},
+				            {5, "High", "Protection units reporting errors", "Protection health", "Resolve protection-unit errors and verify the next successful protection cycle.", "Mailbox protection"},
+				            {6, "Medium", "Stale backup evidence sources", "Data freshness", "Refresh mailbox protection and policy-scope exports before recovery decisions.", "Backup evidence sources"},
+				            {7, "High", "SharePoint coverage scope unavailable", "Coverage assessment gap", "Collect eligible SharePoint policy scope before assessing coverage; protection-unit inventory currently reports 0 protected sites.", "SharePoint protection units: 0; eligible scope unavailable"},
+				            {8, "High", "OneDrive coverage scope unavailable", "Coverage assessment gap", "Collect eligible OneDrive policy scope before assessing coverage; protection-unit inventory currently reports 0 protected accounts.", "OneDrive protection units: 0; eligible scope unavailable"}
+				        }
+				    )
+				in
+				    Source
+

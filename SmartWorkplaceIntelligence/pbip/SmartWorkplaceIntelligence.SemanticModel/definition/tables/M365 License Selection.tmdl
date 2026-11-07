@@ -1,0 +1,14 @@
+/// Observed Microsoft 365 F3/E3/E5 suite membership. Multiple selections match any selected suite; not an entitlement or eligibility decision.
+table 'M365 License Selection'
+	lineageTag: 04337c31-c1aa-4177-8639-adcb5bb42c70
+
+	column 'License Product'
+		dataType: string
+		lineageTag: 92ef803c-c684-4d6d-8d71-3f75bdeeef6e
+		summarizeBy: none
+		sourceColumn: [License Product]
+
+	partition 'M365 License Selection' = calculated
+		mode: import
+		source = DATATABLE("License Product", STRING, {{"Microsoft 365 F3"},{"Microsoft 365 E3"},{"Microsoft 365 E5"},{"No F3/E3/E5 observed"},{"Unknown"}})
+

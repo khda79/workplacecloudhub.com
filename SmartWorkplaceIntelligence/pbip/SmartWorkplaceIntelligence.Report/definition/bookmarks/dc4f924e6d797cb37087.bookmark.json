@@ -1,0 +1,84 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "dc4f924e6d797cb37087",
+  "displayName": "Application inventory",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "1bfd1c9e2256110d7942",
+      "48f16eb4cb5568fcfd08",
+      "73ce24860fdaf31d8c02",
+      "8231a9eb38e16b631c08",
+      "a439ca82d4c69b39eeb3",
+      "d49a643e1db5d7c4acc5",
+      "2f0e7e938ef11f2c31bd",
+      "2b8fd2fe207ead591102",
+      "06d02c77df97dd8ee408",
+      "f43487d022bb58c7d9b9",
+      "075f1d659be28dee5ca9"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "5378dc58f5c9b5cf8be9",
+    "sections": {
+      "5378dc58f5c9b5cf8be9": {
+        "visualContainers": {
+          "2f0e7e938ef11f2c31bd": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "2b8fd2fe207ead591102": {
+            "singleVisual": {}
+          },
+          "06d02c77df97dd8ee408": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "f43487d022bb58c7d9b9": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "075f1d659be28dee5ca9": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
+        "visualContainerGroups": {
+          "1bfd1c9e2256110d7942": {
+            "isHidden": false
+          },
+          "48f16eb4cb5568fcfd08": {
+            "isHidden": true
+          },
+          "73ce24860fdaf31d8c02": {
+            "isHidden": true
+          },
+          "8231a9eb38e16b631c08": {
+            "isHidden": true
+          },
+          "a439ca82d4c69b39eeb3": {
+            "isHidden": true
+          },
+          "d49a643e1db5d7c4acc5": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

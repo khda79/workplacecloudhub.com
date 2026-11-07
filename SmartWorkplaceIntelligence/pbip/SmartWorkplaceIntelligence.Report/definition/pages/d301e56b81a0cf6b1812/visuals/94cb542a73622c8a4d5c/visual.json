@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "94cb542a73622c8a4d5c",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 4000,
+    "height": 1080,
+    "width": 1920,
+    "tabOrder": 4000
+  },
+  "visualGroup": {
+    "displayName": "Risk signals",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

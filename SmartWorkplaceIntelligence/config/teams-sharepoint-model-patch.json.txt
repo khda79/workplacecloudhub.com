@@ -1,0 +1,519 @@
+{
+  "schemaVersion": 1,
+  "description": "Offline MCP patch specification. Apply to an explicitly backed-up private PBIP model; do not refresh or change source parameters.",
+  "tables": [
+    {
+      "name": "Teams Site Links",
+      "mode": "Import",
+      "description": "Receipt-qualified observed Teams / SharePoint scope. Single reviewed tenant batch; no inference of full tenant coverage. ",
+      "mExpression": "let\n Source = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile(\"TeamsSiteLinkEvidence.csv\"), [Delimiter=\",\", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),\n Typed = NativeEvidenceTypes(Source, {[name=\"TenantKey\", dataType=\"String\"], [name=\"Link Key\", dataType=\"String\"], [name=\"Team ID\", dataType=\"String\"], [name=\"Team\", dataType=\"String\"], [name=\"Channel ID\", dataType=\"String\"], [name=\"Channel\", dataType=\"String\"], [name=\"Link Type\", dataType=\"String\"], [name=\"Site ID\", dataType=\"String\"], [name=\"Link Status\", dataType=\"String\"], [name=\"Resolution\", dataType=\"String\"], [name=\"Site URL\", dataType=\"String\"], [name=\"Receipt Run ID\", dataType=\"String\"], [name=\"Business Run ID\", dataType=\"String\"], [name=\"Collected UTC\", dataType=\"DateTime\"]})\nin Typed",
+      "columns": [
+        {
+          "name": "TenantKey",
+          "sourceColumn": "TenantKey",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": true,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Link Key",
+          "sourceColumn": "Link Key",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": true,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Team ID",
+          "sourceColumn": "Team ID",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Team",
+          "sourceColumn": "Team",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Channel ID",
+          "sourceColumn": "Channel ID",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Channel",
+          "sourceColumn": "Channel",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Link Type",
+          "sourceColumn": "Link Type",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Site ID",
+          "sourceColumn": "Site ID",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Link Status",
+          "sourceColumn": "Link Status",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Resolution",
+          "sourceColumn": "Resolution",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Site URL",
+          "sourceColumn": "Site URL",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Receipt Run ID",
+          "sourceColumn": "Receipt Run ID",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Business Run ID",
+          "sourceColumn": "Business Run ID",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Collected UTC",
+          "sourceColumn": "Collected UTC",
+          "dataType": "DateTime",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        }
+      ]
+    },
+    {
+      "name": "SharePoint Site Links",
+      "mode": "Import",
+      "description": "Receipt-qualified observed Teams / SharePoint scope. Single reviewed tenant batch; no inference of full tenant coverage. ",
+      "mExpression": "let\n Source = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile(\"SharePointSiteLinkEvidence.csv\"), [Delimiter=\",\", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),\n Typed = NativeEvidenceTypes(Source, {[name=\"TenantKey\", dataType=\"String\"], [name=\"Site ID\", dataType=\"String\"], [name=\"Site\", dataType=\"String\"], [name=\"Site URL\", dataType=\"String\"], [name=\"Teams Link State\", dataType=\"String\"], [name=\"Link Count\", dataType=\"Int64\"], [name=\"Storage Used GB\", dataType=\"Double\"], [name=\"Collection Scope\", dataType=\"String\"], [name=\"Usage Report Date\", dataType=\"DateOnly\"], [name=\"Collected UTC\", dataType=\"DateTime\"], [name=\"Link Coverage Qualified\", dataType=\"Boolean\"]})\nin Typed",
+      "columns": [
+        {
+          "name": "TenantKey",
+          "sourceColumn": "TenantKey",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": true,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Site ID",
+          "sourceColumn": "Site ID",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Site",
+          "sourceColumn": "Site",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Site URL",
+          "sourceColumn": "Site URL",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Teams Link State",
+          "sourceColumn": "Teams Link State",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Link Count",
+          "sourceColumn": "Link Count",
+          "dataType": "Int64",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Storage Used GB",
+          "sourceColumn": "Storage Used GB",
+          "dataType": "Double",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Collection Scope",
+          "sourceColumn": "Collection Scope",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Usage Report Date",
+          "sourceColumn": "Usage Report Date",
+          "dataType": "DateTime",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Source usage report date, not acquisition time."
+        },
+        {
+          "name": "Collected UTC",
+          "sourceColumn": "Collected UTC",
+          "dataType": "DateTime",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Link Coverage Qualified",
+          "sourceColumn": "Link Coverage Qualified",
+          "dataType": "Boolean",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        }
+      ]
+    },
+    {
+      "name": "SharePoint Tenant Capacity",
+      "mode": "Import",
+      "description": "Receipt-qualified observed Teams / SharePoint scope. Single reviewed tenant batch; no inference of full tenant coverage. Disconnected tenant-level utility; intentionally unaffected by country, service and entity slicers.",
+      "mExpression": "let\n Source = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile(\"SharePointTenantCapacityEvidence.csv\"), [Delimiter=\",\", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),\n Typed = NativeEvidenceTypes(Source, {[name=\"TenantKey\", dataType=\"String\"], [name=\"Storage Used GB\", dataType=\"Double\"], [name=\"Capacity GB\", dataType=\"Double\"], [name=\"Utilization\", dataType=\"Double\"], [name=\"Capacity State\", dataType=\"String\"], [name=\"Capacity Source\", dataType=\"String\"], [name=\"Collected UTC\", dataType=\"DateTime\"]})\nin Typed",
+      "columns": [
+        {
+          "name": "TenantKey",
+          "sourceColumn": "TenantKey",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": true,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Storage Used GB",
+          "sourceColumn": "Storage Used GB",
+          "dataType": "Double",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Capacity GB",
+          "sourceColumn": "Capacity GB",
+          "dataType": "Double",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Utilization",
+          "sourceColumn": "Utilization",
+          "dataType": "Double",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Capacity State",
+          "sourceColumn": "Capacity State",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Capacity Source",
+          "sourceColumn": "Capacity Source",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Collected UTC",
+          "sourceColumn": "Collected UTC",
+          "dataType": "DateTime",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        }
+      ]
+    },
+    {
+      "name": "Collaboration Source Qualification",
+      "mode": "Import",
+      "description": "Receipt-qualified observed Teams / SharePoint scope. Single reviewed tenant batch; no inference of full tenant coverage. Disconnected tenant-level utility; intentionally unaffected by country, service and entity slicers.",
+      "mExpression": "let\n Source = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile(\"CollaborationSourceQualification.csv\"), [Delimiter=\",\", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),\n Typed = NativeEvidenceTypes(Source, {[name=\"TenantKey\", dataType=\"String\"], [name=\"Source\", dataType=\"String\"], [name=\"Receipt Version\", dataType=\"String\"], [name=\"Receipt Run ID\", dataType=\"String\"], [name=\"Completed UTC\", dataType=\"DateTime\"], [name=\"Source Rows\", dataType=\"Int64\"], [name=\"Link Coverage Qualified\", dataType=\"Boolean\"], [name=\"Qualification\", dataType=\"String\"]})\nin Typed",
+      "columns": [
+        {
+          "name": "TenantKey",
+          "sourceColumn": "TenantKey",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": true,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Source",
+          "sourceColumn": "Source",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Receipt Version",
+          "sourceColumn": "Receipt Version",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Receipt Run ID",
+          "sourceColumn": "Receipt Run ID",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Completed UTC",
+          "sourceColumn": "Completed UTC",
+          "dataType": "DateTime",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Source Rows",
+          "sourceColumn": "Source Rows",
+          "dataType": "Int64",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Link Coverage Qualified",
+          "sourceColumn": "Link Coverage Qualified",
+          "dataType": "Boolean",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        },
+        {
+          "name": "Qualification",
+          "sourceColumn": "Qualification",
+          "dataType": "String",
+          "isNullable": true,
+          "isHidden": false,
+          "summarizeBy": "None",
+          "description": "Receipt-qualified observed evidence."
+        }
+      ]
+    }
+  ],
+  "measures": [
+    {
+      "tableName": "SharePoint Site Links",
+      "name": "Observed SPO Sites",
+      "expression": "COUNTROWS('SharePoint Site Links')",
+      "formatString": "#,0",
+      "description": "Sites in the verified non-OneDrive SPO capture; not all tenant sites.",
+      "displayFolder": "Teams & SharePoint | Observed scope"
+    },
+    {
+      "tableName": "SharePoint Site Links",
+      "name": "SPO Sites With Teams Link",
+      "expression": "CALCULATE(COUNTROWS('SharePoint Site Links'), KEEPFILTERS('SharePoint Site Links'[Teams Link State] = \"Observed Teams link\"))",
+      "formatString": "#,0",
+      "description": "Distinct observed sites, regardless of number of Teams/channel links.",
+      "displayFolder": "Teams & SharePoint | Observed scope"
+    },
+    {
+      "tableName": "SharePoint Site Links",
+      "name": "Teams Site Coverage Qualified",
+      "expression": "VAR Proofs = ALL('Collaboration Source Qualification')\nRETURN IF(COUNTROWS(Proofs) = 2 && COUNTROWS(FILTER(Proofs, 'Collaboration Source Qualification'[Link Coverage Qualified] = TRUE())) = 2, 1, 0)",
+      "formatString": "0",
+      "description": "Receipt and complete channel-link coverage across captures no more than 24 hours apart; not tenant-wide completeness.",
+      "displayFolder": "Teams & SharePoint | Observed scope"
+    },
+    {
+      "tableName": "SharePoint Site Links",
+      "name": "SPO Sites With Teams Link (%)",
+      "expression": "IF([Teams Site Coverage Qualified] = 1, DIVIDE([SPO Sites With Teams Link], CALCULATE([Observed SPO Sites], REMOVEFILTERS('SharePoint Site Links'[Teams Link State]))))",
+      "formatString": "0.0%",
+      "description": "Distinct linked sites / observed sites. Blank if coverage is not qualified.",
+      "displayFolder": "Teams & SharePoint | Observed scope"
+    },
+    {
+      "tableName": "SharePoint Site Links",
+      "name": "SPO Sites Without Observed Teams Link",
+      "expression": "IF([Teams Site Coverage Qualified] = 1, CALCULATE(COUNTROWS('SharePoint Site Links'), KEEPFILTERS('SharePoint Site Links'[Teams Link State] = \"No observed Teams link\")))",
+      "formatString": "#,0",
+      "description": "Absence of observed link is not proof of a standalone or non-Teams site.",
+      "displayFolder": "Teams & SharePoint | Observed scope"
+    },
+    {
+      "tableName": "SharePoint Site Links",
+      "name": "Observed SPO Storage (GB)",
+      "expression": "SUM('SharePoint Site Links'[Storage Used GB])",
+      "formatString": "#,0.0",
+      "description": "One source row per SPO site; no addition of duplicate Teams storage.",
+      "displayFolder": "Teams & SharePoint | Observed scope"
+    },
+    {
+      "tableName": "SharePoint Site Links",
+      "name": "Teams Linked SPO Storage (GB)",
+      "expression": "CALCULATE([Observed SPO Storage (GB)], KEEPFILTERS('SharePoint Site Links'[Teams Link State] = \"Observed Teams link\"))",
+      "formatString": "#,0.0",
+      "description": "Storage counted once per observed linked site, including shared/private channel sites.",
+      "displayFolder": "Teams & SharePoint | Observed scope"
+    },
+    {
+      "tableName": "Teams Site Links",
+      "name": "Teams Links Outside SPO Scope",
+      "expression": "CALCULATE(COUNTROWS('Teams Site Links'), KEEPFILTERS('Teams Site Links'[Resolution] = \"Outside observed SPO scope\"))",
+      "formatString": "#,0",
+      "description": "Preserved observed links absent from captured SPO scope; not invalid links.",
+      "displayFolder": "Teams & SharePoint | Observed scope"
+    },
+    {
+      "tableName": "SharePoint Tenant Capacity",
+      "name": "SPO Tenant Used (GB)",
+      "expression": "MAX('SharePoint Tenant Capacity'[Storage Used GB])",
+      "formatString": "#,0.0",
+      "description": "Tenant source storage, independent of page entity filters.",
+      "displayFolder": "Teams & SharePoint | Observed scope"
+    },
+    {
+      "tableName": "SharePoint Tenant Capacity",
+      "name": "SPO Tenant Capacity (GB)",
+      "expression": "MAX('SharePoint Tenant Capacity'[Capacity GB])",
+      "formatString": "#,0.0",
+      "description": "Only Get-PnPTenant.StorageQuota; blank when unauthorized or not measured.",
+      "displayFolder": "Teams & SharePoint | Observed scope"
+    },
+    {
+      "tableName": "SharePoint Tenant Capacity",
+      "name": "SPO Tenant Utilization (%)",
+      "expression": "MAX('SharePoint Tenant Capacity'[Utilization])",
+      "formatString": "0.0%",
+      "description": "Uses measured tenant capacity only, never allocated site quota.",
+      "displayFolder": "Teams & SharePoint | Observed scope"
+    },
+    {
+      "tableName": "SharePoint Tenant Capacity",
+      "name": "SPO Tenant Capacity State",
+      "expression": "SELECTEDVALUE('SharePoint Tenant Capacity'[Capacity State], \"Not measured\")",
+      "formatString": "",
+      "description": "Tenant-level qualification.",
+      "displayFolder": "Teams & SharePoint | Observed scope"
+    }
+  ],
+  "measureUpdates": [
+    {
+      "tableName": "Collaboration Object Evidence",
+      "name": "Collaboration Storage Used (GB)",
+      "expression": "CALCULATE(SUM('Collaboration Object Evidence'[Storage Used GB]), KEEPFILTERS('Collaboration Object Evidence'[Service] <> \"Teams\"))",
+      "description": "Observed SharePoint and OneDrive storage only. Teams storage is hosted on SharePoint and is not added again. A Teams-only selection returns blank.",
+      "formatString": "#,0.0"
+    }
+  ],
+  "relationships": [
+    {
+      "name": "TeamsSiteLinks_ObservedSite",
+      "fromTable": "Teams Site Links",
+      "fromColumn": "Site ID",
+      "fromCardinality": "Many",
+      "toTable": "SharePoint Site Links",
+      "toColumn": "Site ID",
+      "toCardinality": "One",
+      "crossFilteringBehavior": "OneDirection",
+      "isActive": true,
+      "relyOnReferentialIntegrity": false
+    }
+  ]
+}

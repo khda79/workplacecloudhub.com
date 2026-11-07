@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "f8d64d8064405709db6e",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 90000,
+    "width": 1920,
+    "height": 1080,
+    "tabOrder": 90000
+  },
+  "visualGroup": {
+    "displayName": "Readiness evidence",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

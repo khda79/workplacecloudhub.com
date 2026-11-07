@@ -1,0 +1,188 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "displayName": "Personas & activity",
+  "name": "aa04c7f8c8a02dfe0e52",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "42ed423b8e40ab3597b7",
+      "f5f50e9b958ebac1ad9e",
+      "194f5519ff62993efc58",
+      "ad1c8760c7b52aff0a86",
+      "5317b03cc5f50ec97842",
+      "42884626b16cfe1a0a99",
+      "63e3a170de0fa8d0ef14",
+      "7b90ca9fba0e57d6cca6",
+      "300809b8dc20496e4669",
+      "907a2d686879f953b6e0",
+      "ec9f5a00cd7cbcb2ff2e",
+      "b2adfbb09196d33da6d2",
+      "35b6326dc1195c1e2709",
+      "71540081d7e024e59ebd",
+      "ab87863b17fcb4364cf6",
+      "4c36bebd2ccac55bb650",
+      "e11fbb34b4e2b18f67ad",
+      "1a0f34e34dc78b53952d",
+      "f6624e5f2e516546df6c",
+      "417f2b45c937ea402076",
+      "8d6db48215fcf37b462d",
+      "46a43759bfb5ba26affe",
+      "014946aa584d2cd0e0ed",
+      "15f7171401b4c225ce89",
+      "2d36d58bb1873b65640f",
+      "e5975abe6163969783b6",
+      "e958339bcb4cf1140e3a",
+      "7f4cda3fc5cff392778a",
+      "832c8f965f2fff8a2c0b",
+      "a01af72d75320d14ca69",
+      "a3c6808257070e42df1a",
+      "ce8fff0f0d93da4249c8"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "3a0fb4ff8eb05c8835b3",
+    "sections": {
+      "3a0fb4ff8eb05c8835b3": {
+        "visualContainers": {
+          "f6624e5f2e516546df6c": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "417f2b45c937ea402076": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "8d6db48215fcf37b462d": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "46a43759bfb5ba26affe": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "014946aa584d2cd0e0ed": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "15f7171401b4c225ce89": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "2d36d58bb1873b65640f": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "e5975abe6163969783b6": {
+            "singleVisual": {}
+          },
+          "7f4cda3fc5cff392778a": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "832c8f965f2fff8a2c0b": {
+            "singleVisual": {}
+          },
+          "a01af72d75320d14ca69": {
+            "singleVisual": {}
+          },
+          "a3c6808257070e42df1a": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "ce8fff0f0d93da4249c8": {
+            "singleVisual": {}
+          }
+        },
+        "visualContainerGroups": {
+          "194f5519ff62993efc58": {
+            "isHidden": true
+          },
+          "300809b8dc20496e4669": {
+            "isHidden": true
+          },
+          "35b6326dc1195c1e2709": {
+            "isHidden": true
+          },
+          "42884626b16cfe1a0a99": {
+            "isHidden": true
+          },
+          "42ed423b8e40ab3597b7": {
+            "isHidden": true
+          },
+          "5317b03cc5f50ec97842": {
+            "isHidden": true
+          },
+          "63e3a170de0fa8d0ef14": {
+            "isHidden": false
+          },
+          "7b90ca9fba0e57d6cca6": {
+            "isHidden": true
+          },
+          "907a2d686879f953b6e0": {
+            "isHidden": true
+          },
+          "ad1c8760c7b52aff0a86": {
+            "isHidden": true
+          },
+          "b2adfbb09196d33da6d2": {
+            "isHidden": true
+          },
+          "ec9f5a00cd7cbcb2ff2e": {
+            "isHidden": true
+          },
+          "f5f50e9b958ebac1ad9e": {
+            "isHidden": true
+          },
+          "71540081d7e024e59ebd": {
+            "isHidden": true
+          },
+          "ab87863b17fcb4364cf6": {
+            "isHidden": true
+          },
+          "4c36bebd2ccac55bb650": {
+            "isHidden": true
+          },
+          "e11fbb34b4e2b18f67ad": {
+            "isHidden": true
+          },
+          "1a0f34e34dc78b53952d": {
+            "isHidden": true
+          },
+          "e958339bcb4cf1140e3a": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

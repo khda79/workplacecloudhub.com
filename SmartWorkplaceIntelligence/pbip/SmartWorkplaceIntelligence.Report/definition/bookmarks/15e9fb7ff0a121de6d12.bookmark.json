@@ -1,0 +1,80 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "15e9fb7ff0a121de6d12",
+  "displayName": "Data quality & coverage",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "ca9caa8fbb70083f5545",
+      "0453eb72bdf2dcd5e5a8",
+      "5a6f94528c698b194c9c",
+      "9eceeab01c43f66cfaa6",
+      "01742ce7f203bd315563",
+      "97ee060a2c745e7443c9",
+      "b1a2ec1c891c6c5ced85",
+      "9e20dc788fcc22cd22b3",
+      "2ae0fa08b6e05f0511ed",
+      "022ea2c1ecc87b092938"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "6c639a162734adc6926b",
+    "sections": {
+      "6c639a162734adc6926b": {
+        "visualContainers": {
+          "97ee060a2c745e7443c9": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "b1a2ec1c891c6c5ced85": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "9e20dc788fcc22cd22b3": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "2ae0fa08b6e05f0511ed": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "022ea2c1ecc87b092938": {
+            "singleVisual": {}
+          }
+        },
+        "visualContainerGroups": {
+          "ca9caa8fbb70083f5545": {
+            "isHidden": true
+          },
+          "0453eb72bdf2dcd5e5a8": {
+            "isHidden": true
+          },
+          "5a6f94528c698b194c9c": {
+            "isHidden": true
+          },
+          "9eceeab01c43f66cfaa6": {
+            "isHidden": true
+          },
+          "01742ce7f203bd315563": {
+            "isHidden": false
+          }
+        }
+      }
+    }
+  }
+}

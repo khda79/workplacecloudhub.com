@@ -1,0 +1,2990 @@
+{
+  "targets": {
+    "DimTenant": "Tenant Evidence",
+    "DimCountry": "Native Country Evidence",
+    "DimDate": "Date",
+    "DimUser": "Native User Evidence",
+    "DimDevice": "Native Device Evidence",
+    "DimIntuneManagedDevice": "Native Managed Device Evidence",
+    "DimGroup": "Native Group Evidence",
+    "DimVerifiedDomain": "Verified Domain Evidence",
+    "ADUserSource": "AD User Evidence",
+    "ADComputerSource": "AD Computer Evidence",
+    "ADGroupSource": "AD Group Evidence",
+    "ADDomainSource": "AD Domain Evidence",
+    "ADDirectoryObject": "AD Object Evidence",
+    "ADMembership": "AD Membership Evidence",
+    "EntraGroupMembership": "Entra Membership Evidence",
+    "DeviceHardware": "Native Hardware Evidence",
+    "HardwareCoverage": "Hardware Coverage Evidence",
+    "DeviceSource": "Device Source Evidence",
+    "FactADIntuneCoverage": "Native AD Intune Coverage",
+    "FactDeviceCompliance": "Native Compliance Evidence",
+    "FactAutopilotDevice": "Autopilot Evidence",
+    "DimIntuneConfigurationPolicy": "Native Configuration Catalog",
+    "DimWindowsUpdatePolicy": "Native Update Policy Evidence",
+    "FactWindowsUpdateAlert": "Native Update Alert Evidence",
+    "FactEndpointAnalyticsDevice": "Native Endpoint Score Evidence",
+    "FactEndpointAnalyticsUpgradeEligibility": "Native Upgrade Eligibility",
+    "DimDetectedApplication": "Native Discovered Application",
+    "FactDeviceApplication": "Native Device Application",
+    "TopApplication": "Native Application Ranking",
+    "DimLicenseSku": "Native License SKU",
+    "DimLicenseServicePlan": "Native Service Plan",
+    "FactUserLicense": "Native User License",
+    "FactUserServicePlan": "Native User Service Plan",
+    "LicenseAssignmentPath": "Native License Assignment",
+    "DimSharePointSite": "Native SharePoint Site",
+    "DimTeam": "Native Team",
+    "FactTeamMember": "Native Team Membership",
+    "FactMailbox": "Native EXO Mailbox",
+    "FactMailboxHosting": "Native Mailbox Hosting",
+    "FactHybridIdentityCoverage": "Native Hybrid Coverage",
+    "FactUserActivity": "Native Workload Activity",
+    "FactUserDeviceRelationship": "Native User Device Link",
+    "FactRelationshipOverview": "Native Relationship Summary",
+    "EntityFinding": "Native Entity Finding",
+    "FactDataQuality": "Native Quality Finding",
+    "SourceHealth": "Native Source Health"
+  },
+  "tables": [
+    {
+      "name": "Tenant Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantDisplayName",
+        "Environment",
+        "LastRefreshDateTime"
+      ]
+    },
+    {
+      "name": "Native Country Evidence",
+      "columns": [
+        "CountryLabel"
+      ]
+    },
+    {
+      "name": "Native User Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantUserKey",
+        "CmdbUserId",
+        "UserPrincipalName",
+        "DisplayName",
+        "AccountEnabled",
+        "UserType",
+        "Department",
+        "JobTitle",
+        "CountryCode",
+        "CountryLabel",
+        "CountryStatus",
+        "LastSignInDateTime",
+        "LastNonInteractiveSignInDateTime",
+        "LastSuccessfulSignInDateTime",
+        "ActivityState",
+        "ConfidenceScore",
+        "AccountStatusLabel",
+        "DisplayNameLabel",
+        "UserPrincipalNameLabel",
+        "DepartmentLabel",
+        "UserTypeLabel",
+        "UserSelection",
+        "SourceUserId",
+        "CreationRaw",
+        "CreationUtcDateTime",
+        "CreationStatus",
+        "SourceCollectedDateTime",
+        "ManagerStatus",
+        "UserActivityStatus"
+      ]
+    },
+    {
+      "name": "Native Device Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantDeviceKey",
+        "CmdbDeviceId",
+        "DeviceName",
+        "OperatingSystem",
+        "OperatingSystemVersion",
+        "Ownership",
+        "ComplianceState",
+        "EncryptionState",
+        "ManagementState",
+        "ConfidenceScore",
+        "DeviceNameLabel",
+        "OperatingSystemLabel",
+        "OperatingSystemVersionLabel",
+        "OwnershipLabel",
+        "ComplianceStateLabel",
+        "EncryptionStateLabel",
+        "ManagementStateLabel",
+        "DeviceSelection",
+        "SourceDeviceId",
+        "SourceSystems",
+        "AssociatedAccount",
+        "AssociationStatus",
+        "CountryCode",
+        "CountryLabel",
+        "CountryStatus",
+        "PrimaryUserSourceId",
+        "SyncRaw",
+        "SyncUtcDateTime",
+        "SyncStatus",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "name": "Native Managed Device Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantIntuneDeviceKey",
+        "TenantDeviceKey",
+        "ManagedDeviceId"
+      ]
+    },
+    {
+      "name": "Native Group Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantGroupKey",
+        "CmdbGroupId",
+        "DisplayName",
+        "MailEnabled",
+        "SecurityEnabled",
+        "GroupTypes",
+        "GroupSelection",
+        "SourceGroupId",
+        "MemberStatus",
+        "OwnerStatus",
+        "SourceCollectedDateTime",
+        "ObservedPathCount",
+        "ObservedPathStatus"
+      ]
+    },
+    {
+      "name": "Verified Domain Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantDomainKey",
+        "DomainId",
+        "IsDefault",
+        "IsInitial",
+        "AuthenticationType",
+        "SupportedServices",
+        "AvailabilityStatus"
+      ]
+    },
+    {
+      "name": "AD User Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantADUserKey",
+        "ObjectGUID",
+        "ObjectSID",
+        "DomainName",
+        "DistinguishedName",
+        "SamAccountName",
+        "UserPrincipalName",
+        "DisplayName",
+        "Enabled",
+        "Department",
+        "Title",
+        "Country",
+        "ManagerDistinguishedName",
+        "ManagerADObjectKey",
+        "TenantUserKey",
+        "CloudMatchStatus",
+        "LastLogonTimestampRaw",
+        "LastLogonUtcDateTime",
+        "LastLogonStatus",
+        "CreationRaw",
+        "CreationUtcDateTime",
+        "CreationStatus",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "name": "AD Computer Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantADComputerKey",
+        "ObjectGUID",
+        "ObjectSID",
+        "DomainName",
+        "DistinguishedName",
+        "Name",
+        "DNSHostName",
+        "Enabled",
+        "OperatingSystem",
+        "OperatingSystemVersion",
+        "TenantDeviceKey",
+        "CloudMatchStatus",
+        "LastLogonTimestampRaw",
+        "LastLogonUtcDateTime",
+        "LastLogonStatus",
+        "CreationRaw",
+        "CreationUtcDateTime",
+        "CreationStatus",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "name": "AD Group Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantADGroupKey",
+        "ObjectGUID",
+        "ObjectSID",
+        "DomainName",
+        "DistinguishedName",
+        "Name",
+        "DisplayName",
+        "GroupCategory",
+        "GroupScope",
+        "ManagedBy",
+        "ManagedByADObjectKey",
+        "TenantGroupKey",
+        "CloudMatchStatus",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "name": "AD Domain Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantADDomainKey",
+        "DNSRoot",
+        "DomainSID",
+        "NetBIOSName",
+        "Forest",
+        "DistinguishedName",
+        "DomainMode",
+        "PDCEmulator",
+        "RIDMaster",
+        "InfrastructureMaster",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "name": "AD Object Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantADObjectKey",
+        "ObjectGUID",
+        "ObjectSID",
+        "DomainName",
+        "DistinguishedName",
+        "ObjectClass",
+        "PrimaryGroupID",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "name": "AD Membership Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantADMembershipKey",
+        "TenantADGroupKey",
+        "TenantGroupKey",
+        "TenantADObjectKey",
+        "TenantUserKey",
+        "TenantDeviceKey",
+        "GroupObjectGUID",
+        "GroupSID",
+        "MemberDistinguishedName",
+        "MemberObjectGUID",
+        "MemberSID",
+        "MemberObjectClass",
+        "MembershipKind",
+        "ResolutionStatus",
+        "CloudMatchStatus",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "name": "Entra Membership Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantMembershipKey",
+        "TenantGroupKey",
+        "TenantUserKey",
+        "TenantDeviceKey",
+        "NestedTenantGroupKey",
+        "MemberId",
+        "MemberType",
+        "MembershipKind",
+        "LinkStatus",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "name": "Native Hardware Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantDeviceKey",
+        "ManagedDeviceId",
+        "SerialNumber",
+        "Manufacturer",
+        "Model",
+        "Storage",
+        "HardwareCollectedDateTime",
+        "InventoryCollectedDateTime",
+        "CollectionCoverage",
+        "CollectionMode",
+        "PhysicalMemoryGiB",
+        "StorageStatus",
+        "MemoryStatus"
+      ]
+    },
+    {
+      "name": "Hardware Coverage Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "Status",
+        "Coverage",
+        "Mode",
+        "RecordCount"
+      ]
+    },
+    {
+      "name": "Device Source Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantDeviceKey",
+        "SourceRecordKey",
+        "SourceSystem",
+        "SourceObjectId",
+        "SourceDeviceId",
+        "DeviceName",
+        "ManagementAgent",
+        "EnrollmentRaw",
+        "EnrollmentUtcDateTime",
+        "EnrollmentStatus",
+        "EnrollmentType",
+        "ActivityKind",
+        "ActivityRaw",
+        "ActivityUtcDateTime",
+        "ActivityStatus",
+        "SourceCollectedDateTime",
+        "SelectionStatus",
+        "SelectionReason"
+      ]
+    },
+    {
+      "name": "Native AD Intune Coverage",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantADComputerKey",
+        "CmdbAdComputerId",
+        "DeviceName",
+        "Enabled",
+        "OperatingSystem",
+        "OperatingSystemVersion",
+        "TenantDeviceKey",
+        "EntraDeviceId",
+        "IntuneManagedDeviceId",
+        "CoverageState",
+        "MatchMethod",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "name": "Native Compliance Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantDeviceKey",
+        "CmdbDeviceId",
+        "ComplianceState",
+        "LastSyncDateTime",
+        "SourceSystem"
+      ]
+    },
+    {
+      "name": "Autopilot Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantAutopilotDeviceKey",
+        "AutopilotDeviceId",
+        "DisplayName",
+        "SerialNumber",
+        "Manufacturer",
+        "Model",
+        "GroupTag",
+        "EnrollmentState",
+        "LastContactedDateTime",
+        "AzureAdDeviceId",
+        "ManagedDeviceId",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "name": "Native Configuration Catalog",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantPolicyKey",
+        "PolicyId",
+        "DisplayName",
+        "Description",
+        "Platforms",
+        "Technologies",
+        "TemplateId",
+        "TemplateFamily",
+        "CreatedDateTime",
+        "LastModifiedDateTime",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "name": "Native Update Policy Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantUpdatePolicyKey",
+        "PolicyType",
+        "PolicyId",
+        "DisplayName",
+        "TargetVersion",
+        "ReleaseDateTime",
+        "DaysUntilForcedReboot",
+        "CreatedDateTime",
+        "LastModifiedDateTime",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "name": "Native Update Alert Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantUpdateAlertKey",
+        "SourceReport",
+        "DeviceId",
+        "DeviceName",
+        "PolicyId",
+        "EventDateTimeUTC",
+        "LastWUScanTimeUTC",
+        "AggregateState",
+        "CurrentDeviceUpdateStatus",
+        "LatestAlertMessage",
+        "SourceCollectedDateTime",
+        "SourceSystem"
+      ]
+    },
+    {
+      "name": "Native Endpoint Score Evidence",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantEndpointAnalyticsDeviceKey",
+        "DeviceId",
+        "DeviceName",
+        "Manufacturer",
+        "Model",
+        "EndpointAnalyticsScore",
+        "StartupPerformanceScore",
+        "AppReliabilityScore",
+        "WorkFromAnywhereScore",
+        "SourceCollectedDateTime",
+        "SourceSystem"
+      ]
+    },
+    {
+      "name": "Native Upgrade Eligibility",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantUpgradeEligibilityDeviceKey",
+        "MetricId",
+        "MetricDeviceId",
+        "DeviceId",
+        "DeviceIdSource",
+        "DeviceName",
+        "UpgradeEligibility",
+        "SourceCollectedDateTime",
+        "SourceSystem"
+      ]
+    },
+    {
+      "name": "Native Discovered Application",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantApplicationKey",
+        "AppId",
+        "DisplayName",
+        "Version",
+        "Publisher",
+        "DeviceCount",
+        "Platform",
+        "SourceCollectedDateTime",
+        "SourceApplicationKey",
+        "ReportedDeviceCount",
+        "ExactRelatedDeviceCount",
+        "RelationshipCoverageStatus",
+        "ResolvedDeviceCount",
+        "UnresolvedDeviceCount",
+        "Application product key"
+      ]
+    },
+    {
+      "name": "Native Device Application",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantDeviceApplicationKey",
+        "TenantApplicationKey",
+        "ManagedDeviceId",
+        "AppId",
+        "SourceCollectedDateTime",
+        "ApplicationLinkStatus",
+        "DeviceLinkStatus"
+      ]
+    },
+    {
+      "name": "Native Application Ranking",
+      "columns": [
+        "ApplicationProduct",
+        "DisplayName",
+        "Publisher",
+        "Platform",
+        "VersionCount",
+        "ReportedDeviceCount"
+      ]
+    },
+    {
+      "name": "Native License SKU",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantSkuKey",
+        "SkuId",
+        "SkuPartNumber",
+        "ConsumedUnits",
+        "EnabledUnits",
+        "SkuPartNumberLabel"
+      ]
+    },
+    {
+      "name": "Native Service Plan",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantServicePlanKey",
+        "TenantSkuKey",
+        "SkuId",
+        "SkuPartNumber",
+        "ServicePlanId",
+        "ServicePlanName",
+        "ProvisioningStatus",
+        "AppliesTo"
+      ]
+    },
+    {
+      "name": "Native User License",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantUserKey",
+        "TenantSkuKey",
+        "CmdbUserId",
+        "SkuId",
+        "AssignmentState",
+        "AssignedDateTime",
+        "SourceSystem",
+        "AssignmentStateLabel",
+        "SourceUserId",
+        "UserLinkStatus"
+      ]
+    },
+    {
+      "name": "Native User Service Plan",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantUserKey",
+        "TenantSkuKey",
+        "TenantServicePlanKey",
+        "CmdbUserId",
+        "SkuId",
+        "ServicePlanId",
+        "ServicePlanName",
+        "IsEnabled",
+        "AssignmentState",
+        "SourceSystem",
+        "SourceUserId",
+        "UserLinkStatus"
+      ]
+    },
+    {
+      "name": "Native License Assignment",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantAssignmentPathKey",
+        "TenantUserKey",
+        "TenantGroupKey",
+        "TenantSkuKey",
+        "SourceUserId",
+        "AssignedByGroupId",
+        "SkuId",
+        "Account",
+        "Product",
+        "AssignmentRoute",
+        "GroupName",
+        "AssignmentState",
+        "AssignmentError",
+        "ErrorStatus",
+        "DisabledPlanIds",
+        "AssignmentUpdatedRaw",
+        "AssignmentUpdatedUtcDateTime",
+        "AssignmentUpdatedStatus",
+        "SourceCollectedDateTime",
+        "GroupLinkStatus",
+        "UserLinkStatus",
+        "SkuLinkStatus"
+      ]
+    },
+    {
+      "name": "Native SharePoint Site",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantSiteKey",
+        "SiteId",
+        "SiteUrl",
+        "SiteName",
+        "OwnerPrincipalName",
+        "LastActivityDate",
+        "ActivityState",
+        "StorageUsedBytes",
+        "StorageAllocatedBytes",
+        "RootWebTemplate",
+        "IsDeleted",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "name": "Native Team",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantTeamKey",
+        "TeamId",
+        "DisplayName",
+        "Visibility",
+        "CreatedDateTime",
+        "LastActivityDate",
+        "ActivityState",
+        "OwnerCount",
+        "MemberCount",
+        "GuestCount",
+        "UnresolvedMemberCount",
+        "MembershipCoverageStatus",
+        "IsArchived",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "name": "Native Team Membership",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantTeamMemberKey",
+        "TenantTeamKey",
+        "TeamId",
+        "TenantUserKey",
+        "UserId",
+        "UserPrincipalName",
+        "UserType",
+        "Role",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "name": "Native EXO Mailbox",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantMailboxKey",
+        "TenantUserKey",
+        "CmdbMailboxId",
+        "CmdbUserId",
+        "RecipientTypeDetails",
+        "ArchiveStatus",
+        "SourceSystem",
+        "DisplayName",
+        "PrimarySmtpAddress",
+        "LinkStatusLabel",
+        "DisplayNameLabel",
+        "PrimarySmtpAddressLabel",
+        "RecipientTypeDetailsLabel",
+        "ArchiveStatusLabel"
+      ]
+    },
+    {
+      "name": "Native Mailbox Hosting",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "MailboxHostingKey",
+        "CountryLabel",
+        "HostingLocation",
+        "RecipientTypeDetails",
+        "EvidenceSource",
+        "MailboxTypeGroup"
+      ]
+    },
+    {
+      "name": "Native Hybrid Coverage",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "EntityType",
+        "OnPremisesCount",
+        "CloudCount",
+        "MatchedCount",
+        "OnPremisesOnlyCount",
+        "CloudOnlyCount",
+        "DuplicateOnPremisesKeyCount",
+        "DuplicateCloudKeyCount",
+        "MatchRatio",
+        "MatchMethod",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "name": "Native Workload Activity",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantUserActivityKey",
+        "TenantUserKey",
+        "UserPrincipalName",
+        "MatchStatus",
+        "ReportRefreshDate",
+        "IsDeleted",
+        "ExchangeLastActivityDate",
+        "OneDriveLastActivityDate",
+        "SharePointLastActivityDate",
+        "TeamsLastActivityDate",
+        "LastActivityDate",
+        "LastActivityWorkload",
+        "HasAnyM365Activity",
+        "AssignedProducts",
+        "SourceCollectedDateTime"
+      ]
+    },
+    {
+      "name": "Native User Device Link",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantRelationshipKey",
+        "TenantUserKey",
+        "TenantDeviceKey",
+        "CmdbRelationshipId",
+        "CmdbUserId",
+        "CmdbDeviceId",
+        "RelationshipType",
+        "ConfidenceScore",
+        "SourceSystem",
+        "Account",
+        "Device",
+        "DeviceSelection",
+        "DeviceCompliance",
+        "DeviceSyncStatus"
+      ]
+    },
+    {
+      "name": "Native Relationship Summary",
+      "columns": [
+        "RelationshipType",
+        "RelationshipCount",
+        "EvidenceSource"
+      ]
+    },
+    {
+      "name": "Native Entity Finding",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantFindingKey",
+        "TenantUserKey",
+        "TenantDeviceKey",
+        "TenantGroupKey",
+        "EntityType",
+        "EntityId",
+        "Severity",
+        "FindingType",
+        "Description",
+        "RecommendedAction",
+        "DetectedDateTime",
+        "LinkStatus"
+      ]
+    },
+    {
+      "name": "Native Quality Finding",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "TenantFindingKey",
+        "FindingId",
+        "Severity",
+        "EntityType",
+        "FindingType",
+        "DetectedDateTime",
+        "SourceSystem",
+        "Description",
+        "RecommendedAction",
+        "SeverityLabel",
+        "FindingTypeLabel",
+        "DescriptionLabel",
+        "RecommendedActionLabel"
+      ]
+    },
+    {
+      "name": "Native Source Health",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "SourceName",
+        "Status",
+        "Coverage",
+        "SourceRows",
+        "MaxItems",
+        "StartedDateTime",
+        "CompletedDateTime",
+        "Evidence",
+        "SourceRowsLabel",
+        "CompletedDateTimeLabel"
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "fromTable": "FactUserLicense",
+      "fromColumn": "TenantUserKey",
+      "toTable": "DimUser",
+      "toColumn": "TenantUserKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-report-0"
+    },
+    {
+      "fromTable": "FactUserLicense",
+      "fromColumn": "TenantSkuKey",
+      "toTable": "DimLicenseSku",
+      "toColumn": "TenantSkuKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-report-1"
+    },
+    {
+      "fromTable": "FactDeviceCompliance",
+      "fromColumn": "TenantDeviceKey",
+      "toTable": "DimDevice",
+      "toColumn": "TenantDeviceKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-report-2"
+    },
+    {
+      "fromTable": "FactUserDeviceRelationship",
+      "fromColumn": "TenantUserKey",
+      "toTable": "DimUser",
+      "toColumn": "TenantUserKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-report-3"
+    },
+    {
+      "fromTable": "FactUserDeviceRelationship",
+      "fromColumn": "TenantDeviceKey",
+      "toTable": "DimDevice",
+      "toColumn": "TenantDeviceKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-report-4"
+    },
+    {
+      "fromTable": "FactMailbox",
+      "fromColumn": "TenantUserKey",
+      "toTable": "DimUser",
+      "toColumn": "TenantUserKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-report-5"
+    },
+    {
+      "fromTable": "DeviceSource",
+      "fromColumn": "TenantDeviceKey",
+      "toTable": "DimDevice",
+      "toColumn": "TenantDeviceKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-report-6"
+    },
+    {
+      "fromTable": "LicenseAssignmentPath",
+      "fromColumn": "TenantUserKey",
+      "toTable": "DimUser",
+      "toColumn": "TenantUserKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-report-7"
+    },
+    {
+      "fromTable": "LicenseAssignmentPath",
+      "fromColumn": "TenantSkuKey",
+      "toTable": "DimLicenseSku",
+      "toColumn": "TenantSkuKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-report-8"
+    },
+    {
+      "fromTable": "LicenseAssignmentPath",
+      "fromColumn": "TenantGroupKey",
+      "toTable": "DimGroup",
+      "toColumn": "TenantGroupKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-report-9"
+    },
+    {
+      "fromTable": "EntityFinding",
+      "fromColumn": "TenantDeviceKey",
+      "toTable": "DimDevice",
+      "toColumn": "TenantDeviceKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-report-10"
+    },
+    {
+      "fromTable": "EntityFinding",
+      "fromColumn": "TenantUserKey",
+      "toTable": "DimUser",
+      "toColumn": "TenantUserKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-report-11"
+    },
+    {
+      "fromTable": "EntityFinding",
+      "fromColumn": "TenantGroupKey",
+      "toTable": "DimGroup",
+      "toColumn": "TenantGroupKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-report-12"
+    },
+    {
+      "fromTable": "DimUser",
+      "fromColumn": "CountryLabel",
+      "toTable": "DimCountry",
+      "toColumn": "CountryLabel",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-executive-country-user"
+    },
+    {
+      "fromTable": "FactMailboxHosting",
+      "fromColumn": "CountryLabel",
+      "toTable": "DimCountry",
+      "toColumn": "CountryLabel",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-executive-country-mailbox"
+    },
+    {
+      "fromTable": "DeviceHardware",
+      "fromColumn": "TenantDeviceKey",
+      "toTable": "DimDevice",
+      "toColumn": "TenantDeviceKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-hardware-device"
+    },
+    {
+      "fromTable": "FactUserServicePlan",
+      "fromColumn": "TenantUserKey",
+      "toTable": "DimUser",
+      "toColumn": "TenantUserKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-service-plan-user"
+    },
+    {
+      "fromTable": "FactUserServicePlan",
+      "fromColumn": "TenantSkuKey",
+      "toTable": "DimLicenseSku",
+      "toColumn": "TenantSkuKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-service-plan-sku"
+    },
+    {
+      "fromTable": "FactUserServicePlan",
+      "fromColumn": "TenantServicePlanKey",
+      "toTable": "DimLicenseServicePlan",
+      "toColumn": "TenantServicePlanKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-service-plan-definition"
+    },
+    {
+      "fromTable": "FactDeviceApplication",
+      "fromColumn": "Tenant Intune device key",
+      "toTable": "DimIntuneManagedDevice",
+      "toColumn": "TenantIntuneDeviceKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-app-device"
+    },
+    {
+      "fromTable": "DimIntuneManagedDevice",
+      "fromColumn": "TenantDeviceKey",
+      "toTable": "DimDevice",
+      "toColumn": "TenantDeviceKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-app-device-parent"
+    },
+    {
+      "fromTable": "FactDeviceApplication",
+      "fromColumn": "TenantApplicationKey",
+      "toTable": "DimDetectedApplication",
+      "toColumn": "TenantApplicationKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-app-product"
+    },
+    {
+      "fromTable": "FactUserActivity",
+      "fromColumn": "TenantUserKey",
+      "toTable": "DimUser",
+      "toColumn": "TenantUserKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-user-activity"
+    },
+    {
+      "fromTable": "FactTeamMember",
+      "fromColumn": "TenantTeamKey",
+      "toTable": "DimTeam",
+      "toColumn": "TenantTeamKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-team-member-team"
+    },
+    {
+      "fromTable": "FactTeamMember",
+      "fromColumn": "TenantUserKey",
+      "toTable": "DimUser",
+      "toColumn": "TenantUserKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-team-member-user"
+    },
+    {
+      "fromTable": "ADMembership",
+      "fromColumn": "TenantADObjectKey",
+      "toTable": "ADDirectoryObject",
+      "toColumn": "TenantADObjectKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-native-ad-member-object"
+    },
+    {
+      "fromTable": "ADMembership",
+      "fromColumn": "TenantADGroupKey",
+      "toTable": "ADGroupSource",
+      "toColumn": "TenantADGroupKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-native-ad-member-group"
+    },
+    {
+      "fromTable": "EntraGroupMembership",
+      "fromColumn": "TenantGroupKey",
+      "toTable": "DimGroup",
+      "toColumn": "TenantGroupKey",
+      "isActive": true,
+      "crossFilteringBehavior": "OneDirection",
+      "fromCardinality": "Many",
+      "toCardinality": "One",
+      "name": "cmdb-native-entra-member-group"
+    }
+  ],
+  "measures": [
+    {
+      "name": "Native Verified domains",
+      "tableName": "Verified Domain Evidence",
+      "expression": "COALESCE(COUNTROWS('Verified Domain Evidence'),0)",
+      "formatString": "#,0",
+      "description": "Verified Entra domains present in the frozen collection; a domain row does not prove DNS or authentication health. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Users",
+      "tableName": "Native User Evidence",
+      "expression": "COALESCE(COUNTROWS('Native User Evidence'),0)",
+      "formatString": "#,0",
+      "description": "Distinct accounts in the Entra export, subject to page filters. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Enabled accounts",
+      "tableName": "Native User Evidence",
+      "expression": "CALCULATE([Native Users], KEEPFILTERS('Native User Evidence'[AccountEnabled] == TRUE()))",
+      "formatString": "#,0",
+      "description": "AccountEnabled=true; this is not a measure of activity or sign-ins. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Disabled accounts",
+      "tableName": "Native User Evidence",
+      "expression": "CALCULATE([Native Users], KEEPFILTERS('Native User Evidence'[AccountEnabled] == FALSE()))",
+      "formatString": "#,0",
+      "description": "AccountEnabled=false; unknown values remain separate. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Enabled account share",
+      "tableName": "Native User Evidence",
+      "expression": "DIVIDE([Native Enabled accounts], [Native Users])",
+      "formatString": "0.0%",
+      "description": "Enabled accounts / all filtered users; no activity information is implied. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native User details",
+      "tableName": "Native User Evidence",
+      "expression": "IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native User Evidence'))",
+      "formatString": "#,0",
+      "description": "Detail rows only when exactly one user is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Account status share",
+      "tableName": "Native User Evidence",
+      "expression": "DIVIDE([Native Users], CALCULATE([Native Users], REMOVEFILTERS('Native User Evidence'[AccountStatusLabel])))",
+      "formatString": "0.0%",
+      "description": "Share of the current account-status category within the filtered user population. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Activity state rate",
+      "tableName": "Native User Evidence",
+      "expression": "DIVIDE([Native Users], CALCULATE([Native Users], REMOVEFILTERS('Native User Evidence'[ActivityState])))",
+      "formatString": "0.0%",
+      "description": "Share of each observed activity state within the filtered user population. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native License review candidates",
+      "tableName": "Native User Evidence",
+      "expression": "CALCULATE(DISTINCTCOUNT('Native License Assignment'[TenantUserKey]), KEEPFILTERS(FILTER('Native User Evidence', LEFT('Native User Evidence'[License review band], 8) = \"Priority\" || LEFT('Native User Evidence'[License review band], 5) = \"Watch\")))",
+      "formatString": "#,0",
+      "description": "Distinct licensed users in priority or watch bands based on exact M365 workload evidence; coverage gaps are excluded and non-use is not asserted. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Devices",
+      "tableName": "Native Device Evidence",
+      "expression": "VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )\nRETURN IF ( ISCROSSFILTERED ( 'Native Country Evidence' ), CALCULATE ( COALESCE ( DISTINCTCOUNT ( 'Native Device Evidence'[TenantDeviceKey] ), 0 ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) ), COALESCE ( DISTINCTCOUNT ( 'Native Device Evidence'[TenantDeviceKey] ), 0 ) )",
+      "formatString": "#,0",
+      "description": "Distinct imported device identities in the selected fleet and Country. Directory objects are not proof of active physical endpoints. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Compliant devices",
+      "tableName": "Native Device Evidence",
+      "expression": "CALCULATE([Native Devices], KEEPFILTERS('Native Device Evidence'[ComplianceState] == \"compliant\"))",
+      "formatString": "#,0",
+      "description": "State explicitly reported as compliant in the export. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Noncompliant devices",
+      "tableName": "Native Device Evidence",
+      "expression": "CALCULATE([Native Devices], KEEPFILTERS('Native Device Evidence'[ComplianceState] == \"noncompliant\"))",
+      "formatString": "#,0",
+      "description": "State explicitly reported as noncompliant; missing states are not classified as noncompliant. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Compliant device share",
+      "tableName": "Native Device Evidence",
+      "expression": "DIVIDE([Native Compliant devices], [Native Devices])",
+      "formatString": "0.0%",
+      "description": "Compliant devices / all filtered devices, including unknown states in the denominator. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Managed devices",
+      "tableName": "Native Device Evidence",
+      "expression": "CALCULATE([Native Devices], KEEPFILTERS('Native Device Evidence'[ManagementState] == \"Managed\"))",
+      "formatString": "#,0",
+      "description": "Devices whose exported management state is explicitly Managed. This does not prove current Intune enrollment or activity. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Unmanaged devices",
+      "tableName": "Native Device Evidence",
+      "expression": "CALCULATE([Native Devices], KEEPFILTERS('Native Device Evidence'[ManagementState] == \"Unmanaged\"))",
+      "formatString": "#,0",
+      "description": "Devices whose exported management state is explicitly Unmanaged. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Devices with missing management state",
+      "tableName": "Native Device Evidence",
+      "expression": "CALCULATE([Native Devices], KEEPFILTERS(ISBLANK('Native Device Evidence'[ManagementState])))",
+      "formatString": "#,0",
+      "description": "Devices without a management state in the frozen snapshot; they are not classified as unmanaged. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Managed device share",
+      "tableName": "Native Device Evidence",
+      "expression": "DIVIDE([Native Managed devices], [Native Devices])",
+      "formatString": "0.0%",
+      "description": "Explicitly managed devices divided by all filtered devices. Missing management states remain in the denominator. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Other or missing compliance devices",
+      "tableName": "Native Device Evidence",
+      "expression": "MAX(0, [Native Devices] - [Native Compliant devices] - [Native Noncompliant devices])",
+      "formatString": "#,0",
+      "description": "Devices not explicitly classified as compliant or noncompliant, including missing, unknown and grace-period states. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Corporate devices",
+      "tableName": "Native Device Evidence",
+      "expression": "CALCULATE([Native Devices], REMOVEFILTERS('Native Device Evidence'[Ownership]), 'Native Device Evidence'[Ownership] == \"Corporate\")",
+      "formatString": "#,0",
+      "description": "Corporate devices in the current country and device context. The ownership slicer is intentionally ignored so this remains a corporate-only metric. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Corporate device country share",
+      "tableName": "Native Device Evidence",
+      "expression": "DIVIDE ( [Native Corporate devices], CALCULATE ( [Native Corporate devices], REMOVEFILTERS ( 'Native Country Evidence' ), REMOVEFILTERS ( 'Native Device Evidence'[CountryCode], 'Native Device Evidence'[CountryLabel], 'Native Device Evidence'[CountryStatus] ) ) )",
+      "formatString": "0.0%",
+      "description": "Corporate imported-device share across countries; keeps other fleet filters. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Device details",
+      "tableName": "Native Device Evidence",
+      "expression": "IF(COUNTROWS(ALLSELECTED('Native Device Evidence')) = 1, COUNTROWS('Native Device Evidence'))",
+      "formatString": "#,0",
+      "description": "Detail rows only when exactly one device is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Compliance state rate",
+      "tableName": "Native Device Evidence",
+      "expression": "DIVIDE([Native Devices], CALCULATE([Native Devices], REMOVEFILTERS('Native Device Evidence'[ComplianceStateLabel])))",
+      "formatString": "0.0%",
+      "description": "Share of each compliance state in the filtered device population. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Operating system rate",
+      "tableName": "Native Device Evidence",
+      "expression": "DIVIDE([Native Devices], CALCULATE([Native Devices], REMOVEFILTERS('Native Device Evidence'[OperatingSystemLabel])))",
+      "formatString": "0.0%",
+      "description": "Share of each operating-system family in the filtered device population. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Management state rate",
+      "tableName": "Native Device Evidence",
+      "expression": "DIVIDE([Native Devices], CALCULATE([Native Devices], REMOVEFILTERS('Native Device Evidence'[ManagementStateLabel])))",
+      "formatString": "0.0%",
+      "description": "Share of each management state in the filtered device population. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Ownership rate",
+      "tableName": "Native Device Evidence",
+      "expression": "DIVIDE([Native Devices], CALCULATE([Native Devices], REMOVEFILTERS('Native Device Evidence'[OwnershipLabel])))",
+      "formatString": "0.0%",
+      "description": "Share of each ownership state in the filtered device population. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Groups",
+      "tableName": "Native Group Evidence",
+      "expression": "COALESCE(COUNTROWS('Native Group Evidence'),0)",
+      "formatString": "#,0",
+      "description": "Exported Entra groups; no membership metric. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Group details",
+      "tableName": "Native Group Evidence",
+      "expression": "IF(COUNTROWS(ALLSELECTED('Native Group Evidence')) = 1, COUNTROWS('Native Group Evidence'))",
+      "formatString": "#,0",
+      "description": "Detail rows only when exactly one group is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native License SKUs",
+      "tableName": "Native License SKU",
+      "expression": "COALESCE(COUNTROWS('Native License SKU'),0)",
+      "formatString": "#,0",
+      "description": "Subscribed product SKUs. A SKU does not represent a person. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native SKU enabled units",
+      "tableName": "Native License SKU",
+      "expression": "IF(HASONEVALUE('Native License SKU'[TenantSkuKey]), SUM('Native License SKU'[EnabledUnits]))",
+      "formatString": "#,0",
+      "description": "Available only for a single SKU; do not sum different products as a count of people. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native SKU consumed units",
+      "tableName": "Native License SKU",
+      "expression": "IF(HASONEVALUE('Native License SKU'[TenantSkuKey]), SUM('Native License SKU'[ConsumedUnits]))",
+      "formatString": "#,0",
+      "description": "Available only for a single SKU; do not sum different products as a count of people. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Microsoft 365 plans observed",
+      "tableName": "Native License SKU",
+      "expression": "VAR _targetSkus =\n    { \"M365_F1\", \"SPE_F1\", \"SPE_E3\", \"SPE_E5\", \"Microsoft_365_Copilot\" }\nRETURN\n    COALESCE(\n        CALCULATE(\n            COUNTROWS('Native License SKU'),\n            KEEPFILTERS('Native License SKU'[SkuPartNumber] IN _targetSkus)\n        ),\n        0\n    )",
+      "formatString": "0",
+      "description": "Count of subscribed Microsoft 365 target plans observed in the current filter context. Scope: Microsoft 365 F1 (M365_F1), F3 (SPE_F1), E3 (SPE_E3), E5 (SPE_E5), and Microsoft 365 Copilot. A plan is not a person. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native SKU allocation rate",
+      "tableName": "Native License SKU",
+      "expression": "DIVIDE ( [Native SKU consumed units], [Native SKU enabled units] )",
+      "formatString": "0.0%",
+      "description": "Assigned-seat allocation rate for the single Microsoft 365 SKU in filter context: ConsumedUnits divided by EnabledUnits. This measures seat allocation, not product usage. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native SKU allocation summary",
+      "tableName": "Native License SKU",
+      "expression": "VAR _skuObserved = HASONEVALUE ( 'Native License SKU'[TenantSkuKey] )\nVAR _assigned = [Native SKU consumed units]\nVAR _enabled = [Native SKU enabled units]\nVAR _rate = [Native SKU allocation rate]\nRETURN\n    IF (\n        NOT _skuObserved,\n        \"Not observed\",\n        FORMAT ( _assigned, \"#,0\" )\n            & \" / \"\n            & FORMAT ( _enabled, \"#,0\" )\n            & \" · \"\n            & FORMAT ( _rate, \"0.0%\" )\n    )",
+      "formatString": "@",
+      "description": "Executive text summary for one Microsoft 365 SKU: assigned (ConsumedUnits) / enabled seats and allocation rate. Returns Not observed when the filtered SKU is absent from the snapshot. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Hybrid identities matched",
+      "tableName": "Native Hybrid Coverage",
+      "expression": "COALESCE(SUM('Native Hybrid Coverage'[MatchedCount]),0)",
+      "formatString": "#,0",
+      "description": "Matched on-premises/cloud identities for the selected entity type using the collector's declared match method. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Hybrid identity match rate",
+      "tableName": "Native Hybrid Coverage",
+      "expression": "DIVIDE(SUM('Native Hybrid Coverage'[MatchedCount]),SUM('Native Hybrid Coverage'[OnPremisesCount]))",
+      "formatString": "0.0%",
+      "description": "Matched identities divided by on-premises identities for the selected entity type. User and device populations must be reviewed separately. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Autopilot devices",
+      "tableName": "Autopilot Evidence",
+      "expression": "COALESCE(COUNTROWS('Autopilot Evidence'),0)",
+      "formatString": "#,0",
+      "description": "Windows Autopilot device identities observed in the frozen collection. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Autopilot enrolled devices",
+      "tableName": "Autopilot Evidence",
+      "expression": "CALCULATE([Native Autopilot devices],KEEPFILTERS('Autopilot Evidence'[EnrollmentState] = \"enrolled\"))",
+      "formatString": "#,0",
+      "description": "Autopilot rows explicitly reported with enrollment state enrolled. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Autopilot enrollment rate",
+      "tableName": "Autopilot Evidence",
+      "expression": "DIVIDE([Native Selected Autopilot devices], CALCULATE([Native Selected Autopilot devices], REMOVEFILTERS('Autopilot Evidence'[EnrollmentState])))",
+      "formatString": "0.0%",
+      "description": "Share of each Autopilot enrollment state within exact matched Intune devices. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Selected Autopilot devices",
+      "tableName": "Autopilot Evidence",
+      "expression": "VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = \"Intune\")) RETURN CALCULATE(DISTINCTCOUNT('Autopilot Evidence'[ManagedDeviceId]), TREATAS(_intuneIds, 'Autopilot Evidence'[ManagedDeviceId]))",
+      "formatString": "#,0",
+      "description": "Autopilot records linked by exact Intune managed-device identifier to the filtered device population. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Detected applications",
+      "tableName": "Native Discovered Application",
+      "expression": "COALESCE(COUNTROWS('Native Discovered Application'),0)",
+      "formatString": "#,0",
+      "description": "Distinct detected-application rows in the Intune export; versions can create separate rows. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Reported application-device occurrences",
+      "tableName": "Native Discovered Application",
+      "expression": "SUM('Native Discovered Application'[ReportedDeviceCount])",
+      "formatString": "#,0",
+      "description": "Source-reported application-device occurrences. Exact device-level reporting uses FactDeviceApplication instead. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Application products",
+      "tableName": "Native Discovered Application",
+      "expression": "DISTINCTCOUNT ( 'Native Discovered Application'[Application product key] )",
+      "formatString": "#,0",
+      "description": "Distinct normalized application name, publisher and platform products; versions are not products. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Application version rows",
+      "tableName": "Native Discovered Application",
+      "expression": "COUNTROWS('Native Discovered Application')",
+      "formatString": "#,0",
+      "description": "Source-reported application product-version rows. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Application occurrence rate",
+      "tableName": "Native Discovered Application",
+      "expression": "DIVIDE ( [Native Reported application-device occurrences], CALCULATE ( [Native Reported application-device occurrences], REMOVEFILTERS ( 'Native Discovered Application' ) ) )",
+      "formatString": "0.0%",
+      "description": "Share of source-reported application-device occurrences for each product; occurrences are not distinct devices. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Application Top 5",
+      "tableName": "Native Discovered Application",
+      "expression": "VAR _current = SELECTEDVALUE ( 'Native Discovered Application'[Application product key] )\nVAR _scored = CALCULATETABLE (\n    SUMMARIZECOLUMNS ( 'Native Discovered Application'[Application product key], \"DeviceCount\", [Native Devices reporting applications] ),\n    ALLSELECTED ( 'Native Discovered Application' )\n)\nVAR _top = TOPN ( 5, FILTER ( _scored, [DeviceCount] > 0 ), [DeviceCount], DESC, 'Native Discovered Application'[Application product key], ASC )\nRETURN IF ( NOT ISBLANK ( _current ), INT ( CONTAINS ( _top, 'Native Discovered Application'[Application product key], _current ) ) )",
+      "formatString": "0",
+      "description": "Deterministic Top 5 normalized products by distinct native reporting devices in the selected fleet; product-key tie breaker. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Intune configuration policies",
+      "tableName": "Native Configuration Catalog",
+      "expression": "COALESCE(COUNTROWS('Native Configuration Catalog'),0)",
+      "formatString": "#,0",
+      "description": "Configuration policies observed in the frozen Intune collection. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Windows Update policies",
+      "tableName": "Native Update Policy Evidence",
+      "expression": "COALESCE(COUNTROWS('Native Update Policy Evidence'),0)",
+      "formatString": "#,0",
+      "description": "Windows Update policies observed in the frozen Intune collection. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native License service plans",
+      "tableName": "Native Service Plan",
+      "expression": "COALESCE(COUNTROWS('Native Service Plan'),0)",
+      "formatString": "#,0",
+      "description": "Service plans published by the subscribed Microsoft 365 SKUs in the frozen collection. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Service plan provisioning rate",
+      "tableName": "Native Service Plan",
+      "expression": "DIVIDE([Native License service plans], CALCULATE([Native License service plans], REMOVEFILTERS('Native Service Plan'[ProvisioningStatus])))",
+      "formatString": "0.0%",
+      "description": "Share of each service-plan provisioning status. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native License assignments",
+      "tableName": "Native User License",
+      "expression": "COALESCE(COUNTROWS('Native User License'),0)",
+      "formatString": "#,0",
+      "description": "Unique user/SKU pairs across all assignment states. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Users with assignments",
+      "tableName": "Native User License",
+      "expression": "COALESCE(DISTINCTCOUNTNOBLANK('Native User License'[TenantUserKey]),0)",
+      "formatString": "#,0",
+      "description": "Distinct users with at least one assignment across all states; does not establish an active or used license. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native User license assignment coverage",
+      "tableName": "Native User License",
+      "expression": "DIVIDE([Native Users with assignments], [Native Users])",
+      "formatString": "0.0%",
+      "description": "Users with at least one observed license assignment divided by all filtered users. This is not license usage. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Microsoft 365 license assignments",
+      "tableName": "Native User License",
+      "expression": "VAR _targetSkus =\n    { \"M365_F1\", \"SPE_F1\", \"SPE_E3\", \"SPE_E5\", \"Microsoft_365_Copilot\" }\nRETURN\n    COALESCE(\n        CALCULATE(\n            COUNTROWS('Native User License'),\n            KEEPFILTERS('Native License SKU'[SkuPartNumber] IN _targetSkus)\n        ),\n        0\n    )",
+      "formatString": "#,0",
+      "description": "Unique user/SKU assignment rows for Microsoft 365 F1, F3, E3, E5, and Microsoft 365 Copilot across all observed assignment states. This is entitlement assignment, not usage. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Microsoft 365 users assigned",
+      "tableName": "Native User License",
+      "expression": "VAR _targetSkus =\n    { \"M365_F1\", \"SPE_F1\", \"SPE_E3\", \"SPE_E5\", \"Microsoft_365_Copilot\" }\nRETURN\n    COALESCE(\n        CALCULATE(\n            DISTINCTCOUNTNOBLANK('Native User License'[TenantUserKey]),\n            KEEPFILTERS('Native License SKU'[SkuPartNumber] IN _targetSkus)\n        ),\n        0\n    )",
+      "formatString": "#,0",
+      "description": "Distinct users with at least one observed assignment to Microsoft 365 F1, F3, E3, E5, or Microsoft 365 Copilot. This does not establish active use. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Microsoft 365 assignment coverage",
+      "tableName": "Native User License",
+      "expression": "VAR _assignedUsers =\n    [Native Microsoft 365 users assigned]\nVAR _allUsers =\n    CALCULATE(\n        [Native Users],\n        REMOVEFILTERS('Native License SKU')\n    )\nRETURN\n    DIVIDE(_assignedUsers, _allUsers)",
+      "formatString": "0.0%",
+      "description": "Distinct users assigned to Microsoft 365 F1, F3, E3, E5, or Microsoft 365 Copilot divided by all filtered users. This is assignment coverage, not license usage. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Assignment state rate",
+      "tableName": "Native User License",
+      "expression": "DIVIDE([Native License assignments], CALCULATE([Native License assignments], REMOVEFILTERS('Native User License'[AssignmentStateLabel])))",
+      "formatString": "0.0%",
+      "description": "Share of license assignments by normalized assignment state. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native User service plan rows",
+      "tableName": "Native User Service Plan",
+      "expression": "COALESCE(COUNTROWS('Native User Service Plan'),0)",
+      "formatString": "#,0",
+      "description": "Observed user and service-plan assignment rows; this is entitlement configuration, not usage. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Enabled user service plan rows",
+      "tableName": "Native User Service Plan",
+      "expression": "CALCULATE([Native User service plan rows],KEEPFILTERS('Native User Service Plan'[IsEnabled] = \"True\"))",
+      "formatString": "#,0",
+      "description": "User service-plan rows explicitly enabled in the collection. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native User-device links",
+      "tableName": "Native User Device Link",
+      "expression": "COALESCE(COUNTROWS('Native User Device Link'),0)",
+      "formatString": "#,0",
+      "description": "Resolved relationships between a user and a device. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Devices with a resolved user",
+      "tableName": "Native User Device Link",
+      "expression": "COALESCE(DISTINCTCOUNTNOBLANK('Native User Device Link'[TenantDeviceKey]),0)",
+      "formatString": "#,0",
+      "description": "Distinct devices with a resolved user relationship. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Users with a resolved device",
+      "tableName": "Native User Device Link",
+      "expression": "COALESCE(DISTINCTCOUNTNOBLANK('Native User Device Link'[TenantUserKey]),0)",
+      "formatString": "#,0",
+      "description": "Distinct users with at least one resolved device relationship. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Device user-link coverage",
+      "tableName": "Native User Device Link",
+      "expression": "DIVIDE([Native Devices with a resolved user], [Native Devices])",
+      "formatString": "0.0%",
+      "description": "Devices with at least one resolved user relationship divided by all filtered devices. A relationship does not prove exclusive ownership. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native User device-link coverage",
+      "tableName": "Native User Device Link",
+      "expression": "DIVIDE([Native Users with a resolved device], [Native Users])",
+      "formatString": "0.0%",
+      "description": "Users with at least one resolved device relationship divided by all filtered users. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native User device details",
+      "tableName": "Native User Device Link",
+      "expression": "IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native User Device Link'))",
+      "formatString": "#,0",
+      "description": "Detail rows only when exactly one user is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native User-device relationship type rate",
+      "tableName": "Native User Device Link",
+      "expression": "DIVIDE([Native User-device links], CALCULATE([Native User-device links], REMOVEFILTERS('Native User Device Link'[RelationshipType])))",
+      "formatString": "0.0%",
+      "description": "Share of each observed user-device relationship type. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Mailboxes",
+      "tableName": "Native EXO Mailbox",
+      "expression": "COALESCE(COUNTROWS('Native EXO Mailbox'),0)",
+      "formatString": "#,0",
+      "description": "All exported mailboxes, including technical and shared mailboxes. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Mailboxes without a resolved user",
+      "tableName": "Native EXO Mailbox",
+      "expression": "CALCULATE([Native Mailboxes], KEEPFILTERS(ISBLANK('Native EXO Mailbox'[TenantUserKey])))",
+      "formatString": "#,0",
+      "description": "Includes technical mailboxes; a missing user link is not always an issue. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Mailbox link gap rate",
+      "tableName": "Native EXO Mailbox",
+      "expression": "DIVIDE([Native Mailboxes without a resolved user], [Native Mailboxes])",
+      "formatString": "0.000%",
+      "description": "Mailboxes without a resolved user divided by all mailboxes. Technical and shared mailboxes can be legitimate. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native User mailbox details",
+      "tableName": "Native EXO Mailbox",
+      "expression": "IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native EXO Mailbox'))",
+      "formatString": "#,0",
+      "description": "Detail rows only when exactly one user is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Quality findings",
+      "tableName": "Native Quality Finding",
+      "expression": "COALESCE(COUNTROWS('Native Quality Finding'),0)",
+      "formatString": "#,0",
+      "description": "Retained findings, including technical information. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Warnings",
+      "tableName": "Native Quality Finding",
+      "expression": "CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[Severity] == \"Warning\"))",
+      "formatString": "#,0",
+      "description": "Findings classified as Warning by the quality normalizer. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Information",
+      "tableName": "Native Quality Finding",
+      "expression": "CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[Severity] == \"Information\"))",
+      "formatString": "#,0",
+      "description": "Retained information, including technical DiscoveryMailbox findings classified by the local rule. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Critical findings",
+      "tableName": "Native Quality Finding",
+      "expression": "CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[Severity] == \"Critical\"))",
+      "formatString": "#,0",
+      "description": "Findings classified as Critical by the quality normalizer. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Integrity issues",
+      "tableName": "Native Quality Finding",
+      "expression": "CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == \"OrphanPrimaryUserReference\")) + CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == \"ObservedLicenseAssignmentError\"))",
+      "formatString": "#,0",
+      "description": "Orphan primary-user references plus observed Microsoft 365 license-assignment errors. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Coverage gaps",
+      "tableName": "Native Quality Finding",
+      "expression": "CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == \"UserCountryUnknown\")) + CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == \"DeviceWithoutPrimaryUser\"))",
+      "formatString": "#,0",
+      "description": "User records without a country plus devices without a primary user; these are coverage gaps, not integrity failures. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Derived country gaps",
+      "tableName": "Native Quality Finding",
+      "expression": "CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == \"DeviceCountryUnknown\"))",
+      "formatString": "#,0",
+      "description": "Devices whose country cannot be derived. This overlaps device primary-user findings and must not be added to Coverage gaps. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Data quality score",
+      "tableName": "Native Quality Finding",
+      "expression": "VAR _users = CALCULATE([Native Users], REMOVEFILTERS('Native User Evidence'), REMOVEFILTERS('Native Country Evidence')) VAR _devices = CALCULATE([Native Devices], REMOVEFILTERS('Native Device Evidence'), REMOVEFILTERS('Native Country Evidence')) VAR _userCountryCoverage = IF(_users > 0, MAX(0, DIVIDE(_users - CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == \"UserCountryUnknown\")), _users))) VAR _primaryUserCoverage = IF(_devices > 0, MAX(0, DIVIDE(_devices - CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == \"DeviceWithoutPrimaryUser\")), _devices))) VAR _deviceCountryCoverage = IF(_devices > 0, MAX(0, DIVIDE(_devices - CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == \"DeviceCountryUnknown\")), _devices))) VAR _population = _users + _devices VAR _integrityCoverage = IF(_population > 0, MAX(0, DIVIDE(_population - [Native Integrity issues], _population))) VAR _rates = {_userCountryCoverage, _primaryUserCoverage, _deviceCountryCoverage, _integrityCoverage} RETURN MINX(FILTER(_rates, NOT ISBLANK([Value])), [Value])",
+      "formatString": "0.0%",
+      "description": "Lowest non-blank global completeness rate across user country, device primary-user, device country and integrity checks. Overlapping findings are assessed separately, never added together. Country and ownership selections are intentionally ignored because quality findings are not country-grained. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Data quality status",
+      "tableName": "Native Quality Finding",
+      "expression": "VAR _score = [Native Data quality score] RETURN SWITCH(TRUE(), ISBLANK(_score), \"Not assessed\", _score >= 0.9, \"Good\", _score >= 0.6, \"Average\", \"Poor\")",
+      "formatString": "General",
+      "description": "Traffic-light assessment of the data quality score: Good at 90% or above, Average from 60% to below 90%, and Poor below 60%. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Data quality health",
+      "tableName": "Native Quality Finding",
+      "expression": "VAR _score = [Native Data quality score] VAR _status = [Native Data quality status] RETURN IF(ISBLANK(_score), _status, _status & \" · \" & FORMAT(_score, \"0.0%\"))",
+      "formatString": "General",
+      "description": "Compact status and score intended for the Executive Overview; open Workplace Health for the underlying findings. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Windows update alert records",
+      "tableName": "Native Update Alert Evidence",
+      "expression": "COALESCE(COUNTROWS('Native Update Alert Evidence'),0)",
+      "formatString": "#,0",
+      "description": "Windows Update report rows in the frozen collection; a device can contribute more than one row. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Devices with Windows update alerts",
+      "tableName": "Native Update Alert Evidence",
+      "expression": "COALESCE(DISTINCTCOUNTNOBLANK('Native Update Alert Evidence'[DeviceId]),0)",
+      "formatString": "#,0",
+      "description": "Distinct source device identifiers represented in Windows Update report rows. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Windows update alerts needing attention",
+      "tableName": "Native Update Alert Evidence",
+      "expression": "CALCULATE([Native Windows update alert records],KEEPFILTERS('Native Update Alert Evidence'[CurrentDeviceUpdateStatus] = \"Needs attention\"))",
+      "formatString": "#,0",
+      "description": "Windows Update report rows whose current device update status is explicitly Needs attention. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Update aggregate state rate",
+      "tableName": "Native Update Alert Evidence",
+      "expression": "DIVIDE([Native Windows update alert records], CALCULATE([Native Windows update alert records], REMOVEFILTERS('Native Update Alert Evidence'[AggregateState])))",
+      "formatString": "0.0%",
+      "description": "Share of Windows Update evidence records by aggregate state. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Endpoint Analytics devices",
+      "tableName": "Native Endpoint Score Evidence",
+      "expression": "COALESCE(COUNTROWS('Native Endpoint Score Evidence'),0)",
+      "formatString": "#,0",
+      "description": "Devices represented in the Endpoint Analytics export. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Average Endpoint Analytics score",
+      "tableName": "Native Endpoint Score Evidence",
+      "expression": "AVERAGE('Native Endpoint Score Evidence'[EndpointAnalyticsScore])",
+      "formatString": "0.0",
+      "description": "Arithmetic mean of the source-reported Endpoint Analytics device score across rows with a value. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Selected Endpoint Analytics score",
+      "tableName": "Native Endpoint Score Evidence",
+      "expression": "VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = \"Intune\")) RETURN CALCULATE(AVERAGE('Native Endpoint Score Evidence'[EndpointAnalyticsScore]), TREATAS(_intuneIds, 'Native Endpoint Score Evidence'[DeviceId]))",
+      "formatString": "0.0",
+      "description": "Average Endpoint Analytics score for exact Intune device identifiers in the filtered device population. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Selected startup performance score",
+      "tableName": "Native Endpoint Score Evidence",
+      "expression": "VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = \"Intune\")) RETURN CALCULATE(AVERAGE('Native Endpoint Score Evidence'[StartupPerformanceScore]), TREATAS(_intuneIds, 'Native Endpoint Score Evidence'[DeviceId]))",
+      "formatString": "0.0",
+      "description": "Average startup score for exact Intune device identifiers in the filtered device population. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Selected app reliability score",
+      "tableName": "Native Endpoint Score Evidence",
+      "expression": "VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = \"Intune\")) RETURN CALCULATE(AVERAGE('Native Endpoint Score Evidence'[AppReliabilityScore]), TREATAS(_intuneIds, 'Native Endpoint Score Evidence'[DeviceId]))",
+      "formatString": "0.0",
+      "description": "Average app reliability score for exact Intune device identifiers in the filtered device population. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Selected work from anywhere score",
+      "tableName": "Native Endpoint Score Evidence",
+      "expression": "VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = \"Intune\")) RETURN CALCULATE(AVERAGE('Native Endpoint Score Evidence'[WorkFromAnywhereScore]), TREATAS(_intuneIds, 'Native Endpoint Score Evidence'[DeviceId]))",
+      "formatString": "0.0",
+      "description": "Average work-from-anywhere score for exact Intune device identifiers in the filtered device population. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Source feeds",
+      "tableName": "Native Source Health",
+      "expression": "COALESCE(COUNTROWS('Native Source Health'), 0)",
+      "formatString": "#,0",
+      "description": "Configured source feeds represented in SourceHealth for the frozen snapshot. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Collected source feeds",
+      "tableName": "Native Source Health",
+      "expression": "CALCULATE([Native Source feeds], KEEPFILTERS('Native Source Health'[Status] == \"Completed\"))",
+      "formatString": "#,0",
+      "description": "Source feeds whose collection status is explicitly Completed. Completed is not tenant certification. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Missing source feeds",
+      "tableName": "Native Source Health",
+      "expression": "MAX(0, [Native Source feeds] - [Native Collected source feeds])",
+      "formatString": "#,0",
+      "description": "Source feeds not explicitly completed in the frozen snapshot. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Source collection coverage",
+      "tableName": "Native Source Health",
+      "expression": "DIVIDE([Native Collected source feeds], [Native Source feeds])",
+      "formatString": "0.0%",
+      "description": "Completed source feeds divided by represented source feeds. This is collection coverage, not a composite CMDB quality score. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Device source records",
+      "tableName": "Device Source Evidence",
+      "expression": "COALESCE(COUNTROWS('Device Source Evidence'),0)",
+      "formatString": "#,0",
+      "description": "Raw Entra and Intune evidence records; multiple records may describe one CMDB device. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Device source details",
+      "tableName": "Device Source Evidence",
+      "expression": "IF(COUNTROWS(ALLSELECTED('Native Device Evidence')) = 1, COUNTROWS('Device Source Evidence'))",
+      "formatString": "#,0",
+      "description": "Detail rows only when exactly one device is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Assignment paths",
+      "tableName": "Native License Assignment",
+      "expression": "COALESCE(COUNTROWS('Native License Assignment'),0)",
+      "formatString": "#,0",
+      "description": "Individual direct/group assignment paths, not distinct user/SKU pairs. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Group assignment paths",
+      "tableName": "Native License Assignment",
+      "expression": "CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[AssignmentRoute] == \"Group\"))",
+      "formatString": "#,0",
+      "description": "Observed group-based paths, not membership or effective access. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Direct assignment paths",
+      "tableName": "Native License Assignment",
+      "expression": "CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[AssignmentRoute] == \"Direct\"))",
+      "formatString": "#,0",
+      "description": "Observed direct assignment paths. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Assignment paths with errors",
+      "tableName": "Native License Assignment",
+      "expression": "CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[ErrorStatus] == \"Error reported\"))",
+      "formatString": "#,0",
+      "description": "Paths reporting an error; another path may still supply the entitlement. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Assignment error rate",
+      "tableName": "Native License Assignment",
+      "expression": "DIVIDE([Native Assignment paths with errors], [Native Assignment paths])",
+      "formatString": "0.000%",
+      "description": "Assignment paths reporting an error divided by all observed assignment paths. Another path may still supply the entitlement. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native User assignment details",
+      "tableName": "Native License Assignment",
+      "expression": "IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native License Assignment'))",
+      "formatString": "#,0",
+      "description": "Detail rows only when exactly one user is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Group assignment details",
+      "tableName": "Native License Assignment",
+      "expression": "IF(COUNTROWS(ALLSELECTED('Native Group Evidence')) = 1, COUNTROWS('Native License Assignment'))",
+      "formatString": "#,0",
+      "description": "Detail rows only when exactly one group is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Assignment route rate",
+      "tableName": "Native License Assignment",
+      "expression": "DIVIDE([Native Assignment paths], CALCULATE([Native Assignment paths], REMOVEFILTERS('Native License Assignment'[AssignmentRoute])))",
+      "formatString": "0.0%",
+      "description": "Share of each observed license-assignment route. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Device finding details",
+      "tableName": "Native Entity Finding",
+      "expression": "IF(COUNTROWS(ALLSELECTED('Native Device Evidence')) = 1, COUNTROWS('Native Entity Finding'))",
+      "formatString": "#,0",
+      "description": "Detail rows only when exactly one device is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native User finding details",
+      "tableName": "Native Entity Finding",
+      "expression": "IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native Entity Finding'))",
+      "formatString": "#,0",
+      "description": "Detail rows only when exactly one user is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Group finding details",
+      "tableName": "Native Entity Finding",
+      "expression": "IF(COUNTROWS(ALLSELECTED('Native Group Evidence')) = 1, COUNTROWS('Native Entity Finding'))",
+      "formatString": "#,0",
+      "description": "Detail rows only when exactly one group is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Finding records",
+      "tableName": "Native Entity Finding",
+      "expression": "COUNTROWS('Native Entity Finding')",
+      "formatString": "#,0",
+      "description": "Finding evidence records in the current entity and filter context. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Affected devices",
+      "tableName": "Native Entity Finding",
+      "expression": "CALCULATE(DISTINCTCOUNT('Native Entity Finding'[TenantDeviceKey]), KEEPFILTERS(NOT ISBLANK('Native Entity Finding'[TenantDeviceKey])))",
+      "formatString": "#,0",
+      "description": "Distinct devices referenced by the current finding context. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Finding severity rate",
+      "tableName": "Native Entity Finding",
+      "expression": "DIVIDE([Native Finding records], CALCULATE([Native Finding records], REMOVEFILTERS('Native Entity Finding'[Severity])))",
+      "formatString": "0.0%",
+      "description": "Share of entity findings by severity. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Executive workplace devices",
+      "tableName": "Native Country Evidence",
+      "expression": "CALCULATE([Native Devices], TREATAS(VALUES('Native Country Evidence'[CountryLabel]), 'Native Device Evidence'[CountryLabel]))",
+      "formatString": "#,0",
+      "description": "Devices in the selected shared country context; the ownership slicer may further restrict the population. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Executive managed device share",
+      "tableName": "Native Country Evidence",
+      "expression": "CALCULATE([Native Managed device share], TREATAS(VALUES('Native Country Evidence'[CountryLabel]), 'Native Device Evidence'[CountryLabel]))",
+      "formatString": "0.0%",
+      "description": "Managed-device share in the selected shared country context. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Executive compliant device share",
+      "tableName": "Native Country Evidence",
+      "expression": "CALCULATE([Native Compliant device share], TREATAS(VALUES('Native Country Evidence'[CountryLabel]), 'Native Device Evidence'[CountryLabel]))",
+      "formatString": "0.0%",
+      "description": "Compliant-device share in the selected shared country context. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Executive corporate devices",
+      "tableName": "Native Country Evidence",
+      "expression": "CALCULATE([Native Corporate devices], TREATAS(VALUES('Native Country Evidence'[CountryLabel]), 'Native Device Evidence'[CountryLabel]))",
+      "formatString": "#,0",
+      "description": "Corporate devices in the selected shared country context; ownership selection is intentionally ignored by the base measure. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Executive corporate country share",
+      "tableName": "Native Country Evidence",
+      "expression": "VAR _selected = [Native Executive corporate devices] VAR _all = CALCULATE([Native Executive corporate devices], REMOVEFILTERS('Native Country Evidence')) RETURN DIVIDE(_selected, _all)",
+      "formatString": "0.0%",
+      "description": "Corporate devices for each country divided by all corporate devices. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Executive user country share",
+      "tableName": "Native Country Evidence",
+      "expression": "DIVIDE([Native Users], CALCULATE([Native Users], REMOVEFILTERS('Native Country Evidence')))",
+      "formatString": "0.0%",
+      "description": "Users for each country divided by all users, including unknown or unassigned country. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Executive mailbox country share",
+      "tableName": "Native Country Evidence",
+      "expression": "DIVIDE([Native Hosted mailboxes], CALCULATE([Native Hosted mailboxes], REMOVEFILTERS('Native Country Evidence')))",
+      "formatString": "0.0%",
+      "description": "Reconciled mailboxes for each country divided by all reconciled mailboxes, including unknown or unassigned country. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Executive M365 F1 country share",
+      "tableName": "Native Country Evidence",
+      "expression": "VAR _countryAssignments = CALCULATE([Native License assignments], KEEPFILTERS('Native License SKU'[SkuPartNumber] == \"M365_F1\")) VAR _allAssignments = CALCULATE([Native License assignments], KEEPFILTERS('Native License SKU'[SkuPartNumber] == \"M365_F1\"), REMOVEFILTERS('Native Country Evidence')) RETURN DIVIDE(_countryAssignments, _allAssignments)",
+      "formatString": "0.0%",
+      "description": "Microsoft 365 F1 assignments for each country divided by all observed Microsoft 365 F1 assignments. Assignment does not prove usage. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Executive M365 F3 country share",
+      "tableName": "Native Country Evidence",
+      "expression": "VAR _countryAssignments = CALCULATE([Native License assignments], KEEPFILTERS('Native License SKU'[SkuPartNumber] == \"SPE_F1\")) VAR _allAssignments = CALCULATE([Native License assignments], KEEPFILTERS('Native License SKU'[SkuPartNumber] == \"SPE_F1\"), REMOVEFILTERS('Native Country Evidence')) RETURN DIVIDE(_countryAssignments, _allAssignments)",
+      "formatString": "0.0%",
+      "description": "Microsoft 365 F3 assignments for each country divided by all observed Microsoft 365 F3 assignments. Assignment does not prove usage. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Executive M365 E3 country share",
+      "tableName": "Native Country Evidence",
+      "expression": "VAR _countryAssignments = CALCULATE([Native License assignments], KEEPFILTERS('Native License SKU'[SkuPartNumber] == \"SPE_E3\")) VAR _allAssignments = CALCULATE([Native License assignments], KEEPFILTERS('Native License SKU'[SkuPartNumber] == \"SPE_E3\"), REMOVEFILTERS('Native Country Evidence')) RETURN DIVIDE(_countryAssignments, _allAssignments)",
+      "formatString": "0.0%",
+      "description": "Microsoft 365 E3 assignments for each country divided by all observed Microsoft 365 E3 assignments. Assignment does not prove usage. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Executive M365 E5 country share",
+      "tableName": "Native Country Evidence",
+      "expression": "VAR _countryAssignments = CALCULATE([Native License assignments], KEEPFILTERS('Native License SKU'[SkuPartNumber] == \"SPE_E5\")) VAR _allAssignments = CALCULATE([Native License assignments], KEEPFILTERS('Native License SKU'[SkuPartNumber] == \"SPE_E5\"), REMOVEFILTERS('Native Country Evidence')) RETURN DIVIDE(_countryAssignments, _allAssignments)",
+      "formatString": "0.0%",
+      "description": "Microsoft 365 E5 assignments for each country divided by all observed Microsoft 365 E5 assignments. Assignment does not prove usage. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Executive Copilot country share",
+      "tableName": "Native Country Evidence",
+      "expression": "VAR _countryAssignments = CALCULATE([Native License assignments], KEEPFILTERS('Native License SKU'[SkuPartNumber] == \"Microsoft_365_Copilot\")) VAR _allAssignments = CALCULATE([Native License assignments], KEEPFILTERS('Native License SKU'[SkuPartNumber] == \"Microsoft_365_Copilot\"), REMOVEFILTERS('Native Country Evidence')) RETURN DIVIDE(_countryAssignments, _allAssignments)",
+      "formatString": "0.0%",
+      "description": "Microsoft 365 Copilot assignments for each country divided by all observed Microsoft 365 Copilot assignments. Assignment does not prove usage. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Executive device form factor share",
+      "tableName": "Native Country Evidence",
+      "expression": "VAR _countries = VALUES('Native Country Evidence'[CountryLabel]) VAR _selected = CALCULATE([Native Devices], TREATAS(_countries, 'Native Device Evidence'[CountryLabel])) VAR _all = CALCULATE([Native Devices], REMOVEFILTERS('Native Device Evidence'[Device form factor]), TREATAS(_countries, 'Native Device Evidence'[CountryLabel])) RETURN DIVIDE(_selected, _all)",
+      "formatString": "0.0%",
+      "description": "Share of each device form-factor category in the selected shared country and ownership context. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Executive device ownership share",
+      "tableName": "Native Country Evidence",
+      "expression": "VAR _countries = VALUES('Native Country Evidence'[CountryLabel]) VAR _selected = CALCULATE([Native Devices], TREATAS(_countries, 'Native Device Evidence'[CountryLabel])) VAR _all = CALCULATE([Native Devices], REMOVEFILTERS('Native Device Evidence'[Device ownership group]), TREATAS(_countries, 'Native Device Evidence'[CountryLabel])) RETURN DIVIDE(_selected, _all)",
+      "formatString": "0.0%",
+      "description": "Share of each device-ownership category in the selected shared country context. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Executive Windows version share",
+      "tableName": "Native Country Evidence",
+      "expression": "VAR _countries = VALUES('Native Country Evidence'[CountryLabel]) VAR _selected = CALCULATE([Native Devices], TREATAS(_countries, 'Native Device Evidence'[CountryLabel])) VAR _all = CALCULATE([Native Devices], REMOVEFILTERS('Native Device Evidence'[Windows version group]), TREATAS(_countries, 'Native Device Evidence'[CountryLabel])) RETURN DIVIDE(_selected, _all)",
+      "formatString": "0.0%",
+      "description": "Share of each Windows-version category in the selected shared country and ownership context. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Executive Windows 10 devices",
+      "tableName": "Native Country Evidence",
+      "expression": "VAR _countries = VALUES('Native Country Evidence'[CountryLabel]) RETURN CALCULATE([Native Devices], TREATAS(_countries, 'Native Device Evidence'[CountryLabel]), KEEPFILTERS(FILTER('Native Device Evidence', VAR _os = COALESCE('Native Device Evidence'[OperatingSystem], \"\") VAR _version = COALESCE('Native Device Evidence'[OperatingSystemVersion], \"\") VAR _isNumericVersion = LEFT(_version, 5) = \"10.0.\" VAR _build = IF(_isNumericVersion, IFERROR(VALUE(PATHITEM(SUBSTITUTE(_version, \".\", \"|\"), 3, INTEGER)), BLANK())) RETURN _os = \"Windows\" && (_version = \"Windows 10\" || (_build > 0 && _build < 22000)))))",
+      "formatString": "#,0",
+      "description": "Windows 10 devices identified from the reported operating-system version in the selected country and ownership context. This is an OS count, not a hardware-readiness assessment. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Executive Windows 10 not compatible devices",
+      "tableName": "Native Country Evidence",
+      "expression": "VAR _countries = VALUES('Native Country Evidence'[CountryLabel]) VAR _windows10DeviceKeys = CALCULATETABLE(VALUES('Native Device Evidence'[TenantDeviceKey]), TREATAS(_countries, 'Native Device Evidence'[CountryLabel]), KEEPFILTERS(FILTER('Native Device Evidence', VAR _os = COALESCE('Native Device Evidence'[OperatingSystem], \"\") VAR _version = COALESCE('Native Device Evidence'[OperatingSystemVersion], \"\") VAR _isNumericVersion = LEFT(_version, 5) = \"10.0.\" VAR _build = IF(_isNumericVersion, IFERROR(VALUE(PATHITEM(SUBSTITUTE(_version, \".\", \"|\"), 3, INTEGER)), BLANK())) RETURN _os = \"Windows\" && (_version = \"Windows 10\" || (_build > 0 && _build < 22000))))) VAR _intuneDeviceIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_windows10DeviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = \"Intune\")) VAR _observed = CALCULATE(COUNTROWS('Native Upgrade Eligibility'), TREATAS(_intuneDeviceIds, 'Native Upgrade Eligibility'[DeviceId]), KEEPFILTERS('Native Upgrade Eligibility'[UpgradeEligibility] IN {\"upgraded\", \"unknown\", \"notCapable\", \"capable\", \"unknownFutureValue\"})) VAR _notCapable = CALCULATE(DISTINCTCOUNT('Native Upgrade Eligibility'[DeviceId]), TREATAS(_intuneDeviceIds, 'Native Upgrade Eligibility'[DeviceId]), KEEPFILTERS('Native Upgrade Eligibility'[UpgradeEligibility] = \"notCapable\")) RETURN IF(_observed = 0, BLANK(), _notCapable)",
+      "formatString": "#,0",
+      "description": "Distinct Windows 10 Intune devices explicitly reported as notCapable by Endpoint Analytics in the selected country and ownership context. Returns blank when no readiness evidence exists; unknown is never treated as incompatible. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Executive Endpoint Analytics score",
+      "tableName": "Native Country Evidence",
+      "expression": "VAR _countries = VALUES('Native Country Evidence'[CountryLabel]) VAR _deviceKeys = CALCULATETABLE(VALUES('Native Device Evidence'[TenantDeviceKey]), TREATAS(_countries, 'Native Device Evidence'[CountryLabel])) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = \"Intune\")) RETURN CALCULATE(AVERAGE('Native Endpoint Score Evidence'[EndpointAnalyticsScore]), TREATAS(_intuneIds, 'Native Endpoint Score Evidence'[DeviceId]))",
+      "formatString": "0.0",
+      "description": "Average Endpoint Analytics score from 0 to 100, linked by exact Intune device identifier in the selected country and ownership context; it is a normalized score, not a population percentage. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Hosted mailboxes",
+      "tableName": "Native Mailbox Hosting",
+      "expression": "COALESCE(COUNTROWS('Native Mailbox Hosting'), 0)",
+      "formatString": "#,0",
+      "description": "Distinct mailbox addresses after reconciliation of Exchange Online, RemoteMailbox and local Mailbox evidence. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Exchange Online mailboxes",
+      "tableName": "Native Mailbox Hosting",
+      "expression": "CALCULATE([Native Hosted mailboxes], KEEPFILTERS('Native Mailbox Hosting'[HostingLocation] == \"Exchange Online\"))",
+      "formatString": "#,0",
+      "description": "Mailboxes observed in Exchange Online or as RemoteMailbox; duplicate addresses are counted once. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Exchange On-premises mailboxes",
+      "tableName": "Native Mailbox Hosting",
+      "expression": "CALCULATE([Native Hosted mailboxes], KEEPFILTERS('Native Mailbox Hosting'[HostingLocation] == \"Exchange On-premises\"))",
+      "formatString": "#,0",
+      "description": "Local Mailbox recipients not already observed as Exchange Online or RemoteMailbox; duplicate addresses are counted once. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Exchange Online share",
+      "tableName": "Native Mailbox Hosting",
+      "expression": "DIVIDE([Native Exchange Online mailboxes], [Native Hosted mailboxes])",
+      "formatString": "0.0%",
+      "description": "Exchange Online mailboxes divided by the reconciled mailbox footprint. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Exchange On-premises share",
+      "tableName": "Native Mailbox Hosting",
+      "expression": "DIVIDE([Native Exchange On-premises mailboxes], [Native Hosted mailboxes])",
+      "formatString": "0.0%",
+      "description": "Exchange On-premises mailboxes divided by the reconciled mailbox footprint. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native User mailboxes",
+      "tableName": "Native Mailbox Hosting",
+      "expression": "CALCULATE([Native Hosted mailboxes], KEEPFILTERS('Native Mailbox Hosting'[MailboxTypeGroup] == \"User mailbox\"))",
+      "formatString": "#,0",
+      "description": "UserMailbox and RemoteUserMailbox recipients after mailbox-hosting reconciliation. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Shared mailboxes",
+      "tableName": "Native Mailbox Hosting",
+      "expression": "CALCULATE([Native Hosted mailboxes], KEEPFILTERS('Native Mailbox Hosting'[MailboxTypeGroup] == \"Shared mailbox\"))",
+      "formatString": "#,0",
+      "description": "SharedMailbox and RemoteSharedMailbox recipients after mailbox-hosting reconciliation. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Other mailbox types",
+      "tableName": "Native Mailbox Hosting",
+      "expression": "CALCULATE([Native Hosted mailboxes], KEEPFILTERS('Native Mailbox Hosting'[MailboxTypeGroup] == \"Other mailbox types\"))",
+      "formatString": "#,0",
+      "description": "Room, scheduling, discovery and other recipient types after mailbox-hosting reconciliation. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native User mailbox share",
+      "tableName": "Native Mailbox Hosting",
+      "expression": "DIVIDE([Native User mailboxes], [Native Hosted mailboxes])",
+      "formatString": "0.0%",
+      "description": "User mailbox family divided by all reconciled mailboxes. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Shared mailbox share",
+      "tableName": "Native Mailbox Hosting",
+      "expression": "DIVIDE([Native Shared mailboxes], [Native Hosted mailboxes])",
+      "formatString": "0.0%",
+      "description": "Shared mailbox family divided by all reconciled mailboxes. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Other mailbox type share",
+      "tableName": "Native Mailbox Hosting",
+      "expression": "DIVIDE([Native Other mailbox types], [Native Hosted mailboxes])",
+      "formatString": "0.0%",
+      "description": "Other mailbox types divided by all reconciled mailboxes. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Mailbox type share",
+      "tableName": "Native Mailbox Hosting",
+      "expression": "DIVIDE([Native Hosted mailboxes], CALCULATE([Native Hosted mailboxes], REMOVEFILTERS('Native Mailbox Hosting'[MailboxTypeGroup])))",
+      "formatString": "0.0%",
+      "description": "Share of the current mailbox-type category within the filtered reconciled mailbox population. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Mailbox hosting rate",
+      "tableName": "Native Mailbox Hosting",
+      "expression": "DIVIDE([Native Hosted mailboxes], CALCULATE([Native Hosted mailboxes], REMOVEFILTERS('Native Mailbox Hosting'[HostingLocation])))",
+      "formatString": "0.0%",
+      "description": "Share of each mailbox-hosting location within the filtered reconciled mailbox population. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Hardware records",
+      "tableName": "Native Hardware Evidence",
+      "expression": "VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )\nRETURN IF ( ISCROSSFILTERED ( 'Native Country Evidence' ), CALCULATE ( COALESCE ( COUNTROWS ( 'Native Hardware Evidence' ), 0 ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) ), COALESCE ( COUNTROWS ( 'Native Hardware Evidence' ), 0 ) )",
+      "formatString": "#,0",
+      "description": "Native hardware inventory rows/device identities in the selected fleet and Country. Missing attributes do not become zero. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Devices with hardware",
+      "tableName": "Native Hardware Evidence",
+      "expression": "VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )\nRETURN IF ( ISCROSSFILTERED ( 'Native Country Evidence' ), CALCULATE ( COALESCE ( DISTINCTCOUNT ( 'Native Hardware Evidence'[TenantDeviceKey] ), 0 ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) ), COALESCE ( DISTINCTCOUNT ( 'Native Hardware Evidence'[TenantDeviceKey] ), 0 ) )",
+      "formatString": "#,0",
+      "description": "Native hardware inventory rows/device identities in the selected fleet and Country. Missing attributes do not become zero. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Devices without hardware",
+      "tableName": "Native Hardware Evidence",
+      "expression": "MAX ( 0, [Native Devices] - [Native Devices with hardware] )",
+      "formatString": "#,0",
+      "description": "Imported scoped devices with no hardware row; distinguishes row coverage from attribute completeness. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Hardware detail rows",
+      "tableName": "Native Hardware Evidence",
+      "expression": "IF(COUNTROWS(ALLSELECTED('Native Device Evidence')) = 1, COUNTROWS('Native Hardware Evidence'))",
+      "formatString": "#,0",
+      "description": "Current device filter; separate native records are retained. Coverage does not prove hardware freshness. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Hardware source message",
+      "tableName": "Native Hardware Evidence",
+      "expression": "VAR _status = SELECTEDVALUE('Hardware Coverage Evidence'[Status], \"NotProvided\") RETURN IF(_status = \"NotProvided\", \"Hardware source not supplied. Existing inventory is retained; hardware attributes are unavailable.\", IF(COUNTROWS(ALLSELECTED('Native Device Evidence')) <> 1, \"Select one device to inspect its hardware. Coverage: \" & SELECTEDVALUE('Hardware Coverage Evidence'[Coverage]) & \".\", IF([Native Hardware records] = 0, \"No hardware record for this device in the supplied snapshot.\", \"Source-reported hardware. Missing values remain unknown; each source retains its own collection date.\")))",
+      "formatString": "@",
+      "description": "Current device filter; separate native records are retained. Coverage does not prove hardware freshness. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Hardware covered devices",
+      "tableName": "Native Hardware Evidence",
+      "expression": "CALCULATE([Native Devices with hardware], REMOVEFILTERS('Native Hardware Evidence'[Manufacturer]), REMOVEFILTERS('Native Hardware Evidence'[Model]), REMOVEFILTERS('Native Hardware Evidence'[SerialNumber]), REMOVEFILTERS('Native Hardware Evidence'[Storage]))",
+      "formatString": "#,0",
+      "description": "Distinct devices with a hardware record in the current DimDevice scope. Hardware-attribute selections are excluded from this coverage numerator. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Hardware uncovered devices",
+      "tableName": "Native Hardware Evidence",
+      "expression": "MAX(0, [Native Devices] - [Native Hardware covered devices])",
+      "formatString": "#,0",
+      "description": "Devices in the current DimDevice scope minus covered devices. The denominator is the filtered device inventory, not hardware records. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Hardware coverage rate",
+      "tableName": "Native Hardware Evidence",
+      "expression": "DIVIDE([Native Hardware covered devices], [Native Devices])",
+      "formatString": "0.0%",
+      "description": "Covered devices divided by devices in the current DimDevice scope. Hardware-attribute selections do not change the coverage numerator. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Missing serial records",
+      "tableName": "Native Hardware Evidence",
+      "expression": "CALCULATE([Native Hardware records], KEEPFILTERS('Native Hardware Evidence'[SerialNumber] = \"Not provided\"))",
+      "formatString": "#,0",
+      "description": "Hardware records whose source serial status was Missing. This is distinct from a reported value and never defines identity or ownership. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Missing manufacturer records",
+      "tableName": "Native Hardware Evidence",
+      "expression": "CALCULATE([Native Hardware records], KEEPFILTERS('Native Hardware Evidence'[Manufacturer] = \"Not provided\"))",
+      "formatString": "#,0",
+      "description": "Hardware records whose source manufacturer status was Missing. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Missing model records",
+      "tableName": "Native Hardware Evidence",
+      "expression": "CALCULATE([Native Hardware records], KEEPFILTERS('Native Hardware Evidence'[Model] = \"Not provided\"))",
+      "formatString": "#,0",
+      "description": "Hardware records whose source model status was Missing. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Zero-reported storage records",
+      "tableName": "Native Hardware Evidence",
+      "expression": "CALCULATE([Native Hardware records], KEEPFILTERS('Native Hardware Evidence'[Storage] = \"Unknown (reported 0)\"))",
+      "formatString": "#,0",
+      "description": "Hardware records where the source explicitly reported zero storage. This is not a missing value. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Repeated serial values",
+      "tableName": "Native Hardware Evidence",
+      "expression": "VAR _serials = FILTER(ADDCOLUMNS(VALUES('Native Hardware Evidence'[SerialNumber]), \"_RecordCount\", CALCULATE(COUNTROWS('Native Hardware Evidence'))), 'Native Hardware Evidence'[SerialNumber] <> \"Not provided\" && [_RecordCount] > 1) RETURN COUNTROWS(_serials)",
+      "formatString": "#,0",
+      "description": "Distinct non-missing serial values appearing on more than one hardware record in the current filter. Records remain separate; serial never defines identity or ownership. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Hardware fleet rows",
+      "tableName": "Native Hardware Evidence",
+      "expression": "VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )\nRETURN IF ( ISCROSSFILTERED ( 'Native Country Evidence' ), CALCULATE ( COUNTROWS ( 'Native Hardware Evidence' ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) ), COUNTROWS ( 'Native Hardware Evidence' ) )",
+      "formatString": "#,0",
+      "description": "Native hardware inventory rows/device identities in the selected fleet and Country. Missing attributes do not become zero. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": true
+    },
+    {
+      "name": "Native Hardware data gap rate",
+      "tableName": "Native Hardware Evidence",
+      "expression": "DIVIDE([Native Hardware uncovered devices], [Native Devices])",
+      "formatString": "0.0%",
+      "description": "Devices without a hardware record divided by all devices in the current DimDevice scope. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Manufacturer record rate",
+      "tableName": "Native Hardware Evidence",
+      "expression": "DIVIDE([Native Hardware records], CALCULATE([Native Hardware records], REMOVEFILTERS('Native Hardware Evidence'[Manufacturer])))",
+      "formatString": "0.0%",
+      "description": "Share of source-reported hardware records by manufacturer. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Selected upgrade eligibility devices",
+      "tableName": "Native Upgrade Eligibility",
+      "expression": "VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = \"Intune\")) RETURN CALCULATE(DISTINCTCOUNT('Native Upgrade Eligibility'[DeviceId]), TREATAS(_intuneIds, 'Native Upgrade Eligibility'[DeviceId]))",
+      "formatString": "#,0",
+      "description": "Distinct readiness records linked by exact Intune device identifier to the filtered device population. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Upgrade eligibility rate",
+      "tableName": "Native Upgrade Eligibility",
+      "expression": "DIVIDE([Native Selected upgrade eligibility devices], CALCULATE([Native Selected upgrade eligibility devices], REMOVEFILTERS('Native Upgrade Eligibility'[UpgradeEligibility])))",
+      "formatString": "0.0%",
+      "description": "Share of each reported Windows upgrade-eligibility state within exact matched Intune devices. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Top application occurrences",
+      "tableName": "Native Application Ranking",
+      "expression": "SUM('Native Application Ranking'[ReportedDeviceCount])",
+      "formatString": "#,0",
+      "description": "Source-reported application-device occurrences for the five highest-volume normalized products; not distinct devices. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Top application occurrence rate",
+      "tableName": "Native Application Ranking",
+      "expression": "DIVIDE([Native Top application occurrences], CALCULATE([Native Top application occurrences], REMOVEFILTERS('Native Application Ranking'[ApplicationProduct])))",
+      "formatString": "0.0%",
+      "description": "Share within the five highest-volume normalized application products; source-reported occurrences are not distinct devices. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Installed application products",
+      "tableName": "Native Device Application",
+      "expression": "VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )\nRETURN\nIF ( ISCROSSFILTERED ( 'Native Country Evidence' ),\n    VAR _countryApps = CALCULATETABLE ( VALUES ( 'Native Device Application'[TenantApplicationKey] ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) )\n    RETURN CALCULATE ( DISTINCTCOUNT ( 'Native Discovered Application'[Application product key] ), KEEPFILTERS ( TREATAS ( _countryApps, 'Native Discovered Application'[TenantApplicationKey] ) ) ),\n    VAR _scopeApps = VALUES ( 'Native Device Application'[TenantApplicationKey] )\n    RETURN CALCULATE ( DISTINCTCOUNT ( 'Native Discovered Application'[Application product key] ), KEEPFILTERS ( TREATAS ( _scopeApps, 'Native Discovered Application'[TenantApplicationKey] ) ) ) )",
+      "formatString": "#,0",
+      "description": "Distinct normalized installed products in the selected native application evidence, respecting the resolved fleet and Country scope. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Application-device installations",
+      "tableName": "Native Device Application",
+      "expression": "VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )\nRETURN IF ( ISCROSSFILTERED ( 'Native Country Evidence' ), CALCULATE ( COUNTROWS ( 'Native Device Application' ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) ), COUNTROWS ( 'Native Device Application' ) )",
+      "formatString": "#,0",
+      "description": "Native application-version/device relations, not distinct products or distinct fleet devices. Unresolved native evidence remains in global scope. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Devices reporting applications",
+      "tableName": "Native Device Application",
+      "expression": "VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )\nRETURN IF ( ISCROSSFILTERED ( 'Native Country Evidence' ), CALCULATE ( DISTINCTCOUNT ( 'Native Device Application'[ManagedDeviceId] ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) ), DISTINCTCOUNT ( 'Native Device Application'[ManagedDeviceId] ) )",
+      "formatString": "#,0",
+      "description": "Distinct managed-device IDs in native weekly application evidence. Global scope retains unresolved IDs; Country/ownership scope requires a resolved device. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Application device rate",
+      "tableName": "Native Device Application",
+      "expression": "DIVIDE ( [Native Devices reporting applications], CALCULATE ( [Native Devices reporting applications], REMOVEFILTERS ( 'Native Discovered Application' ) ) )",
+      "formatString": "0.0%",
+      "description": "Share of distinct reporting-device IDs for this product, over reporting-device IDs across all products in the same fleet scope. Product shares are not additive. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Enabled AD Windows workstations",
+      "tableName": "Native AD Intune Coverage",
+      "expression": "COUNTROWS ( FILTER ( 'Native AD Intune Coverage',\nVAR _os = LOWER ( COALESCE ( 'Native AD Intune Coverage'[OperatingSystem], \"\" ) )\nRETURN 'Native AD Intune Coverage'[Enabled] = TRUE ()\n&& NOT CONTAINSSTRING ( _os, \"server\" )\n&& ( CONTAINSSTRING ( _os, \"windows 7\" ) || CONTAINSSTRING ( _os, \"windows 8\" )\n|| CONTAINSSTRING ( _os, \"windows 10\" ) || CONTAINSSTRING ( _os, \"windows 11\" ) ) ) )",
+      "formatString": "#,0",
+      "description": "Enabled Windows 7/8/10/11 workstation directory objects, excluding Windows Server. Includes native AD objects without DNSHostName; not a count of active physical machines. AD-only objects have no inferred Country/ownership. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native AD Windows workstations managed in Intune",
+      "tableName": "Native AD Intune Coverage",
+      "expression": "CALCULATE([Native Enabled AD Windows workstations], KEEPFILTERS('Native AD Intune Coverage'[CoverageState] = \"Managed in Intune\"))",
+      "formatString": "#,0",
+      "description": "Enabled AD workstations linked exactly through AD ObjectSid to Entra onPremisesSecurityIdentifier, then Entra deviceId to Intune azureADDeviceId. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native AD to Intune coverage rate",
+      "tableName": "Native AD Intune Coverage",
+      "expression": "DIVIDE ( [Native AD Windows workstations managed in Intune], CALCULATE ( [Native Enabled AD Windows workstations], REMOVEFILTERS ( 'Native AD Intune Coverage'[CoverageState] ) ) )",
+      "formatString": "0.0%",
+      "description": "Matched Intune coverage of enabled AD Windows workstation objects, using the full workstation-state denominator. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native AD workstation coverage state rate",
+      "tableName": "Native AD Intune Coverage",
+      "expression": "DIVIDE([Native Enabled AD Windows workstations], CALCULATE([Native Enabled AD Windows workstations], REMOVEFILTERS('Native AD Intune Coverage'[CoverageState])))",
+      "formatString": "0.0%",
+      "description": "Share of enabled AD Windows workstations by exact coverage state. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native SharePoint sites",
+      "tableName": "Native SharePoint Site",
+      "expression": "DISTINCTCOUNT('Native SharePoint Site'[TenantSiteKey])",
+      "formatString": "#,0",
+      "description": "Distinct SharePoint sites from the Microsoft 365 D180 site-usage report; OneDrive personal sites are excluded. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Active SharePoint sites",
+      "tableName": "Native SharePoint Site",
+      "expression": "CALCULATE([Native SharePoint sites], KEEPFILTERS('Native SharePoint Site'[ActivityState] = \"Active (90d)\"))",
+      "formatString": "#,0",
+      "description": "SharePoint sites with activity reported within 90 days. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native SharePoint active rate",
+      "tableName": "Native SharePoint Site",
+      "expression": "DIVIDE([Native Active SharePoint sites], [Native SharePoint sites])",
+      "formatString": "0.0%",
+      "description": "SharePoint sites active within 90 days divided by all reported SharePoint sites. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native SharePoint activity state rate",
+      "tableName": "Native SharePoint Site",
+      "expression": "DIVIDE([Native SharePoint sites], CALCULATE([Native SharePoint sites], REMOVEFILTERS('Native SharePoint Site'[ActivityState])))",
+      "formatString": "0.0%",
+      "description": "Share of SharePoint sites by explicit 90-day activity state. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native SharePoint storage used GB",
+      "tableName": "Native SharePoint Site",
+      "expression": "DIVIDE(SUM('Native SharePoint Site'[StorageUsedBytes]), 1073741824)",
+      "formatString": "#,0.0",
+      "description": "Total reported SharePoint site storage in GiB. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native SharePoint storage utilization",
+      "tableName": "Native SharePoint Site",
+      "expression": "DIVIDE(SUM('Native SharePoint Site'[StorageUsedBytes]), SUM('Native SharePoint Site'[StorageAllocatedBytes]))",
+      "formatString": "0.0%",
+      "description": "Reported SharePoint storage used divided by reported allocated storage. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Teams",
+      "tableName": "Native Team",
+      "expression": "DISTINCTCOUNT('Native Team'[TenantTeamKey])",
+      "formatString": "#,0",
+      "description": "Distinct Microsoft 365 groups provisioned as Teams. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Active Teams",
+      "tableName": "Native Team",
+      "expression": "CALCULATE([Native Teams], KEEPFILTERS('Native Team'[ActivityState] = \"Active (90d)\"))",
+      "formatString": "#,0",
+      "description": "Teams with activity reported within 90 days. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Teams active rate",
+      "tableName": "Native Team",
+      "expression": "DIVIDE([Native Active Teams], [Native Teams])",
+      "formatString": "0.0%",
+      "description": "Teams active within 90 days divided by all Teams. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Teams activity state rate",
+      "tableName": "Native Team",
+      "expression": "DIVIDE([Native Teams], CALCULATE([Native Teams], REMOVEFILTERS('Native Team'[ActivityState])))",
+      "formatString": "0.0%",
+      "description": "Share of Teams by explicit 90-day activity state. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Average members per Team",
+      "tableName": "Native Team",
+      "expression": "CALCULATE(AVERAGE('Native Team'[MemberCount]), KEEPFILTERS('Native Team'[MembershipCoverageStatus] = \"Complete\"))",
+      "formatString": "#,0.0",
+      "description": "Average exact enumerated group-member count across Teams with complete membership coverage. Partial Teams are excluded. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Teams with partial membership coverage",
+      "tableName": "Native Team",
+      "expression": "CALCULATE([Native Teams], KEEPFILTERS('Native Team'[MembershipCoverageStatus] = \"Partial\"))",
+      "formatString": "#,0",
+      "description": "Teams for which Graph returned one or more member objects without an immutable identifier; exact links are preserved but the member total is incomplete. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Teams without owner",
+      "tableName": "Native Team",
+      "expression": "CALCULATE([Native Teams], KEEPFILTERS('Native Team'[OwnerCount] = 0))",
+      "formatString": "#,0",
+      "description": "Teams whose exact owner enumeration returned no owner. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Team memberships",
+      "tableName": "Native Team Membership",
+      "expression": "COUNTROWS('Native Team Membership')",
+      "formatString": "#,0",
+      "description": "Exact group membership edges for Teams. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Teams with guests",
+      "tableName": "Native Team Membership",
+      "expression": "CALCULATE(DISTINCTCOUNT('Native Team Membership'[TenantTeamKey]), KEEPFILTERS('Native Team Membership'[UserType] = \"Guest\"))",
+      "formatString": "#,0",
+      "description": "Teams containing at least one exact guest membership. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Team membership role rate",
+      "tableName": "Native Team Membership",
+      "expression": "DIVIDE([Native Team memberships], CALCULATE([Native Team memberships], REMOVEFILTERS('Native Team Membership'[Role])))",
+      "formatString": "0.0%",
+      "description": "Share of exact Team membership edges by owner/member role. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Users with exact M365 activity evidence",
+      "tableName": "Native Workload Activity",
+      "expression": "CALCULATE(DISTINCTCOUNT('Native Workload Activity'[TenantUserKey]), KEEPFILTERS('Native Workload Activity'[MatchStatus] = \"ExactUPN\"))",
+      "formatString": "#,0",
+      "description": "Users whose Microsoft 365 workload report row was linked to DimUser by exact normalized UPN. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Relationship edges",
+      "tableName": "Native Relationship Summary",
+      "expression": "SUM('Native Relationship Summary'[RelationshipCount])",
+      "formatString": "#,0",
+      "description": "Exact observed relationship edges by supported source type. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Relationship type rate",
+      "tableName": "Native Relationship Summary",
+      "expression": "DIVIDE([Native Relationship edges], CALCULATE([Native Relationship edges], REMOVEFILTERS('Native Relationship Summary'[RelationshipType])))",
+      "formatString": "0.0%",
+      "description": "Share of exact observed edges by relationship type. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Selected user AD objects",
+      "tableName": "AD User Evidence",
+      "expression": "IF ( HASONEVALUE ( 'Native User Evidence'[TenantUserKey] ), CALCULATE ( COUNTROWS ( 'AD User Evidence' ), TREATAS ( VALUES ( 'Native User Evidence'[TenantUserKey] ), 'AD User Evidence'[TenantUserKey] ) ) )",
+      "formatString": "#,##0",
+      "description": "Native AD records explicitly linked to one selected cloud user identity. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native AD objects without DNS",
+      "tableName": "AD Computer Evidence",
+      "expression": "COUNTROWS ( FILTER ( 'AD Computer Evidence', ISBLANK ( 'AD Computer Evidence'[DNSHostName] ) || TRIM ( 'AD Computer Evidence'[DNSHostName] ) = \"\" ) )",
+      "formatString": "#,##0",
+      "description": "Native AD computer objects whose DNSHostName is absent; this does not prove physical use or non-use. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    },
+    {
+      "name": "Native Selected device AD objects",
+      "tableName": "AD Computer Evidence",
+      "expression": "IF ( HASONEVALUE ( 'Native Device Evidence'[TenantDeviceKey] ), CALCULATE ( COUNTROWS ( 'AD Computer Evidence' ), TREATAS ( VALUES ( 'Native Device Evidence'[TenantDeviceKey] ), 'AD Computer Evidence'[TenantDeviceKey] ) ) )",
+      "formatString": "#,##0",
+      "description": "Native AD records explicitly linked to one selected CMDB device identity; no name-based guessed relation. Migrated without changing the source calculation.",
+      "displayFolder": "Native evidence",
+      "isHidden": false
+    }
+  ]
+}

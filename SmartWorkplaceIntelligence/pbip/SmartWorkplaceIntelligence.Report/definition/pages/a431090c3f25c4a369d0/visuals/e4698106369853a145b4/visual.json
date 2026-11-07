@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "e4698106369853a145b4",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 70279,
+    "height": 1080,
+    "width": 1920,
+    "tabOrder": 70279
+  },
+  "visualGroup": {
+    "displayName": "Unclassified identities",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

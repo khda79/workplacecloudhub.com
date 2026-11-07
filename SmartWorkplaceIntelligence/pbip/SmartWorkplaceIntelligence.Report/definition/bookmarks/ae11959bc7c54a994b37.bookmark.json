@@ -1,0 +1,44 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "ae11959bc7c54a994b37",
+  "displayName": "Identity",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "05be71d990e3270a7c63",
+      "5d89da1c565b6335cee9",
+      "36916fe64a62a02ec4b1",
+      "4c555ad31f25399ab967"
+    ],
+    "suppressData": true,
+    "suppressActiveSection": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "270d570d0b3c317afd17",
+    "sections": {
+      "270d570d0b3c317afd17": {
+        "visualContainerGroups": {
+          "05be71d990e3270a7c63": {
+            "isHidden": false
+          },
+          "5d89da1c565b6335cee9": {
+            "isHidden": true
+          }
+        },
+        "visualContainers": {
+          "36916fe64a62a02ec4b1": {
+            "singleVisual": {}
+          },
+          "4c555ad31f25399ab967": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

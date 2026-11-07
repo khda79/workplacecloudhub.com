@@ -1,0 +1,119 @@
+/// SPO means SharePoint Online. Grain: Legacy Key; source: one selected immutable prepared batch.
+table 'SPO Migration Legacy Collection'
+	isHidden
+	lineageTag: 932d38f1-cf6f-4b68-97d0-f0b64bba4b60
+
+	/// Prepared, tenant-qualified migration evidence: TenantKey.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 20536d24-2ae2-4158-9cbf-97b8538407e2
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Prepared, tenant-qualified migration evidence: Project Key.
+	column 'Project Key'
+		dataType: string
+		isHidden
+		lineageTag: dfd2ae63-0509-4d49-8a94-7aa5fb5c09de
+		summarizeBy: none
+		sourceColumn: Project Key
+
+	/// Prepared, tenant-qualified migration evidence: Snapshot ID.
+	column 'Snapshot ID'
+		dataType: string
+		isHidden
+		lineageTag: eaf95f13-dc91-4ae9-8332-c40be0967c1d
+		summarizeBy: none
+		sourceColumn: Snapshot ID
+
+	/// Prepared, tenant-qualified migration evidence: Snapshot Date.
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 158bf1a7-df04-42e1-8a47-ce710571f44e
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: 7a4fed8e-bb12-4fe8-8402-065f9d4a18ac
+			defaultHierarchy: LocalDateTable_41b13c2b-fe1c-4d4e-abe2-c09e72f23525.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	/// Prepared, tenant-qualified migration evidence: Legacy Key.
+	column 'Legacy Key'
+		dataType: string
+		isHidden
+		lineageTag: 01b04cef-dc13-4cba-a739-61d99261852e
+		summarizeBy: none
+		sourceColumn: Legacy Key
+
+	/// Prepared, tenant-qualified migration evidence: Legacy ID.
+	column 'Legacy ID'
+		dataType: string
+		lineageTag: a68253dc-9504-4231-bd8a-8004771a2b68
+		summarizeBy: none
+		sourceColumn: Legacy ID
+
+	/// Prepared, tenant-qualified migration evidence: Source URL.
+	column 'Source URL'
+		dataType: string
+		lineageTag: d0c79db8-e9b2-4b34-a668-462ca7e4b0dd
+		summarizeBy: none
+		sourceColumn: Source URL
+
+	/// Prepared, tenant-qualified migration evidence: Reported Size.
+	column 'Reported Size'
+		dataType: decimal
+		isHidden
+		lineageTag: bcc21c43-741e-4458-87d0-a5772b25c9b9
+		summarizeBy: sum
+		sourceColumn: Reported Size
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Project Identity'
+		dataType: string
+		isHidden
+		lineageTag: 64964ec4-5e6d-4e00-8d11-ccdaec269b5c
+		summarizeBy: none
+		sourceColumn: Project Identity
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 4696739f-9801-416e-89f3-b815e6306146
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'SPO Migration Legacy Collection' = m
+		mode: import
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
+				    Source = GetSharePointMigrationEvidence("SharePointMigrationLegacyCollectionEvidence.csv", {{"TenantKey", type text}, {"Project Key", type text}, {"Snapshot ID", type text}, {"Snapshot Date", type date}, {"Legacy Key", type text}, {"Legacy ID", type text}, {"Source URL", type text}, {"Reported Size", Currency.Type}}),
+				    Identity = Table.AddColumn(Source, "Project Identity", each Binary.ToText(Json.FromValue({[TenantKey], [Project Key]}), BinaryEncoding.Base64), type text),
+				    Categories = Table.TransformColumns(Identity, List.Transform(List.Intersect({{"Business Unit", "Phase"}, Table.ColumnNames(Identity)}), (c) => {c, each if _ = null then "(Unspecified)" else _, type text}))
+				in Categories)
+				in
+				    Readers[Finish](BusinessRows)
+

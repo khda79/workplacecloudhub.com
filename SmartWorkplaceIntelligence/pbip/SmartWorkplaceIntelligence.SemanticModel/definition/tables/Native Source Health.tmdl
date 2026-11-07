@@ -1,0 +1,199 @@
+/// Native source facet migrated from SourceHealth; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Source Health'
+	lineageTag: 281de526-d87b-42e0-8dd3-f41d75aef28f
+
+	/// Configured source feeds represented in SourceHealth for the frozen snapshot. Migrated without changing the source calculation.
+	measure 'Native Source feeds' = (COALESCE(COUNTROWS('Native Source Health'), 0))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 357aa941-a508-477f-b23e-815c6ae5274f
+
+	/// Source feeds collected by their producer: Health State OK or Warning (Success or SuccessWithWarnings). Collected is not tenant certification.
+	measure 'Native Collected source feeds' = ([Native OK source feeds] + [Native Warning source feeds])
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 21999a0e-0974-4acb-90bc-20d2c53fa4b1
+
+	/// Source feeds not collected in the frozen snapshot: Failed or Unknown health state.
+	measure 'Native Missing source feeds' = (MAX(0, [Native Source feeds] - [Native Collected source feeds]))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 2cdc2862-f82f-4d5e-a905-4a225c1b1139
+
+	/// Collected (OK or Warning) source feeds divided by represented source feeds. This is collection coverage, not a composite CMDB quality score.
+	measure 'Native Source collection coverage' = (DIVIDE([Native Collected source feeds], [Native Source feeds]))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: a4d11cc5-35c3-457a-91c5-c7cdbb98ae70
+
+	/// Source feeds whose native status is Success (Health State OK).
+	measure 'Native OK source feeds' = (COALESCE(CALCULATE(COUNTROWS('Native Source Health'), KEEPFILTERS('Native Source Health'[Health State] == "OK")), 0))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: f9cbbf92-a7e1-4bd9-89de-c984a6e785c5
+
+	/// Source feeds collected with qualifications: native status SuccessWithWarnings (Health State Warning).
+	measure 'Native Warning source feeds' = (COALESCE(CALCULATE(COUNTROWS('Native Source Health'), KEEPFILTERS('Native Source Health'[Health State] == "Warning")), 0))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 2cf259b2-128c-403d-96dc-e2a060fdc241
+
+	/// Source feeds whose native status is Failed or Cancelled (Health State Failed).
+	measure 'Native Failed source feeds' = (COALESCE(CALCULATE(COUNTROWS('Native Source Health'), KEEPFILTERS('Native Source Health'[Health State] == "Failed")), 0))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 52697217-d897-4fd4-b8be-31e79d3b0f90
+
+	/// Source feeds whose native status is blank or outside the mapped vocabulary (Health State Unknown); never counted as collected.
+	measure 'Native Unknown-status source feeds' = (COALESCE(CALCULATE(COUNTROWS('Native Source Health'), KEEPFILTERS('Native Source Health'[Health State] == "Unknown")), 0))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 19898157-ceac-4bff-941b-6a7590fcd8f4
+
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
+	measure 'Native Context Rows · Native Source Health' = (COUNTROWS('Native Source Health'))
+		formatString: #,0
+		isHidden
+		lineageTag: 13c62cae-81f2-41c1-8b01-d06836c9719d
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 4b6cd335-15f4-4a98-a008-efce8b4ed257
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 35ce9c00-53c8-4957-886e-b172bb9979bf
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 87534197-f673-48d3-b1ac-4ac970989f4e
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 78afdf0b-6ccb-4b3f-af46-38a2ba762be9
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column SourceName
+		dataType: string
+		lineageTag: 13000168-6736-4832-bcc2-b6821ccb9b30
+		summarizeBy: none
+		sourceColumn: SourceName
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column Status
+		dataType: string
+		lineageTag: ab58798c-34cc-446b-b862-754881d4fa19
+		summarizeBy: none
+		sourceColumn: Status
+
+	/// Status mapped by NativeSourceHealthState: OK, Warning, Failed or Unknown. Unmapped values stay Unknown, never OK.
+	column 'Health State'
+		dataType: string
+		lineageTag: 2c5a1d95-b34b-4bcc-a3b0-8d2304c64997
+		summarizeBy: none
+		sourceColumn: Health State
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column Coverage
+		dataType: string
+		lineageTag: 9b6dd0a6-e70e-4470-8956-97eab7885825
+		summarizeBy: none
+		sourceColumn: Coverage
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column SourceRows
+		dataType: int64
+		lineageTag: 59aedf2f-62ae-4dd4-86a8-ee2ecca3f5f6
+		summarizeBy: none
+		sourceColumn: SourceRows
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column MaxItems
+		dataType: int64
+		lineageTag: 34545f7e-df04-4495-aac2-386d163496b0
+		summarizeBy: none
+		sourceColumn: MaxItems
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column StartedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 4d55a180-1713-46fa-8c96-4bb7e5ab2f12
+		summarizeBy: none
+		sourceColumn: StartedDateTime
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column CompletedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 7f4011a7-bcc9-4d0a-aead-156e5a4c2815
+		summarizeBy: none
+		sourceColumn: CompletedDateTime
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column Evidence
+		dataType: string
+		lineageTag: d2c873f4-361a-46ef-af8b-65a35eb596e6
+		summarizeBy: none
+		sourceColumn: Evidence
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column SourceRowsLabel
+		dataType: string
+		lineageTag: 09c65c29-9677-4939-96f2-1ab6cda5c841
+		summarizeBy: none
+		sourceColumn: SourceRowsLabel
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column CompletedDateTimeLabel
+		dataType: string
+		lineageTag: 35893adc-3462-46aa-ae4c-4887e17884f2
+		summarizeBy: none
+		sourceColumn: CompletedDateTimeLabel
+
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: b88f4052-feb1-456c-9286-b11cd8f929a0
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'Native Source Health' = m
+		mode: import
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (Table.AddColumn(NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("SourceHealth.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="SourceName", dataType="String"], [name="Status", dataType="String"], [name="Coverage", dataType="String"], [name="SourceRows", dataType="Int64"], [name="MaxItems", dataType="Int64"], [name="StartedDateTime", dataType="DateTime"], [name="CompletedDateTime", dataType="DateTime"], [name="Evidence", dataType="String"], [name="SourceRowsLabel", dataType="String"], [name="CompletedDateTimeLabel", dataType="String"]}), "Health State", each NativeSourceHealthState([Status]), type text))
+				in
+				    Readers[Finish](BusinessRows)
+

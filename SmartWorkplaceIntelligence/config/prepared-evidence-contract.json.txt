@@ -1,0 +1,4127 @@
+{
+  "schemaVersion": 1,
+  "tables": [
+    {
+      "table": "Intune Configuration Policy Evidence",
+      "file": "IntuneConfigurationPolicyEvidence.csv",
+      "source": "Intune_ConfigurationPolicies.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "EvidenceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "EvidenceKey",
+          "type": "string"
+        },
+        {
+          "name": "ReceiptRunId",
+          "type": "string"
+        },
+        {
+          "name": "BusinessRunId",
+          "type": "string"
+        },
+        {
+          "name": "SourceFile",
+          "type": "string"
+        },
+        {
+          "name": "SourceSHA256",
+          "type": "string"
+        },
+        {
+          "name": "SourceRecord",
+          "type": "int64"
+        },
+        {
+          "name": "CollectionUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "PolicyId",
+          "type": "string"
+        },
+        {
+          "name": "PolicyFamily",
+          "type": "string"
+        },
+        {
+          "name": "DisplayName",
+          "type": "string"
+        },
+        {
+          "name": "PolicyType",
+          "type": "string"
+        },
+        {
+          "name": "Platforms",
+          "type": "string"
+        },
+        {
+          "name": "Technologies",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Intune Configuration Setting Evidence",
+      "file": "IntuneConfigurationSettingEvidence.csv",
+      "source": "Intune_ConfigurationSettings.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "EvidenceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "EvidenceKey",
+          "type": "string"
+        },
+        {
+          "name": "ReceiptRunId",
+          "type": "string"
+        },
+        {
+          "name": "BusinessRunId",
+          "type": "string"
+        },
+        {
+          "name": "SourceFile",
+          "type": "string"
+        },
+        {
+          "name": "SourceSHA256",
+          "type": "string"
+        },
+        {
+          "name": "SourceRecord",
+          "type": "int64"
+        },
+        {
+          "name": "CollectionUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "PolicyId",
+          "type": "string"
+        },
+        {
+          "name": "PolicyFamily",
+          "type": "string"
+        },
+        {
+          "name": "SettingId",
+          "type": "string"
+        },
+        {
+          "name": "SettingDefinitionId",
+          "type": "string"
+        },
+        {
+          "name": "SettingInstanceType",
+          "type": "string"
+        },
+        {
+          "name": "CatalogMatch",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Intune Configuration Assignment Evidence",
+      "file": "IntuneConfigurationAssignmentEvidence.csv",
+      "source": "Intune_ConfigurationAssignments.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "EvidenceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "EvidenceKey",
+          "type": "string"
+        },
+        {
+          "name": "ReceiptRunId",
+          "type": "string"
+        },
+        {
+          "name": "BusinessRunId",
+          "type": "string"
+        },
+        {
+          "name": "SourceFile",
+          "type": "string"
+        },
+        {
+          "name": "SourceSHA256",
+          "type": "string"
+        },
+        {
+          "name": "SourceRecord",
+          "type": "int64"
+        },
+        {
+          "name": "CollectionUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "PolicyId",
+          "type": "string"
+        },
+        {
+          "name": "PolicyFamily",
+          "type": "string"
+        },
+        {
+          "name": "AssignmentId",
+          "type": "string"
+        },
+        {
+          "name": "TargetType",
+          "type": "string"
+        },
+        {
+          "name": "GroupId",
+          "type": "string"
+        },
+        {
+          "name": "AssignmentFilterId",
+          "type": "string"
+        },
+        {
+          "name": "AssignmentFilterType",
+          "type": "string"
+        },
+        {
+          "name": "CatalogMatch",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Intune Configuration Device Evidence",
+      "file": "IntuneConfigurationDeviceEvidence.csv",
+      "source": "Intune_ConfigurationDeviceCurrentStates.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "EvidenceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "EvidenceKey",
+          "type": "string"
+        },
+        {
+          "name": "ReceiptRunId",
+          "type": "string"
+        },
+        {
+          "name": "BusinessRunId",
+          "type": "string"
+        },
+        {
+          "name": "SourceFile",
+          "type": "string"
+        },
+        {
+          "name": "SourceSHA256",
+          "type": "string"
+        },
+        {
+          "name": "SourceRecord",
+          "type": "int64"
+        },
+        {
+          "name": "CollectionUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "PolicyId",
+          "type": "string"
+        },
+        {
+          "name": "IntuneDeviceId",
+          "type": "string"
+        },
+        {
+          "name": "UPN",
+          "type": "string"
+        },
+        {
+          "name": "PolicyName",
+          "type": "string"
+        },
+        {
+          "name": "DeviceName",
+          "type": "string"
+        },
+        {
+          "name": "PolicyInCollectedCatalog",
+          "type": "string"
+        },
+        {
+          "name": "PolicyStatus",
+          "type": "string"
+        },
+        {
+          "name": "ReportedApplicationState",
+          "type": "string"
+        },
+        {
+          "name": "ReportStatus",
+          "type": "string"
+        },
+        {
+          "name": "LastModifiedTimeUtc",
+          "type": "string"
+        },
+        {
+          "name": "SourceStatusUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "SourceStatusTimeBasis",
+          "type": "string"
+        },
+        {
+          "name": "CatalogMatch",
+          "type": "string"
+        },
+        {
+          "name": "InventoryMatch",
+          "type": "string"
+        },
+        {
+          "name": "HealthQualification",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Intune Managed App Evidence",
+      "file": "IntuneManagedAppEvidence.csv",
+      "source": "Intune_ManagedAppInstallSummary.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "EvidenceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "EvidenceKey",
+          "type": "string"
+        },
+        {
+          "name": "ReceiptRunId",
+          "type": "string"
+        },
+        {
+          "name": "BusinessRunId",
+          "type": "string"
+        },
+        {
+          "name": "SourceFile",
+          "type": "string"
+        },
+        {
+          "name": "SourceSHA256",
+          "type": "string"
+        },
+        {
+          "name": "SourceRecord",
+          "type": "int64"
+        },
+        {
+          "name": "CollectionUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "ApplicationId",
+          "type": "string"
+        },
+        {
+          "name": "DisplayName",
+          "type": "string"
+        },
+        {
+          "name": "Publisher",
+          "type": "string"
+        },
+        {
+          "name": "AppType",
+          "type": "string"
+        },
+        {
+          "name": "DisplayVersion",
+          "type": "string"
+        },
+        {
+          "name": "InCollectedCatalog",
+          "type": "string"
+        },
+        {
+          "name": "StatusSource",
+          "type": "string"
+        },
+        {
+          "name": "ObservedRows",
+          "type": "int64"
+        },
+        {
+          "name": "ReportedInstalledRows",
+          "type": "int64"
+        },
+        {
+          "name": "ReportedFailureRows",
+          "type": "int64"
+        },
+        {
+          "name": "ReportedNotInstalledRows",
+          "type": "int64"
+        },
+        {
+          "name": "PendingRows",
+          "type": "int64"
+        },
+        {
+          "name": "NotApplicableRows",
+          "type": "int64"
+        },
+        {
+          "name": "UnknownRows",
+          "type": "int64"
+        },
+        {
+          "name": "MeasurementState",
+          "type": "string"
+        },
+        {
+          "name": "HealthQualification",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Intune Managed App Assignment Evidence",
+      "file": "IntuneManagedAppAssignmentEvidence.csv",
+      "source": "Intune_ManagedAppAssignments.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "EvidenceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "EvidenceKey",
+          "type": "string"
+        },
+        {
+          "name": "ReceiptRunId",
+          "type": "string"
+        },
+        {
+          "name": "BusinessRunId",
+          "type": "string"
+        },
+        {
+          "name": "SourceFile",
+          "type": "string"
+        },
+        {
+          "name": "SourceSHA256",
+          "type": "string"
+        },
+        {
+          "name": "SourceRecord",
+          "type": "int64"
+        },
+        {
+          "name": "CollectionUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "ApplicationId",
+          "type": "string"
+        },
+        {
+          "name": "AssignmentId",
+          "type": "string"
+        },
+        {
+          "name": "Intent",
+          "type": "string"
+        },
+        {
+          "name": "TargetType",
+          "type": "string"
+        },
+        {
+          "name": "GroupId",
+          "type": "string"
+        },
+        {
+          "name": "AssignmentFilterId",
+          "type": "string"
+        },
+        {
+          "name": "AssignmentFilterType",
+          "type": "string"
+        },
+        {
+          "name": "CatalogMatch",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Intune Managed App Deployment Evidence",
+      "file": "IntuneManagedAppDeploymentEvidence.csv",
+      "source": "Intune_ManagedAppDeviceStates.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "EvidenceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "EvidenceKey",
+          "type": "string"
+        },
+        {
+          "name": "ReceiptRunId",
+          "type": "string"
+        },
+        {
+          "name": "BusinessRunId",
+          "type": "string"
+        },
+        {
+          "name": "SourceFile",
+          "type": "string"
+        },
+        {
+          "name": "SourceSHA256",
+          "type": "string"
+        },
+        {
+          "name": "SourceRecord",
+          "type": "int64"
+        },
+        {
+          "name": "CollectionUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "ApplicationId",
+          "type": "string"
+        },
+        {
+          "name": "DeviceId",
+          "type": "string"
+        },
+        {
+          "name": "UserPrincipalName",
+          "type": "string"
+        },
+        {
+          "name": "AppVersion",
+          "type": "string"
+        },
+        {
+          "name": "Platform",
+          "type": "string"
+        },
+        {
+          "name": "InstallState",
+          "type": "string"
+        },
+        {
+          "name": "ReportedDeploymentState",
+          "type": "string"
+        },
+        {
+          "name": "InstallStateDetail",
+          "type": "string"
+        },
+        {
+          "name": "ErrorCode",
+          "type": "string"
+        },
+        {
+          "name": "LastModifiedDateTime",
+          "type": "string"
+        },
+        {
+          "name": "SourceStatusUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "SourceStatusTimeBasis",
+          "type": "string"
+        },
+        {
+          "name": "CatalogMatch",
+          "type": "string"
+        },
+        {
+          "name": "InventoryMatch",
+          "type": "string"
+        },
+        {
+          "name": "HealthQualification",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Intune Enrollment Failure Evidence",
+      "file": "IntuneEnrollmentFailureEvidence.csv",
+      "source": "Intune_EnrollmentFailures.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "EvidenceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "EvidenceKey",
+          "type": "string"
+        },
+        {
+          "name": "ReceiptRunId",
+          "type": "string"
+        },
+        {
+          "name": "BusinessRunId",
+          "type": "string"
+        },
+        {
+          "name": "SourceFile",
+          "type": "string"
+        },
+        {
+          "name": "SourceSHA256",
+          "type": "string"
+        },
+        {
+          "name": "SourceRecord",
+          "type": "int64"
+        },
+        {
+          "name": "CollectionUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "EventId",
+          "type": "string"
+        },
+        {
+          "name": "EventDateTime",
+          "type": "string"
+        },
+        {
+          "name": "CorrelationId",
+          "type": "string"
+        },
+        {
+          "name": "ManagedDeviceIdentifier",
+          "type": "string"
+        },
+        {
+          "name": "HasManagedDeviceIdentifier",
+          "type": "string"
+        },
+        {
+          "name": "DeviceId",
+          "type": "string"
+        },
+        {
+          "name": "UserId",
+          "type": "string"
+        },
+        {
+          "name": "EnrollmentType",
+          "type": "string"
+        },
+        {
+          "name": "FailureCategory",
+          "type": "string"
+        },
+        {
+          "name": "FailureReason",
+          "type": "string"
+        },
+        {
+          "name": "OperatingSystem",
+          "type": "string"
+        },
+        {
+          "name": "OSVersion",
+          "type": "string"
+        },
+        {
+          "name": "SourceStatusUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "SourceStatusTimeBasis",
+          "type": "string"
+        },
+        {
+          "name": "InventoryMatch",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Intune Operational Source Evidence",
+      "file": "IntuneOperationalSourceEvidence.csv",
+      "uniqueKey": [
+        "EvidenceKey"
+      ],
+      "stagingIncludesTenantKey": true,
+      "allowEmpty": false,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "EvidenceKey",
+          "type": "string"
+        },
+        {
+          "name": "SourceGroup",
+          "type": "string"
+        },
+        {
+          "name": "Availability",
+          "type": "string"
+        },
+        {
+          "name": "Producer",
+          "type": "string"
+        },
+        {
+          "name": "ScriptVersion",
+          "type": "string"
+        },
+        {
+          "name": "ReceiptRunId",
+          "type": "string"
+        },
+        {
+          "name": "BusinessRunId",
+          "type": "string"
+        },
+        {
+          "name": "ReceiptSHA256",
+          "type": "string"
+        },
+        {
+          "name": "CompletedUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "ScopeQualification",
+          "type": "string"
+        },
+        {
+          "name": "FullInventoryQualified",
+          "type": "string"
+        },
+        {
+          "name": "ConsumerScopeQualified",
+          "type": "string"
+        },
+        {
+          "name": "FileCount",
+          "type": "int64"
+        },
+        {
+          "name": "RowCount",
+          "type": "int64"
+        },
+        {
+          "name": "Qualification",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Device System Evidence",
+      "file": "DeviceSystemEvidence.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": ["Device System Key"],
+      "allowEmpty": true,
+      "columns": [
+        {"name":"TenantKey","type":"string"}, {"name":"Device System Key","type":"string"},
+        {"name":"Device Source ID","type":"string"}, {"name":"Device Name","type":"string"},
+        {"name":"Azure AD Device ID","type":"string"}, {"name":"Primary User UPN","type":"string"},
+        {"name":"Country","type":"string"}, {"name":"Country Basis","type":"string"},
+        {"name":"Inventory Match","type":"string"}, {"name":"Prepared Inventory Match","type":"string"},
+        {"name":"Observation Raw","type":"string"}, {"name":"Observation UTC","type":"dateTime"},
+        {"name":"Observation Time Basis","type":"string"}, {"name":"Observation Age Hours","type":"double"},
+        {"name":"Freshness","type":"string"}, {"name":"Freshness Max Age Hours","type":"double"},
+        {"name":"Prepared UTC","type":"dateTime"}, {"name":"Secure Boot State","type":"string"},
+        {"name":"Secure Boot Raw","type":"string"}, {"name":"BIOS Version","type":"string"},
+        {"name":"BIOS Date","type":"string"}, {"name":"BIOS Date Quality","type":"string"},
+        {"name":"Firmware Type","type":"string"}, {"name":"Firmware Raw","type":"string"},
+        {"name":"Last Boot Time","type":"string"}, {"name":"Last Boot Quality","type":"string"},
+        {"name":"Local Encryption State","type":"string"}, {"name":"Inventory Encryption State","type":"string"},
+        {"name":"Encryption Comparison","type":"string"}, {"name":"VBS State","type":"string"},
+        {"name":"VBS Raw","type":"string"}, {"name":"VBS Hardware Requirements","type":"string"},
+        {"name":"VBS Hardware Raw","type":"string"}, {"name":"Credential Guard State","type":"string"},
+        {"name":"Credential Guard Raw","type":"string"}, {"name":"Management State","type":"string"},
+        {"name":"Management Raw","type":"string"}, {"name":"Compliance State","type":"string"},
+        {"name":"Compliance Raw","type":"string"}, {"name":"Inventory Compliance State","type":"string"},
+        {"name":"Compliance Comparison","type":"string"}, {"name":"Last Sync Raw","type":"string"},
+        {"name":"Last Sync UTC","type":"dateTime"}, {"name":"Last Sync Time Basis","type":"string"},
+        {"name":"Third Party AV State","type":"string"}, {"name":"Third Party AV Raw","type":"string"},
+        {"name":"Third Party AV Products","type":"string"}, {"name":"Expected AV Name","type":"string"},
+        {"name":"Expected AV State","type":"string"}, {"name":"Expected AV Raw","type":"string"},
+        {"name":"AV Qualification","type":"string"}, {"name":"AV Comparison","type":"string"},
+        {"name":"Windows Update Reboot Required","type":"string"}, {"name":"Windows Update Reboot Raw","type":"string"},
+        {"name":"BitLocker OS Protection","type":"string"}, {"name":"BitLocker OS Protection Raw","type":"string"},
+        {"name":"BitLocker OS Conversion","type":"string"}, {"name":"BitLocker OS Conversion Raw","type":"string"},
+        {"name":"Data Quality Issues","type":"string"},
+        {"name":"Local Data Source","type":"string"}, {"name":"Local Data Freshness","type":"string"},
+        {"name":"Last Console Logon Status","type":"string"}, {"name":"Last Console Logon User","type":"string"},
+        {"name":"Last Console Logon UTC","type":"dateTime"}, {"name":"Last Console Logon Quality","type":"string"},
+        {"name":"Last Console Logon SID","type":"string"}
+      ]
+    },
+    {
+      "table": "All Accounts Evidence",
+      "file": "AllAccountsEvidence.csv",
+      "uniqueKey": ["Account Key"],
+      "columns": [
+        {"name":"Account Key","type":"string"}, {"name":"Inventory Source","type":"string"},
+        {"name":"Account Kind","type":"string"}, {"name":"AD Object GUID","type":"string"},
+        {"name":"Entra Object ID","type":"string"}, {"name":"AD State","type":"string"},
+        {"name":"Entra State","type":"string"}, {"name":"Entra User Type","type":"string"},
+        {"name":"Country","type":"string"}, {"name":"Country Basis","type":"string"},
+        {"name":"Match Basis","type":"string"}, {"name":"UPN Comparison","type":"string"},
+        {"name":"AD Observation UTC","type":"string"}, {"name":"Entra Observation UTC","type":"string"}
+      ]
+    },
+    {
+      "table": "All Devices Evidence",
+      "file": "AllDevicesEvidence.csv",
+      "uniqueKey": ["Device Key"],
+      "columns": [
+        {"name":"Device Key","type":"string"}, {"name":"Inventory Source","type":"string"},
+        {"name":"AD Object GUID","type":"string"}, {"name":"Intune Device ID","type":"string"},
+        {"name":"Azure AD Device ID","type":"string"}, {"name":"Platform","type":"string"},
+        {"name":"Country","type":"string"}, {"name":"Country Basis","type":"string"},
+        {"name":"Match Basis","type":"string"}, {"name":"AD Observation UTC","type":"string"},
+        {"name":"Intune Observation UTC","type":"string"}
+      ]
+    },
+    {
+      "table": "Historical Windows Readiness",
+      "file": "HistoricalWindowsReadiness.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": ["ObservationKey"],
+      "allowEmpty": true,
+      "columns": [
+        {"name":"TenantKey","type":"string"},
+        {"name":"ObservationKey","type":"string"},
+        {"name":"Device Name","type":"string"},
+        {"name":"Observation UTC","type":"string"},
+        {"name":"Historical Result","type":"string"},
+        {"name":"Storage Check","type":"string"},
+        {"name":"Memory Check","type":"string"},
+        {"name":"TPM Check","type":"string"},
+        {"name":"Processor Check","type":"string"},
+        {"name":"Secure Boot Check","type":"string"},
+        {"name":"Manufacturer","type":"string"},
+        {"name":"Model","type":"string"},
+        {"name":"Source Files","type":"string"},
+        {"name":"Source SHA256","type":"string"},
+        {"name":"Duplicate Count","type":"string"},
+        {"name":"Observation Status","type":"string"},
+        {"name":"Match Status","type":"string"},
+        {"name":"Candidate Device Source ID","type":"string"}
+      ]
+    },
+    {
+      "table": "Windows Migration Evidence",
+      "file": "WindowsMigrationEvidence.csv",
+      "uniqueKey": ["Device Source ID"],
+      "allowEmpty": true,
+      "columns": [
+        {"name":"Device Source ID","type":"string"}, {"name":"Device Name","type":"string"},
+        {"name":"Country","type":"string"}, {"name":"Primary User UPN","type":"string"},
+        {"name":"OS Version","type":"string"}, {"name":"Windows Release","type":"string"},
+        {"name":"Intune State","type":"string"}, {"name":"Autopatch Registration","type":"string"},
+        {"name":"Upgrade Eligibility","type":"string"}, {"name":"Hardware Reasons","type":"string"},
+        {"name":"Free Disk GB","type":"double"}, {"name":"Disk Review","type":"string"},
+        {"name":"Legacy Build Review","type":"string"}, {"name":"Update State","type":"string"},
+        {"name":"Update Action","type":"string"}, {"name":"Last Intune Sync","type":"string"},
+        {"name":"Migration Status","type":"string"}, {"name":"Risk Priority","type":"string"},
+        {"name":"Next Action","type":"string"}, {"name":"Evidence Date","type":"string"},
+        {"name":"Country Basis","type":"string"}, {"name":"AD Domain","type":"string"},
+        {"name":"AD Domain Match Status","type":"string"}, {"name":"Inventory Source","type":"string"},
+        {"name":"Inventory Observation Date","type":"string"}, {"name":"Eligibility Observation Date","type":"string"},
+        {"name":"Eligibility OS Version","type":"string"}, {"name":"Eligibility Match Status","type":"string"},
+        {"name":"Autopatch Policy State","type":"string"}, {"name":"Autopatch Device Status","type":"string"},
+        {"name":"Autopatch Blocking Reason","type":"string"}, {"name":"Autopatch Alert","type":"string"},
+        {"name":"Autopatch Observation Date","type":"string"}, {"name":"Windows 11 Policy State","type":"string"},
+        {"name":"Windows 11 Device Status","type":"string"}, {"name":"Windows 11 Blocking Reason","type":"string"},
+        {"name":"Windows 11 Alert","type":"string"}, {"name":"Windows 11 Observation Date","type":"string"}
+      ]
+    },
+    {
+      "table": "Windows Migration AD Observations",
+      "file": "WindowsMigrationADObservations.csv",
+      "uniqueKey": ["AD Object GUID"],
+      "allowEmpty": true,
+      "columns": [
+        {"name":"AD Object GUID","type":"string"}, {"name":"Device Name","type":"string"},
+        {"name":"Source Domain","type":"string"}, {"name":"OS Version","type":"string"},
+        {"name":"Intune Evidence","type":"string"}, {"name":"Autopatch Evidence","type":"string"},
+        {"name":"Country","type":"string"}, {"name":"Qualification","type":"string"},
+        {"name":"Next Action","type":"string"}
+      ]
+    },
+    {
+      "table": "Device Inventory Evidence",
+      "file": "DeviceInventoryEvidence.csv",
+      "uniqueKey": [
+        "Device Source ID"
+      ],
+      "columns": [
+        {
+          "name": "Device Source ID",
+          "type": "string"
+        },
+        {
+          "name": "Device Name",
+          "type": "string"
+        },
+        {
+          "name": "Primary User UPN",
+          "type": "string"
+        },
+        {
+          "name": "Country",
+          "type": "string"
+        },
+        {
+          "name": "Platform",
+          "type": "string"
+        },
+        {
+          "name": "Device Category",
+          "type": "string"
+        },
+        {
+          "name": "Ownership",
+          "type": "string"
+        },
+        {
+          "name": "Management State",
+          "type": "string"
+        },
+        {
+          "name": "Compliance State",
+          "type": "string"
+        },
+        {
+          "name": "Manufacturer",
+          "type": "string"
+        },
+        {
+          "name": "Model",
+          "type": "string"
+        },
+        {
+          "name": "Operating System Family",
+          "type": "string"
+        },
+        {
+          "name": "Operating System Version",
+          "type": "string"
+        },
+        {
+          "name": "Windows Release",
+          "type": "string"
+        },
+        {
+          "name": "System Drive Capacity (GB)",
+          "type": "double"
+        },
+        {
+          "name": "Free Disk Space (GB)",
+          "type": "double"
+        },
+        {
+          "name": "Free Disk Space (%)",
+          "type": "double"
+        },
+        {
+          "name": "Disk Space State",
+          "type": "string"
+        },
+        {
+          "name": "AD to Intune Match",
+          "type": "string"
+        },
+        {
+          "name": "Entra Match",
+          "type": "string"
+        },
+        {
+          "name": "Enrollment DateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "Last Sync DateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "Observed Since",
+          "type": "dateTime"
+        },
+        {
+          "name": "Managed Tenure (Years)",
+          "type": "double"
+        },
+        {
+          "name": "Tenure Bucket",
+          "type": "string"
+        },
+        {
+          "name": "Tenure Confidence",
+          "type": "string"
+        },
+        {
+          "name": "Source Scope",
+          "type": "string"
+        },
+        {
+          "name": "Windows Generation",
+          "type": "string"
+        },
+        {
+          "name": "Windows 11 Upgrade Eligibility",
+          "type": "string"
+        },
+        {
+          "name": "Windows 11 Blocking Reasons",
+          "type": "string"
+        },
+        {
+          "name": "Windows Update State",
+          "type": "string"
+        },
+        {
+          "name": "Windows Update Risk",
+          "type": "string"
+        },
+        {
+          "name": "Windows Update Action Code",
+          "type": "string"
+        },
+        {
+          "name": "Secure Boot State",
+          "type": "string"
+        },
+        {
+          "name": "Endpoint Analytics Score",
+          "type": "double"
+        },
+        {
+          "name": "Endpoint Analytics State",
+          "type": "string"
+        },
+        {
+          "name": "Stop Error Count",
+          "type": "int64"
+        },
+        {
+          "name": "Stop Error State",
+          "type": "string"
+        },
+        {
+          "name": "Entra Hardware ID Conflict",
+          "type": "string"
+        },
+        {
+          "name": "Removal Candidate",
+          "type": "string"
+        },
+        {
+          "name": "Windows 11 Release State",
+          "type": "string"
+        },
+        {
+          "name": "Startup Score",
+          "type": "double"
+        },
+        {
+          "name": "Startup Score State",
+          "type": "string"
+        },
+        {
+          "name": "App Reliability Score",
+          "type": "double"
+        },
+        {
+          "name": "App Reliability State",
+          "type": "string"
+        },
+        {
+          "name": "Boot Score",
+          "type": "double"
+        },
+        {
+          "name": "Sign-in Score",
+          "type": "double"
+        },
+        {
+          "name": "Core Boot Time (s)",
+          "type": "double"
+        },
+        {
+          "name": "Core Sign-in Time (s)",
+          "type": "double"
+        },
+        {
+          "name": "Restart Count",
+          "type": "int64"
+        },
+        {
+          "name": "Crash Count",
+          "type": "int64"
+        },
+        {
+          "name": "Crash State",
+          "type": "string"
+        },
+        {
+          "name": "Entra Account State",
+          "type": "string"
+        },
+        {
+          "name": "Intune Encryption State",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Device Risk Evidence Summary",
+      "file": "DeviceRiskEvidenceSummary.csv",
+      "uniqueKey": [],
+      "columns": [
+        {
+          "name": "Signal Sort",
+          "type": "int64"
+        },
+        {
+          "name": "Signal",
+          "type": "string"
+        },
+        {
+          "name": "Affected Devices",
+          "type": "int64"
+        },
+        {
+          "name": "Covered Devices",
+          "type": "int64"
+        },
+        {
+          "name": "Managed Devices Affected",
+          "type": "int64"
+        },
+        {
+          "name": "Managed Devices Covered",
+          "type": "int64"
+        },
+        {
+          "name": "Source Findings",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "table": "User Inventory Evidence",
+      "file": "UserInventoryEvidence.csv",
+      "uniqueKey": [
+        "User Source ID"
+      ],
+      "columns": [
+        {
+          "name": "User Source ID",
+          "type": "string"
+        },
+        {
+          "name": "User Principal Name",
+          "type": "string"
+        },
+        {
+          "name": "Display Name",
+          "type": "string"
+        },
+        {
+          "name": "Country",
+          "type": "string"
+        },
+        {
+          "name": "Department",
+          "type": "string"
+        },
+        {
+          "name": "Department Evidence State",
+          "type": "string"
+        },
+        {
+          "name": "Manager",
+          "type": "string"
+        },
+        {
+          "name": "Manager Evidence State",
+          "type": "string"
+        },
+        {
+          "name": "Account State",
+          "type": "string"
+        },
+        {
+          "name": "User Type",
+          "type": "string"
+        },
+        {
+          "name": "Workforce Status",
+          "type": "string"
+        },
+        {
+          "name": "Activity State",
+          "type": "string"
+        },
+        {
+          "name": "Activity Evidence Status",
+          "type": "string"
+        },
+        {
+          "name": "Days Since Last Activity",
+          "type": "int64"
+        },
+        {
+          "name": "Last Activity Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Last Activity Workload",
+          "type": "string"
+        },
+        {
+          "name": "Identity Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Identity Match Method",
+          "type": "string"
+        },
+        {
+          "name": "M365 License Count",
+          "type": "int64"
+        },
+        {
+          "name": "Has M365 License",
+          "type": "string"
+        },
+        {
+          "name": "Duplicate UPN State",
+          "type": "string"
+        },
+        {
+          "name": "Attention Priority",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Account Type",
+          "type": "string"
+        },
+        {
+          "name": "Account Population",
+          "type": "string"
+        },
+        {
+          "name": "Account Classification Rule Version",
+          "type": "string"
+        },
+        {
+          "name": "Job Title",
+          "type": "string"
+        },
+        {
+          "name": "Job Title Evidence State",
+          "type": "string"
+        },
+        {
+          "name": "AD Last Activity Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "M365 Last Activity Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Activity Source",
+          "type": "string"
+        },
+        {"name":"Console Last Activity UTC","type":"dateTime"},
+        {"name":"Console Activity Evidence State","type":"string"},
+        {"name":"Console Activity Device Count","type":"int64"},
+        {"name":"Console Activity Match Method","type":"string"},
+        {
+          "name": "Workforce Persona",
+          "type": "string"
+        },
+        {
+          "name": "Persona Match State",
+          "type": "string"
+        },
+        {
+          "name": "Persona Matched Keywords",
+          "type": "string"
+        },
+        {
+          "name": "MFA Registration State",
+          "type": "string"
+        },
+        {
+          "name": "Has Microsoft 365 F3",
+          "type": "string"
+        },
+        {
+          "name": "Has Microsoft 365 E3",
+          "type": "string"
+        },
+        {
+          "name": "Has Microsoft 365 E5",
+          "type": "string"
+        },
+        {
+          "name": "Exchange Usage State (30D)",
+          "type": "string"
+        },
+        {
+          "name": "Teams Usage State (30D)",
+          "type": "string"
+        },
+        {
+          "name": "SharePoint Usage State (30D)",
+          "type": "string"
+        },
+        {
+          "name": "OneDrive Usage State (30D)",
+          "type": "string"
+        },
+        {
+          "name": "M365 Usage Report Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Office Desktop Activation State (30D)",
+          "type": "string"
+        },
+        {
+          "name": "Office Desktop Usage State (30D)",
+          "type": "string"
+        },
+        {
+          "name": "Office Desktop Usage Report Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Directory Site Code",
+          "type": "string"
+        },
+        {
+          "name": "Site Type",
+          "type": "string"
+        },
+        {
+          "name": "Site Match State",
+          "type": "string"
+        },
+        {
+          "name": "Persona Classification Source",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "User Activity History Evidence",
+      "file": "UserActivityHistoryEvidence.csv",
+      "historyKey": ["Week Label"],
+      "uniqueKey": [
+        "Date Key",
+        "User Source ID"
+      ],
+      "columns": [
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Date Key",
+          "type": "int64"
+        },
+        {
+          "name": "Week Label",
+          "type": "string"
+        },
+        {
+          "name": "User Source ID",
+          "type": "string"
+        },
+        {
+          "name": "Activity State",
+          "type": "string"
+        },
+        {
+          "name": "Activity Evidence Status",
+          "type": "string"
+        },
+        {
+          "name": "Days Since Last Activity",
+          "type": "int64"
+        },
+        {
+          "name": "Last Activity Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "AD Last Activity Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "M365 Last Activity Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Activity Source",
+          "type": "string"
+        },
+        {
+          "name": "User Principal Name",
+          "type": "string"
+        },
+        {
+          "name": "Confirmed Human",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "table": "Workforce Trend Evidence",
+      "file": "WorkforceTrendEvidence.csv",
+      "historyKey": ["Week Label"],
+      "uniqueKey": [],
+      "columns": [
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Date Key",
+          "type": "int64"
+        },
+        {
+          "name": "Week Label",
+          "type": "string"
+        },
+        {
+          "name": "Enabled Workforce Accounts",
+          "type": "int64"
+        },
+        {
+          "name": "Activity Covered Users",
+          "type": "int64"
+        },
+        {
+          "name": "Activity Evidence Coverage",
+          "type": "double"
+        },
+        {
+          "name": "Active Workforce",
+          "type": "int64"
+        },
+        {
+          "name": "Accounts Without Activity >30D",
+          "type": "int64"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        },
+        {
+          "name": "Confirmed Human Users",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "table": "Identity Reconciliation Evidence",
+      "file": "IdentityReconciliationEvidence.csv",
+      "uniqueKey": [],
+      "columns": [
+        {
+          "name": "Evidence Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Match Method",
+          "type": "string"
+        },
+        {
+          "name": "Identities",
+          "type": "int64"
+        },
+        {
+          "name": "Eligible Identities",
+          "type": "int64"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        },
+        {
+          "name": "Recommended Action",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Workforce Operational Signals",
+      "file": "WorkforceOperationalSignals.csv",
+      "uniqueKey": [],
+      "columns": [
+        {
+          "name": "Severity Label",
+          "type": "string"
+        },
+        {
+          "name": "Signal",
+          "type": "string"
+        },
+        {
+          "name": "Risk Category",
+          "type": "string"
+        },
+        {
+          "name": "Affected Users",
+          "type": "int64"
+        },
+        {
+          "name": "Covered Population",
+          "type": "int64"
+        },
+        {
+          "name": "Affected Estate (%)",
+          "type": "double"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        },
+        {
+          "name": "Recommended Action",
+          "type": "string"
+        },
+        {
+          "name": "Source Scope",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Windows Lifecycle Trend Evidence",
+      "file": "WindowsLifecycleTrendEvidence.csv",
+      "historyKey": ["Snapshot Week"],
+      "uniqueKey": [],
+      "columns": [
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Snapshot Week",
+          "type": "string"
+        },
+        {
+          "name": "Managed Devices",
+          "type": "int64"
+        },
+        {
+          "name": "Windows Devices",
+          "type": "int64"
+        },
+        {
+          "name": "Windows 10 Devices",
+          "type": "int64"
+        },
+        {
+          "name": "Windows 11 Devices",
+          "type": "int64"
+        },
+        {
+          "name": "Windows 11 Adoption (%)",
+          "type": "double"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Endpoint Experience Trend Evidence",
+      "file": "EndpointExperienceTrendEvidence.csv",
+      "historyKey": ["Snapshot Week"],
+      "uniqueKey": [],
+      "columns": [
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Snapshot Week",
+          "type": "string"
+        },
+        {
+          "name": "Endpoint Analytics Covered Devices",
+          "type": "int64"
+        },
+        {
+          "name": "Endpoint Analytics Score",
+          "type": "double"
+        },
+        {
+          "name": "Endpoint Analytics Below 50 Devices",
+          "type": "int64"
+        },
+        {
+          "name": "Startup Covered Devices",
+          "type": "int64"
+        },
+        {
+          "name": "Startup Score",
+          "type": "double"
+        },
+        {
+          "name": "Startup Below 50 Devices",
+          "type": "int64"
+        },
+        {
+          "name": "App Reliability Covered Devices",
+          "type": "int64"
+        },
+        {
+          "name": "App Reliability Score",
+          "type": "double"
+        },
+        {
+          "name": "Devices with Stop Errors",
+          "type": "int64"
+        },
+        {
+          "name": "Devices with Boot Time over 60s",
+          "type": "int64"
+        },
+        {
+          "name": "Devices with Sign-in Time over 30s",
+          "type": "int64"
+        },
+        {
+          "name": "Excluded Endpoint Analytics Score Devices",
+          "type": "int64"
+        },
+        {
+          "name": "Excluded Endpoint Analytics Score Rows",
+          "type": "int64"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Application Inventory Evidence",
+      "file": "ApplicationInventoryEvidence.csv",
+      "uniqueKey": [],
+      "columns": [
+        {
+          "name": "Application Source ID",
+          "type": "string"
+        },
+        { "name": "Application Product Key", "type": "string" },
+        { "name": "Product Distinct Devices", "type": "int64" },
+        { "name": "Metric Definition", "type": "string" },
+        { "name": "Collection Scope", "type": "string" },
+        {
+          "name": "Application Name",
+          "type": "string"
+        },
+        {
+          "name": "Application Version",
+          "type": "string"
+        },
+        {
+          "name": "Publisher",
+          "type": "string"
+        },
+        {
+          "name": "Publisher State",
+          "type": "string"
+        },
+        {
+          "name": "Platform",
+          "type": "string"
+        },
+        {
+          "name": "Device Count",
+          "type": "int64"
+        },
+        {
+          "name": "Product Total Installs",
+          "type": "int64"
+        },
+        {
+          "name": "Product Version Count",
+          "type": "int64"
+        },
+        {
+          "name": "Dominant Version Share (%)",
+          "type": "double"
+        },
+        {
+          "name": "Installs Outside Dominant Version",
+          "type": "int64"
+        },
+        {
+          "name": "Standardization State",
+          "type": "string"
+        },
+        {
+          "name": "Version Footprint State",
+          "type": "string"
+        },
+        {
+          "name": "Risk Priority",
+          "type": "string"
+        },
+        {
+          "name": "Recommended Action",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Snapshot Week",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Application Trend Evidence",
+      "file": "ApplicationTrendEvidence.csv",
+      "historyKey": ["Snapshot Week"],
+      "uniqueKey": [],
+      "columns": [
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Date Key",
+          "type": "int64"
+        },
+        {
+          "name": "Snapshot Week",
+          "type": "string"
+        },
+        {
+          "name": "Applications",
+          "type": "int64"
+        },
+        {
+          "name": "Application Versions",
+          "type": "int64"
+        },
+        {
+          "name": "Publishers",
+          "type": "int64"
+        },
+        {
+          "name": "Application Install Observations",
+          "type": "int64"
+        },
+        {
+          "name": "Fragmented Applications",
+          "type": "int64"
+        },
+        {
+          "name": "Highly Fragmented Applications",
+          "type": "int64"
+        },
+        {
+          "name": "Installations Outside Dominant Version",
+          "type": "int64"
+        },
+        {
+          "name": "Long Tail Versions",
+          "type": "int64"
+        },
+        {
+          "name": "Unknown Publisher Versions",
+          "type": "int64"
+        },
+        {
+          "name": "Standardization Opportunity Rate (%)",
+          "type": "double"
+        },
+        {
+          "name": "Dominant Version Coverage (%)",
+          "type": "double"
+        },
+        { "name": "Metric Definition", "type": "string" },
+        { "name": "Collection Scope", "type": "string" },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Collaboration Adoption Evidence",
+      "file": "CollaborationAdoptionEvidence.csv",
+      "uniqueKey": [],
+      "columns": [
+        {
+          "name": "Service",
+          "type": "string"
+        },
+        {
+          "name": "Eligible Users",
+          "type": "int64"
+        },
+        {
+          "name": "Active Users 30D",
+          "type": "int64"
+        },
+        {
+          "name": "Active User Rate (%)",
+          "type": "double"
+        },
+        {
+          "name": "Service Objects",
+          "type": "int64"
+        },
+        {
+          "name": "Active Objects 30D",
+          "type": "int64"
+        },
+        {
+          "name": "Inactive Objects",
+          "type": "int64"
+        },
+        {
+          "name": "Orphaned Objects",
+          "type": "int64"
+        },
+        {
+          "name": "Objects with External Access",
+          "type": "int64"
+        },
+        {
+          "name": "Storage Used GB",
+          "type": "double"
+        },
+        {
+          "name": "Usage Refresh Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Age Days",
+          "type": "int64"
+        },
+        {
+          "name": "Freshness State",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Collaboration Object Evidence",
+      "file": "CollaborationObjectEvidence.csv",
+      "uniqueKey": [],
+      "columns": [
+        {
+          "name": "Object ID",
+          "type": "string"
+        },
+        {
+          "name": "Object Name",
+          "type": "string"
+        },
+        {
+          "name": "Service",
+          "type": "string"
+        },
+        {
+          "name": "Object Type",
+          "type": "string"
+        },
+        {
+          "name": "Visibility",
+          "type": "string"
+        },
+        {
+          "name": "Activity State",
+          "type": "string"
+        },
+        {
+          "name": "Days Since Last Activity",
+          "type": "int64"
+        },
+        {
+          "name": "Last Activity Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Owner State",
+          "type": "string"
+        },
+        {
+          "name": "Owner Count",
+          "type": "int64"
+        },
+        {
+          "name": "Member Count",
+          "type": "int64"
+        },
+        {
+          "name": "Guest Count",
+          "type": "int64"
+        },
+        {
+          "name": "External Access State",
+          "type": "string"
+        },
+        {
+          "name": "Storage Used GB",
+          "type": "double"
+        },
+        {
+          "name": "Risk Priority",
+          "type": "string"
+        },
+        {
+          "name": "Risk Signal",
+          "type": "string"
+        },
+        {
+          "name": "Recommended Action",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Collaboration Trend Evidence",
+      "file": "CollaborationTrendEvidence.csv",
+      "historyKey": ["Snapshot Week", "Service"],
+      "uniqueKey": [],
+      "columns": [
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Date Key",
+          "type": "int64"
+        },
+        {
+          "name": "Snapshot Week",
+          "type": "string"
+        },
+        {
+          "name": "Service",
+          "type": "string"
+        },
+        {
+          "name": "Total Objects",
+          "type": "int64"
+        },
+        {
+          "name": "Active Objects 30D",
+          "type": "int64"
+        },
+        {
+          "name": "Inactive Objects",
+          "type": "int64"
+        },
+        {
+          "name": "Orphaned Objects",
+          "type": "int64"
+        },
+        {
+          "name": "Eligible Users",
+          "type": "int64"
+        },
+        {
+          "name": "Active Users 30D",
+          "type": "int64"
+        },
+        {
+          "name": "Adoption Rate (%)",
+          "type": "double"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Email Client Usage Evidence",
+      "file": "EmailClientUsageEvidence.csv",
+      "uniqueKey": ["Client"],
+      "columns": [
+        {
+          "name": "Client",
+          "type": "string"
+        },
+        {
+          "name": "Client Family",
+          "type": "string"
+        },
+        {
+          "name": "Legacy Protocol",
+          "type": "string"
+        },
+        {
+          "name": "Users",
+          "type": "int64"
+        },
+        {
+          "name": "Email Client Users",
+          "type": "int64"
+        },
+        {
+          "name": "User Share (%)",
+          "type": "double"
+        },
+        {
+          "name": "Report Period Days",
+          "type": "int64"
+        },
+        {
+          "name": "Usage Refresh Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Age Days",
+          "type": "int64"
+        },
+        {
+          "name": "Freshness State",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "OneDrive Activity Evidence",
+      "file": "OneDriveActivityEvidence.csv",
+      "uniqueKey": ["Metric"],
+      "columns": [
+        {
+          "name": "Metric",
+          "type": "string"
+        },
+        {
+          "name": "Users",
+          "type": "int64"
+        },
+        {
+          "name": "Files",
+          "type": "int64"
+        },
+        {
+          "name": "Population Users",
+          "type": "int64"
+        },
+        {
+          "name": "User Rate (%)",
+          "type": "double"
+        },
+        {
+          "name": "Report Period Days",
+          "type": "int64"
+        },
+        {
+          "name": "Usage Refresh Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Age Days",
+          "type": "int64"
+        },
+        {
+          "name": "Freshness State",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Group Activity Evidence",
+      "file": "GroupActivityEvidence.csv",
+      "uniqueKey": ["Group ID"],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "Group ID",
+          "type": "string"
+        },
+        {
+          "name": "Group Name",
+          "type": "string"
+        },
+        {
+          "name": "Group Type",
+          "type": "string"
+        },
+        {
+          "name": "Teams State",
+          "type": "string"
+        },
+        {
+          "name": "Activity State",
+          "type": "string"
+        },
+        {
+          "name": "Days Since Last Activity",
+          "type": "int64"
+        },
+        {
+          "name": "Last Activity Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Owner State",
+          "type": "string"
+        },
+        {
+          "name": "Member Count",
+          "type": "int64"
+        },
+        {
+          "name": "External Member Count",
+          "type": "int64"
+        },
+        {
+          "name": "External Access State",
+          "type": "string"
+        },
+        {
+          "name": "Received Email Count",
+          "type": "int64"
+        },
+        {
+          "name": "SharePoint Active File Count",
+          "type": "int64"
+        },
+        {
+          "name": "Viva Engage Posted Message Count",
+          "type": "int64"
+        },
+        {
+          "name": "Storage Used GB",
+          "type": "double"
+        },
+        {
+          "name": "Risk Priority",
+          "type": "string"
+        },
+        {
+          "name": "Risk Signal",
+          "type": "string"
+        },
+        {
+          "name": "Recommended Action",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Copilot Daily Adoption Evidence",
+      "file": "CopilotDailyAdoptionEvidence.csv",
+      "uniqueKey": ["Date Key", "App"],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "Report Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Date Key",
+          "type": "int64"
+        },
+        {
+          "name": "App",
+          "type": "string"
+        },
+        {
+          "name": "Enabled Users",
+          "type": "int64"
+        },
+        {
+          "name": "Active Users",
+          "type": "int64"
+        },
+        {
+          "name": "Active User Rate (%)",
+          "type": "double"
+        },
+        {
+          "name": "Prompts Submitted",
+          "type": "int64"
+        },
+        {
+          "name": "Report Version",
+          "type": "string"
+        },
+        {
+          "name": "Usage Refresh Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Age Days",
+          "type": "int64"
+        },
+        {
+          "name": "Freshness State",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "User Cleanup Evidence",
+      "file": "UserCleanupEvidence.csv",
+      "uniqueKey": ["User Cleanup Key"],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "User Cleanup Key",
+          "type": "string"
+        },
+        {
+          "name": "AD Object GUID",
+          "type": "string"
+        },
+        {
+          "name": "Entra Object ID",
+          "type": "string"
+        },
+        {
+          "name": "AD Domain",
+          "type": "string"
+        },
+        {
+          "name": "SamAccountName",
+          "type": "string"
+        },
+        {
+          "name": "User Principal Name",
+          "type": "string"
+        },
+        {
+          "name": "Display Name",
+          "type": "string"
+        },
+        {
+          "name": "Enabled",
+          "type": "string"
+        },
+        {
+          "name": "When Created",
+          "type": "dateTime"
+        },
+        {
+          "name": "Password Last Set",
+          "type": "dateTime"
+        },
+        {
+          "name": "Password Never Expires",
+          "type": "string"
+        },
+        {
+          "name": "Identity Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Identity Match Method",
+          "type": "string"
+        },
+        {
+          "name": "Classification Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Country",
+          "type": "string"
+        },
+        {
+          "name": "Country Basis",
+          "type": "string"
+        },
+        {
+          "name": "Account Type",
+          "type": "string"
+        },
+        {
+          "name": "Account Population",
+          "type": "string"
+        },
+        {
+          "name": "Account Population Source",
+          "type": "string"
+        },
+        {
+          "name": "Account Classification Rule Version",
+          "type": "string"
+        },
+        {
+          "name": "User Type",
+          "type": "string"
+        },
+        {
+          "name": "Workforce Persona",
+          "type": "string"
+        },
+        {
+          "name": "Persona Basis",
+          "type": "string"
+        },
+        {
+          "name": "Account Type Source",
+          "type": "string"
+        },
+        {
+          "name": "Has Mailbox",
+          "type": "string"
+        },
+        {
+          "name": "Hosting Location",
+          "type": "string"
+        },
+        {
+          "name": "Litigation Hold",
+          "type": "string"
+        },
+        {
+          "name": "Retention Hold",
+          "type": "string"
+        },
+        {
+          "name": "In-Place Holds",
+          "type": "string"
+        },
+        {
+          "name": "Hold State",
+          "type": "string"
+        },
+        {
+          "name": "AD Last Logon",
+          "type": "dateTime"
+        },
+        {
+          "name": "AD Last Logon Quality",
+          "type": "string"
+        },
+        {
+          "name": "Entra Last Sign-In",
+          "type": "dateTime"
+        },
+        {
+          "name": "Entra Last Sign-In Quality",
+          "type": "string"
+        },
+        {
+          "name": "Entra Last Non-Interactive Sign-In",
+          "type": "dateTime"
+        },
+        {
+          "name": "Entra Last Non-Interactive Sign-In Quality",
+          "type": "string"
+        },
+        {
+          "name": "Entra Last Successful Sign-In",
+          "type": "dateTime"
+        },
+        {
+          "name": "Entra Last Successful Sign-In Quality",
+          "type": "string"
+        },
+        {
+          "name": "EXO Last User Action",
+          "type": "dateTime"
+        },
+        {
+          "name": "EXO Last User Action Quality",
+          "type": "string"
+        },
+        {
+          "name": "EXO Last Logon",
+          "type": "dateTime"
+        },
+        {
+          "name": "EXO Last Logon Quality",
+          "type": "string"
+        },
+        {
+          "name": "On-Prem Last Logon",
+          "type": "dateTime"
+        },
+        {
+          "name": "On-Prem Last Logon Quality",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Usage Last Activity",
+          "type": "dateTime"
+        },
+        {
+          "name": "Mailbox Usage Last Activity Quality",
+          "type": "string"
+        },
+        {
+          "name": "M365 Last Activity",
+          "type": "dateTime"
+        },
+        {
+          "name": "M365 Last Activity Quality",
+          "type": "string"
+        },
+        {
+          "name": "Console Last Activity",
+          "type": "dateTime"
+        },
+        {
+          "name": "Console Last Activity Quality",
+          "type": "string"
+        },
+        {
+          "name": "Entra Match Status",
+          "type": "string"
+        },
+        {
+          "name": "M365 Report Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Usage Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Last Activity Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Last Activity Source",
+          "type": "string"
+        },
+        {
+          "name": "Days Since Last Activity",
+          "type": "int64"
+        },
+        {
+          "name": "Inactivity Bucket",
+          "type": "string"
+        },
+        {
+          "name": "Bucket Sort",
+          "type": "int64"
+        },
+        {
+          "name": "Cleanup State",
+          "type": "string"
+        },
+        {
+          "name": "State Sort",
+          "type": "int64"
+        },
+        {
+          "name": "Decision Reason",
+          "type": "string"
+        },
+        {
+          "name": "Secondary Reasons",
+          "type": "string"
+        },
+        {
+          "name": "Recommended Action",
+          "type": "string"
+        },
+        {
+          "name": "AD Source Status",
+          "type": "string"
+        },
+        {
+          "name": "AD Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Entra Source Status",
+          "type": "string"
+        },
+        {
+          "name": "Entra Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "EXO Source Status",
+          "type": "string"
+        },
+        {
+          "name": "EXO Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "On-Prem Source Status",
+          "type": "string"
+        },
+        {
+          "name": "On-Prem Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "M365 Activity Source Status",
+          "type": "string"
+        },
+        {
+          "name": "M365 Activity Report Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Reference UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Computer Cleanup Evidence",
+      "file": "ComputerCleanupEvidence.csv",
+      "uniqueKey": ["Computer Cleanup Key"],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "Computer Cleanup Key",
+          "type": "string"
+        },
+        {
+          "name": "AD Object GUID",
+          "type": "string"
+        },
+        {
+          "name": "Entra Device ID",
+          "type": "string"
+        },
+        {
+          "name": "Intune Device ID",
+          "type": "string"
+        },
+        {
+          "name": "AD Domain",
+          "type": "string"
+        },
+        {
+          "name": "Computer Name",
+          "type": "string"
+        },
+        {
+          "name": "Enabled",
+          "type": "string"
+        },
+        {
+          "name": "Operating System",
+          "type": "string"
+        },
+        {
+          "name": "Scope State",
+          "type": "string"
+        },
+        {
+          "name": "In Disabled OU",
+          "type": "string"
+        },
+        {
+          "name": "When Created",
+          "type": "dateTime"
+        },
+        {
+          "name": "Password Last Set",
+          "type": "dateTime"
+        },
+        {
+          "name": "Country",
+          "type": "string"
+        },
+        {
+          "name": "Country Basis",
+          "type": "string"
+        },
+        {
+          "name": "Account Type",
+          "type": "string"
+        },
+        {
+          "name": "Account Population",
+          "type": "string"
+        },
+        {
+          "name": "Workforce Persona",
+          "type": "string"
+        },
+        {
+          "name": "Entra Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Intune Match Status",
+          "type": "string"
+        },
+        {
+          "name": "AD Last Logon",
+          "type": "dateTime"
+        },
+        {
+          "name": "AD Last Logon Quality",
+          "type": "string"
+        },
+        {
+          "name": "Entra Last Sign-In",
+          "type": "dateTime"
+        },
+        {
+          "name": "Entra Last Sign-In Quality",
+          "type": "string"
+        },
+        {
+          "name": "Intune Last Sync",
+          "type": "dateTime"
+        },
+        {
+          "name": "Intune Last Sync Quality",
+          "type": "string"
+        },
+        {
+          "name": "Last Activity Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Last Activity Source",
+          "type": "string"
+        },
+        {
+          "name": "Days Since Last Activity",
+          "type": "int64"
+        },
+        {
+          "name": "Inactivity Bucket",
+          "type": "string"
+        },
+        {
+          "name": "Bucket Sort",
+          "type": "int64"
+        },
+        {
+          "name": "Cleanup State",
+          "type": "string"
+        },
+        {
+          "name": "State Sort",
+          "type": "int64"
+        },
+        {
+          "name": "Decision Reason",
+          "type": "string"
+        },
+        {
+          "name": "Secondary Reasons",
+          "type": "string"
+        },
+        {
+          "name": "Recommended Action",
+          "type": "string"
+        },
+        {
+          "name": "AD Source Status",
+          "type": "string"
+        },
+        {
+          "name": "AD Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Entra Source Status",
+          "type": "string"
+        },
+        {
+          "name": "Entra Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Intune Source Status",
+          "type": "string"
+        },
+        {
+          "name": "Intune Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Reference UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Mailbox Cleanup Evidence",
+      "file": "MailboxCleanupEvidence.csv",
+      "uniqueKey": ["Mailbox Cleanup Key"],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "Mailbox Cleanup Key",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Identity Basis",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox GUID",
+          "type": "string"
+        },
+        {
+          "name": "Primary SMTP Address",
+          "type": "string"
+        },
+        {
+          "name": "Hosting Location",
+          "type": "string"
+        },
+        {
+          "name": "Recipient Type",
+          "type": "string"
+        },
+        {
+          "name": "Scope State",
+          "type": "string"
+        },
+        {
+          "name": "When Mailbox Created",
+          "type": "dateTime"
+        },
+        {
+          "name": "Owner AD Object GUID",
+          "type": "string"
+        },
+        {
+          "name": "Owner Entra Object ID",
+          "type": "string"
+        },
+        {
+          "name": "Owner Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Owner Account State",
+          "type": "string"
+        },
+        {
+          "name": "AD Domain",
+          "type": "string"
+        },
+        {
+          "name": "Country",
+          "type": "string"
+        },
+        {
+          "name": "Country Basis",
+          "type": "string"
+        },
+        {
+          "name": "Account Type",
+          "type": "string"
+        },
+        {
+          "name": "Account Population",
+          "type": "string"
+        },
+        {
+          "name": "Account Population Source",
+          "type": "string"
+        },
+        {
+          "name": "Account Classification Rule Version",
+          "type": "string"
+        },
+        {
+          "name": "User Type",
+          "type": "string"
+        },
+        {
+          "name": "Workforce Persona",
+          "type": "string"
+        },
+        {
+          "name": "Persona Basis",
+          "type": "string"
+        },
+        {
+          "name": "Account Type Source",
+          "type": "string"
+        },
+        {
+          "name": "Classification Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Litigation Hold",
+          "type": "string"
+        },
+        {
+          "name": "Retention Hold",
+          "type": "string"
+        },
+        {
+          "name": "In-Place Holds",
+          "type": "string"
+        },
+        {
+          "name": "Hold State",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Size GB",
+          "type": "double"
+        },
+        {
+          "name": "EXO Last User Action",
+          "type": "dateTime"
+        },
+        {
+          "name": "EXO Last User Action Quality",
+          "type": "string"
+        },
+        {
+          "name": "EXO Last Logon",
+          "type": "dateTime"
+        },
+        {
+          "name": "EXO Last Logon Quality",
+          "type": "string"
+        },
+        {
+          "name": "On-Prem Last Logon",
+          "type": "dateTime"
+        },
+        {
+          "name": "On-Prem Last Logon Quality",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Usage Last Activity",
+          "type": "dateTime"
+        },
+        {
+          "name": "Mailbox Usage Last Activity Quality",
+          "type": "string"
+        },
+        {
+          "name": "Owner AD Last Logon",
+          "type": "dateTime"
+        },
+        {
+          "name": "Owner AD Last Logon Quality",
+          "type": "string"
+        },
+        {
+          "name": "Owner Entra Last Sign-In",
+          "type": "dateTime"
+        },
+        {
+          "name": "Owner Entra Last Sign-In Quality",
+          "type": "string"
+        },
+        {
+          "name": "Owner M365 Last Activity",
+          "type": "dateTime"
+        },
+        {
+          "name": "Owner M365 Last Activity Quality",
+          "type": "string"
+        },
+        {
+          "name": "Owner Console Last Activity",
+          "type": "dateTime"
+        },
+        {
+          "name": "Owner Console Last Activity Quality",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Usage Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Owner M365 Report Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Last Activity Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Last Activity Source",
+          "type": "string"
+        },
+        {
+          "name": "Days Since Last Activity",
+          "type": "int64"
+        },
+        {
+          "name": "Inactivity Bucket",
+          "type": "string"
+        },
+        {
+          "name": "Bucket Sort",
+          "type": "int64"
+        },
+        {
+          "name": "Cleanup State",
+          "type": "string"
+        },
+        {
+          "name": "State Sort",
+          "type": "int64"
+        },
+        {
+          "name": "Decision Reason",
+          "type": "string"
+        },
+        {
+          "name": "Secondary Reasons",
+          "type": "string"
+        },
+        {
+          "name": "Recommended Action",
+          "type": "string"
+        },
+        {
+          "name": "EXO Source Status",
+          "type": "string"
+        },
+        {
+          "name": "EXO Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "On-Prem Source Status",
+          "type": "string"
+        },
+        {
+          "name": "On-Prem Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Mailbox Usage Source Status",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Usage Report Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Reference UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Directory Cleanup Source Qualification",
+      "file": "DirectoryCleanupSourceQualification.csv",
+      "uniqueKey": ["Source"],
+      "columns": [
+        {
+          "name": "Source",
+          "type": "string"
+        },
+        {
+          "name": "File",
+          "type": "string"
+        },
+        {
+          "name": "Producer",
+          "type": "string"
+        },
+        {
+          "name": "Status",
+          "type": "string"
+        },
+        {
+          "name": "Reason",
+          "type": "string"
+        },
+        {
+          "name": "Rows",
+          "type": "int64"
+        },
+        {
+          "name": "Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Report Refresh Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Out Of Scope Rows",
+          "type": "int64"
+        },
+        {
+          "name": "Unkeyable Rows",
+          "type": "int64"
+        },
+        {
+          "name": "Reference UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Date",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Content Storage Evidence",
+      "file": "ContentStorageEvidence.csv",
+      "uniqueKey": [],
+      "columns": [
+        {
+          "name": "Content Object Key",
+          "type": "string"
+        },
+        {
+          "name": "Content Object Name",
+          "type": "string"
+        },
+        {
+          "name": "Service",
+          "type": "string"
+        },
+        {
+          "name": "Object Type",
+          "type": "string"
+        },
+        {
+          "name": "Owner",
+          "type": "string"
+        },
+        {
+          "name": "Owner State",
+          "type": "string"
+        },
+        {
+          "name": "Activity State",
+          "type": "string"
+        },
+        {
+          "name": "Last Activity Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Days Since Last Activity",
+          "type": "int64"
+        },
+        {
+          "name": "Storage Used GB",
+          "type": "double"
+        },
+        {
+          "name": "Storage Allocated GB",
+          "type": "double"
+        },
+        {
+          "name": "Storage Utilization (%)",
+          "type": "double"
+        },
+        {
+          "name": "Storage Pressure",
+          "type": "string"
+        },
+        {
+          "name": "File Count",
+          "type": "int64"
+        },
+        {
+          "name": "Active File Count",
+          "type": "int64"
+        },
+        {
+          "name": "Deleted State",
+          "type": "string"
+        },
+        {
+          "name": "Risk Priority",
+          "type": "string"
+        },
+        {
+          "name": "Risk Signal",
+          "type": "string"
+        },
+        {
+          "name": "Recommended Action",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Age Days",
+          "type": "int64"
+        },
+        {
+          "name": "Freshness State",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Content Storage Trend Evidence",
+      "file": "ContentStorageTrendEvidence.csv",
+      "historyKey": ["Snapshot Week"],
+      "uniqueKey": [],
+      "columns": [
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Date Key",
+          "type": "int64"
+        },
+        {
+          "name": "Snapshot Week",
+          "type": "string"
+        },
+        {
+          "name": "SharePoint Sites",
+          "type": "int64"
+        },
+        {
+          "name": "SharePoint Storage Used GB",
+          "type": "double"
+        },
+        {
+          "name": "SharePoint Storage Allocated GB",
+          "type": "double"
+        },
+        {
+          "name": "SharePoint Storage Utilization (%)",
+          "type": "double"
+        },
+        {
+          "name": "Inactive SharePoint Sites",
+          "type": "int64"
+        },
+        {
+          "name": "Orphaned SharePoint Sites",
+          "type": "int64"
+        },
+        {
+          "name": "Sites at 80%+ Quota",
+          "type": "int64"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Backup Mailbox Evidence",
+      "file": "BackupMailboxEvidence.csv",
+      "uniqueKey": [],
+      "columns": [
+        {
+          "name": "Backup Entity Key",
+          "type": "string"
+        },
+        {
+          "name": "Display Name",
+          "type": "string"
+        },
+        {
+          "name": "Primary Address",
+          "type": "string"
+        },
+        {
+          "name": "Entity Type",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Type",
+          "type": "string"
+        },
+        {
+          "name": "Account State",
+          "type": "string"
+        },
+        {
+          "name": "Expected Scope State",
+          "type": "string"
+        },
+        {
+          "name": "Protection State",
+          "type": "string"
+        },
+        {
+          "name": "Reconciliation State",
+          "type": "string"
+        },
+        {
+          "name": "Protection Status",
+          "type": "string"
+        },
+        {
+          "name": "Policy Scope Group",
+          "type": "string"
+        },
+        {
+          "name": "Protection Policy",
+          "type": "string"
+        },
+        {
+          "name": "Error State",
+          "type": "string"
+        },
+        {
+          "name": "Error Code",
+          "type": "string"
+        },
+        {
+          "name": "Risk Priority",
+          "type": "string"
+        },
+        {
+          "name": "Risk Signal",
+          "type": "string"
+        },
+        {
+          "name": "Recommended Action",
+          "type": "string"
+        },
+        {
+          "name": "Protection Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Policy Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Protection Evidence Age Days",
+          "type": "int64"
+        },
+        {
+          "name": "Policy Evidence Age Days",
+          "type": "int64"
+        },
+        {
+          "name": "Evidence Age Days",
+          "type": "int64"
+        },
+        {
+          "name": "Freshness State",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Data Trust Evidence",
+      "file": "DataTrustEvidence.csv",
+      "uniqueKey": [],
+      "columns": [
+        {
+          "name": "Source Key",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Domain",
+          "type": "string"
+        },
+        {
+          "name": "Source Name",
+          "type": "string"
+        },
+        {
+          "name": "File Name",
+          "type": "string"
+        },
+        {
+          "name": "File State",
+          "type": "string"
+        },
+        {
+          "name": "Schema State",
+          "type": "string"
+        },
+        {
+          "name": "Expected Columns",
+          "type": "string"
+        },
+        {
+          "name": "Missing Columns",
+          "type": "string"
+        },
+        {
+          "name": "Row Count",
+          "type": "int64"
+        },
+        {
+          "name": "Column Count",
+          "type": "int64"
+        },
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Snapshot Basis",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Age Days",
+          "type": "int64"
+        },
+        {
+          "name": "Freshness State",
+          "type": "string"
+        },
+        {
+          "name": "Decision Readiness",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        },
+        {
+          "name": "Recommended Action",
+          "type": "string"
+        },
+        {
+          "name": "Read Error",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Hybrid Identity Findings",
+      "file": "HybridIdentityFindings.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "Finding Key"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Finding Key",
+          "type": "string"
+        },
+        {
+          "name": "AD Object GUID",
+          "type": "string"
+        },
+        {
+          "name": "Entra Object ID",
+          "type": "string"
+        },
+        {
+          "name": "Exchange GUID",
+          "type": "string"
+        },
+        {
+          "name": "User Principal Name",
+          "type": "string"
+        },
+        {
+          "name": "Primary SMTP Address",
+          "type": "string"
+        },
+        {
+          "name": "Recipient Type",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Hosting",
+          "type": "string"
+        },
+        {
+          "name": "Rule ID",
+          "type": "string"
+        },
+        {
+          "name": "Legacy Issue Number",
+          "type": "int64"
+        },
+        {
+          "name": "Rule Family",
+          "type": "string"
+        },
+        {
+          "name": "Severity",
+          "type": "string"
+        },
+        {
+          "name": "Is Blocker",
+          "type": "boolean"
+        },
+        {
+          "name": "Observed Value",
+          "type": "string"
+        },
+        {
+          "name": "Recommended Action",
+          "type": "string"
+        },
+        {
+          "name": "Account Population",
+          "type": "string"
+        },
+        {
+          "name": "Account Population Source",
+          "type": "string"
+        },
+        {
+          "name": "Account Classification Rule Version",
+          "type": "string"
+        },
+        {
+          "name": "Rule Version",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Date",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Device Readiness Gap Evidence",
+      "file": "DeviceReadinessGapEvidence.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Inventory Scope",
+          "type": "string"
+        },
+        {
+          "name": "Device Source ID",
+          "type": "string"
+        },
+        {
+          "name": "Device Name",
+          "type": "string"
+        },
+        {
+          "name": "Azure AD Device ID",
+          "type": "string"
+        },
+        {
+          "name": "AD Object GUID",
+          "type": "string"
+        },
+        {
+          "name": "Entra Registration Pending",
+          "type": "boolean"
+        },
+        {
+          "name": "Physical Memory (GB)",
+          "type": "double"
+        },
+        {
+          "name": "Firmware Type (source)",
+          "type": "string"
+        },
+        {
+          "name": "Secure Boot Status (source)",
+          "type": "string"
+        },
+        {
+          "name": "Last Reboot (source)",
+          "type": "string"
+        },
+        {
+          "name": "Last Reboot Source",
+          "type": "string"
+        },
+        {
+          "name": "Last Reboot Time Basis",
+          "type": "string"
+        },
+        {
+          "name": "Last Reboot UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Days Since Last Reboot",
+          "type": "int64"
+        },
+        {
+          "name": "Reboot Age Basis",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Date",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Mailbox Evidence",
+      "file": "MailboxEvidence.csv",
+      "uniqueKey": [],
+      "columns": [
+        {
+          "name": "Mailbox Key",
+          "type": "string"
+        },
+        {
+          "name": "Primary SMTP Address",
+          "type": "string"
+        },
+        {
+          "name": "Display Name",
+          "type": "string"
+        },
+        {
+          "name": "Country",
+          "type": "string"
+        },
+        {
+          "name": "Hosting Location",
+          "type": "string"
+        },
+        {
+          "name": "Exchange Version",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Type",
+          "type": "string"
+        },
+        {
+          "name": "Recipient Type",
+          "type": "string"
+        },
+        {
+          "name": "Operational State",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Size GB",
+          "type": "double"
+        },
+        {
+          "name": "Archive State",
+          "type": "string"
+        },
+        {
+          "name": "Archive Size GB",
+          "type": "double"
+        },
+        {
+          "name": "Delegation Count",
+          "type": "int64"
+        },
+        {
+          "name": "Delegation Types",
+          "type": "string"
+        },
+        {
+          "name": "Forwarding State",
+          "type": "string"
+        },
+        {
+          "name": "Last Activity Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Hosting State",
+          "type": "string"
+        },
+        {
+          "name": "Risk Priority",
+          "type": "string"
+        },
+        {
+          "name": "Risk Signal",
+          "type": "string"
+        },
+        {
+          "name": "Recommended Action",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        },
+        {
+          "name": "Total Storage GB",
+          "type": "double"
+        }
+      ]
+    },
+    {
+      "table": "Security Control Evidence",
+      "file": "SecurityControlEvidence.csv",
+      "uniqueKey": [],
+      "columns": [
+        {
+          "name": "Control Sort",
+          "type": "int64"
+        },
+        {
+          "name": "Security Domain",
+          "type": "string"
+        },
+        {
+          "name": "Control Name",
+          "type": "string"
+        },
+        {
+          "name": "Severity Label",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        },
+        {
+          "name": "Coverage State",
+          "type": "string"
+        },
+        {
+          "name": "Covered Entities",
+          "type": "int64"
+        },
+        {
+          "name": "Healthy Entities",
+          "type": "int64"
+        },
+        {
+          "name": "Affected Entities",
+          "type": "int64"
+        },
+        {
+          "name": "Health Rate",
+          "type": "double"
+        },
+        {
+          "name": "Gap State",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Source",
+          "type": "string"
+        },
+        {
+          "name": "Recommended Action",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Metric Unit",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Device Directory Summary",
+      "file": "DeviceDirectorySummary.csv",
+      "uniqueKey": [],
+      "columns": [
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Enabled AD Windows PCs",
+          "type": "int64"
+        },
+        {
+          "name": "Enabled AD Windows PCs Managed by Intune",
+          "type": "int64"
+        },
+        {
+          "name": "Enabled AD Windows PCs Unmanaged",
+          "type": "int64"
+        },
+        {
+          "name": "Enabled AD PCs Managed by Intune (%)",
+          "type": "double"
+        },
+        {
+          "name": "Disabled AD Computer Objects",
+          "type": "int64"
+        },
+        {
+          "name": "Disabled Entra Devices",
+          "type": "int64"
+        },
+        {
+          "name": "Country Definition",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        },
+        {
+          "name": "Enabled AD Windows 10 PCs",
+          "type": "int64"
+        },
+        {
+          "name": "Enabled AD Windows 10 PCs Without Intune",
+          "type": "int64"
+        },
+        {
+          "name": "AD Windows 10 Ambiguous Intune Matches",
+          "type": "int64"
+        },
+        {
+          "name": "Intune Windows 10 Eligibility Undetermined",
+          "type": "int64"
+        },
+        {
+          "name": "Windows 10 Eligibility Undetermined",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "table": "Daily Directory Trends",
+      "file": "DailyDirectoryTrends.csv",
+      "source": "DATA-ALL daily statistics",
+      "stagingIncludesTenantKey": true,
+      "historyKey": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "Date Key",
+        "Source Name",
+        "Domain Key",
+        "Metric Name"
+      ],
+      "historyKeyVersion": 1,
+      "uniqueKey": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "Date Key",
+        "Source Name",
+        "Domain Key",
+        "Metric Name"
+      ],
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "Date Key",
+          "type": "int64"
+        },
+        {
+          "name": "Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Source Name",
+          "type": "string"
+        },
+        {
+          "name": "Domain Key",
+          "type": "string"
+        },
+        {
+          "name": "Domain Name",
+          "type": "string"
+        },
+        {
+          "name": "Metric Name",
+          "type": "string"
+        },
+        {
+          "name": "Metric Unit",
+          "type": "string"
+        },
+        {
+          "name": "Metric Value",
+          "type": "double"
+        },
+        {
+          "name": "Reading At",
+          "type": "dateTime"
+        },
+        {
+          "name": "Metric Status",
+          "type": "string"
+        },
+        {
+          "name": "Source Day Status",
+          "type": "string"
+        },
+        {
+          "name": "Quality Event",
+          "type": "string"
+        },
+        {
+          "name": "Quality Reason",
+          "type": "string"
+        },
+        {
+          "name": "Observed Domain Count",
+          "type": "int64"
+        },
+        {
+          "name": "Absent Domain Count",
+          "type": "int64"
+        },
+        {
+          "name": "Persistent Absent Domain Count",
+          "type": "int64"
+        },
+        {
+          "name": "Absent Prior Share (%)",
+          "type": "double"
+        },
+        {
+          "name": "Partial Threshold (%)",
+          "type": "double"
+        },
+        {
+          "name": "Reference Complete Day",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Daily Mailbox Trends",
+      "file": "DailyMailboxTrends.csv",
+      "source": "DATA-ALL daily statistics",
+      "stagingIncludesTenantKey": true,
+      "historyKey": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "Date Key",
+        "Source Name",
+        "Domain Key",
+        "Metric Name"
+      ],
+      "historyKeyVersion": 1,
+      "uniqueKey": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "Date Key",
+        "Source Name",
+        "Domain Key",
+        "Metric Name"
+      ],
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "Date Key",
+          "type": "int64"
+        },
+        {
+          "name": "Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Source Name",
+          "type": "string"
+        },
+        {
+          "name": "Domain Key",
+          "type": "string"
+        },
+        {
+          "name": "Domain Name",
+          "type": "string"
+        },
+        {
+          "name": "Metric Name",
+          "type": "string"
+        },
+        {
+          "name": "Metric Unit",
+          "type": "string"
+        },
+        {
+          "name": "Metric Value",
+          "type": "double"
+        },
+        {
+          "name": "Reading At",
+          "type": "dateTime"
+        },
+        {
+          "name": "Metric Status",
+          "type": "string"
+        },
+        {
+          "name": "Source Day Status",
+          "type": "string"
+        },
+        {
+          "name": "Quality Event",
+          "type": "string"
+        },
+        {
+          "name": "Quality Reason",
+          "type": "string"
+        },
+        {
+          "name": "Observed Domain Count",
+          "type": "int64"
+        },
+        {
+          "name": "Absent Domain Count",
+          "type": "int64"
+        },
+        {
+          "name": "Persistent Absent Domain Count",
+          "type": "int64"
+        },
+        {
+          "name": "Absent Prior Share (%)",
+          "type": "double"
+        },
+        {
+          "name": "Partial Threshold (%)",
+          "type": "double"
+        },
+        {
+          "name": "Reference Complete Day",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Executive KPI Trends",
+      "file": "ExecutiveKPITrends.csv",
+      "historyKey": ["Date Key", "Metric Name"],
+      "historyKeyVersion": 2,
+      "uniqueKey": [
+        "Date Key",
+        "Metric Name"
+      ],
+      "columns": [
+        {
+          "name": "Date Key",
+          "type": "int64"
+        },
+        {
+          "name": "Tenant Key",
+          "type": "int64"
+        },
+        {
+          "name": "Environment Key",
+          "type": "int64"
+        },
+        {
+          "name": "Metric Name",
+          "type": "string"
+        },
+        {
+          "name": "Metric Value",
+          "type": "double"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    }
+  ]
+}
