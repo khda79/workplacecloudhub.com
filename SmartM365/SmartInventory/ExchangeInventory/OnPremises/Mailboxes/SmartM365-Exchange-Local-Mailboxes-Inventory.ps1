@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.74
+1.77
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules: SmartM365 WindowsPowerShell5 compatibility module; Exchange remote PowerShell (default) or local snap-in (rollback); ActiveDirectory when AD permission export is enabled.
@@ -25,7 +25,7 @@
     Optional switches: -IncludeADPermission and -OnlyADPermission require read access to AD mailbox permission ACLs.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-Version: 1.74
+Version: 1.77
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access. Remote uses the current Windows identity with Kerberos.
@@ -130,6 +130,8 @@ function Get-ScriptLocalConfigValue {
 }
 
 $ScriptLocalConfig = Get-ScriptLocalConfig
+$expectedNoRemoteValue = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExpectedNoOnPremRemoteMailboxes' -DefaultValue $false
+$script:ExpectedNoOnPremRemoteMailboxes = ($expectedNoRemoteValue -is [bool] -and $expectedNoRemoteValue -eq $true)
 $script:ExchangeConnectionMode = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExchangeConnectionMode' -DefaultValue 'Remote')
 if ($script:ExchangeConnectionMode -notin @('Remote','LocalSnapin')) {
     throw 'ExchangeConnectionMode must be Remote or LocalSnapin.'
@@ -148,7 +150,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.74"
+$ScriptVersion = "1.77"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -198,6 +200,7 @@ function Ensure-SmartM365ExchangeScriptScope {
         if ($null -eq $script:ExchangeOnPremContext) {
             $remoteCommands = @('Get-Mailbox','Get-MailboxDatabase','Get-MailboxPermission','Get-MailboxStatistics','Get-MobileDevice','Get-ADPermission','Get-ExchangeServer','Get-ADServerSettings','Set-ADServerSettings')
             if ($IncludeRemoteMailboxes) { $remoteCommands += 'Get-RemoteMailbox' }
+            if ($IncludeRemoteMailboxes -and $script:ExpectedNoOnPremRemoteMailboxes) { $remoteCommands += 'Get-Recipient' }
             if ($CollectLargeItemStatistics) { $remoteCommands += 'Search-Mailbox' }
             try {
                 $script:ExchangeOnPremContext = Start-SmartM365ExchangeOnPremSession -RequiredCommands $remoteCommands
@@ -953,7 +956,7 @@ function Get-SmartM365RemoteMailboxColumns {
     @('DomainName','Name','DisplayName','Alias','PrimarySmtpAddress','WindowsEmailAddress',
       'UserPrincipalName','SamAccountName','RecipientType','RecipientTypeDetails','RemoteRoutingAddress',
       'RemoteRecipientType','OnPremisesOrganizationalUnit','DistinguishedName','ObjectCategory',
-      'WhenCreated','WhenChanged','MailboxRelease','WhenMailboxCreated','WhenMailboxCreatedIso8601','LastLogonTimeIso8601','AccountDisabled',
+      'WhenCreated','WhenChanged','MailboxRelease','WhenMailboxCreatedIso8601','WhenMailboxCreated','AccountDisabled',
       'ExchangeUserAccountControl','ArchiveState','ArchiveQuota','ArchiveWarningQuota',
       'DeliverToMailboxAndForward','ForwardingAddress','IsValid','MailboxMoveTargetMDB',
       'MailboxMoveSourceMDB','MailboxMoveFlags','MailboxMoveRemoteHostName','MailboxMoveBatchName',
@@ -963,7 +966,7 @@ function Get-SmartM365RemoteMailboxColumns {
 
 function Invoke-SmartM365RemoteMailboxPopulationQuery {
     [CmdletBinding()]
-    param([string[]]$IncludedLDAPPaths = @())
+    param([string[]]$IncludedLDAPPaths = @(), [bool]$ExpectedNone = $false, [string[]]$ExistingPaths = @())
 
     $rows = @()
     $warnings = @()
@@ -974,9 +977,26 @@ function Invoke-SmartM365RemoteMailboxPopulationQuery {
     } else {
         $rows = @(Get-RemoteMailbox -ResultSize Unlimited -WarningVariable warnings -ErrorAction Stop)
     }
-    # Empty results are not proof that all recipients are visible. Fail before writes.
-    if ($rows.Count -eq 0) { throw 'Unconfirmed empty remote mailbox population. Mailbox CSV publication is blocked; verify Exchange recipient scope and directory visibility.' }
-    return [pscustomobject]@{ Rows=$rows; Warnings=@($warnings) }
+    if ($rows.Count -eq 0) {
+        if (-not $ExpectedNone -or $IncludedLDAPPaths.Count -gt 0 -or @($warnings).Count -gt 0) { throw 'Unconfirmed empty remote mailbox population. Mailbox CSV publication is blocked; verify Exchange recipient scope and directory visibility.' }
+        if (@($ExistingPaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count -eq 0) { throw 'Empty remote mailbox population cannot be confirmed without checking previous evidence paths.' }
+        $recipientWarnings=@()
+        $recipients=@(Get-Recipient -ResultSize Unlimited -WarningVariable recipientWarnings -ErrorAction Stop)
+        if (@($recipientWarnings).Count -gt 0 -or $recipients.Count -eq 0) { throw 'Empty remote mailbox population cannot be confirmed: recipient verification was empty or emitted warnings.' }
+        foreach ($recipient in $recipients) {
+            $kind=[string]$recipient.RecipientTypeDetails
+            if ([string]::IsNullOrWhiteSpace($kind) -or $kind -match '^Remote.*Mailbox$') { throw 'Empty remote mailbox population cannot be confirmed: recipient evidence is incomplete or contains a remote mailbox.' }
+        }
+        foreach ($path in @($ExistingPaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+                $header=[string](Get-Content -LiteralPath $path -TotalCount 1 -ErrorAction Stop)
+                if ($header -notmatch '(?i)(^|,)"?ObjectGuid"?(,|$)' -or @(Import-Csv -LiteralPath $path -ErrorAction Stop).Count -gt 0) { throw 'Empty remote mailbox population cannot replace existing nonempty or unreadable evidence.' }
+            }
+        }
+        WriteLog -Message 'No on-premises remote mailboxes expected for this tenant; unrestricted remote mailbox and recipient checks found none. Existing nonempty evidence is preserved.'
+        return [pscustomobject]@{ Rows=@(); Warnings=@(); ConfirmedEmpty=$true }
+    }
+    return [pscustomobject]@{ Rows=$rows; Warnings=@($warnings); ConfirmedEmpty=$false }
 }
 
 function Invoke-SmartM365ExchangeRemoteMailboxInventory {
@@ -996,7 +1016,8 @@ function Invoke-SmartM365ExchangeRemoteMailboxInventory {
     } else { Invoke-SmartM365RemoteMailboxPopulationQuery -IncludedLDAPPaths $IncludedLDAPPaths }
     $allRemoteMailboxes = @($population.Rows)
     $remoteWarningRecords = @($population.Warnings)
-    if ($allRemoteMailboxes.Count -eq 0) { throw 'Unconfirmed empty remote mailbox population. Existing CSVs are preserved.' }
+    $confirmedEmpty = $population.PSObject.Properties['ConfirmedEmpty'] -and [bool]$population.ConfirmedEmpty
+    if ($allRemoteMailboxes.Count -eq 0 -and -not $confirmedEmpty) { throw 'Unconfirmed empty remote mailbox population. Existing CSVs are preserved.' }
 
     $dataQualityWarnings = @(ConvertFrom-SmartM365ExchangeRemoteMailboxWarnings -Warnings $remoteWarningRecords)
     $Global:SmartM365ExchangeRemoteMailboxDataQualityWarnings = @($dataQualityWarnings)
@@ -1038,7 +1059,7 @@ function Invoke-SmartM365ExchangeRemoteMailboxInventory {
     if ($TargetDomains -and $TargetDomains.Count -gt 0) { $records = @($records | Where-Object { $_.DomainName -in $TargetDomains }) }
     if ($records.Count -eq 0) {
         if ($dataQualityWarnings.Count -gt 0) { throw 'Remote mailbox warnings prevent qualification of an empty inventory.' }
-        throw 'Unconfirmed empty remote mailbox export after scope filtering. Existing CSVs are preserved.'
+        if (-not $confirmedEmpty -or $IncludedLDAPPaths.Count -gt 0 -or @($TargetDomains).Count -gt 0) { throw 'Unconfirmed empty remote mailbox export after scope filtering. Existing CSVs are preserved.' }
     }
 
     $suffix = if ($OnlyADPermission) { '_OnlyADPermission.csv' } else { '.csv' }
@@ -1917,6 +1938,7 @@ $scriptScopeExchangeCommands = @(
     "Get-ADPermission"
 )
 if ($IncludeRemoteMailboxes) { $scriptScopeExchangeCommands += "Get-RemoteMailbox" }
+if ($IncludeRemoteMailboxes -and $script:ExpectedNoOnPremRemoteMailboxes) { $scriptScopeExchangeCommands += "Get-Recipient" }
 if ($script:ExchangeConnectionMode -ne 'Remote' -and -not (Get-Command -Name Get-Mailbox -ErrorAction SilentlyContinue)) {
     WriteLog -Message "Exchange cmdlets are loaded in module scope; loading Exchange snap-in in script scope for mailbox processing."
     try {
@@ -3178,7 +3200,15 @@ throw $errorMessage
                 Initialize-SmartM365LocalMailboxForestPopulation -ForestScopes $script:LocalMailboxExpectedScopes
                 if ($IncludeRemoteMailboxes) {
                     # Acquire both populations before the first mailbox CSV publication.
-                    $script:RemoteMailboxForestPopulation = Invoke-SmartM365RemoteMailboxPopulationQuery
+                    $emptyExpected = $script:ExpectedNoOnPremRemoteMailboxes -and $DetectAllDomains -and $MaxItems -eq 0 -and @($IncludedOrganizationalUnit).Count -eq 0 -and @($TargetDomains).Count -eq 0
+                    if ($emptyExpected) {
+                        $latestFolder = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
+                        $previousRemotePaths = @((Join-Path $RemoteMailboxOutputPath 'Exchange_OnPrem_RemoteMailboxes_AllDomains.csv'))
+                        if ($latestFolder) { $previousRemotePaths += Join-Path $latestFolder 'Exchange_OnPrem_RemoteMailboxes_AllDomains.csv' }
+                        $script:RemoteMailboxForestPopulation = Invoke-SmartM365RemoteMailboxPopulationQuery -ExpectedNone $true -ExistingPaths $previousRemotePaths
+                    } else {
+                        $script:RemoteMailboxForestPopulation = Invoke-SmartM365RemoteMailboxPopulationQuery
+                    }
                     WriteLog -Message ("Remote forest acquisition completed: native mailboxes={0}; current-run objects retained for projection." -f @($script:RemoteMailboxForestPopulation.Rows).Count)
                 }
                 WriteLog -Message ("Forest acquisition completed: native mailboxes={0}; domains={1}. Domain processing uses these current-run objects only." -f $script:LocalMailboxAcquisitions[0].Rows,$script:LocalMailboxExpectedScopes.Count)
@@ -3422,8 +3452,7 @@ if ($scriptdatamailbox -eq $true -and $scriptdatamegewithperm -eq $true -and $In
 	$sourceFiles = Get-ChildItem -Path $SourceDirectory -Filter "*_OnlyADPermission.csv" -File
 
 	if ($sourceFiles.Count -eq 0) {
-		WriteLog -Message "No '*_OnlyADPermission.csv' files found in the source directory. Permission merge skipped." "WARNING"
-		Write-Warning "No '*_OnlyADPermission.csv' files found in the source directory. Permission merge skipped."
+		WriteLog -Message "No separate OnlyADPermission exports found; optional historical permission merge skipped. Send As permissions are requested directly in the current mailbox inventory."
 		$scriptdatamegewithperm = $false
 	}
 
@@ -3706,8 +3735,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJF250u3JdxMmU
-# QqjkLYVakU4/+Hl4AL19ywjcOgXIoKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB9vdGh4PtZIwPl
+# GDUQkjqoCY5tBX+jmOgSZ2IVIs4mCqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3840,31 +3869,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJbEz/ui1YbwIpz/zfxZANdBubnlHHZrP7hz82QoFKfTMA0GCSqG
-# SIb3DQEBAQUABIIBgIgdLiQoc/8rOuxSZA9CaXaB0moyqd1HWBq55H+nRpPKr0sX
-# lpKB/Ct1Yy3CGKzwsFZOx510cOxlq6aNbJ8e/svxv6p5FEBOv8NQB8YGunt9HJKy
-# 0I7FtzUWosyNbrkFtrdEdVW/A2wNOnpK0t5MfWRpmBFrWFAXI+ZgfLa8WGbl082T
-# hqToOlo37Hh6jrTOhAGulTtoewfCojLBgC3h4HUnqTs2O70H3KptVdStkt7HjEA8
-# J43+50N0ZHVsuRLkdseRsFnfiijn2WrknhLP4PhxLrLe2yfR7oUecWBT4KZwP5vj
-# +DypU88QtoXEGpT9NmiKEN6m6G+EOVPaSdJpRFO/yq6/OQkm95L8NtKOeeFVE81H
-# peGZuH5lxcJl56Ei9TGLuPzSvxwDXMQRFzWiXhNAC3xi2JKVcGRbCucyAqJ56NGP
-# IWx7GaX0kWl5v5PRmPZ5TJFf12YlxyMS1JckNx0AIwqGWcqscgM3Yuq0i2dVvY0H
-# 0S8b/xYxr+iPICqNj6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPvS1L0qVL54TT2TnTF2jN3kU0CajmujgYFjQIYpUgJdMA0GCSqG
+# SIb3DQEBAQUABIIBgCyDNEe791UAZOqAYHW7x7ovJ3g02L34oVxXiQxoTF2bi13/
+# J30ebZTXA0mKenRS/92nJX3LCTTGutpfnpBH3Cw8qzKq0HxlFldEc7ukuzL8CEYw
+# 5T5fjbYB8Jvs09Z7pOPs6m+ODcoCGYlzhKTh9NctCDe3sbGRDEjTAJrp5ngetBMU
+# haAcqgffPq1ugh9SVIS9Uj8ep2qUI2F4i2Psbqb40RoufJuSVIdSGMKEzEdBBARV
+# 0xUijXntcShargNZNSPgkdQkoO63APS6DQr8WdulYc7iVH5kl9KU447L1bdxP9MD
+# Yt1jUFgD1W07HgAoJyazXmH4pSg5u3EFJTsXE4zlT5+1JD10kpUpZU8jCYhm59j9
+# dC81eXTIyKeI9dp84lQ23imu8EE4cyUl/xjfTh2f7oW89LN2upehl77PnaZKS81r
+# UXNbs0Eo3K+ShD4kv7tfKEfNYy2h1CtPy8PgXXwPNmALTAcgDFuhT3WJJTYI+Wqk
+# gOu7TBJmGyPdkCzOcqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDExMzA1
-# MjZaMC8GCSqGSIb3DQEJBDEiBCARgiwOAGE/y/uPXtBIqdwhD3xBMIKLpEu3YWGE
-# IpqfCDANBgkqhkiG9w0BAQEFAASCAgAZPsK5N0V1ZfwhzepWk632qLHXLtlmriJB
-# tYRbG2MDVs5QpvaINrp71kUo/C+3HqT9p/V0U0DdbBT9MdQY08JLtpgUXiEhqwQ+
-# 4CAHZtf2pdYr4KezOQym4uCWJPBNiagkh8dOFLmgaNlOKY5y4UtK7ANV4bIncb+9
-# 7JovOFOrHGx5E4mJRWBjgzFSecjX2rX9j35cvB1EcTBlxD2Y3rNeOR6Ny5STHU20
-# 6ipwf5TMKru/HtWBOZMwl5hRX5vQ8ONpPB9vaUxc/o5Fc0i2ep4QWxOL5QF/LTyH
-# PdYoei3qdmzu82jn8HDiElLWOnG94FpWbXVg/AkOVcV037iOHz6BXCQe/Da5LhOT
-# HAq1UG/dhLWOnu9nfXXGYf8gecKqpPHHaOk3N2tA37QDOOCX727czbrn3RnWuSye
-# 0YR40Aet5mIRIdp5Z/FM+3XN8BJ3oD823rrX0sInwJVNGstyXM/8r5IXiJCogKW2
-# 34+ddPEvI1RnPvCQqwCpSAXBE4dALMQR3YimfiDfKrBDUCsJwSz8t4HtBw4DVBvN
-# 23CpGpZLx9dfXYhoZrWVRBeZ/KMD92LTlGrnyW0CG/+rGYEGIsOWoZ+khGO0FeVA
-# mhxWeZIylp9rvr2Uk6gV5a55m/OvIcw+nRiKl0QsDfM+2wv90m0k/ZHczwk5yl5b
-# vaZS11l4Hw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDkxNTE4
+# MjZaMC8GCSqGSIb3DQEJBDEiBCAg+L6xpIurUrb7IAE6zAYYkx4hePbH8p+P5S+R
+# QH9bITANBgkqhkiG9w0BAQEFAASCAgBfn1dCvT9pWuMUMIksho1meY+iN8UR86Qj
+# DdawZl8eY0ZYqw36cv6Vo/N0vi+17dKQ3sQvLJ6t1knEaedCmdwQpBYFxAbqluaE
+# NrrN+2vgYb6z31IYzEc2DsMqqIa5Gs2kaYE+8EN6VPs7pXKzNGy7htQi3lA7ehAJ
+# YKxlVDL72CAy6FuIUiHM7QnP9tIOux7UZ805agY2UfR3NFAu/rrGgwGSLQSH6fy6
+# MWOm7FpRXNfgV+f+pbcbeBBkcmnNLRhqFYZzp9uNGpTNjbsUOOuup9+uOezvASCR
+# 5BUXijKaIZ2UqwdoC0G6QTfLCMglwCuWDsXXRHQ/gzRbiI3e2YQA7ndrxJiEe2BE
+# 6X0Jz4jAsGe7BfBGj3NfPf76t3QHflEAm4riBqit11SapO7CplyoKIn4y5Y6T/Eo
+# 35U1BKaWvKcypO41gPkN++SJPq3VYB8vo/yHjsFEi0KdkTPzHdoQ28KNRg8E12k7
+# gDpw6mg3Z8r4XaYuFSyYWDiTSaJNkth7a07bTQzMX4rQaH0L0Q6YG/06DywWMLzV
+# 1S8NVHj1wf7+E4zr/vWM4q0K1l7C1bZYQDZnAFW+1Rumzh+h3Tsm3aQYEGsfudoP
+# Ehs8AurjMpWNXIPFOFoteufCRxtkJO48r4nprOUZJ1dAfm/RZXVtUnvrSMAtAgTj
+# OruYum1Ulw==
 # SIG # End signature block

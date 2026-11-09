@@ -1,0 +1,10 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Create directory service account" Width="620" Height="620" WindowStartupLocation="CenterOwner" ResizeMode="NoResize" Background="#F5F8FB">
+ <Grid Margin="20"><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
+  <TextBlock Text="Create a domain service account" FontSize="18" FontWeight="SemiBold"/>
+  <TextBlock Text="Account name (1–15 characters)" Margin="0,10,0,4"/><TextBox x:Name="AccountName" Padding="5"/>
+  <TextBlock Text="Domain controller DNS name" Margin="0,10,0,4"/><TextBox x:Name="DomainController" Padding="5"/>
+  <TextBlock Text="Organizational unit or container distinguished name" Margin="0,10,0,4"/><TextBox x:Name="OrganizationalUnit" Padding="5"/>
+  <TextBlock Text="Password" Margin="0,10,0,4"/><PasswordBox x:Name="AccountPassword" Padding="5"/>
+  <TextBlock Text="Requires the ActiveDirectory module and directory permissions. Existing accounts are never modified. Task logon and access require separate review." TextWrapping="Wrap" Foreground="#5F6B7A" Margin="0,14,0,0"/>
+ </StackPanel></ScrollViewer><StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right"><Button x:Name="Cancel" Content="Cancel" Width="90" Height="32" Margin="4"/><Button x:Name="Create" Content="Create" Width="90" Height="32" Margin="4"/></StackPanel></Grid>
+</Window>

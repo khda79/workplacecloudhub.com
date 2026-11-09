@@ -32,6 +32,7 @@
   "LocalMailboxCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\Mailboxes",
   "RemoteMailboxCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\RemoteMailboxes",
   "IncludeRemoteMailboxes": true,
+  "ExpectedNoOnPremRemoteMailboxes": "__USE_GLOBAL__",
   "IncludeRemoteMailboxDelegation": false,
   "LocalMailboxReportCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\MailboxReports",
   "LocalMailboxCombinedPermissionCsvLogFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\MailboxPermissions\\CombinedWithADPermission",

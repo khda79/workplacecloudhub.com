@@ -1,0 +1,3 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Local checks" Width="420" Height="150" WindowStartupLocation="CenterOwner" ResizeMode="NoResize" WindowStyle="None" ShowInTaskbar="False" Background="#F5F8FB">
+ <Border BorderBrush="#B9DDF7" BorderThickness="1" Padding="20"><StackPanel><TextBlock Text="Running local checks..." FontSize="17" FontWeight="SemiBold" Foreground="#1F2937"/><TextBlock Text="Please wait while the configuration is assessed." Margin="0,10,0,12" Foreground="#5F6B7A"/><ProgressBar Height="8" IsIndeterminate="True" Foreground="#0078D4"/></StackPanel></Border>
+</Window>

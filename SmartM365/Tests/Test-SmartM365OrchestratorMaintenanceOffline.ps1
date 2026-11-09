@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline maintenance, scheduler admission and GUI contract tests using synthetic shared data.
 .VERSION
-1.0.8
+1.0.9
 #>
 [CmdletBinding()]
 param([string]$Tenant = 'test')
@@ -300,6 +300,25 @@ try {
     $guiDefinitions=Load-Functions $guiPath @('Set-GuiMaintenance','Refresh-MaintenanceView')
     Assert-Case (($guiDefinitions -join "`n") -notmatch 'Publish-SmartM365OrchestratorConfiguration|Start-Process|Stop-Process') 'Maintenance GUI publishes draft or controls processes.'
     Assert-Case (($guiDefinitions -join "`n") -match 'ExpectedRevision') 'GUI does not guard stale writes.'
+    $guiModule = New-Module -ScriptBlock ([scriptblock]::Create(($guiDefinitions -join "`n")))
+    $emptyView = & $guiModule {
+        Set-StrictMode -Version 2.0
+        $script:SharedDataFolderPath = 'synthetic'
+        $script:EffectiveConfig = [pscustomobject]@{ Smart365Administrators = 'admin@example.invalid' }
+        $script:Controls = @{}
+        foreach ($name in @('AdminMailStatusText','AdminMailToggleButton','MaintenanceBannerText','EnableMaintenanceButton','DisableMaintenanceButton','MaintenanceDetailText')) {
+            $script:Controls[$name] = [pscustomobject]@{ Text=''; Content=''; IsEnabled=$false }
+        }
+        function Get-SmartM365AdminMailControl { [pscustomobject]@{AdministratorsOnly=$false} }
+        function Resolve-ConfigTokens { param($Value) $Value }
+        function Resolve-SmartM365AdminMailRoute { 'valid' }
+        function Test-SmartM365OrchestratorMaintenanceActivationReady { param($Servers) $false }
+        function Set-GuiMaintenanceBannerStyle { param($Level) }
+        $control=[pscustomobject]@{Enabled=$false;Revision=0;ChangedAtUtc='';ChangedBy='';Reason=''}
+        Refresh-MaintenanceView ([pscustomobject]@{MaintenanceError='';Maintenance=$control;MaintenanceServers=@()})
+        [pscustomobject]@{ Banner=$script:Controls.MaintenanceBannerText.Text; Detail=$script:Controls.MaintenanceDetailText.Text; Enabled=$script:Controls.EnableMaintenanceButton.IsEnabled }
+    }
+    Assert-Case ($emptyView.Banner -notmatch 'CONTROL UNAVAILABLE' -and $emptyView.Detail -match 'Running jobs: 0' -and -not $emptyView.Enabled) 'Empty server list must show the real control state and keep activation disabled.'
     $runtimeSource=[IO.File]::ReadAllText((Join-Path $orchFolder 'SmartM365-Inventory-Orchestrator.ps1'))
     Assert-Case ($runtimeSource.Contains('MaintenanceModuleFingerprint = $maintenanceModuleFingerprint')) 'Maintenance module is not monitored for runtime updates.'
     Assert-Case ($runtimeSource.Contains("-Role 'Maintenance orchestrator runtime module'")) 'Runtime updates omit maintenance signature validation.'
@@ -315,8 +334,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB9lsuS3jr6QREf
-# yjA5DaLjBOJV9rpRksoQOFHU1mJ7LaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCArzj4U68Eb0+dp
+# ikrsBLvQdGnoHocT/Q7d5RukJExA76CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -449,31 +468,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIN5lp1Q6Buq93ybBsz8UkOhzoZV+KXruyDRSz8WfaAqJMA0GCSqG
-# SIb3DQEBAQUABIIBgF/XgnPUGYS6vMxrhBF160B9QV2FvXUyzMDTX7bD5pKU3CDk
-# 1KhWAv8CGzu0Ev25zIagsbQ1aPIKNzM4TV4XrbwqHY80dIIrGYSJ6mTtNUZGx9Go
-# 6/DrUH0XFbGniTzEEPx0CZ3rG+gUz0YBAeKeI3wuMN1JMstGjLtqrqV8QbsmTP/1
-# c9p16ExOX/qSE68R6BbI6uKHYPgvXoh3N0LAOcDMOKEfAVk5kgpt+YlCXgVeCRTH
-# xlbo7bBBwiQOuDN3BJorezez1L9ITZ14x1D078YAxS+MzyxdZxUq8hU/KVVxolad
-# Fl2+7mfYJNUfyVjj0RrBeaUs24+nKB57ccg835khh8wpHuVilBgOxdSE4FDP/afw
-# vFsKFwOHgNEO06fBb0ZayQ6AOvrUQbqAirh0fF5Or5LJ+ZRCxhtkiidIPn4Bfibe
-# qmOmLXQckg/n9V5pYsBt1x8/wIGwQhd5D/Y3fA4eQouToZpIhamLsU52vRPvF10r
-# vd0jwY+aVBkXjhMeeqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIA564Ec360W5/EsHzKPwRpPe/lk9lgMkchkYTkqHszVCMA0GCSqG
+# SIb3DQEBAQUABIIBgFIdQ/HC9gjHMPNbSEWU+3ppkjbzHrUdgnHfUUArlbDWbMFw
+# MQaXbIZF2b3yUI+G/C38v2hUFD5FPcwxlcNjrbJlrxdDw8WMkuNUmfmSU7MosqW5
+# dcz9k7a6Gepc9KcLj6FM6spScEvtOTL3pyIIay0DDO+eHQslbhG7w89SnqHNGJao
+# DkiB4QUvqe1goYLuWzBSxAHq4aPo4Pr4VpTQwaAozH1AawqOZIBdimpugYCONJoX
+# ZpMm7IgVAbA3vC4L8LOyILdY+bfvjnExbmKIwvs1798LqOv3QNAulz56GUpVVzB7
+# m88j9U8lfFfFNzgf90duWrPhOWP0CItRYI9IVokIXYLVBzrKjsYgqr2q9T83cx48
+# uJTwfSMjrnj5yxLtl8bwlegk8CVflEwRUihkGFnlrtpc0ZJqDDVP/+z5pRSSANOI
+# r9h9POWl63z/7Q5xv7gHFhSmUpp5gU717qFj+0Ym8TOXQ/JLy4P9rU5EWQybmIZb
+# +7Fsj7vee7kqs7yhraGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjgyMDQz
-# MzhaMC8GCSqGSIb3DQEJBDEiBCB7j/N9PO93VPd1hcdxHmlxE4JEZanUy97bUOaN
-# 2zrtNzANBgkqhkiG9w0BAQEFAASCAgCcu2hEKxsAQbSKZJFjyblhNVGqjreGOIa4
-# cbbzOW517qtjZWFhrAD2saHSog3OXeJr7bstxprI3myDmhJZQrK+ex1MtpgGpRvP
-# bd7u9grSN2KxAzTlUPci8x5WOcKf6axsDNIhgKMRBIbRtiRQbYuew5AOo1Klszgn
-# K/uDpvUDXtS7htNIY4vgzeqVzfmdVb1KOY28V/QN68RTQXXugoRtBJdvOC9WFAO0
-# eCW5UvfJHDUF5k1yXizAi3p89iEYqhUih/3Ci66tRYnc9s52H5DhClQjyGrOjgN2
-# 8r0BEmPWWjR3QcPCGBwmv2u7od5y92912SHEsUPHTypBsDHJgzllK3tcqeL+Bndb
-# bvljyX7wdN05CxagOqYX12PyYz5d5pkIwGoVsLEDnsKc3n49+E96QlWMRQVhnuPJ
-# 05WSDwoNd2unm9CGkq/ophQubSTkAP/7/PxtbfJH6pB+vtSLfBjqcaLYYBCq5FXq
-# p4QAz9DhWbWtYAQg4mFU8npR7PZ+S7sVSHFjAo5BO+bhNyACykaqprVEe9mCDbc3
-# h+X3sDZozsIqRdUywty0a12C81W6mLGHuahLF8KuopsqK5aFPqk2c5tjgc0G2NXT
-# Ab03LAda5N3AOnlwkxPWsafEE9CvJuHdXGkBalElgvRUf28wwOItCNvxd7V+XwXw
-# Dq/0ysjKTw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDkxNTE4
+# MjZaMC8GCSqGSIb3DQEJBDEiBCAryE3wme6P2gKhbIyllfhszjQ3fTjVo1t78bq/
+# W4phzzANBgkqhkiG9w0BAQEFAASCAgBpafuhxs3udhkoJksllLm48exlU9fypxQl
+# BFo6MdETkUC5isQQkKeV8caQBzFz4AHbkyBnee5qcURE3WRyL8htrFvCGmPmhpRF
+# DCPw8qS9zqRnVRxZING+G8R40+PO2t+3zO3/7XiP767JhwyR251tHulzRvNuFTz0
+# fPHib74xNCNMWgaecjxb434jJtJc8vHNMJhdiEtq8FWDsVse45K75MgLpny0dGuz
+# 3k9Izyg/60MLO0tKp3iIYMuCH2JY3thZRtFs3SKOr9NxK049W3jkY/yBCWewj9T+
+# zaoB6RoSxzLIk5VmkwDxI9MJpFCwWuFTzvT3u5QrtpLmkntXPxO3/d1orhN4dBjh
+# CzcQ5vpxJZAe95tzamDh4eCxoj64ProPeOeNTX61brvVdGh4FsZfufDNab7XrNqs
+# tHDG7H4IDDJSXwjyck0ordvYObK8Cl4nZrbqjgwmjFUsM4VZBnEFIu4hab4tnl4L
+# 8pvPVygHxwZ0j8yHxsidzQelH9/prjIKISSI0v3n6Zwijw7PCq7Q/j2j5RPObXPO
+# elIoqzZe+MXD34+s+m1hCHi145Cu3RHUmhp/JGYhZcEJiq97XdY0vrc0IugnsyhT
+# wxm7iE+0xMootFuSaMoyQnvYEefphq48CvvFuMeSMk8V9OKjdL0/gCiU5TmpQxfr
+# l3fA1DXJbQ==
 # SIG # End signature block

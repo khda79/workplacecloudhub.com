@@ -17,14 +17,14 @@ Forces a (reconnection) to cloud services when specified, or auto-connects if no
 .PARAMETER InteractiveAuth
 Forces interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.16
+1.18
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ExchangeOnlineManagement.
     Minimum permissions: Exchange.ManageAsApp plus Exchange Online app-only RBAC allowing Get-MigrationBatch and related migration user/detail reads; Global Reader is the default read-only service-principal role.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.16
+    Version : 1.17
     Author: https://github.com/khda79/workplacecloudhub.com
 Date: October 2025
 Dependencies: SmartM365.Core module
@@ -235,7 +235,7 @@ function Get-AllPreviousCsvPaths {
 #endregion
 
 #region Module Import and Initialization
-$ScriptVersion = "1.16"
+$ScriptVersion = "1.18"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoMigrationJobCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -368,7 +368,7 @@ try {
 
     try {
         $results       = @()
-        $migrationJobs = Invoke-WithRetry { Get-MigrationBatch -ErrorAction Stop }
+        $migrationJobs = Invoke-WithRetry { Get-MigrationBatch -ResultSize Unlimited -ErrorAction Stop }
         $maxItemsReached = $false
         if ($MaxItems -gt 0) {
             WriteLog -Message ("MaxItems enabled: migration user export will stop after {0} rows." -f $MaxItems) "WARN"
@@ -377,10 +377,9 @@ try {
         foreach ($batch in $migrationJobs) {
             $batchDetails = $batch
             try {
-                $users = Invoke-WithRetry { Get-MigrationUser -BatchId $batch.Identity -ErrorAction Stop }
+                $users = Invoke-WithRetry { Get-MigrationUser -BatchId $batch.Identity -ResultSize Unlimited -ErrorAction Stop }
             } catch {
-                $users = @()
-                WriteLog -Message "Error in Get-MigrationUser for batch '$($batch.Name)': $_" "ERROR"
+                throw "Get-MigrationUser failed for batch '$($batch.Name)': $($_.Exception.Message)"
             }
 
             foreach ($user in $users) {
@@ -493,22 +492,26 @@ try {
         $merged = @()
         if ($dict.Count -gt 0) { $merged = $dict.Values }
 
-        if (($merged.Count -eq 0) -and ($propertyOrder.Count -gt 0)) {
-            $empty = [ordered]@{}
-            foreach ($h in $propertyOrder) { $empty[$h] = $null }
-            $merged = ,([pscustomobject]$empty) | Where-Object { $false }
-        }
-
         if ($propertyOrder.Count -gt 0 -and $merged.Count -gt 0) {
             $merged = $merged | Select-Object -Property $propertyOrder
         }
 
+        if (@($merged).Count -eq 0) {
+            # A successful empty query is a valid zero-row dataset, not a synthetic blank record.
+            $columns = @('Timestamp','BatchName','BatchStatus','State','DataConsistencyScore','Flags','WorkflowStage','TriggeredAction','BatchGuid','TotalCount','ActiveCount','StoppedCount','SyncedCount','FinalizedCount','FailedCount','CompletedWithWarningCount','PostMigrationSyncCount','PendingCount','ProvisionedCount','ValidationWarningCount','ValidationWarnings','Message','CreationDateTime','CreationDateTimeUTC','StartDateTime','StartDateTimeUTC','ExpirationDateTime','ExpirationDateTimeUTC','LastSyncedDateTime','LastSyncedDateTimeUTC','SubmittedByUser','OwnerId','OwnerExchangeObjectId','NotificationEmails','MigrationType','BatchDirection','Locale','Reports','IsProvisioning','IsLargeArchiveOnboarding','IsOnboardingRestore','CompleteAfter','CompleteAfterUTC','MigrationUser','UserStatus','EmailAddress','EstimatedTotalItems','EstimatedTotalSize','FinalSyncTime','LastSyncTime','CompleteAfterUser','CompleteAfterUTCUser')
+            $emptyExport = Export-SmartM365Csv -BaseFileName $baseName -OutputPath $OutputPath -GlobalPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -Data @() -Columns $columns -Encoding 'UTF8'
+            $outputCopy = Join-Path $OutputPath ((Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName $baseName) + '.csv')
+            Copy-SmartM365FileAtomically -SourcePath $emptyExport.TimestampedPath -DestinationPath $outputCopy
+            [void]$global:csvGeneratedPaths.Add($outputCopy)
+            WriteLog -Message 'Migration query completed with no user rows and no historical rows; published a header-only CSV.' 'INFO'
+        } else {
         ExportAndCopyCsv -BaseFileName $baseName `
             -OutputPath $OutputPath `
             -GlobalPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') `
             -Data $merged `
             -Encoding "UTF8" `
             -NoTypeInformation
+        }
 
     } catch {
         $msg = "Global error while retrieving migration jobs: $($_.Exception.Message)"
@@ -570,8 +573,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAKzsz+7uhfXkdq
-# +CUTHx42VjC7vuBU9f/DY8no4ubz7KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB9D4rvupfkbDgw
+# FVI0UOjIUBkm7Z92lwV+FJjqPAVywaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -704,31 +707,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAnZqOODK7ljw0aMA1vtRRU4/tfhEijOTLL7wKt0g1wfMA0GCSqG
-# SIb3DQEBAQUABIIBgGbQIuRxFQQKf9OoBkl5Rp6B2x387egmnwUWiT1oKLUBuw+6
-# nVE75M0rTR/wIDEDlWpvChBlTqaDBFB0md1SVinI3hdWAWt1kVVkd0SEP9ifL+5v
-# 03XMYppdFmA6Xm4qEob0jEpe1EfqXjC8w7TClaScFK/XRG53qGP9OicxHDGftmqi
-# /q6Stf49hzmToRiSGQZfthyvpgvjUnI8gVjEEWewMaxIKeY6AVhGgQwjMEl06StE
-# jM2/5TMa1qGOJi8fB+7EH9b4hIBXovnWRgyNZkdjzgLkjzcAF3lwLrp1d1EGvCqr
-# YJ2mJWu8EhCOGSCYdDpb0RoPen3eLefofNiqzorauMaK3eMJj/6odiR+04S3rRMb
-# dJvlxMxD6OeBoRWRQF8IAvunPsPaR4So9Zh4OUHdEHATBX/eoYUMrQmfTwo+ukRY
-# 3k+gzMwtuDDiVpi5UfGkzpu7bRZO+yEGkcm3aXQtmSAKytdrE/ji3sOoI0342esP
-# vFvu8RLZGWQMeb6mWqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEGvzRiYBckLGglPmvIK25XYWPtCbMYWm12pCpPyoMm5MA0GCSqG
+# SIb3DQEBAQUABIIBgBKCxq27pwtzd7u7QnH73fVBcGPqJ4xB+ukJKLjcTA2sxT8C
+# ePg33ECGnSmwnStzZeWGqkvtTvnPwxL+Mm0/c1fJ+Jsf3OslqWMt4ZtQNjMD68C0
+# teyv60HDU7BlQ/h4B8uuhBIVosjIuFLNPCbB4sj33VB9MMWfyfYLxGR6SWC9qNm5
+# apm/loDxJFu+Zr+aIG8tCPU6QK3IVCcZYxz1PQmG4I2FuNFP4Plq5JHhAvk01nGJ
+# AlS/dI3NtMhtgYAvjGEQKQLMQtjiqWm9Xc5WipfagusPX2pQtJLneGAIy8KF0J99
+# 8fcqZB6Ds+kPJ62reb296CVRSfuvZ3NH76zwgLkij/PzalkgZi5OXYTr9fUObAiz
+# o2Y4lgHlZ5M/0WKt3o7oQJrBamV1PJMze0/YzuqxcE92K7YSM6gbqeu9FlVhIzjZ
+# IaL0/CbVzYZPNBzJrpbDFREwr2oWXnDo+4KhIQwe4gBl2qjWGPRQJksaGMq83wzW
+# oLLmJ1f/GYobJPG28qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDExMzA1
-# MjZaMC8GCSqGSIb3DQEJBDEiBCAadgmNp3zzYZZb/0py0lDUjLflit9D5vwseQBV
-# VgCZRzANBgkqhkiG9w0BAQEFAASCAgBescPqisO0GZC0h8HlhVYgM6lZoTMEc3nV
-# 6PW7fJeZZagfRTObp0d5v8B5qX96JRo4E5/WCrrepkcviaTjpvwGq1lP8mCmQlVt
-# qlYNd6kF9xxveLaKKojaGvsxA8KWcYncb3nKKB3lykKwY+fXoT7dyW54WVlb8u3+
-# UFyyqE6CoKlLYzCmmCSd85yCZhBdkqCDTx9tACt1bEZvNIqG22e7roxOmZnhOAvX
-# N8HSDodH4gD6QkKJGEbBE1p8xy/wKbKt8jv0B6udjqnKKP9WenynSr5LMUOMo6ij
-# 9FX+R5ssJA0lyr45m9IhP/fUqALk3CtYR4rykDJbgj+2kWpu32icH6PKCIRH84jv
-# q61fdbpLgEjXSa+frLdZddVWSqUclBYB4xfYSKysNLexxwB6EEAsD5aylB0vz3TZ
-# tU4JkjO5+0pQGaHK6hVjZfY8aFdZXXxV7NTt7txBItp64ElO9RYF1oZoYLfdFK4D
-# ljq4+nUqUzv9uyTvDkJzX8+jJSAVyc8DFLZII0eSsRE9dtgYrSXYX/V7YzTCCmAI
-# s66ermXaUH6QNY0s2Ap5GcM7c/LfMr49dikdnh+2Z732ujVw4LbjBp4DSy4CQugm
-# r7PqBVN1ZC/cw7ncuRoulCtCZwhBbNLuI0xXOKA3Vn2emVukWr/CtP2AVodE/iwv
-# XJyS5Wxn1Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDkxMjM5
+# MTNaMC8GCSqGSIb3DQEJBDEiBCCn2jembZgsUrZJ54yj+C8Nzv66U614fPDP77A7
+# MWdLkzANBgkqhkiG9w0BAQEFAASCAgC0Mjdt3Zc/Ckl2Q4J/7wl2fdUUKQM6BDr2
+# o7tFdL/d+GylbS74O2+sjzCppJGpUB7lw1+DSbOsBcg2aAB5bniqukSajmzVdccx
+# NmHudwuzKwpuow3I/XHO18Z72jPZweFFiNA60ZhoWKHw0wn+Vrxz4Mc5bUBgfRtC
+# 7PoONQP+KAVUh4TLWXLteEW+NxXgWAWELtTEdfFWZqQzTgdNyywmLpQ4v7Y+tHAF
+# NhmP0P8dDwq3ZyR5oHf2wnU6l2wTW0SL69d/eDkSCeOF5kOEAz433SXZhasGfh0U
+# uqFioY9KNtn+fRTVAOCe1UufFvt8RvodhcgOr1GEX4JjextXYGS5OqXg4izzk/i4
+# bDzETpAa37UTULhZe7PZFQC8LLHlk/B3Lf1iy5uvSqPlMxkmqKcYofCOoIXpHiel
+# o0NPtgk6IrH8EZcXheeb1Gec9uwQai8rOE2P7IRlfkYQukvRgbmsF4TVM7nn4Chb
+# YFszkAHoCKbLT8HgDokMcsPxN75SIHa/vp+S0gqs/bzRw19J+DPoBdtS7wAQa8GC
+# eT1eK1JBAzr0nhgZndCyfPPEdiq069Q2tICy63TyCmE5p4ClzrVhnazE5AvY9Dtl
+# AeMPAwRcGC5BEg7Uh5Bk4rnnQGCel+lPZpBOFlJjZn4OIqT2tpnTW4r0djWCJOPQ
+# muCxGykHIg==
 # SIG # End signature block

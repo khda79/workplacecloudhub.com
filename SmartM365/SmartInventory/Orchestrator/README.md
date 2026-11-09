@@ -906,7 +906,7 @@ Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode`
 
 | Parameter | Description |
 | --- | --- |
-| `-Tenant prod\|test` | Tenant profile key (default `test`). Also appended to every job command line. |
+| `-Tenant <profile>` | Tenant profile key (default `test`). Also appended to every job command line. |
 | `-Connect` | Passed through only to direct target scripts that declare a `Connect` parameter; ignored for unsupported scripts and launcher-based jobs. |
 | `-DryRun` | Print the next-24h planning per job (plus pending catch-ups), launch nothing, exit. |
 | `-Once` | Run a single tick then exit (tests). Launched children keep running detached. |
@@ -933,7 +933,7 @@ Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode`
 
 The installer can be started from a standard PowerShell session and requests UAC elevation automatically. It securely prompts for the dedicated service-account password; the password is never accepted as a command-line parameter. `SYSTEM` and `LocalSystem` are explicitly refused because a privileged task must not launch repository files that could be modified by non-administrators.
 
-For interactive setup, run the manual catalog entry below. The PowerShell installer itself requests UAC elevation, prompts for install/uninstall and prod/test, validates the service account, and asks whether the task should start immediately. It runs under Windows PowerShell 5.1 in `Direct` mode and asks for its tenant itself (`PassTenant: false`). `SmartInventory.cmd` starts from a UNC share without `pushd`.
+For interactive setup, run the manual catalog entry below. The PowerShell installer itself requests UAC elevation, prompts for install/uninstall and the profile key (default `prod`), validates the service account, and asks whether the task should start immediately. Profile keys contain 1–64 letters, digits, underscores or hyphens and start with a letter or digit. It runs under Windows PowerShell 5.1 in `Direct` mode and asks for its tenant itself (`PassTenant: false`). `SmartInventory.cmd` starts from a UNC share without `pushd`.
 
 ```text
 .\SmartM365\SmartInventory\SmartInventory.cmd Orchestrator-ScheduledTask-Installer
@@ -954,7 +954,7 @@ The default registered task path is `\WCH\SmartM365 Inventory Orchestrator - <Te
 
 The installed task:
 
-- directly runs `pwsh.exe -File SmartM365-Inventory-Orchestrator.ps1 -Tenant <prod|test> -Connect`;
+- directly runs `pwsh.exe -File SmartM365-Inventory-Orchestrator.ps1 -Tenant <profile> -Connect`;
 - is stored in the `\WCH\` Task Scheduler folder;
 - starts five minutes after server startup;
 - starts daily at midnight and repeats every five minutes for one day;
@@ -975,7 +975,7 @@ The service account must already have the local/domain rights and file/certifica
 
 ### Manual configuration
 
-Create ONE task per tenant under the `\WCH\` Task Scheduler folder. Configure it to run `pwsh.exe -File SmartM365-Inventory-Orchestrator.ps1 -Tenant <prod|test> -Connect`, matching the action created by the installer:
+Create ONE task per tenant under the `\WCH\` Task Scheduler folder. Configure it to run `pwsh.exe -File SmartM365-Inventory-Orchestrator.ps1 -Tenant <profile> -Connect`, matching the action created by the installer:
 
 - General: dedicated service account with "Log on as a batch job", "Run whether user is logged on or not", "Run with highest privileges" if the inventory scripts need it. The account needs write access to the SmartM365 `Data` folders and the certificate/private key used by app-only auth.
 - Triggers:

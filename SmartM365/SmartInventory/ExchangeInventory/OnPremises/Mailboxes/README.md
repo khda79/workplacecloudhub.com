@@ -26,6 +26,8 @@ Exchange 2016 local mailbox inventory script with integrated reporting.
 - `SmartM365\SmartInventory\SmartInventory.cmd Exchange2016-Local-Mailboxes-Inventory`: standard inventory with AD permissions (`-IncludeADPermission`), the orchestrator job.
 ## Configuration
 
+For a tenant that has no on-premises remote mailbox recipients (for example before hybrid deployment), the tenant profile can explicitly set `"ExpectedNoOnPremRemoteMailboxes": true`. The default is false. A zero-row remote export is allowed only for a full, unrestricted run when the remote-mailbox query has no warnings, a separate forest recipient query succeeds with at least one recipient and no remote-mailbox types, and neither existing current export contains rows or invalid evidence. An unexpected empty result, a warning, a conflicting recipient or an existing nonempty export still stops publication. The resulting CSV has its normal headers and no fabricated row. Review this setting when hybrid deployment begins; it is an expectation about on-premises remote recipients, not about cloud-only mailboxes.
+
 ### Exchange connection mode (1.70)
 
 `ExchangeConnectionMode` in this collector's local JSON configuration accepts

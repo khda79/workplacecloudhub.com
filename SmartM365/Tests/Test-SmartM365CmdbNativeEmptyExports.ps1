@@ -137,10 +137,11 @@ try {
         $actual=@($table.KeyValuePairs | ForEach-Object { $_.Item1.Value })
         $actual+=@(1..10 | ForEach-Object { 'IsMemberOfConfiguredGroup{0:D2}' -f $_ })
         $actual+='MatchedConfiguredGroups'
+        $actual+=@('WhenCreatedIso8601','WhenChangedIso8601','LastLogonDateIso8601','pwdLastSetDateIso8601','LastLogonTimestamp')
         Assert-True ((@(Get-SmartM365AdNativeColumns Computers) -join '|') -ceq ($actual -join '|')) 'Native configured-group schema drifted.'
     }
     Test-Case 'AD workstation projection retains and counts missing DNS without widening OS scope' {
-        foreach ($name in @('Get-ADStringValue','Get-DomainNameShort','Get-NormalizedDomainAndSam','Convert-GuidToImmutableId')) { Import-TestFunction $adAst $name }
+        foreach ($name in @('Get-ADStringValue','Get-DomainNameShort','Get-NormalizedDomainAndSam','Convert-GuidToImmutableId','ConvertTo-InventoryIsoDate','ConvertFrom-AdFileTimeIso')) { Import-TestFunction $adAst $name }
         $query=$adAst.Find({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Get-ADComputer' -and $n.Extent.Text -match '-Filter \$computerFilter\b' },$true)
         Assert-True ($null -ne $query) 'Native computer acquisition missing.'
         $pipeline=$query.Parent
@@ -440,8 +441,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDQX/spXkhsblzo
-# TNExeItUGRnWE08YCDFXnyqRy3rwtKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1lJKCJUjwZ+c8
+# 6D36Mlc6oRN+TX8eIbtAKLP83KZj/KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -574,31 +575,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIP5JUY2Fz0qBYTAPhhobp0mUXV3Lo3IvOnXXqFjv70GpMA0GCSqG
-# SIb3DQEBAQUABIIBgIzj0lfDBhLiXVkj28OzlEb28QaJjv4KRZMJOqd+8d/YvVq6
-# XQ/ny2FNElBTWbY8H6eA/n4BkXaKf5Sakjzr/8ANAompaEIQkyZWc/oKBSiDKg8Y
-# 14iq382M/Uqmx0KtMJ1IpH5dcvavmwxlz5gxxd8uoUpE2D9BQcWPncwvZLTBqDbY
-# Sn3UHxVg2QTPHIlkpN1CZY/708+NjIKwvy3dm+UoUn3Xwh8s3b+TaskqgJU1ej/X
-# 5WuETqQ9LQBfy1YeEZ1zo6WqiM3OBaQAuE4XOE/xu0vvdE5842SsetQDgRKCzhi2
-# VuvMiZOsT3PzmWDEwjbN4ap19K0jwf47jO3UXGEgtpHMS7Q5FyBhZnTAk7MvPJt/
-# sagDhMbNrXmaKBHpa1YuXl3a94+A9ahrGLKQdjmLz8Vf7qOZS54ejBmJsyPVsX0o
-# Yz6WRCpg/KTSEVmO6LGs3hGM66LhaRd4Um5+qDa8JSHUTF3DFzjUf7nTb9HTqQrb
-# C0oYMqDf6S9D6vTGSaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHzGLnBorsgQTcHFEQjdm4t7IYwNDATB3OXDfGcl7PqJMA0GCSqG
+# SIb3DQEBAQUABIIBgG1lnYFMhP3hVUvzC0eHQGjfyzVMUhcf8mPBSMpRyFCBUwYz
+# p14ovqsmWNyUQfIMpRJQYdSWtAOWBOJM5CRyPvbZq7dbT3S6LL6w4Zs1MAfxBAVO
+# 3amjWERhVRobudSLEULQokVkCrUOeuuEphyMRej0WKtWMHBY4tz2bivBpkhN956T
+# tvpiOO0y/jgKkX4R9U56MIQplBmKL+JGyOPBBAvLTy6Z4JdNoxdZ48dAADFHZCpd
+# qXhsDS/Jm+47peHH92KFfn3hDboykHVTqSvpT/c/urm6b6atL5IbnGabZFGbgO3y
+# F07zDQO3l4Z6FZoUwGpmqJBhibjIqcEGLAA2TkhsE/t66E7sJQB1AxPGsu4mIldR
+# n3a6xVwBjoMdhwgk2NDa46UyGIUf8DwkHCERoc7BudiiWpqUPNznpdg3/SWf/whV
+# cSljOFVJ03T0BUAdgyUNoP2GZ9i5D5QN1tKnipGenWHgBtsZFBSof6KP1uYOhqAe
+# 5MD1tKPj5lIGPCzFWqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMDMx
-# MjRaMC8GCSqGSIb3DQEJBDEiBCCUjxWogqZzJq4EP6wP0v59cRP373TsWwtAujcI
-# AyH2lDANBgkqhkiG9w0BAQEFAASCAgAGpxa8bz5bmt8aefmXRNKmOxgH5MleDH37
-# GS7fzc0xGV6ZoMDyHuZEBPIsUSDJYodz6kHbU4ak2mVZllOz4PbSTMQ3SxDDAApe
-# rmmFfhzl6nSQnOsuyxQkv+Z0BEmMI9lOtuPOy8UQeFYC7ZPV1IROrwOW7RI9YvGj
-# vt9CmumEq9FPyITL7+Nks87CDA9C7CWPWkq95jOH5wz9nVazqBPCFL0wV8eOv3O1
-# DlC9xXES7i/yDZUo1YRbpHBbQ2sQ5IOeGdRipGxEoKHZztynhnAc588heAW6263T
-# 0fQ1N9MzFNCOOWFhx73w6ucPj5RFdv95OzxPA07Bs026pPtqme2D1P7NdwAZjx4K
-# zn0o//UIBNfPO5tHgcV8v8HDE73gQJpgXnA4KktzIU+yJFz35cdN1P75bsU1ubyf
-# ajknZLANjRrmGvw2YXk4jaS1Vt9mxHScZyXcgLSXHQ6cbTdO5Z8j5xB2NO9u38N3
-# 50udGjFKHaGhxBAiMdcPTvqateSfPuHXUFCxTX8M5Kneq7aVUec3xz75bnM4b+l/
-# C4Jb34haLkmBA8uHTdM2KdWZ5bfcrkhdbhNo1HcuKsYK1ltdhgFDjRjvwQFf/y1k
-# ZylmsO/6CPDoiBLY/2ffVT8IG04OwOF9RnZIThDpLYE9A3d7nJSx3d/WFkfpiO37
-# zfz1D7FjgA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDkxNTE4
+# MjdaMC8GCSqGSIb3DQEJBDEiBCAZ0NM0YqH+qWRtRoM6QtekCAe/HFeqLesRJs6C
+# y4qXCjANBgkqhkiG9w0BAQEFAASCAgAkyVv4NC07i9CLZ2bURmoY/xkW0hoRvFw4
+# mI4zi6blU3XSlgHe3v6PEDqBsJJkV11nZFRARmCqj388G/KOCRQSJDmyz0kd2wzV
+# 20RqKWWRm8wgPcsjrD/3sbL9oBih22zMu7v4duP0nmyYTyS/5tbgIi+bJdR9/tYx
+# 4YPJLrQUiXKvgSZEXedGgBKpc1ksdIQn4RSZ3p/Yxkmt333tTbTHSTNT/ouGQVsw
+# glt52OpP7dNk2AEXwA53Qy0OF6eC7ob/DSDXRlMqDq7cXKbz34zAGPU13E3E822o
+# 53t3fd8r2u4U7KBgBxbDRpaBYfq+KrdOTuErKCkHTOMF7/IKkETbLb1b1gp5pPc/
+# BQlO5/ghYJUsGOE5zL0gvF277SvkOaCgtf7AELuUo5dH3RqPTUfukoSaPV7QSkXz
+# Ghd8vKgN9gUy6KH9BjoMYIxBuaZdrDEtKEOLBy+rzGrY2BAAiIK8wlRlu/2HUwJL
+# RJ2LF9No+lPox15XcZYpIi6tKGD3V15imZeyXSECbnDLcgJV5CpeypU2tIzsLWYj
+# gxr0MTleWurW6+lrDN5lbjx681DM7GTwfY9ZOHXGVHJsbkc4qExTQtWBqHITLj9q
+# oR0onqsWZEKweWVfzP6YjzftmnhEpIfya9/B4eVRS8wM+p3HQ5o7M4UYuzoQP18F
+# KnqlRI85vA==
 # SIG # End signature block

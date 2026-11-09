@@ -147,6 +147,10 @@ $check = Test-SmartM365AcceptanceDataset -Rows $future -SampleSize 100 -Columns 
 Assert-True ($check.Status -eq 'WARN' -and ($check.Issues -join ' ') -match 'implausible date') 'Future creation date warns.'
 $sites = Get-SmartM365AcceptanceDatasetSpec -Name 'SharePointSites'
 Assert-True ((Test-SmartM365AcceptanceDataset -Rows @() -SampleSize 10 -Columns $sites.Columns -AllowEmpty:([bool]$sites.AllowEmpty)).Status -eq 'WARN') 'An empty SharePoint farm only warns.'
+foreach ($name in @('EntraDevices','IntuneDevices')) {
+    $emptySpec=Get-SmartM365AcceptanceDatasetSpec -Name $name
+    Assert-True ((Test-SmartM365AcceptanceDataset -Rows @() -SampleSize 10 -Columns $emptySpec.Columns -AllowEmpty:([bool]$emptySpec.AllowEmpty)).Status -eq 'WARN') "An empty $name response warns rather than falsely failing Graph."
+}
 $mailboxes = Get-SmartM365AcceptanceDatasetSpec -Name 'EXOMailboxes'
 $mailboxRows = @([pscustomobject]@{ Guid = [guid]::NewGuid().ToString(); PrimarySmtpAddress = 'no-at-sign'; ExternalDirectoryObjectId = [guid]::NewGuid().ToString(); RecipientTypeDetails = 'UserMailbox' })
 Assert-True ((Test-SmartM365AcceptanceDataset -Rows $mailboxRows -SampleSize 100 -Columns $mailboxes.Columns).Status -eq 'FAIL') 'Malformed SMTP address fails.'
@@ -337,8 +341,8 @@ Write-Host ("Orchestrator server acceptance offline test passed ({0} checks)." -
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAT2sTL92eZ8bpp
-# HPLpLSu7HVnQdLgsNG3f1KEf07pBGaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBiWN+LUdRyICKI
+# 8d3AQjrO1qnV3/NE4a3A5UXM+b252qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -471,31 +475,31 @@ Write-Host ("Orchestrator server acceptance offline test passed ({0} checks)." -
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOBhyv9vIitp+kH6CR2u3Ltmq/jm7eMmNew2aDL/MFpzMA0GCSqG
-# SIb3DQEBAQUABIIBgG0qt2VR/T6RkD5/bGLiBbQkKLDAmXAmetza82f46xNTuIdT
-# GJhVUC5j3gbIgZsA8CrDmmxMRKg9VmRAjZZshWwEdDmJ3ptIh95KYZouTXy321YD
-# CWYosI9yLiL7gaXFMu4gELhn5htRzHWD8D2b+hWHeIKmrs43uKIAXKpkeH23iPe6
-# zJHU7x8dCKcwD5QZZ/qq0H2gW3KwmijqQqG0s6ZW1zO0/ptOWbgo4tok9RZyDql2
-# Ie4DcvX7u9RwRGqrQJmIg/+BnO/xtGsZHfrllYqmnXaaIJ26WOa3zVMJDzM4I+UU
-# UR1odFM6g3z3s7+nFI9jea0Vv+NqhPR/YyWZpYQKd2I6seZpmv/3DNKci9s8u6hq
-# tFJ2fkd4lj3vfUB5cNeqXPkrTCHdVRfYH9P9B1nGbPQ6txgcB3VNjalDyKSeRzZl
-# mMYx+uWBowWt0lLItF3VqMLYV4F7grtGCtqijy7w+7G27fi+xtGhX8EOEOVEEiK8
-# Z/dN41R3fRad9MivL6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDkOGCKj6WG1qBPlOLeRl2gOONxDtacaUyMl/q0MHya7MA0GCSqG
+# SIb3DQEBAQUABIIBgHnzK/S5NES0yt8y1U/Cz2sWCEE1nm3cYEVTkTbZsNBTN+3D
+# AX3jj+ehEn8vAniOHdDeDk448IMpNeHpZ0Bc/rIOMpplXJLD5BqRhtl561pdaF0x
+# Q91ue7F2+qoV0lr7w4b4udmy0a7cLn3gI2RE2a2U0Snr2doLp1hMh5qXF02ZCPT0
+# rHz2BdXHxoOLlAn22PCckyZcE/LhNWhclKCd47oKOz1hx1ZNp99rY75BVtHa6CVP
+# 1SZ4EoZU/PYWMk6DIvAsuSmnlKXg2k2Vw2ROXUCqBT+hWcMLOLNI+yjPMfE5EIn+
+# QWcLdIoa53FJ8dE3g1x8Zl6UZCX2zF14c39oTffLwnqmST2rHMMB45JfEheZgMF8
+# rDfqBaJ4Hv3smnOr8yoPKDxFb3r8w3hPKxiLnsZ9iovQ933+IEV6p9DGqi4uuXGa
+# lca3UVLzhJkGRNyWLp+UZDErU37I4emchmkYPPESdUJ9Hf0BfROWb5mHOlcIWAC9
+# STNbsD445rZrW/ulBaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzAxMjI0
-# NDVaMC8GCSqGSIb3DQEJBDEiBCA3Q7u/VhG9Z7EsmkTz4U5rzIGqcygT7mU3V8w3
-# 7t2VMDANBgkqhkiG9w0BAQEFAASCAgBSQU9W4Q1BfeCqllDRREnYZ/9tNf789AMl
-# wRM1kgY0PCT7Z41DS6jFzvAUnAbaDOniDyKKMwdd0UlHBZUXpvqdpjKbP5n1H7xo
-# cVOKyCdfmNxPeGX1pixHzqkDP/MVKYhh/7liUCLYQIDHZxmAsMQUpJ31jDDd4jIH
-# oiRRC55+Yccfmzxvoc1PgLisc3bb1fSYfMmGSVAB7iD621ywd/vTFOuOV3JCZ2UJ
-# oRXgvS1XzJBUofuH79P34qKSksQ0aKjGSRBCCoTpo0Xfkf+wzvYDxAV+sOuLG1l+
-# fF3FQSXeFNkOZSSRmPBRnUhb3E6+4q6MK0k95shZuaeFN3CdKr+rHJkfdgp6TiDk
-# BTmS6UkajXmV6PncA5F8R/wzhNe0EP5chdz0nukeon9wMoRf2qoiHHfcleEw09ra
-# NbIUw01wgV9JucX+qeckpGDc8oURSN+H+ED+tXowr1FkT5cLS/cPUlMYMEN6hYQY
-# YVTPzIVYP+JoGaZy0Tk7hBi9GY3ejQMyiO6ULJXLnCv4rTjckieErIddQCS9CUU6
-# c1/INZrQ33JVOeuiF+zPFqfI7Vi/D42uaKaNlKpiWwhYHzqXSHKZ59Phn9cDAU3a
-# h0+mV6h3MNsdNZX2GGEhO2xsorosVMJ3JB99W/j8y56TscBlx8w9sD1LIUcY6hGm
-# V384qCWXyA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDkxNTE4
+# MjZaMC8GCSqGSIb3DQEJBDEiBCBoZjtMDf2qqeIvBgkhTOWoif+Htymwu3gC0inS
+# ZeniUTANBgkqhkiG9w0BAQEFAASCAgA2CalK8PO/0dPeghXr4uKrZN9iD8nKa37I
+# aRLvYNMThFTQUy/5lMh9eXM1DisZNjk5VmilENVyOfE6sgVCbduPFMkXzM3/sFQB
+# sRYxSWs3/TDrqtZVp//nuhCves2OHXTirReBXbLIOkaYlGyVD2mfxOrfi9hk8J3Q
+# +vkuG8y9UC7roOYLnJY5k+i1ILCFWaqap/a6frBVXWy/jCsVku2eY4iLeQu3a5e3
+# 6zQbwexRv9c79oF/8XRcEIKNsq9owlVUYIvmBa2Aot/KQLh23IIym2DvFIItNvVp
+# pmhknrRFNs8trIlVIFa4/Ye4C+OUmP2HYxoKi19xjk/FBw/NVBRMFti/riMMqZjX
+# iuRko9KWy8QT1Mh+f/thucSs4TnitJwmbrKTlqq5T7C6mSfs0YZLXKfVNHbOXaR3
+# BV3cnOG+CDdKE259urIbmiqYv9DGBItBfFMq6PYrSxRi+ypBQFfNY86TuUDZTl1b
+# 4+MVsnC5l5x5f+m0NNctQ2n3JmCQBy8AKdbqI92UwSKnICYo5DFEzeBKu9xdWil7
+# 4HyDKMdwcvNCfqQxSlyRuloPOPxCzSwgTpXaPDBLXDXIrN/57mRrnPxJUeg1DEzM
+# cW/fP4MQk59T94nKJ7Kf+E0nYdx4tEU0iUpts/iRzv6jX8gwaig0407F4AEsqUm2
+# lj/DkaHIkA==
 # SIG # End signature block

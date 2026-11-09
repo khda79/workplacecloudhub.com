@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Installs PowerShell prerequisites for SmartM365 SmartInventory scripts.
+Installs PowerShell and Python prerequisites for SmartM365 SmartInventory scripts.
 
 .DESCRIPTION
 Installs the PowerShell modules required by SmartM365 SmartInventory scripts from PSGallery,
@@ -36,8 +36,12 @@ Shows what would be installed without installing modules.
 .PARAMETER SkipImportValidation
 Skips Import-Module validation after installation.
 
+.PARAMETER AuditOnly
+Inspects module availability and Graph version alignment without installation,
+repository access, imports, or changes to repository trust.
+
 .NOTES
-Version: 1.4
+Version: 1.8
 Author: https://github.com/khda79/workplacecloudhub.com
 #>
 
@@ -51,7 +55,8 @@ param(
     [switch]$AllowClobber = $true,
     [switch]$SkipPublisherCheck,
     [switch]$SkipMicrosoftGraphMetaModule,
-    [switch]$SkipImportValidation
+    [switch]$SkipImportValidation,
+    [switch]$AuditOnly
 )
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
@@ -61,6 +66,72 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
 }
 
 $ErrorActionPreference = 'Stop'
+function Get-SmartM365PythonPrerequisite {
+    [CmdletBinding()]
+    param([switch]$MachineOnly)
+    $candidates=[Collections.Generic.List[string]]::new()
+    if (-not $MachineOnly) {
+        $command=Get-Command -Name 'python.exe' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($command -and $command.Source -notmatch '(?i)\\WindowsApps\\') { $candidates.Add([string]$command.Source) }
+    }
+    $pathValues=@([Environment]::GetEnvironmentVariable('Path','Machine'))
+    if (-not $MachineOnly) { $pathValues+=@([Environment]::GetEnvironmentVariable('Path','User')) }
+    foreach ($entry in @($pathValues | ForEach-Object { $_ -split ';' })) {
+        if ([string]::IsNullOrWhiteSpace($entry) -or $entry -match '(?i)\\WindowsApps(?:\\|$)') { continue }
+        $candidate=Join-Path ([Environment]::ExpandEnvironmentVariables($entry.Trim(' ', '"'))) 'python.exe'
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { $candidates.Add($candidate) }
+    }
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        try {
+            $info=[Diagnostics.ProcessStartInfo]::new($candidate,'--version')
+            $info.UseShellExecute=$false; $info.RedirectStandardOutput=$true; $info.RedirectStandardError=$true; $info.CreateNoWindow=$true
+            $process=[Diagnostics.Process]::Start($info)
+            try {
+                $stdout=$process.StandardOutput.ReadToEndAsync(); $stderr=$process.StandardError.ReadToEndAsync()
+                if (-not $process.WaitForExit(15000)) { try {$process.Kill($true)} catch {}; continue }
+                $versionText=([string]$stdout.GetAwaiter().GetResult())+' '+([string]$stderr.GetAwaiter().GetResult())
+                if ($process.ExitCode -eq 0 -and $versionText -match 'Python\s+(\d+\.\d+\.\d+)' -and [version]$Matches[1] -ge [version]'3.10') {
+                    return [pscustomobject]@{Available=$true;Version=$Matches[1];Path=$candidate}
+                }
+            } finally {$process.Dispose()}
+        } catch { continue }
+    }
+    return [pscustomobject]@{Available=$false;Version='';Path=''}
+}
+function Invoke-SmartM365WindowsPowerShellPrerequisites {
+    param([ValidateSet('Audit','Install')][string]$Mode,[ValidateSet('CurrentUser','AllUsers')][string]$ModuleScope,[bool]$Trust,[string]$RepositoryName='PSGallery')
+    $legacy=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path -LiteralPath $legacy -PathType Leaf)) { throw 'Windows PowerShell 5.1 is required for on-premises inventory.' }
+    $child=@'
+$ErrorActionPreference='Stop'
+$scope='__SCOPE__'; $mode='__MODE__'; $trust=__TRUST__; $repository=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__REPOSITORY__'))
+$roots=@((Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules'),(Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\Modules'))
+if($scope -eq 'CurrentUser') {$roots=@((Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'WindowsPowerShell\Modules'))+$roots}
+$env:PSModulePath=$roots -join [IO.Path]::PathSeparator
+$missing=@()
+foreach($name in @('Microsoft.Graph.Authentication','ImportExcel')) {
+    $module=Get-Module -ListAvailable -Name $name | Sort-Object Version -Descending | Select-Object -First 1
+    if(-not $module -and $mode -eq 'Install') {
+        if(-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Scope $scope -Force | Out-Null}
+        if($trust) {Set-PSRepository -Name $repository -InstallationPolicy Trusted -ErrorAction Stop}
+        $installOptions=@{Name=$name;Repository=$repository;Scope=$scope;Force=$true;AllowClobber=$true;ErrorAction='Stop'}
+        if($name -eq 'Microsoft.Graph.Authentication') {$installOptions.RequiredVersion='2.41.2'}
+        Install-Module @installOptions
+        $module=Get-Module -ListAvailable -Name $name | Sort-Object Version -Descending | Select-Object -First 1
+    }
+    if(-not $module) {Write-Host ("MISSING WindowsPowerShell5 {0}" -f $name);$missing+=@($name);continue}
+    if($mode -eq 'Install') {Import-Module -Name $module.Path -ErrorAction Stop}
+    Write-Host ("AVAILABLE WindowsPowerShell5 {0} {1} {2}" -f $name,$module.Version,$module.Path)
+}
+if($missing.Count){exit 1}
+exit 0
+'@
+    $repositoryEncoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($RepositoryName))
+    $child=$child.Replace('__SCOPE__',$ModuleScope).Replace('__MODE__',$Mode).Replace('__TRUST__',$(if($Trust){'$true'}else{'$false'})).Replace('__REPOSITORY__',$repositoryEncoded)
+    $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($child))
+    & $legacy -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded
+    if($LASTEXITCODE -ne 0) {throw 'Windows PowerShell 5.1 prerequisite check or installation failed.'}
+}
 
 $requiredModules = @()
 if (-not $SkipMicrosoftGraphMetaModule) {
@@ -78,18 +149,46 @@ $requiredModules += @(
     'Microsoft.Graph.DeviceManagement',
     'Microsoft.Graph.DeviceManagement.Administration',
     'Microsoft.Graph.DeviceManagement.Enrollment',
+    'Microsoft.Graph.Beta.Groups',
     'Microsoft.Graph.Beta.DeviceManagement',
     'Microsoft.Graph.Beta.Reports',
-    'Microsoft.Graph.Policies',
+    'Microsoft.Graph.Identity.SignIns',
     'Microsoft.Graph.Reports',
     'MicrosoftTeams',
     'MicrosoftPowerBIMgmt.Profile',
     'ExchangeOnlineManagement',
+    'ImportExcel',
     'PnP.PowerShell',
     'MSAL.PS'
 )
 
 $requiredModules = @($requiredModules | Select-Object -Unique)
+
+if ($AuditOnly) {
+    $missing = @()
+    $graphVersions = @{}
+    foreach ($name in $requiredModules) {
+        $module = Get-Module -ListAvailable -Name $name | Sort-Object Version -Descending | Select-Object -First 1
+        if ($module) {
+            Write-Host ("AVAILABLE {0} {1} {2}" -f $name, $module.Version, $module.Path)
+            if ($name -like 'Microsoft.Graph.*') { $graphVersions[$name] = $module.Version }
+        } else {
+            Write-Host ("MISSING {0}" -f $name)
+            $missing += $name
+        }
+    }
+    $authVersion = $graphVersions['Microsoft.Graph.Authentication']
+    $mismatched = @($graphVersions.Keys | Where-Object { $authVersion -and $graphVersions[$_] -ne $authVersion })
+    foreach ($name in $mismatched) { Write-Host ("GRAPH VERSION MISMATCH {0} {1}; Authentication {2}" -f $name, $graphVersions[$name], $authVersion) }
+    if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) { Write-Host 'OPTIONAL ActiveDirectory RSAT missing; required for AD workloads.' }
+    $python=Get-SmartM365PythonPrerequisite -MachineOnly:($Scope -eq 'AllUsers')
+    if ($python.Available) { Write-Host ("AVAILABLE Python {0} {1}" -f $python.Version,$python.Path) }
+    else { Write-Host 'MISSING Python 3.10+ (required for evidence preparation).'; $missing += 'Python' }
+    try { Invoke-SmartM365WindowsPowerShellPrerequisites -Mode Audit -ModuleScope $Scope -Trust $false -RepositoryName $Repository } catch { Write-Host $_.Exception.Message; $missing += 'WindowsPowerShell5' }
+    Write-Host 'Audit applies only to this PowerShell edition, account and PSModulePath; it does not test imports or service-account access.'
+    if ($missing.Count -or $mismatched.Count) { exit 1 }
+    exit 0
+}
 
 function Write-SmartM365SetupLog {
     [CmdletBinding()]
@@ -171,6 +270,19 @@ function Test-ActiveDirectoryPrerequisite {
 }
 
 Write-SmartM365SetupLog -Message 'Installing SmartM365 SmartInventory prerequisites.'
+$python=Get-SmartM365PythonPrerequisite -MachineOnly:($Scope -eq 'AllUsers')
+if (-not $python.Available) {
+    if ($PSCmdlet.ShouldProcess('Python 3.14','Install using winget')) {
+        $winget=Get-Command -Name 'winget.exe' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $winget) { throw 'Python 3.10+ is missing and winget is unavailable. Install Python for all users and add it to the machine PATH, then rerun prerequisites.' }
+        $pythonScope=if($Scope -eq 'AllUsers'){'machine'}else{'user'}
+        $pythonOverride=if($Scope -eq 'AllUsers'){'/quiet InstallAllUsers=1 PrependPath=1 Include_test=0'}else{'/quiet InstallAllUsers=0 PrependPath=1 Include_test=0'}
+        & $winget.Source install --id Python.Python.3.14 --exact --source winget --scope $pythonScope --override $pythonOverride --accept-package-agreements --accept-source-agreements
+        if ($LASTEXITCODE -ne 0) {throw "Python installation failed with exit code $LASTEXITCODE."}
+        $python=Get-SmartM365PythonPrerequisite -MachineOnly:($Scope -eq 'AllUsers')
+        if (-not $python.Available) {throw 'Python was installed but is not yet visible in PATH for the selected scope. Reopen the session and run -AuditOnly.'}
+    }
+} else { Write-SmartM365SetupLog -Level SUCCESS -Message ("Python {0} available: {1}" -f $python.Version,$python.Path) }
 Ensure-PackageProvider
 Ensure-RepositoryTrust -Name $Repository
 
@@ -178,7 +290,7 @@ foreach ($moduleName in $requiredModules) {
     Install-RequiredModule -Name $moduleName
 }
 
-if (-not $SkipImportValidation) {
+if (-not $SkipImportValidation -and -not $WhatIfPreference) {
     foreach ($moduleName in $requiredModules) {
         Write-SmartM365SetupLog -Message ("Validating module import: {0}" -f $moduleName)
         Import-Module -Name $moduleName -ErrorAction Stop
@@ -196,19 +308,21 @@ if (-not $SkipImportValidation) {
 }
 
 Test-ActiveDirectoryPrerequisite
+if (-not $WhatIfPreference) { Invoke-SmartM365WindowsPowerShellPrerequisites -Mode Install -ModuleScope $Scope -Trust ([bool]$TrustRepository) -RepositoryName $Repository }
+else { Write-SmartM365SetupLog -Message 'Preview: Windows PowerShell 5.1 Graph Authentication and ImportExcel prerequisites.' }
 
 if ($WhatIfPreference) {
-    Write-SmartM365SetupLog -Level SUCCESS -Message 'SmartM365 SmartInventory prerequisite audit completed. No installation was performed because -WhatIf is enabled.'
+    Write-SmartM365SetupLog -Level INFO -Message 'Preview completed without installation or import validation. Use -AuditOnly to inspect installed modules.'
 }
 else {
-    Write-SmartM365SetupLog -Level SUCCESS -Message 'SmartM365 SmartInventory prerequisites are ready.'
+    Write-SmartM365SetupLog -Level INFO -Message 'Module installation completed. Run -AuditOnly and the server acceptance checks under the actual service account; other host and workload prerequisites are separate.'
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAwdXz+ye/ZL9gO
-# 6zXbjPCOJ7O7Y/FGe4vrH4BtjrFycaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDf18ItBeFcNPSu
+# Tv8gWVszIm8VqF/k/2cjX2QfGk0SCaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -299,25 +413,25 @@ else {
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -325,47 +439,47 @@ else {
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOo0XhueiEVDWc4oo4KahAyKOoZbvJ/j9PfytfDBhwktMA0GCSqG
-# SIb3DQEBAQUABIIBgBZLIW3JMI19xT4lBx/extjEJSlrSp+amFD/Y5xg6zTsVY6X
-# tEKgkHiBpbtJy2p3icCNNnGkUnZwE4jfHJeJEqdK4CR9g4+q8zLCPugPh8qz4iCf
-# XGyT3zFk7qFjyvZC+8Cd0ve3ZCPQ/9MiSSRLxU3CxgjhpSMzf4f+tt2+EyOZ0WWG
-# ywocT+wa0/HzboVIP9FFyUGgsweWPVLFTJ3L2PxoD4UvM9BftiVKeJYw05zAqrrc
-# nRfetUGS24ZFfSyiP2ss4eA13hEGqnV//ZY9e5ivUkiHPPuPOIACqzybwLEXun7A
-# 2GL6N57JUovQBN6woFfn4x9k5yjjpjIO/UNgo0GD+KQX71PaJ1phff4e88aaNo1k
-# HmkudhwczjCSeBxwRqX8OxQu8IGG3ypcQDF+Yapb6owQS1XllsKvPVGXuTrYzuu8
-# 2hIEvO7vEZiLsD2SIZXk6qK585v84EhytD9TTBXsyBYQt7fSmS7Iei/Ej4JZHExG
-# JMAaycmNPRCFQP3mlKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIECuMO/Y/bNx24irlNGqPLMblRElmDXIIBYB/a7hTWm/MA0GCSqG
+# SIb3DQEBAQUABIIBgIaIuPnJ0VG1Bi9D3nZMEr9e2tqSXVoIXCDIsi9oLcpUGC0A
+# rvckSZcxZp3IF/r5diYncE1jGLPAgWx3Ha4qMwlKM/txhTNMlA2+aq5miBfAvLDY
+# xiynu/CmqFj+aIKd45idlx6r63P+ZUBuHCfQ0FTU2XE/rHEqGCecKZYhT/O0G51h
+# s8Ds0BOcKRzAccai1MaJUYNJ840oYherPLYes6kfKKFVS2wFUWz7o1YXA2RqTuKK
+# GeSFzNEXLg0jC2fSNHbkEsCRkCj3y/rEron+6AewBDdwJYt3ha2rjDbyd45k0sl3
+# gvS0tn/xzuGYoLHiJq7QDwBx4xpHHlYoj7v+AvNDwr93mrEyMtEyRTmZx5kk0/aE
+# 9wsWB2sUz7St52SmdpLB1xnMh2e4jYNqdbT/yjhyQgAZjAevPYWTiYTEalWGLUT6
+# v3sm07f1ORp2KWZYz13VjhL8HgM+OtvZAeFwZZNw7uDyOiNKDVRfy012lnkwXKik
+# 3Ysz3Pnr7P3T9Ed3wqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTgyMjM1
-# MDJaMC8GCSqGSIb3DQEJBDEiBCDIcGTto70AGxelNs1Vb0yqROaLPgEsBnzhnKJf
-# WYPJ4jANBgkqhkiG9w0BAQEFAASCAgBli74cgvpVlmjqXhgfwoEFiqnkdq8HNNZX
-# ZWuAg+8xKc+swZPIUzznfXZX9Me46o/pocJLNzCQKhet/h67tiBeYdgS91EQmIG8
-# 31bpdpTCjNxpxLkVKzXkhC4T9HJm6cUGYcZHsFcrLOZHNKVUeLaJYaLWpASxJcFr
-# 1s1u6BSVFxZ4BPjd3hO9LaK2ef2YpdMQAUA38KI4122052NYxTw5grvli7RJmKDb
-# rqy2SoQ9cbuUQEOBnWM3Rqht3erh01BVUMTdrjTkbZ14jovMEyrj5KGfBubHCNMh
-# h24uqoYBk7Defw3vtYzJatNnYUblZBLP50n98rIzsmYiqlo+G5AlWaj1TdP4hEEY
-# LOXvpPpAuan9K9A+8YTetn/BFTdg1F9Pq2EBuzTD/xuu+G3Cd98Zpt8FrnBFYCSQ
-# ctjcRrhgvkUgwYQYPiiuqPsKofqnCw8dFQK6RhzepM82t9Kv6CPuf4/l6ymio9/H
-# L+eUCgfewk+TQphyGfWMRGjM6U++eB25egs2hmenRGf7ZPLBoHsDYxnlVdXwt7+r
-# igeby7O8hSl8ve3SOqv/1pYZA1Q0O5j/02FgVVTtdm4IoTxyFWeRmC58m6Z6GqxN
-# cR5USU7Ec7jcAcw7aV56gYubGQcTaWd3OSzhqb216sKVhyrJ5UfHvgrthNAZDrg3
-# sFIbuwWgIA==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDkxNDEx
+# MjVaMC8GCSqGSIb3DQEJBDEiBCDGPun6Qqo6hGgfR6Y8PZh7QPm4EYR1gz70n97n
+# 1LJzEDANBgkqhkiG9w0BAQEFAASCAgC0Ke6B6Ltyv7XbTgdYRa8kDsBti4B3gvin
+# +/VTPoVSLnnIGsq/g49ghhMaPFe8p/KUjb8RmpaC12H3k1aU5AFCq+MaIL783wjU
+# uMeNKxmg3F3cTsfs4bPadQ046C8Gz+bmWCosIC2iXZ216cOUSp6vbPhd+NodyM+U
+# JFT0HyhZyX5HIoHs3k4XqdX1i0o+1TKGy9O+WdQfi30dCp/sj7ISEJQb2u0FBcxu
+# y/Dah6jwxCKkMggMeuVPy0L0Imj/gDvZHOicgK0FnAuxeATNtEmSoAzsKpFudy+A
+# bKrGkJyev+RmwLmg1S8leNvUQMX9yiIoc3PBQIC2miHMv/0wZTAazm7P4RyaCbSo
+# JHF82aKg9yYjhCatl8ucjeJVFjfxQd2X7WhG+DUtxJsWHOxfbbgZUa9YmTmBjkd3
+# wY8yxbaI9Ge6880hmax4WjuZtSY9tlrwZ4rxNt00PZJZ/1RfVrB9sojgfo//LO32
+# yQkfsxkKoLSC/A0ffZ9ZxgYnPsSnLWntM2H1kPBhsHwVb1HIma8v2U1Ozzvdrjf0
+# NnxmXOcAwwk3abElhLbN3A6T+b7TGyPZiYDGqFpeMSNHOl4HJFl/DG0mUzkoyTQz
+# UZYmJT3AOu2JAEojonaALfocVg4813vvAvu3pGsSnjsHB0kTOfmZu6VsJL7nTfX2
+# 7xDrZeOZsA==
 # SIG # End signature block

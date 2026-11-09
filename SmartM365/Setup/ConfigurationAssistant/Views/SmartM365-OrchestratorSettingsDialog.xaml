@@ -1,0 +1,11 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Orchestrator local settings" Width="700" Height="480" WindowStartupLocation="CenterOwner" ResizeMode="NoResize" Background="#F5F8FB">
+ <Grid Margin="20"><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><StackPanel>
+  <TextBlock Text="Edit local orchestrator settings" FontSize="18" FontWeight="SemiBold"/>
+  <TextBlock Text="Select the exact local configuration file to review. The effective setting may also depend on shared configuration or server overrides." TextWrapping="Wrap" Foreground="#5F6B7A" Margin="0,8,0,12"/>
+  <DockPanel><Button x:Name="Browse" Content="Browse..." Width="95" Height="30" DockPanel.Dock="Right" Margin="8,0,0,0"/><TextBox x:Name="Path" IsReadOnly="True" Padding="5"/></DockPanel>
+  <TextBlock Text="Setting" Margin="0,12,0,4"/><ComboBox x:Name="Field"/>
+  <TextBlock Text="Current value" Margin="0,10,0,4"/><TextBox x:Name="Current" IsReadOnly="True" Padding="5"/>
+  <TextBlock Text="New value (use JSON for lists and per-server objects)" Margin="0,10,0,4"/><TextBox x:Name="Value" Padding="5"/>
+  <TextBlock Text="Only the selected field is changed or added after review. A running orchestrator may pick up configuration changes. Unrelated fields and existing jobs are preserved." TextWrapping="Wrap" Foreground="#5F6B7A" Margin="0,12,0,0"/>
+ </StackPanel><StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right"><Button x:Name="Cancel" Content="Close" Width="90" Height="32" Margin="4"/><Button x:Name="Load" Content="Load" Width="90" Height="32" Margin="4"/><Button x:Name="Save" Content="Review and save" Width="130" Height="32" Margin="4"/></StackPanel></Grid>
+</Window>

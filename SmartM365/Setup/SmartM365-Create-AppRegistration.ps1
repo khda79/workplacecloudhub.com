@@ -1,4 +1,4 @@
-﻿#Requires -Version 7.0
+#Requires -Version 7.0
 
 <#
 .SYNOPSIS
@@ -23,8 +23,9 @@
 
     The script also creates or reuses a dedicated Exchange Online shared mailbox
     for SmartM365 report/error emails, creates a mail-enabled security group,
-    adds the sender mailbox to that group, and scopes Microsoft Graph Mail.Send
-    with an Exchange Online Application Access Policy.
+    adds the sender mailbox to that group, and creates a scoped Exchange App RBAC
+    Application Mail.Send assignment. A separate out-of-scope mailbox is required
+    for the negative authorization test. Existing Entra Mail.Send is not revoked.
 
 .PARAMETER DisplayName
     Display name for the Entra ID application. Defaults to SmartM365 Automation.
@@ -53,6 +54,14 @@
     Adds the requested API permissions without granting tenant-wide admin
     consent.
 
+.PARAMETER SkipBroadIntuneReadWritePermissions
+    Omits all three Intune ReadWrite application roles, including the managed
+    devices role required by several current export jobs. Does not revoke existing grants.
+
+.PARAMETER IncludeLegacyIntuneReadWritePermissions
+    Also requests Apps and Configuration ReadWrite application roles for legacy
+    compatibility. These are separate from interactive delegated scopes.
+
 .PARAMETER UseDeviceCode
     Uses interactive device code authentication for Microsoft Graph setup
     sign-in. Useful when browser/WAM authentication is not available in the
@@ -74,6 +83,16 @@
 .PARAMETER MailSenderDisplayName
     Display name for the SmartM365 sender shared mailbox.
 
+.PARAMETER MailOutOfScopeTestAddress
+    Existing mailbox outside the allowed sender group, used for the negative
+    Exchange App RBAC authorization test. Required unless automatic selection
+    is explicitly requested.
+
+.PARAMETER AutoSelectMailOutOfScopeTestAddress
+    Selects a distinct mailbox from up to 100 candidates and requires a verified
+    negative App RBAC result. Fails if no suitable mailbox can be established.
+    This is mutually exclusive with MailOutOfScopeTestAddress.
+
 .PARAMETER MailSendSecurityGroupName
     Display name for the mail-enabled security group that scopes Mail.Send.
 
@@ -89,13 +108,13 @@
     fallback to Setup\Output\Tenants\<TenantKey>\LOG-ALL\Setup.
 
 .EXAMPLE
-    .\Setup\SmartM365-Create-AppRegistration.ps1 -TenantId contoso.onmicrosoft.com
+    .\Setup\SmartM365-Create-AppRegistration.ps1 -TenantId contoso.onmicrosoft.com -MailOutOfScopeTestAddress outside@contoso.com
 
 .EXAMPLE
-    .\Setup\SmartM365-Create-AppRegistration.ps1 -DisplayName SmartM365 -TenantId 00000000-0000-0000-0000-000000000000 -CertificateThumbprint 00112233445566778899AABBCCDDEEFF00112233 -UpdateExisting
+    .\Setup\SmartM365-Create-AppRegistration.ps1 -DisplayName SmartM365 -TenantId 00000000-0000-0000-0000-000000000000 -CertificateThumbprint 00112233445566778899AABBCCDDEEFF00112233 -UpdateExisting -MailOutOfScopeTestAddress outside@contoso.com
 
 .EXAMPLE
-    .\Setup\SmartM365-Create-AppRegistration.ps1 -TenantId contoso.onmicrosoft.com -CertificateThumbprint 00112233445566778899AABBCCDDEEFF00112233 -UseDeviceCode -WhatIf
+    .\Setup\SmartM365-Create-AppRegistration.ps1 -TenantId contoso.onmicrosoft.com -CertificateThumbprint 00112233445566778899AABBCCDDEEFF00112233 -UseDeviceCode -MailOutOfScopeTestAddress outside@contoso.com -WhatIf
 
 .EXAMPLE
     .\Setup\SmartM365-Create-AppRegistration.ps1 -RemoveAppRegistration -Confirm
@@ -106,7 +125,7 @@
     Runtime app permissions created: see SmartM365-AppRegistration-Permissions.md and Get-RequiredApiResource.
 
 .VERSION
-1.4
+1.11
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -146,6 +165,9 @@ param(
     [switch]$SkipBroadIntuneReadWritePermissions,
 
     [Parameter()]
+    [switch]$IncludeLegacyIntuneReadWritePermissions,
+
+    [Parameter()]
     [string]$ExchangeAdminUserPrincipalName,
 
     [Parameter()]
@@ -162,6 +184,12 @@ param(
 
     [Parameter()]
     [string]$MailSenderAddress,
+
+    [Parameter()]
+    [string]$MailOutOfScopeTestAddress,
+
+    [Parameter()]
+    [switch]$AutoSelectMailOutOfScopeTestAddress,
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]
@@ -181,6 +209,13 @@ param(
     [Parameter()]
     [string]$LogPath = ''
 )
+if ($SkipBroadIntuneReadWritePermissions -and $IncludeLegacyIntuneReadWritePermissions) {
+    throw 'SkipBroadIntuneReadWritePermissions and IncludeLegacyIntuneReadWritePermissions cannot be combined.'
+}
+if ($AutoSelectMailOutOfScopeTestAddress -and -not [string]::IsNullOrWhiteSpace($MailOutOfScopeTestAddress)) { throw 'Choose an explicit or an automatically selected negative-test mailbox, not both.' }
+if (-not $RemoveAppRegistration -and -not $AutoSelectMailOutOfScopeTestAddress -and [string]::IsNullOrWhiteSpace($MailOutOfScopeTestAddress)) {
+    throw 'Provide -MailOutOfScopeTestAddress for the required negative App RBAC test.'
+}
 $tenantContextPath = & {
     $d = $PSScriptRoot
     while ($d) {
@@ -444,7 +479,7 @@ function Connect-SmartM365GraphSetupSession {
     }
 
     Write-SmartM365SetupStatus -Message ("Connecting interactively to Microsoft Graph with setup scopes: {0}" -f ($scopes -join ', '))
-    Connect-MgGraph @connectParams | Out-Null
+    Connect-MgGraph @connectParams | Out-Host
 
     $context = Get-MgContext
     if ($null -eq $context -or [string]::IsNullOrWhiteSpace($context.TenantId)) {
@@ -452,6 +487,9 @@ function Connect-SmartM365GraphSetupSession {
     }
     if ($context.AuthType -ne 'Delegated' -or [string]::IsNullOrWhiteSpace($context.Account)) {
         throw 'This setup script must be run with an interactive delegated Microsoft Graph administrator session.'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($RequestedTenantId) -and $RequestedTenantId -match '^[0-9a-fA-F-]{36}$' -and $context.TenantId -ine $RequestedTenantId) {
+        throw 'Microsoft Graph connected to a different tenant than requested.'
     }
 
     Write-SmartM365SetupStatus -Message ("Connected as {0} in tenant {1}." -f $context.Account, $context.TenantId) -Level OK
@@ -484,6 +522,7 @@ function Connect-SmartM365ExchangeOnlineSetupSession {
     if (-not [string]::IsNullOrWhiteSpace($UserPrincipalName)) {
         $connectParams.UserPrincipalName = $UserPrincipalName
     }
+    if (-not [string]::IsNullOrWhiteSpace($TenantId)) { $connectParams.Organization = $TenantId }
     if ((Get-Command Connect-ExchangeOnline).Parameters.ContainsKey('DisableWAM')) {
         $connectParams.DisableWAM = $true
     }
@@ -507,9 +546,17 @@ function Connect-SmartM365ExchangeOnlineSetupSession {
         if (-not [string]::IsNullOrWhiteSpace($UserPrincipalName)) {
             $deviceParams.UserPrincipalName = $UserPrincipalName
         }
+        if (-not [string]::IsNullOrWhiteSpace($TenantId)) { $deviceParams.Organization = $TenantId }
         Connect-ExchangeOnline @deviceParams
     }
     $script:SmartM365ExchangeOnlineConnected = $true
+    $connectedSessions = @(Get-ConnectionInformation -ErrorAction Stop | Where-Object { $_.State -eq 'Connected' })
+    if ($connectedSessions.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$connectedSessions[0].TenantID)) {
+        throw 'Could not uniquely verify the connected Exchange Online tenant.'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($TenantId) -and $TenantId -match '^[0-9a-fA-F-]{36}$' -and [string]$connectedSessions[0].TenantID -ine $TenantId) {
+        throw 'Exchange Online connected to a different tenant than requested.'
+    }
     Write-SmartM365SetupStatus -Message 'Connected to Exchange Online.' -Level OK
 }
 
@@ -533,7 +580,8 @@ function Close-SmartM365ExchangeOnlineSetupSession {
 function Get-SmartM365RequiredApiResource {
     param(
         [switch]$SkipExchange,
-        [switch]$SkipBroadReadWrite
+        [switch]$SkipBroadReadWrite,
+        [switch]$IncludeLegacyReadWrite
     )
 
     $graphPermissions = @(
@@ -542,6 +590,7 @@ function Get-SmartM365RequiredApiResource {
         'Policy.Read.All',
         'SecurityEvents.Read.All',
         'Directory.Read.All',
+        'Organization.Read.All',
         'User.Read.All',
         'Device.Read.All',
         'Group.Read.All',
@@ -558,15 +607,16 @@ function Get-SmartM365RequiredApiResource {
         'DeviceManagementManagedDevices.Read.All',
         'DeviceManagementScripts.Read.All',
         'DeviceManagementServiceConfig.Read.All',
-        'Mail.Send',
         'Sites.Selected'
     )
 
     if (-not $SkipBroadReadWrite) {
+        $graphPermissions += 'DeviceManagementManagedDevices.ReadWrite.All'
+    }
+    if ($IncludeLegacyReadWrite -and -not $SkipBroadReadWrite) {
         $graphPermissions += @(
             'DeviceManagementApps.ReadWrite.All',
-            'DeviceManagementConfiguration.ReadWrite.All',
-            'DeviceManagementManagedDevices.ReadWrite.All'
+            'DeviceManagementConfiguration.ReadWrite.All'
         )
     }
 
@@ -621,6 +671,23 @@ function Resolve-ApplicationPermission {
     }
 
     return $role
+}
+
+function Assert-SmartM365NoEntraMailSend {
+    param([Parameter(Mandatory)]$Application)
+    $graph = @(Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'" -All -ErrorAction Stop)
+    if ($graph.Count -ne 1) { throw 'Cannot uniquely resolve the Microsoft Graph service principal; mail authorization cannot be qualified.' }
+    $mailRole = Resolve-ApplicationPermission -ResourceServicePrincipal $graph[0] -PermissionValue 'Mail.Send'
+    $declared = @($Application.RequiredResourceAccess | Where-Object { $_.ResourceAppId -eq $graph[0].AppId } | ForEach-Object { $_.ResourceAccess } | Where-Object { $_.Type -eq 'Role' -and $_.Id -eq $mailRole.Id })
+    $principals = @(Get-MgServicePrincipal -Filter "appId eq '$($Application.AppId)'" -All -ErrorAction Stop)
+    if ($principals.Count -gt 1) { throw 'Multiple application service principals found; cannot qualify Mail.Send.' }
+    $grants = @()
+    if ($principals.Count -eq 1) {
+        $grants = @(Get-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $principals[0].Id -All -ErrorAction Stop | Where-Object { $_.ResourceId -eq $graph[0].Id -and $_.AppRoleId -eq $mailRole.Id })
+    }
+    if ($declared.Count -or $grants.Count) {
+        throw 'Existing Microsoft Graph Mail.Send declaration or consent detected. Stop and follow the staged App RBAC migration guide; this bootstrap does not revoke existing grants.'
+    }
 }
 
 function Get-RequiredResourceAccessBlock {
@@ -1601,58 +1668,6 @@ function Add-SmartM365SenderMailboxToScopeGroup {
     }
 }
 
-function Set-SmartM365MailSendApplicationAccessPolicy {
-    [CmdletBinding(SupportsShouldProcess)]
-    param(
-        [Parameter(Mandatory)][string]$AppId,
-        [Parameter(Mandatory)]$Group,
-        [Parameter(Mandatory)][string]$GroupAddress
-    )
-
-    $scopeIdentifiers = @(
-        $GroupAddress,
-        [string]$Group.Identity,
-        [string]$Group.Name,
-        [string]$Group.DisplayName,
-        [string]$Group.Alias,
-        [string]$Group.PrimarySmtpAddress,
-        [string]$Group.ExternalDirectoryObjectId,
-        [string]$Group.Guid
-    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique
-
-    $policies = @(Get-SmartM365ApplicationAccessPolicy)
-    $matchingPolicy = $policies | Where-Object {
-        $policy = $_
-        @($_.AppId) -contains $AppId -and
-        $_.AccessRight -eq 'RestrictAccess' -and
-        ($scopeIdentifiers | Where-Object { $_.Equals([string]$policy.ScopeName, [System.StringComparison]::OrdinalIgnoreCase) })
-    } | Select-Object -First 1
-
-    if ($null -ne $matchingPolicy) {
-        Write-SmartM365SetupStatus -Message ("Application Access Policy already scopes Mail.Send for app {0} to '{1}'." -f $AppId, $matchingPolicy.ScopeName) -Level OK
-        return $matchingPolicy
-    }
-
-    $otherRestrictPolicy = $policies | Where-Object {
-        @($_.AppId) -contains $AppId -and $_.AccessRight -eq 'RestrictAccess'
-    } | Select-Object -First 1
-    if ($null -ne $otherRestrictPolicy) {
-        Write-SmartM365SetupStatus -Level WARN -Message ("App {0} already has an Application Access Policy scoped to '{1}'. A second policy will be added for '{2}'." -f $AppId, $otherRestrictPolicy.ScopeName, $GroupAddress)
-    }
-
-    if ($PSCmdlet.ShouldProcess($AppId, ("Create Application Access Policy scoped to {0}" -f $GroupAddress))) {
-        $policy = New-ApplicationAccessPolicy `
-            -AccessRight RestrictAccess `
-            -AppId $AppId `
-            -PolicyScopeGroupId $GroupAddress `
-            -Description 'Restrict SmartM365 Graph Mail.Send to approved SmartM365 sender mailboxes.' `
-            -ErrorAction Stop `
-            -Confirm:$false
-        Write-SmartM365SetupStatus -Message ("Created Application Access Policy for app {0} scoped to '{1}'." -f $AppId, $GroupAddress) -Level OK
-        return $policy
-    }
-}
-
 function Get-SmartM365ApplicationAccessPolicy {
     try {
         return @(Get-ApplicationAccessPolicy -ErrorAction Stop)
@@ -1685,26 +1700,6 @@ function Remove-SmartM365MailSendApplicationAccessPolicy {
             Remove-ApplicationAccessPolicy -Identity $policy.Identity -Confirm:$false -ErrorAction Stop
             Write-SmartM365SetupStatus -Message ("Removed Application Access Policy '{0}' for app {1}." -f $policy.Identity, $AppId) -Level OK
         }
-    }
-}
-
-function Test-SmartM365MailSendApplicationAccessPolicy {
-    param(
-        [Parameter(Mandatory)][string]$AppId,
-        [Parameter(Mandatory)][string]$SenderAddress
-    )
-
-    if (-not (Get-Command -Name Test-ApplicationAccessPolicy -ErrorAction SilentlyContinue)) {
-        Write-SmartM365SetupStatus -Level WARN -Message 'Test-ApplicationAccessPolicy is not available in this Exchange Online session; skipping Mail.Send scope test.'
-        return
-    }
-
-    try {
-        $testResult = Test-ApplicationAccessPolicy -Identity $SenderAddress -AppId $AppId -ErrorAction Stop
-        Write-SmartM365SetupStatus -Message ("Application Access Policy test for '{0}' returned: {1}." -f $SenderAddress, $testResult.AccessCheckResult) -Level OK
-    }
-    catch {
-        Write-SmartM365SetupStatus -Level WARN -Message ("Application Access Policy test failed for '{0}': {1}" -f $SenderAddress, $_.Exception.Message)
     }
 }
 
@@ -1746,20 +1741,124 @@ function Set-SmartM365MailLocalConfig {
     }
 }
 
+function Set-SmartM365MailSendAppRbac {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$AppId,
+        [Parameter(Mandatory)][string]$ServicePrincipalId,
+        [Parameter(Mandatory)][string]$GroupAddress,
+        [Parameter(Mandatory)][string]$SenderAddress,
+        [string]$OutsideAddress,
+        [switch]$AutoSelectOutsideAddress
+    )
+    if (-not $AutoSelectOutsideAddress -and [string]::IsNullOrWhiteSpace($OutsideAddress)) {throw 'A negative-test mailbox is required.'}
+    if ($SenderAddress -ieq $OutsideAddress) { throw 'The negative-test mailbox must differ from the sender.' }
+    if (-not $WhatIfPreference) {
+        $sender = @(Get-Mailbox -Identity $SenderAddress -ErrorAction Stop)
+        if ($sender.Count -ne 1) {throw 'Sender mailbox must resolve uniquely.'}
+        $senderId = [guid]::Empty
+        if (-not [guid]::TryParse([string]$sender[0].ExchangeGuid, [ref]$senderId) -or $senderId -eq [guid]::Empty) {throw 'Sender mailbox requires a valid Exchange GUID.'}
+        if (-not $AutoSelectOutsideAddress) {
+            $outside = @(Get-Mailbox -Identity $OutsideAddress -ErrorAction Stop)
+            if ($outside.Count -ne 1) {throw 'Negative-test mailbox must resolve uniquely.'}
+            $outsideId = [guid]::Empty
+            if (-not [guid]::TryParse([string]$outside[0].ExchangeGuid, [ref]$outsideId) -or $outsideId -eq [guid]::Empty -or $senderId -eq $outsideId) {throw 'Authorization test mailboxes must have distinct, non-empty Exchange GUIDs.'}
+        }
+    }
+    $group = Get-Group -Identity $GroupAddress -ErrorAction Stop
+    $dn = [string]$group.DistinguishedName
+    if ([string]::IsNullOrWhiteSpace($dn)) { throw 'Mail scope group has no distinguished name.' }
+    $filter = "MemberOfGroup -eq '" + $dn.Replace("'", "''") + "'"
+    $suffix = ([guid]$AppId).ToString('N')
+    $scopeName = "SmartM365-MailSend-$suffix"
+    $assignmentName = "SmartM365-MailSend-$suffix"
+    $principals = @(Get-ServicePrincipal -ErrorAction Stop | Where-Object { [string]$_.ObjectId -eq $ServicePrincipalId })
+    if ($principals.Count -gt 1 -or ($principals.Count -eq 1 -and [string]$principals[0].AppId -ne $AppId)) { throw 'Conflicting Exchange service principal.' }
+    if (-not $principals.Count -and $PSCmdlet.ShouldProcess($ServicePrincipalId, 'Create Exchange service principal pointer')) {
+        New-ServicePrincipal -AppId $AppId -ObjectId $ServicePrincipalId -DisplayName "SmartM365 $AppId" -ErrorAction Stop | Out-Null
+    }
+    $allScopes = @(Get-ManagementScope -ErrorAction Stop)
+    $scopes = @($allScopes | Where-Object { $_.Name -eq $scopeName })
+    if ($scopes.Count -gt 1) { throw 'Multiple matching mail scopes found.' }
+    if ($scopes.Count -eq 1 -and ((([string]$scopes[0].RecipientFilter).Trim(' ', '(', ')') -ine $filter) -or [string]$scopes[0].RecipientRoot -or [string]$scopes[0].ScopeRestrictionType -ne 'RecipientScope' -or $scopes[0].Exclusive -ne $false)) { throw 'Existing mail scope has different restrictions; refusing to change it.' }
+    if (-not $scopes.Count) {
+        $equivalentScopes = @($allScopes | Where-Object {
+            ([string]$_.RecipientFilter).Trim(' ', '(', ')') -ieq $filter -and
+            [string]::IsNullOrWhiteSpace([string]$_.RecipientRoot) -and
+            [string]$_.ScopeRestrictionType -eq 'RecipientScope' -and $_.Exclusive -eq $false
+        })
+        if ($equivalentScopes.Count -gt 1) { throw 'Multiple equivalent mail scopes found; refusing an ambiguous assignment.' }
+        if ($equivalentScopes.Count -eq 1) {
+            $scopeName = [string]$equivalentScopes[0].Name
+            if ([string]::IsNullOrWhiteSpace($scopeName)) { throw 'Equivalent mail scope has no name.' }
+            $scopes = $equivalentScopes
+            Write-SmartM365SetupStatus -Message ("Reusing equivalent recipient scope '{0}'; changes to that scope affect every assignment using it." -f $scopeName) -Level WARN
+        }
+    }
+    if (-not $scopes.Count -and $PSCmdlet.ShouldProcess($scopeName, 'Create recipient management scope')) {
+        New-ManagementScope -Name $scopeName -RecipientRestrictionFilter $filter -ErrorAction Stop | Out-Null
+    }
+    if ($WhatIfPreference -and -not $principals.Count) { return }
+    $assignments = @(Get-ManagementRoleAssignment -RoleAssignee $ServicePrincipalId -ErrorAction Stop | Where-Object { $_.Name -eq $assignmentName })
+    if ($assignments.Count -gt 1) { throw 'Multiple matching App RBAC assignments found.' }
+    if ($assignments.Count -eq 1 -and (([string]$assignments[0].Role -ine 'Application Mail.Send') -or ([string]$assignments[0].CustomResourceScope -ine $scopeName))) { throw 'Existing mail assignment differs; refusing to change it.' }
+    if (-not $assignments.Count -and $PSCmdlet.ShouldProcess($ServicePrincipalId, "Assign Application Mail.Send scoped to $scopeName")) {
+        New-ManagementRoleAssignment -Name $assignmentName -App $ServicePrincipalId -Role 'Application Mail.Send' -CustomResourceScope $scopeName -ErrorAction Stop | Out-Null
+    }
+    if ($WhatIfPreference) { return }
+    if ($AutoSelectOutsideAddress) {
+        $OutsideAddress=''
+        foreach ($candidate in @(Get-Mailbox -ResultSize 100 -ErrorAction Stop)) {
+            $candidateId=[guid]::Empty; $address=[string]$candidate.PrimarySmtpAddress
+            if (-not $address -or $address -ieq $SenderAddress -or -not [guid]::TryParse([string]$candidate.ExchangeGuid,[ref]$candidateId) -or $candidateId -eq [guid]::Empty -or $candidateId -eq $senderId) {continue}
+            $rows=@(Test-ServicePrincipalAuthorization -Identity $ServicePrincipalId -Resource $address -ErrorAction Stop)
+            $expectedRows=@($rows | Where-Object {@($_.GrantedPermissions) -contains 'Mail.Send' -and [string]$_.RoleName -eq 'Application Mail.Send' -and [string]$_.AllowedResourceScope -eq $scopeName -and [string]$_.ScopeType -eq 'CustomRecipientScope'})
+            if ($expectedRows.Count -ne 1 -or [string]$expectedRows[0].InScope -notin @('True','False')) {throw 'Negative-test candidate authorization is indeterminate.'}
+            if ([string]$expectedRows[0].InScope -eq 'True') {continue}
+            Assert-SmartM365MailRbacTestResult -Results $rows -ScopeName $scopeName -Expected $false -Address $address
+            $OutsideAddress=$address;break
+        }
+        if (-not $OutsideAddress) {throw 'No suitable negative-test mailbox was found among the first 100 mailboxes. Inspect the tenant before retrying.'}
+        Write-SmartM365SetupStatus -Message 'A distinct out-of-scope mailbox was selected automatically for the negative authorization check.' -Level INFO
+    }
+    foreach ($case in @(@{Address=$SenderAddress; Expected=$true}, @{Address=$OutsideAddress; Expected=$false})) {
+        $results = @(Test-ServicePrincipalAuthorization -Identity $ServicePrincipalId -Resource $case.Address -ErrorAction Stop)
+        Assert-SmartM365MailRbacTestResult -Results $results -ScopeName $scopeName -Expected $case.Expected -Address $case.Address
+    }
+    Write-SmartM365SetupStatus -Message 'App RBAC allowed and denied mailbox tests passed; separately review Entra grants and cached authorization.' -Level OK
+}
+
+function Assert-SmartM365MailRbacTestResult {
+    param([object[]]$Results, [string]$ScopeName, [bool]$Expected, [string]$Address)
+    $mailRows = @($Results | Where-Object { @($_.GrantedPermissions) -contains 'Mail.Send' })
+    $expectedRows = @($mailRows | Where-Object { [string]$_.RoleName -eq 'Application Mail.Send' -and [string]$_.AllowedResourceScope -eq $ScopeName -and [string]$_.ScopeType -eq 'CustomRecipientScope' })
+    if ($expectedRows.Count -ne 1) { throw "App RBAC did not return exactly one expected scoped Mail.Send result for $Address." }
+    foreach ($row in $mailRows) {
+        $value = [string]$row.InScope
+        if ($value -notin @('True', 'False')) { throw "App RBAC returned an indeterminate scope result for $Address." }
+        if (-not $Expected -and $value -eq 'True') { throw "App RBAC allows Mail.Send outside the intended scope for $Address." }
+    }
+    if (([string]$expectedRows[0].InScope -eq 'True') -ne $Expected) { throw "App RBAC authorization test did not match the expected scope for $Address." }
+}
+
 function Set-SmartM365ExchangeMailSendSetup {
     [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)]$Application,
+        [Parameter(Mandatory)]$ApplicationServicePrincipal,
         [Parameter(Mandatory)][string]$AdminUserPrincipalName,
         [Parameter(Mandatory)][string]$ConfigPath,
         [string]$SenderAddress,
         [Parameter(Mandatory)][string]$SenderDisplayName,
         [Parameter(Mandatory)][string]$ScopeGroupName,
-        [Parameter(Mandatory)][string]$ScopeGroupAlias
+        [Parameter(Mandatory)][string]$ScopeGroupAlias,
+        [string]$OutsideAddress,
+        [switch]$AutoSelectOutsideAddress
     )
 
     Connect-SmartM365ExchangeOnlineSetupSession -UserPrincipalName $AdminUserPrincipalName
     $effectiveSenderAddress = Resolve-SmartM365MailAddress -ConfiguredAddress $SenderAddress -DefaultAlias 'smartm365-reports'
+    if ($effectiveSenderAddress -ieq $OutsideAddress) { throw 'The negative-test mailbox must differ from the sender.' }
     $domain = ($effectiveSenderAddress -split '@', 2)[1]
     $scopeGroupAddress = ('{0}@{1}' -f $ScopeGroupAlias, $domain)
 
@@ -1773,9 +1872,9 @@ function Set-SmartM365ExchangeMailSendSetup {
         Write-SmartM365SetupStatus -Level WARN -Message 'SmartM365 Mail.Send scope group was not created because WhatIf was used.'
     }
     else {
+        if ([string]$group.PrimarySmtpAddress -ine $scopeGroupAddress) { throw 'Resolved sender group address differs from the requested scope group; refusing to change its membership.' }
         Add-SmartM365SenderMailboxToScopeGroup -Group $group -SenderAddress $effectiveSenderAddress
-        Set-SmartM365MailSendApplicationAccessPolicy -AppId $Application.AppId -Group $group -GroupAddress $scopeGroupAddress | Out-Null
-        Test-SmartM365MailSendApplicationAccessPolicy -AppId $Application.AppId -SenderAddress $effectiveSenderAddress
+        Set-SmartM365MailSendAppRbac -AppId $Application.AppId -ServicePrincipalId $ApplicationServicePrincipal.Id -GroupAddress $scopeGroupAddress -SenderAddress $effectiveSenderAddress -OutsideAddress $OutsideAddress -AutoSelectOutsideAddress:$AutoSelectOutsideAddress
     }
 
     Set-SmartM365MailLocalConfig -ConfigPath $ConfigPath -SenderAddress $effectiveSenderAddress -ScopeGroupAddress $scopeGroupAddress
@@ -1975,6 +2074,10 @@ Disconnect-SmartM365ExistingExchangeOnlineSession
 Connect-SmartM365ExchangeOnlineSetupSession -UserPrincipalName $ExchangeAdminUserPrincipalName
 $graphContext = Connect-SmartM365GraphSetupSession -RequestedTenantId $TenantId -UseDeviceCode:$UseDeviceCode
 $effectiveTenantId = $graphContext.TenantId
+$exchangeSessions = @(Get-ConnectionInformation -ErrorAction Stop | Where-Object { $_.State -eq 'Connected' })
+if ($exchangeSessions.Count -ne 1 -or [string]$exchangeSessions[0].TenantID -ine $effectiveTenantId) {
+    throw 'Exchange Online and Microsoft Graph tenant contexts do not match; refusing tenant changes.'
+}
 $localConfigPath = Join-Path -Path $script:SmartM365RootPath -ChildPath ("Config\Tenants\{0}.local.json" -f $Tenant)
 
 $escapedDisplayName = ConvertTo-ODataStringLiteral -Value $DisplayName
@@ -1983,6 +2086,9 @@ $application = $null
 
 if ($existingApps.Count -gt 1) {
     throw "Multiple app registrations named '$DisplayName' were found. Rename duplicates or use a unique -DisplayName."
+}
+if ($existingApps.Count -eq 1 -and -not $RemoveAppRegistration) {
+    Assert-SmartM365NoEntraMailSend -Application $existingApps[0]
 }
 
 if ($RemoveAppRegistration) {
@@ -2005,14 +2111,17 @@ if ($RemoveAppRegistration) {
 
 $requiredApiResources = Get-SmartM365RequiredApiResource `
     -SkipExchange:$SkipExchangeOnlinePermission `
-    -SkipBroadReadWrite:$SkipBroadIntuneReadWritePermissions
+    -SkipBroadReadWrite:$SkipBroadIntuneReadWritePermissions `
+    -IncludeLegacyReadWrite:$IncludeLegacyIntuneReadWritePermissions
 
 $obsoleteBroadSharePointPermissions = @('Files.ReadWrite.All', 'Sites.ReadWrite.All')
 $exchangeOnlineDirectoryRoleName = 'Global Reader'
 $obsoleteExchangeOnlineDirectoryRoleNames = @('Exchange Administrator')
 
-if (-not $SkipBroadIntuneReadWritePermissions) {
-    Write-SmartM365SetupStatus -Level WARN -Message 'Including broad Intune ReadWrite application permissions because one current Autopatch report script requests them. Use -SkipBroadIntuneReadWritePermissions after hardening those scripts.'
+if ($SkipBroadIntuneReadWritePermissions) {
+    Write-SmartM365SetupStatus -Level WARN -Message 'Intune export jobs requiring DeviceManagementManagedDevices.ReadWrite.All will not have that role requested. Existing grants are not revoked.'
+} else {
+    Write-SmartM365SetupStatus -Level WARN -Message 'Requesting DeviceManagementManagedDevices.ReadWrite.All for current Intune export jobs. Review enabled workloads and consent.'
 }
 
 $requiredResourceAccess = Get-RequiredResourceAccessBlock -RequiredApiResource $requiredApiResources
@@ -2113,12 +2222,15 @@ if (-not $SkipExchangeOnlinePermission -and $null -ne $appServicePrincipal) {
 
 $mailSendSetup = Set-SmartM365ExchangeMailSendSetup `
     -Application $application `
+    -ApplicationServicePrincipal $appServicePrincipal `
     -AdminUserPrincipalName $graphContext.Account `
     -ConfigPath $localConfigPath `
     -SenderAddress $MailSenderAddress `
     -SenderDisplayName $MailSenderDisplayName `
     -ScopeGroupName $MailSendSecurityGroupName `
-    -ScopeGroupAlias $MailSendSecurityGroupAlias
+    -ScopeGroupAlias $MailSendSecurityGroupAlias `
+    -OutsideAddress $MailOutOfScopeTestAddress `
+    -AutoSelectOutsideAddress:$AutoSelectMailOutOfScopeTestAddress
 
 $teamsWorkspace = $null
 if (-not $DisableTeamsSetup) {
@@ -2218,8 +2330,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAJ543sS1sXPlAv
-# uYqHvoHbP9CXmM/twE2wndFeOps1TaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD6HD1S+ykfjgSr
+# DEC6jSrAbgprLxyFWgg+rKPk+O/RbqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2352,31 +2464,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMBMLulD3w+aeO6BSw53m0O4foRnbxTVxrlbcf7Ep9nFMA0GCSqG
-# SIb3DQEBAQUABIIBgDfs7dIDiycdG2kwVMDitNsFFljkuxRI+8Ld2BawH+2Zwxtt
-# o/0dfP3nk8aRSab/cpt55hBiYvZ6lnrFjALvj7yIkNCxhSijqHAHjlTluG7YCM6v
-# 6babR005A7YEQPQkBPNWxeY+Asdyxilh+MU/7A7WgD/0o94J/mS69sNcb6Zp6ohj
-# YQSD1MXZnajJDBlhn8rbnfjTXs5wpGiKWAErZKxAhOuoMr0r3ziMUDYepBefDvov
-# d7oOEV2SnRY71UtzcN78zpQie5dzLTTmH73kRzBRSciyx5z7lILkGTtot0zIYoQp
-# Db5Kokbv1TS9NRhGYYyiB7HHko7y2UKQVeCvzv7EhgIUjs03CFhwyJzuo9s3f0cf
-# ZV8zMRtOxJJJZ0zexvJFoxpMDqfmyx3XXm4l4SVyY7+aYhIC+/+hi2eMYQcw/23B
-# uDZOsGSXZb0WApcZ1yWSoKtdlMCcAkHDlpd+P8R+gMUUZu7p2D57frD0CgGUziDM
-# I4zVZtyacx9FcTI1UqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPksZ3JsXlrnygYybwar+qrOuld7PeL+2AlyzR8wfh2MMA0GCSqG
+# SIb3DQEBAQUABIIBgGu7WB1dRA2OrUY8jVYeNsFg6l+JcwWzkPyiB2oNLZDgF8nt
+# f5hNCqk2i7RWanJeN9u2btUQw+HGNzTJ5F1ngKu2AUY0FEWuFum1xAxyaOY0ul5+
+# Yr/obhXauSB4lENqv+bDvIeRf4onS2Txw/u5ktKu7+FDNRohRZSkLDu/RKV3mPIn
+# wGvmji4/AYTGFg0hgqkpa7YaXbXPNU3V+pcyEqwNLS2bCQA6IsQtwGSVRm0GVHG7
+# L+RYG87dmW0qQ/Xb0sNPsiCxugqicCLdckjv3I3/oUft+vPL8yDRuqO8kvPliICO
+# j5InFpMrYOJ9F8WHrZ8HIVZj1zeIn4NyercQCBFTtIq5dLrJSIt0W4c66okX6uQ9
+# RfENMJ6jKCr39AzPkBxjkMcrivCOJCX7vyiAFWOSVpgj00Nixyv9xvEseA35eVwK
+# IELciESTyQGYr7pyzCe9Y+ePs6CRkGB4b/qKhhQ7+um8W8327AdnaaT62L5oq8o+
+# hvYM/8divZTokTmtnqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# MzhaMC8GCSqGSIb3DQEJBDEiBCBcorkqsg22gn69fa1Vr1EV+gEPtLjaSYLFc426
-# rHp9kjANBgkqhkiG9w0BAQEFAASCAgA6b3nuxaXuCyatZL4+SVqAzRZtjgkrw1EQ
-# KRowdRHyIdQyuJUPj9xJcgurrQMHuAqYnvnVlvD9ahl+HvQhwMf1am38dvFiJEtV
-# 6YE24nEBT6IOSfYtS+/5JZiEUZd/HjNXgqOeM06IW/ChTI6/3Tp6NMlKMbf321Is
-# r0VvSoITfCeM4ZYeJz1bsnNcOrfhrNX4BS1F35kprkdibcP8aNfVSr826ybhuVDu
-# x2DmKvI7Td/EQaHTCCacFrpTcvfaN4Lxtgb3ziLhvN202pGoreTAMwgtKU106cZ2
-# XjUJsj8MtVjhyVKcXDO8R6aXBdvRtw2vr5hvkF+9WfC7XDCErYnMX4+EuDxpenF7
-# KhFbOtvCCy5E3Qkkwaw6pV8agX0qJ1DKE63y1n3uhQjH9MzrKQGRqwo9tBZDL3db
-# 1NKcouxVgFMs6DnbyZXcT6+GYNZScQgLWVM6zaZSJI1DJy7HyYst9NtiQRa5/8V9
-# Im2d459cgn+snRVULo2eS+Z/o9Rdze4Yz7c4/FHiOij0pbcEcDccBvvHiTY+UCD2
-# 9GuG2hwf+y7bN9TKYwKJW2i/1DWdPFhr2O6tqeEq97tdw4ZH3W1ysgaQ1xjS4hPg
-# RIgZTLE6wUx6JdJXc/0ZkuDssMHi8E0wbP7N2uE8450EQS8AJJyk35ec6DaArRrF
-# TaRKypP3zA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDkxNTE4
+# MjZaMC8GCSqGSIb3DQEJBDEiBCBN8WKfv588OTNmYy0haPM0jvqcwW4BfjmPc4/+
+# 12kU3DANBgkqhkiG9w0BAQEFAASCAgCGVyyxWtBbD8bsg6dQui/ywjF/vnyP3FI1
+# /kcK0VaDjb7y8rmPz1Ywc3oTzKeGctcD6qZXkPt9+o4/qwJba2p269KHVv89938Y
+# wM1qxRS/ssEmftGTN+faXqvGVrLOFbq9iRi9pKaMD5ID7FV+3ijlHNBpzCZfD6eS
+# jo7Mgv4n7BQjsa9Co1mt0/TP2vFPQvt4BBIxkE6UuzW1YRd8r6V2d0STWqPTRZL0
+# ntWrfBwi02Wlj21Rl6k1THemSIF3ax42XF6/jfYeJrn/weCqY16K8I6/Rvjp4OjV
+# EURW6LK3JTHBJTLHcMSUcHp/bkasqpRaWThYrk9uEVsQfiGcYGiQ1L/36TfIyJ5b
+# cp4xZzQJwgdkuNou1JpIkbw5sTeayVJLYfA1YGGkvVRciQTOktg1hoKa7ei5gM6p
+# AIpUqFV45Lst/edt7gvryCaZHpRZcuwtDGg8+FgI+vwrw1bxObM3yWtImFDRdXK6
+# rjTbysTZ6ZFBosJm812rV1ercf117+ZxJ7ZzuoPh+jS1a/SgKkXAI2xTe9D8qHYC
+# KRZYi4mytTQ/sb66Fynwu03G1x6EuY+b7wPkwTOp+VgNmYwhRdhdquu5Pt/dqo0j
+# Tsz//s/arHGwHNf+UHUR81kzo46p9Hcnlz3kwWopTyI2/m8gu9xrF98YE0856LcB
+# I5MQUsvPiw==
 # SIG # End signature block

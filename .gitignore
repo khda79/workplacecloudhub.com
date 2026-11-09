@@ -47,6 +47,9 @@ SmartFinOps/**
 !/SmartM365/**/*.psm1
 !/SmartM365/**/*.psd1
 !/SmartM365/**/*.cmd
+!/SmartM365/Setup/ConfigurationAssistant/Views/*.xaml
+!/SmartM365/Setup/ConfigurationAssistant/Assets/*.png
+!/SmartM365/Setup/ConfigurationAssistant/Assets/*.ico
 !/SmartM365/**/*.md
 !/SmartM365/**/*.html
 !/SmartM365/**/*.json.template
@@ -228,6 +231,7 @@ SmartM365/**/SmartM365-IntuneRemediation-GUI.config.json
 SmartM365/SmartInventory/Orchestrator/Orchestrator-Jobs.json
 
 # Secrets / Certificates
+!/SmartM365/Config/Certificats/.gitignore
 *.pfx
 *.cer
 !Certificates/workplacecloudhub.com-CodeSigning-F01F4A8871B7E349B40564D90F2B2E5BB563720B.cer
@@ -242,6 +246,8 @@ SmartM365/SmartInventory/Orchestrator/Orchestrator-Jobs.json
 # Logs
 Logs/
 *.log
+/SmartM365/Setup/ConfigurationAssistant/Log/*
+!/SmartM365/Setup/ConfigurationAssistant/Log/.gitkeep
 !SmartM365/SharePointMigration/Migrations_Template/logs/
 !SmartM365/SharePointMigration/Migrations_Template/logs/.gitkeep
 

@@ -1,0 +1,10 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Read-only Graph and Exchange checks" Width="680" Height="500" WindowStartupLocation="CenterOwner" ResizeMode="NoResize" Background="#F5F8FB">
+ <Grid Margin="20"><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
+  <TextBlock Text="Check Graph roles and Exchange App RBAC" FontSize="18" FontWeight="SemiBold"/>
+  <TextBlock Text="Select the catalog whose enabled jobs define the Graph roles to compare. It may differ from the effective deployed catalog." TextWrapping="Wrap" Foreground="#5F6B7A" Margin="0,10,0,8"/>
+  <DockPanel><Button x:Name="Browse" Content="Browse..." Width="95" Height="30" DockPanel.Dock="Right" Margin="8,0,0,0"/><TextBox x:Name="Catalog" IsReadOnly="True" Padding="5"/></DockPanel>
+  <TextBlock Text="Existing mailbox outside the allowed scope" Margin="0,14,0,4"/><TextBox x:Name="Outside" Padding="5"/>
+  <TextBlock Text="Expected Exchange App RBAC recipient scope name" Margin="0,12,0,4"/><TextBox x:Name="Scope" Padding="5"/>
+  <TextBlock Text="The sender, tenant and application are read from the selected local profile. Graph requests only delegated Application.Read.All; consent may be required. Exchange authorization tests do not send mail. The result does not prove effective access or delivery." TextWrapping="Wrap" Foreground="#5F6B7A" Margin="0,14,0,0"/>
+ </StackPanel></ScrollViewer><StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right"><Button x:Name="Cancel" Content="Cancel" Width="90" Height="32" Margin="4"/><Button x:Name="Check" Content="Review check" Width="120" Height="32" Margin="4"/></StackPanel></Grid>
+</Window>
