@@ -69,7 +69,9 @@ Reject { Get-Plan } 'Required.csv'
 Reject { Get-Plan } 'publication-age'
 [IO.File]::SetLastWriteTimeUtc($requiredPath,$now)
 Write-ADFixture -Tenant 'other-test'
-Reject { Invoke-PreparedEvidencePipeline @runParameters } 'TenantKey'
+$result=Invoke-PreparedEvidencePipeline @runParameters
+Check ($result.SourceFiles -eq 1 -and @($result.OptionalSourceIssues | Where-Object { $_.Relative -like '*AD_HealthCheck.csv' -and $_.Phase -eq 'Qualification' }).Count -eq 1) 'Foreign-tenant optional monitoring was not excluded and recorded'
+Check (-not (Test-Path (Join-Path $result.DiagnosticPath 'source/DATA-LAST/AD_HealthCheck.csv'))) 'Foreign-tenant monitoring was retained in the snapshot'
 
 # Business acquisition freshness: modifying/copying a stale file never refreshes it.
 Write-ADFixture
@@ -139,8 +141,8 @@ Write-Host "PASS: $script:checks optional AD monitoring checks. Synthetic local 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDqA9kPPROFT+dS
-# WeLo0mbaxK7KqpyHKerrOXqMIZdr6qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBTepmM/XvGgcAs
+# KN7e+vYWDjKrEf1IY8xuQ4nvx/YcmqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -273,31 +275,31 @@ Write-Host "PASS: $script:checks optional AD monitoring checks. Synthetic local 
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJbsR0mBG0h2cxTcR5ym2wdIbFSf6Qp3IJo1IJtkuTNxMA0GCSqG
-# SIb3DQEBAQUABIIBgJq5N8vUy53Aq1RI8kBr0EDE7hCfx+jp+Kqgtdsja6NgaCed
-# 9JCX3A23NZbUANZvTXLjohgc2q1dMDXvMa6GXrlNAkjZi7K5eAiK45xjFdGCXShn
-# PeMTMM3km+Ub6JjavsH5PNyTvvrYIljaA8XoFtLKXCuGJcXKEZswFFbzUuWfSv4I
-# B8TSocryQZe5SISlnq/Y+mLKQNIb70FiEPaOp1O3NnBA2hXdpcaQo+t8ZrzwBVzg
-# wNLFiwc9DfwQ4XUdDM9N9b5zrcqFKBHGaFlNDGFBmEYmq61q3xK2T/8Hv4Gg0kDR
-# dORic+fFQyc5GvQaNmLJTWnMHoQKhS+uAqOF4yv3BTNYORFb+rOjmMr3Js9///sA
-# fQbUG95vpoH6KVlt5GobVkapAlTmY/YFe49YjIpI0GbIkVV1CGks9WqoFOtFOnJZ
-# 1+noozrCI2Uxv/eVExEgRn+A6+LXiVzDm7gaYcGnIBaHN2udbB5tBfg0JjkbJ1uW
-# Ehbc2QoM47dcXPdNYaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKteu2VyQ0vc0bIxN/U96vq+gtx0BKk2ZOjnsuLRzVtxMA0GCSqG
+# SIb3DQEBAQUABIIBgHuX+dQUBrhGa375P19yh1kIzpVYomh4ndDINp6OxRFKFZaY
+# RrtuUHmuhqYVtnXG9yuFbbJz9NLV/2flSSCsNa0vLQuqVrfjZR+zZt6JgCTVvgN7
+# TKkNzu+yYvzSpsrrT/qlwiz673yBhQYToEllNCKvv18wiz0t0xbkb2+wlQa+AJTp
+# aHpLmy7KHuAMCUZfdYr/Oo1QJ07xwwboYs+C6n7ohoKA4R9gndCA0XnioiTDqPX0
+# yliO6KwWd9s/1qEmfBYaDr66z3CgLOzruD8IaguQ6zA9MOjtz+U8DZjm59EpncTr
+# ZloXM4VC57mq6SaFGVKkeI8QkEvzf8d74BeBg6DoWiXRMFrEiotYGjAtO4Lo6xBC
+# vRpcQMVIdFFs5tAkeLSWuEs8JisU6DPqn4ZSSNZ1hu24slqMuMXsyCyRqAeImdjo
+# hAHIqDJndqeiu9ExR+Mw8NDxp5jknsR4108f9XroIEqjsEti3x6iA7liyff/SDY8
+# D6EUS45sq969QRG6WKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjgxODIw
-# MjJaMC8GCSqGSIb3DQEJBDEiBCCB5lVN0erm3MKqZlBscyAIJjW2UJ1cf106vlNL
-# U4WBeDANBgkqhkiG9w0BAQEFAASCAgAgIwBjZlkBh/9oKg94IqKKTxN9woVu/YoZ
-# RiTeubzj15i+BXD1FdsYx4g8ZaafawMsXlc2rl4vFsGwC2gFDGXuBwXRZg38Exz8
-# 7KxG9912+peotqVVEroeAB3Wg9wcW952AZYCpggriQxL0Pz/CWkTSPa6UqE5WKIw
-# tPagU444mo74d6s7tC6nWZ5M+LKi6JmAEH8Y4W5gLaOd0rxX86KJ9BDh1HCYmHaB
-# PYdKRN2XwNAl+LQQEZvhbcQmWUUOPQxxKoBpeM42W/Ua3/jz/zsTAwkTLqqsTLUO
-# xN5YDT4KTt3fmJ6nRaJ6rRpJ15q1xuMnL3iBz7zJNrYVAYSHfapeGTivfe6lbxTX
-# KEC3qqkb2G2nY3Qqm5MCn9Pzv7Ddgw+o2eArM5wzziY10M91U35tCKgg5ISlJmz8
-# 45QqXan2EgJRw4kK0XWTa5oRR6grUJQNPvfGE+MwEAZAQI1m0w6WRgF1+pvbVugz
-# CRQhWucwZ/58qSJYSMzS9iNS3HRMy9Mt7GjUIIcKZ9iL8B+93lL+SN1fvyW64QGJ
-# 6726HjwJ+5fcSiTb1DOtVMJHyhZJo40/mJebpCW7OVeAqHcbMVKSHBg3JI5IQc2j
-# 75SwcH5nR8rTs+naCMRe2ZTy6266px7QnnsobC41hsI5nelGRUbHM4IpiynO5uBV
-# ghbl2G7NMw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDkxMjM2
+# MTBaMC8GCSqGSIb3DQEJBDEiBCBEmFotQeJRm4/wWzWg2oTL1Sab0d652robf2DH
+# 8vnrXzANBgkqhkiG9w0BAQEFAASCAgCYwsK+ErjkJneAPZK5C4Lptqb0sRe/nKfL
+# wQiKmARaLFTu5Z8Wij30C+SgT8qhSnNWscHaIoBkWb9eqwiImXhAplrl3m2d0lb3
+# uIMbc+qMditbyBVJUeZshXpDDsuw/qc+hjEa3Ub31jCX4wj51i33CcW8Z0rnrqI3
+# Jk1FKrmhaE6rserprNLPyiGuLOwJzPVKIHQPIVcQAhNf9X2nIaF3kdesd9f7EeYp
+# eUoLJZ9HKA6vblWZ1NLxzuujkkIcXgykxNIX8eYFIZ61KSSOOHIeodZJHNY1KoBF
+# uzyrI/XSw3g4MjAzGwsTlyUySkJQWx4V/xsTjuoXPkuHjklOSuyj3ES/G4NS5tX8
+# cxs9XWDqav9I4WC9cx6f2PfQMFGuDhZ01Z79vuliGiBFyiQriIs0odKXcV527I0/
+# M3whNw1+oQEQawOLne5JIlmxhSVAbq5EvrDC8vjtOp7VOefPmvPP/hOPbKNDqqgv
+# 99mBp7m2W6ZdyrcoWRKxxwnva4I7TlaTU6TbvVkAUuBG/+P95qpxUaJiWT4ulGbL
+# Bl8vcD5w+Uf9QFKX+7v7r/10cmO5Q9Zs/Kd0KnSHFdiDWQ4kAChau+PtwUrQ8wp6
+# 70Oi84SMq3jXXXe4RkduznrOrNBifG3ODUIvarUstnqtti5Vy9jbGmC7/7YCKQlu
+# Jmyzb/Coeg==
 # SIG # End signature block

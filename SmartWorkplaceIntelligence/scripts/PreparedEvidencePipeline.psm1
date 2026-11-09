@@ -1,5 +1,5 @@
 # Offline, single-tenant preparation and versioned local publication. No tenant APIs.
-# Version: 1.2.9
+# Version: 1.2.10
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:ProductRoot = Split-Path -Parent $PSScriptRoot
@@ -920,10 +920,9 @@ function Invoke-PreparedEvidencePipeline {
             if ($captured.Count % 25 -eq 0) { Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Stable source copies: {1}/{2}.' -f (Get-Date),$captured.Count,$plan.Count) }
         }
         $plan=$captured.ToArray()
-        # Optional on-prem inventories must never contaminate another tenant or
-        # stop the batch. Drop only an unqualified captured file; its receipt
-        # will then make the corresponding migration group unavailable.
-        foreach ($entry in @($plan | Where-Object { $_.Relative -like 'DATA-LAST/SharePoint_OnPrem_*.csv' })) {
+        # Exclude unqualified optional evidence before the common tenant guard.
+        # A missing on-prem payload also makes its migration group unavailable.
+        foreach ($entry in @($plan | Where-Object { $_.Relative -like 'DATA-LAST/SharePoint_OnPrem_*.csv' -or $_.Relative -ceq 'DATA-LAST/AD_HealthCheck.csv' })) {
             try { $null=Test-PreparedTenant -Path (Get-PreparedChildPath $snapshot $entry.Relative) -TenantKey $TenantKey }
             catch {
                 if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
@@ -1064,8 +1063,8 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDbUJHAtTUhBpaB
-# yf8QPTtRaY1oxUQLsay02p6Kok7oIKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA4q7gNRpTvurZb
+# cXsfS+y2j7/14xkM+Uh1K3w4PLqu7qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1198,31 +1197,31 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIL6HLFeC4p8Qj1pBNN3IWreZCvGh5mpxqzPvbhxR2MTlMA0GCSqG
-# SIb3DQEBAQUABIIBgH7cN1oNfx0rKbb5GR8+lZJQX5FLQKkIEf/ZIoglIKvoRcS4
-# x33bbL0qdrnG3tZiF02OKgl7cyi8UE+tUDHyFbjOk2glywIROCyh+ANB52UEtuxC
-# GzmUZMBGCbBtKbt8zV1ET69KiRzTzRJKf1QosfH2zH9+zBNUrLIUd7aHHqwI1VCc
-# aJqDJTnkW3BweO8fu472UPpTcecnZ5jqsoZvXXiUheMYfWVW1sy3yYuetIisoiux
-# Q+pv5lfH/4nCs+K72IdKIU3H6mPNMx893eFwDItnrMs1JYkM99VmRpy84SlcXEj+
-# zOWfOw3HtgVVhIIpC+Nx5CEjzKAXpjZd0CjGZOghkeoSfY/L3QLg7m7awheLHPml
-# 0GnE/ugm5m5Rp1SqF68QeBDo4BK1+I7Hx/f0PmXfW+8ojWZOrbywypdX3urRGNdy
-# wjDTSkALF29I+kbjfRaWlXxo5avphnBNllXbMbMdj7HRvFC4GjtFe63/pssbrIpN
-# qzef8bTtZmWWoa2wi6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGQLk1WLB6XT4wAJ9E4V0/yX/XgqvOXm+jMJso1rxx2VMA0GCSqG
+# SIb3DQEBAQUABIIBgH6fQCDdoJQvWyGEj6pO/MhBghCPMF9xzdZ4/tn73GzMrtay
+# ZyoxFCcez+SBLibWy0lw0WD69Vi/Iw4wdh29N2N+BcyzYR0iuktDn2ke3/Dq5Dv5
+# 2vSVccnadOoPGV+GUINJn45N7tpnmQ6h8PiMnR57vlmZA4gbFLI7ZwDS4dE+KBLJ
+# iruBRXP8e8zikXbobm7wZOUp7p+RQvddERW72ln0GottuKyx/2tr8QJAJI/hUS/M
+# p7bZ3BhD+WlH/oYgoHjtj90FKc/oBZOukj9l0W/Ipli1bvHAWesotJWUD+IluYwY
+# JmR2+RMY0rQ5D1l5V6XS/LMWodzpewBUCGZ9vwBjEPL3+WtHlz74Gibk6MMeND3a
+# 1p1hFyHaq3o5GLUsVY2GKDrfopah/I36Z3BBdvibCvG1gwlAkgmDzXgTotmKwKqs
+# U9M6HVQwz9vAVCHJXt7uCfOHM6kw0x6TPxUhKpFkZvzFnLQo1Q4nAAQVl+j1y9Ke
+# Vgj2Exuhua1UOzF03qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDkwOTI3
-# NTdaMC8GCSqGSIb3DQEJBDEiBCCuEH9eJZWHHnzFXkDOVUW2ynasJsHyYoh9E225
-# kzAk2jANBgkqhkiG9w0BAQEFAASCAgB7wKVoXGWXUL1+P++zye2HooWmgxazLYhv
-# 1wyLhOPfNuA+fZN+RxzEGxn6APJmXlsRwtriQGj/FF1iOiUdwPdxb+0tBah+2XR2
-# b9r7baVtV8Z+IFwNZ7FY5XcYDUcqsCdMq8u2ECNn3yELvQhTCD3ZRsatuI9nIzVB
-# Yx36I2Dbk/46Tx6Wq5NRwyXXO8oALeVi8ebQmeYFnrdA/CHhbiga3lUbMBS6BpwE
-# auNEyP4CI6wdafmxVR+KHcOX4Qzj7jnQhKuJxPHWAaeg/Xvj/wXFpoEzy/4b4Oyr
-# kDu/gcKH3nL34iRXREhQICohffC+3c7iVHi44oit3yl7Y8nW0q3PTDZQHE7Nk5S3
-# qWkH3++tBFnkj+J0bvqrWwTyi8YvNkQAn7jmuP09Wz7NwFp/KyZwFoNd9K1bnVhe
-# XCpp4jei76cJxtlO/haONCWMc1zZxC+QuVS9yF4GiTjgDSeZQxqVEni34VRXbumw
-# 5xM0VZW2ocSka+/ukATr+8DC/GvpeQIFr0Ej5ilQkGeTsYsBeGPcyEF3wweRs8BX
-# r7N7P0rBDvcD/G/CJfsNgx7/BRimNWKTn4PwuSTiNeI6UKhe1OoTX5TNWoquZ4Db
-# ZEOv6RnazU8cuOUiAOJ5N10aVFsLK/E3/lPPg/wHtND42/ooHOtVeDTaj8AaFZVI
-# ncLBz8OnbQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDkxMjM2
+# MTBaMC8GCSqGSIb3DQEJBDEiBCCJ1Hm6Rc5NK3i+yRWDZVKMmOI1EZKZtyYZ0Bnf
+# SZuXrzANBgkqhkiG9w0BAQEFAASCAgCPOYMLNU3ToUw65m03w5BGT1CJbGcCWVYe
+# yp8VVxuQrzf5u7e09AbtpObL/9g0rhphOVFG9Ga1ADtkzxgNIQK/2bu/kcF56dwk
+# tEDBxL+dQqcuq6bF3SFu33ah8ixdbb/WFtQZNH475Q6suWdpUJP1GO0cMfV8xZuM
+# vEGutY54ynCud13MsgoiFMi2jkzzsJEDoBuRLBlZ4jVGkEN8LdT3UxPQ1/PGjiMY
+# ymsxE3SkmJVE64B1NZkI0FlM6+eVxNzzdK5V0KwiEXp5DQILUtCdvlQQQv5GA8yv
+# nOP50Sq4ef//W2C4OT62Xe2eYMKqcoK66iIY7Di875SMSsU6MLCa0v4Zxux+0lBG
+# Hu/Ghq/owsz3NZCDBWBAgd4AlCtXXApMxo+/+CTgloTudVSy9bUGMdJqvjjBw4R/
+# ImmIhrPbQg4dWCsuggMvmZEZK+1bj/vL/YtqbhnK0e33KDhmtx6qunx8lJoPCLox
+# pGgz2hm2sQmwU33U2a1apx1ZRgdKf0o3/h3DOQ7GKrIK0QZzU6izM0XtnYTkzDMk
+# FF7S4m/H0A268dNCbwKnKuOLulqWli1HYFSDmjVS57o+0kV4PfSxVWI8N6IJeXVm
+# g3NuuZYBxrV78Xm9TtW05tmbAAU8uyDLDFAjitXTIdjtQPnqtOvKyuDwREcOFWo4
+# gCUWNs79Uw==
 # SIG # End signature block
