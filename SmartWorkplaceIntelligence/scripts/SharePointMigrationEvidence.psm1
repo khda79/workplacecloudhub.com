@@ -14,17 +14,10 @@ function Get-SharePointMigrationSourceItems {
     $contract=Get-Content -LiteralPath (Join-Path $PSScriptRoot '../config/sharepoint-migration-contract.json.txt') -Raw | ConvertFrom-Json
     foreach($producer in $contract.producers){
         Assert-SharePointMigrationFileName $producer.receipt
-        $receiptPath=Join-Path (Join-Path $DataRoot 'DATA-LAST') $producer.receipt
-        $receipt=Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
-        if($receipt.Owner -cne 'SmartInventory-SourceReceipt' -or $receipt.Producer -cne ($producer.producer+'.ps1') -or $receipt.Status -notin @('Completed','CompletedWithWarnings')){throw 'Invalid SharePoint migration source producer receipt.'}
-        $names=@($receipt.Files.File)
-        if(@($names | Sort-Object -Unique).Count -ne $names.Count){throw 'Duplicate SharePoint receipt payload file.'}
-        foreach($required in $producer.requiredFiles){if($required -cnotin $names){throw 'SharePoint migration receipt is missing a required inventory.'}}
-        @{Relative=('DATA-LAST/'+$producer.receipt);Kind='Receipt'}
-        foreach($entry in $receipt.Files){
-            Assert-SharePointMigrationFileName $entry.File
-            if($entry.File -notlike '*.csv'){throw 'Unexpected non-CSV SharePoint receipt payload.'}
-            @{Relative=('DATA-LAST/'+$entry.File);Kind='NativeCurrent'}
+        @{Relative=('DATA-LAST/'+$producer.receipt);Kind='Receipt';IsOptional=$true;MaxAgeHours=336}
+        foreach($name in $producer.requiredFiles){
+            Assert-SharePointMigrationFileName $name
+            @{Relative=('DATA-LAST/'+$name);Kind='Current';IsOptional=$true;MaxAgeHours=336}
         }
     }
 }
@@ -61,8 +54,8 @@ Export-ModuleMember -Function Assert-SharePointMigrationFileName,Get-SharePointM
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBBqW5FX86WE4FR
-# 8ZIkJQ20XiwcOVb0TBNXDu5fMg6GtKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCb2sdanitHpx9s
+# SofoMZr4SuyscY8Q0VxBIm5E3Z65DqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -195,31 +188,31 @@ Export-ModuleMember -Function Assert-SharePointMigrationFileName,Get-SharePointM
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOeVlfU40KOJtlcaquOeuH8sLkCG9kY3GMwOYhGim4mWMA0GCSqG
-# SIb3DQEBAQUABIIBgD584y54ig8KDVzZsalk5IghIeFGUVi5wypaubQOUP49ya0T
-# 1zs42MKoNCr1ktEtASHliRte0YCkFqRz39P0cDMTnLyhO+U06NqjLwQzmBy1F43+
-# l7eF8x5QWEGCVKwN5FtQc/LYmMWwCxEvPyq5RBRS9BpDY0wCH8OeslkpxnoXbnlK
-# wPVU98J5gaZYJfhuyTR27N+ZKYcNk0JJ6DJ5yKcgstrEIlZkucl+dknh0Y+KpkBQ
-# iP1vyvL/N9lGRHYbh7BMvoUmI3Bkqb5wYYPBAqnYH1S0psQ8uS/aOfOlujxP8Ala
-# CWjmX85uynZWF3N6hm2L28hpdBHvUNXkBFe5tio66IKMj2aDxCwrLgf9L3aXDcfv
-# Bb+UVqIBgpF5tbIYeNZO+zHAGvN/FaBxiTYtjiRHdmSzb+LVsGgYerr/zVhIEE9u
-# fG92lhapqlVb3BU/GN8iYd0lIWBFXo1gpu0eLvj6NG039Bvrl5XWqA7yPCAz1u1p
-# mEHOvpJsejqZaJmt46GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDRr86t/ke0fXp/z7MGq1f0TH9SwDH0PVPmT8suVrwhFMA0GCSqG
+# SIb3DQEBAQUABIIBgJk2wGN5dnaOMjJ6mF0odcQaLSXLczrxBNmVIg/EwYseSqVP
+# ga5O/3x3X3azBV1u48IENbBstVEnSKpuleuZtWYHpXswgZtViBYkRRrfyamXJ0ll
+# ZUX5VfoNuh61hErEriotuWCRx1YgrwgRv5HPuZ8bAU0gjMVG9PQkTNzYa8+MN1tr
+# U6FgX+qPjdXlFZswYwDY1OBlClmfIU4TQFtlfTstbsg86uJm0DA+7osvtI7J7Yfm
+# 5zvmi9e660+i9QGywTcwuCIPqRrw2hVKe+khXm397OHaqx7F1EAQrOY/ZFYWbe4L
+# 4WNKGesERh8YVC2rlJHidZHiK4mX5dBaEKpwRyn6HyEVPfK8s+DdvE8w+8mSNkRd
+# w43JS2tl5xhONEEqRjzkfKhXKSd+5j/nGPvkZN+6SxSPqBNmwVtCLQMmB5OQF5dc
+# cLkGEu2oqYNhzysi3E3Keh7Hz9YbkKHtJdE3OktfiFb73CC/dNr05bb+pL5qFya3
+# SGxo/KV/4LRu/6olgaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkyMDU4
-# MTNaMC8GCSqGSIb3DQEJBDEiBCCNyj8nv1qVQeiQIUHZRW0jF9tjWtK9YLtt73rJ
-# csahVDANBgkqhkiG9w0BAQEFAASCAgBMoW2nCbEG41awmSHcwyQmUFCHhLye9347
-# Uk0UuxiFhQz5dhGIGU7ap1FPDBy6JkmnWdLNI5bVrgafw3SlKsQPeuTW9wP6yy77
-# N1U8gkvlwDfDrhNI4JuftZi9CyO9fd1Vb0wUq6mMTH7jEvB7LMhG9ffxRw9ssLKi
-# e/6jUTOD9SjAT7RKtmOEhCFR0DInUlPdge5NRaPqJ0joMP9/TNOzBuAACAfDKt1M
-# MVPuQynY2g94XFrvPg9aX4L66JmN4+kmedfO6GY+o/oIOfqto0F4lZM1YMx0QFn8
-# M5vFXfFzLnoUWD96n8Xf1FdVlCXv4ZjVHhChxNSxLGkPKhUxZNY/Szy43C24v4lT
-# soinMGFiw8oZPf/DKOYAtGP9ziBESMAkVQw8KyKLABilL72csUO6CtUzIztuJKtp
-# a4ymCibpxBTDbnGZaEdAEZsSmn3/lj5V51/vLv1B4fYnKukgUokam8YFcXP2Lb/i
-# jhoBCqsgAKl/zkkRGrWcfOFub2l8uaVOrHAbv7jrfxyGvXLjiz3sCOWhWx3zt71b
-# 1mVUypIf+6bwnJYk6GDBbiy6d+t6cTWgFwBh3LyqbDtYyu06Fb6Bopf4GBJ7WAmZ
-# iSYulNDc8bRVtfpzEHsYqyAlprcvSQKwA4V6oM370nUS7wev2/lZuWMDXteNCHbO
-# aMRHupJTIg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDkwOTI3
+# NThaMC8GCSqGSIb3DQEJBDEiBCDf2SzLumyeDXfI9Nc7Sy5ZpRgQSkDiEYQZ7ycR
+# euCebjANBgkqhkiG9w0BAQEFAASCAgABys1spJjk8MUUoj1mc7ibnvpAmvnwuyvn
+# izkE11S0qxpSKqQUMrRMOcjCXxiSXlIu3tAPX1xf/lqU21Ken/d2oq+tVKDhz8R6
+# TcxRCR9YcceUGnrfAd+XHXF9sco1ZdcvbGspRyhZ8997W3Qjc9xaMHjhBEv4V6Vm
+# 21y9v1xl61XaFoL9HqApDrKgNToPAUuyNf6Nfv1UbegniyeW0B/40uIKomeglNJv
+# hiOn/x0agjtw/Gzo5bHdTNF3yibPB2eSyS3KTeFh7H3OmNqdfkhQx/zcrB3ydAgc
+# 40xUEmIoiBDdlcmWhlxs01bp1XJRLsh2AIZc+UEVCWnbMKKqL4LZHpBTxhOpcbuu
+# vnCTQ1qZzLG8QxnAg4ZDSzn4VVBlycl0kisXCJ1HVVbiiM+Kd9OH3pVUV0tE9QgV
+# +wpJyO1idAmJ9ntAqhHXOFZT2R6CuT/rd+e4gcmGQFyWoP5bpBe3nipJ+bVl9lHY
+# d89NOOHNvs+ARiCJaBRJktjrL+KrAXWgIUgE1wHexAmbX7ebgsi5fZgU0xR1FzcK
+# HPZO/hn6TKKSUYei4zF4iW9mTr9RnnIvgfBiDgObfF/ynd0TQOwmHghZNiQ9q1q5
+# Ohh5uf679eXVjhNYXfeBLhGM86bHMJmVgdZAi/4S9Fcli6We2G2vANQTy/lb5Yf/
+# 2yyab8xJUQ==
 # SIG # End signature block

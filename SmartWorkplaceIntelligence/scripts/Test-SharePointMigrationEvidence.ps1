@@ -23,14 +23,15 @@ if(@($plans | Where-Object 'Target Observation' -EQ 'Site observed').Count -ne 2
 if(@($plans | Where-Object 'Is Validated' -EQ 'True').Count){throw 'Declared DONE was promoted to migration validation.'}
 if((Get-FileHash -LiteralPath (Join-Path $raw 'SmartWorkplaceIntelligence-Migration-to-SPO.xlsx')).Hash -ne $fixture.WorkbookSHA256){throw 'Source workbook was changed.'}
 
-# Missing configured sources and tampered receipts fail; there is no cached fallback.
+# An invalid optional receipt removes native observations without blocking the workbook.
 $receipt=Join-Path $raw 'DATA-LAST/SmartInventory_SmartM365-SharePoint-OnPrem-Content-Inventory.current.json.txt'
 $saved=[IO.File]::ReadAllBytes($receipt)
 try {
     [IO.File]::WriteAllText($receipt,'{}')
-    $failed=$false
-    try { & (Join-Path $PSScriptRoot 'New-SharePointMigrationEvidence.ps1') @args 2>$null } catch {$failed=$true}
-    if(-not $failed){throw 'Invalid receipt was accepted.'}
+    & (Join-Path $PSScriptRoot 'New-SharePointMigrationEvidence.ps1') @args
+    $state=@(Import-Csv -LiteralPath (Join-Path $staged 'SharePointMigrationSourceSummary.csv') | Where-Object Source -EQ 'SmartM365-SharePoint-OnPrem-Content-Inventory')
+    if($state.Count -ne 1 -or $state[0].Qualification -ne 'Unavailable'){throw 'Invalid optional receipt was not marked unavailable.'}
+    if(@(Import-Csv -LiteralPath (Join-Path $staged 'SharePointMigrationWebEvidence.csv')).Count){throw 'Unqualified inventory was used.'}
 } finally {[IO.File]::WriteAllBytes($receipt,$saved)}
 
 $empty=Join-Path $taskRoot 'disabled'
@@ -59,6 +60,19 @@ $sourceContract=Join-Path $taskRoot 'minimal-source-contract.json.txt'
 @{currentFiles=@();mappingFiles=@('SmartWorkplaceIntelligence-PersonaClassification.xlsx','SmartWorkplaceIntelligence-SiteClassification.xlsx');dailyFiles=@();history=@();sharePointMigrationContract='sharepoint-migration-contract.json.txt'} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $sourceContract
 $sourcePlan=@(Get-PreparedSourcePlan -DataRoot $raw -SourceContractPath $sourceContract -MappingRoot $mapping -MetadataOnly -SharePointMigrationEnabled -SharePointMigrationBindingsFileName $bindingName)
 if($sourcePlan.Count -ne 16 -or 'DATA-LAST/SharePoint_OnPrem_Webs.csv' -notin $sourcePlan.Relative){throw 'Full pipeline source plan omitted migration inventory inputs.'}
+$infraReceipt=Join-Path $raw 'DATA-LAST/SmartInventory_SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.current.json.txt'
+$savedInfra=[IO.File]::ReadAllBytes($infraReceipt)
+try {
+    Remove-Item -LiteralPath $receipt,$infraReceipt
+    $issues=[Collections.Generic.List[object]]::new()
+    $missingPlan=@(Get-PreparedSourcePlan -DataRoot $raw -SourceContractPath $sourceContract -MappingRoot $mapping -MetadataOnly -SharePointMigrationEnabled -SharePointMigrationBindingsFileName $bindingName -OptionalSourceIssues $issues)
+    if($issues.Count -ne 2 -or $missingPlan.Count -ne 14){throw 'Missing optional receipts blocked or were not recorded.'}
+    & (Join-Path $PSScriptRoot 'New-SharePointMigrationEvidence.ps1') @args
+    if(@(Import-Csv (Join-Path $staged 'SharePointMigrationSourceSummary.csv') | Where-Object Qualification -EQ 'Unavailable').Count -ne 2){throw 'Both missing inventories must be unavailable.'}
+} finally {
+    [IO.File]::WriteAllBytes($receipt,$saved)
+    [IO.File]::WriteAllBytes($infraReceipt,$savedInfra)
+}
 $before=(Get-FileHash -LiteralPath (Join-Path $mappingData 'SmartWorkplaceIntelligence-Migration-to-SPO.xlsx')).Hash
 $broken={param($destination,$name) if($name -ceq $bindingName){return $null}; Copy-Item -LiteralPath (Join-Path $raw $name) -Destination $destination; Get-Item -LiteralPath $destination}.GetNewClosure()
 $failed=$false
@@ -84,14 +98,14 @@ if(@(Import-Csv -LiteralPath (Join-Path $disabledHistory $historyName)).Count -n
 $failed=$false
 try{$null=Get-SharePointMigrationHistoryCapture -OutputRoot $published -TenantKey 'sample-prod'}catch{$failed=$true}
 if(-not $failed){throw 'Tampered predecessor history was accepted.'}
-Write-Host 'PASS: synthetic migration generator, nine CSV contracts, identities, target observations, missing/invalid source rejection, source preservation, disabled compatibility and safe filenames.'
+Write-Host 'PASS: synthetic migration generator, nine CSV contracts, identities, target observations, unavailable optional source, source preservation, disabled compatibility and safe filenames.'
 Write-Host 'PASS: mapping acquisition and missing-registry rollback, validated predecessor capture and tamper rejection, history retained while disabled.'
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAlrnsyS105vprR
-# TjyWFKnGBv7cqjQreXfTcHVMN0iDtaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCL0K0XOUIlyzLI
+# /3frOvIYhJGV0NLIQ5jyw7AJ+Ksgu6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -224,31 +238,31 @@ Write-Host 'PASS: mapping acquisition and missing-registry rollback, validated p
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIL/wPCeVMARpPVpg+lcvMqhm2POovE10HcS/3dBJAESXMA0GCSqG
-# SIb3DQEBAQUABIIBgD0X5rDshcmKcm64cvdk9RIi80dXoB4Ru8wxWnysddO54eOR
-# zaC+6r4Bx40iGxiorlbrpRYQ69MVMRgvgtu8Nk0aLW2vZw3p4e+cLIwbd9BJP4p5
-# sZIU/Q3kvhWQGjCsSZ41CkRtbpBQSGGu4FoHLggJbF8K+M1ckiacdb//obSaEO1r
-# TRQaELPG2bGHZfcexuA0dner9OgNaNKqtOvngKuJ+Ufh/YMgWRdr0ZA7sn4BKeLG
-# z4oTECVoylufR9LepsO+s9qmsh9TGO80bIj3Zpy5QnKUKbmEVe6BJal8Zkqq5cqv
-# sXcK2AhyisCPVz0ldzW/OvGzK5LHPFTQUQWfBckgk6Nf3TpCOizB4Zemh4QBSJ6E
-# aj4vK828sgycMf87RKXXJE8BFZZU5Bxr4dZgLyNOigNj/bSg23ADMssrkGOjAIf4
-# ynfVjBcMnm5kYGWRdTKVMm2FeUUQkJs4K0gERy6zgQiklq3iQJ66aZXnO38xjqtn
-# 7qYNPnVpiNlo7At5f6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJObqNEhw03qx0XUI1YqSpuS2DLzvWVW1r1zcQLrpiwSMA0GCSqG
+# SIb3DQEBAQUABIIBgDCl3mQNLv8OgSS1UgooxD8XZCn1hne9hpK4nfX7dyyBKlxG
+# 68KR8TqS4ZpZKSEczeX2fQcf4R4MS+SvfqKI/dhsRcMbsjDjPJkubhaEzstlG5Bn
+# gwNoiXUeN6zJLNA7kqXvQfnDehC5VcOZI9xWUlWLoVQz71Q6rcZ/Hwe56Xf1Aw+m
+# RhZXv4HViTFlRFnLoWGccWqx35xbJCDIwdAXKL/zrGKcggGpCdVF37iEbSGidBud
+# 2Jbp6GGR+m3cP8/fWa4GOGyP3Wi956H1K8BHzYpJjhaf8QhyKzTViptb5qgmyaZH
+# pwAzHJbk3Irm9wy55oK2qOXLQof/Bzjfqb2nszaGCveQZl7lW+R2MGaEmfOnav9l
+# 3EHklNICbDkJHSLB6pWlX3zH6qABvW63nI9jIQEjPPvgLlWEHRmk33LEYjtHQbn2
+# Xj0Cps6vhf1rCPdzsZ19TU592BpZaGfWa0cuBOadNiRWqFYf4QqWpApYObYkVbv/
+# jzHbTPzBvdpzDbd7T6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkyMDU4
-# MTRaMC8GCSqGSIb3DQEJBDEiBCC+p3kqd/sUVWHe4GKpqDZOAywa8GWEESPlT3wt
-# pDDHVTANBgkqhkiG9w0BAQEFAASCAgCmKycjB6lPsZWodwaO1kHSPixPnfAt/zjn
-# cRfXx3gV4rNhMOj6QzHlFAr+Wn85+7qNxM1a0CnbfRiS2DStRqkidaJmxTHwJV97
-# aUMnTvO6uqlZ/WkzhdaLqajudmSZGQiPbcMeXDdGUiPn6PHmTXmfCkX37iUuFTKL
-# 2hzsLU0y7JqVTGzpH5emZAYNwoVoccUwQhspXK44xQDI7d6HQsrazWGVpnfqEjni
-# 6y21vdCMO58f523ie9JhNZUakPE4bDSGQzspyz54o24UiOd+ZcTKeXw0DHXb+1od
-# Z8yrT2kbXEog64LZMhhXEuWZWEfgig9vMgVvwWcuUOB+Lor3eB3LPiNZty6caYLM
-# EQVDw3bpBnHzsvmX1bZWac4nmnYIiIWN1y8YwStbE8Ij5a4LhMqJr1dsrxxgmbtg
-# cLOHiF1Vi3mtqVWRuRUA3tUNjXOkaNTaUCjkkvuoHZOwFyjQZ72xWKCMb5nFI1gg
-# a7Kuy7Jja5mCs0798Ltv91aWQwROiqGfRzZObAjeX0zpfKZLPn4fl3K9g7ELtL8I
-# 7pjFBLCIB14wCN4TiIQzrlkZUNRgQnM0dXrk80OCpiYVr3ls6Dw/Spi5irGAYSYz
-# 5BFkgdGsRRZ0rUwc7sfjxNHLysJTgBLRiu6CCsdj3y5wKYVc6AKgOMhrJXArscl5
-# ihWfuy11hg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDkwOTI3
+# NThaMC8GCSqGSIb3DQEJBDEiBCBAEcdJ6lPUV2+m7+qRwCjWc1SVJC7qbxm+n+py
+# +NoM6jANBgkqhkiG9w0BAQEFAASCAgBM5ptdallvBLM+qUXT7et13+9KmUvjZ4iL
+# Y3RYJb4vG+Z/wY2y/r62C5yiFYqF4/itExqeHgxZSsGRp3h0Q1zoaQfrZNUx4Uof
+# d9NrjK3YVObP9G7bWFpTUaxim9mnzU8nQqQxVxj3+zUSEE+xuUoAinxEEYCTpMFO
+# OMKww/tHBh0uk8L38ghBijIO/2oMzvSxC6r30j7WbACrQ9qqJR9yJls1YZYK65Fv
+# fRwXPMvhXm1PBWSIka/MAP1Y4NYQIlAjzNLelhBTYjvXu/p56c8cu70sJVnCw3Ur
+# S4knSDJZiXYitWnwc1kVT1hyrcY7puJzxuDpp45OXOFLueoJDsdOaEhs1A58APxj
+# nwrUMXTbeipOtLP95OT7KwpgldnEoHPCf2uv33kv6jr9sMz+RUrckraavydH+Pkd
+# s6lN/125O76q53T+2Ei0vfReokWGIO5c6iVE3lmIMwlkSOH2dE9BzDR3e+gxa7wv
+# nhtTuFpwRjjNBr/k8XWvDYBZhxwyz/cPpJU7uRyE4zIhuCwchg9+vFJDi8GfGyma
+# lizjbsoGXq0J8CfKFAOWw7XoO5PtsgEw3YfozoJ3PQJ+EHyi3zozMK96Xm+BmB4I
+# FD9fCu68vg7uXg4rtE/yqkSEBnIQbybvluwXTrN3jYvxYcGSl+zmJo/4Y2jQkkqt
+# cSGl8AszUA==
 # SIG # End signature block

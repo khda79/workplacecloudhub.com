@@ -292,6 +292,24 @@ class InventoryReceiptTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'row count mismatch'):
             self.check()
 
+    def test_old_verified_group_remains_available_but_not_complete(self):
+        self.write([[{'TenantKey': 'sample-prod', 'RunId': 'collector-run'}]])
+        self.receipt['CompletedAtUtc'] = (NOW - m.dt.timedelta(hours=400)).isoformat()
+        self.receipt['ConsumerScopeQualified'] = self.receipt['FullInventoryQualified'] = True
+        self.receipt_path.write_text(json.dumps(self.receipt))
+        files, state = self.check()
+        self.assertTrue(files)
+        self.assertEqual(state['Qualification'], 'Stale')
+
+    def test_missing_or_invalid_group_is_unavailable(self):
+        files, state = m.optional_inventory(self.last, self.producer, 'sample-prod', NOW, 168, {})
+        self.assertFalse(files)
+        self.assertEqual(state['Qualification'], 'Unavailable')
+        self.receipt_path.write_text('{}')
+        files, state = m.optional_inventory(self.last, self.producer, 'sample-prod', NOW, 168, {})
+        self.assertFalse(files)
+        self.assertEqual(state['Qualification'], 'Unavailable')
+
 
 if __name__ == '__main__':
     unittest.main()

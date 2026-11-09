@@ -16,7 +16,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree as ET
 
-VERSION = '1.0.3'
+VERSION = '1.0.4'
 DISABLED_PROJECT_KEY = 'Not configured'
 CONTRACT = Path(__file__).resolve().parents[1] / 'config/sharepoint-migration-contract.json.txt'
 UTC = dt.timezone.utc
@@ -216,8 +216,9 @@ def inventory(last, producer, tenant, asof, maximum=168, overrides=None):
     age = (asof - captured).total_seconds() / 3600
     overrides = overrides or {}
     group_limit = max([float(overrides.get(name, maximum)) for name in receipt.get('RequiredFiles', [])] or [maximum])
-    if age < -5 / 60 or age > group_limit:
-        raise ValueError('SharePoint capture is stale or in the future')
+    if age < -5 / 60:
+        raise ValueError('SharePoint capture is in the future')
+    stale = age > group_limit
     files = {}
     inventory_run = None
     for entry in receipt.get('Files', []):
@@ -229,8 +230,9 @@ def inventory(last, producer, tenant, asof, maximum=168, overrides=None):
         candidate = last / name
         limit = float(overrides.get(name, maximum))
         observed_age = (asof - utc(entry.get('CompletedAtUtc', receipt['CompletedAtUtc']))).total_seconds() / 3600
-        if not 0 < limit <= 8760 or observed_age < -5 / 60 or observed_age > limit:
+        if not 0 < limit <= 8760 or observed_age < -5 / 60:
             raise ValueError('Receipt payload violates its source acquisition-age policy')
+        stale = stale or observed_age > limit
         if sha(candidate) != text(entry.get('SHA256')).upper() or ('Bytes' in entry and candidate.stat().st_size != entry['Bytes']):
             raise ValueError('SharePoint receipt payload mismatch: ' + name)
         rows = read_csv(candidate, ';')
@@ -253,8 +255,21 @@ def inventory(last, producer, tenant, asof, maximum=168, overrides=None):
         raise ValueError('Incomplete SharePoint receipt group')
     full = receipt.get('ConsumerScopeQualified') is True and receipt.get('FullInventoryQualified') is True and receipt.get('IsPartialInventory') is not True
     return files, {'Source': producer, 'Source SHA256': sha(path), 'Captured UTC': captured.isoformat(),
-                   'Age Hours': round(age, 2), 'Qualification': 'Complete' if full else 'Observed only',
-                   'Coverage State': receipt.get('ScopeQualification', 'Unknown'), 'Run ID': receipt.get('RunId', '')}
+                   'Age Hours': round(age, 2), 'Qualification': 'Stale' if stale else 'Complete' if full else 'Observed only',
+                   'Coverage State': ('Stale; latest available inventory' if stale else receipt.get('ScopeQualification', 'Unknown')), 'Run ID': receipt.get('RunId', '')}
+
+
+def optional_inventory(last, producer, tenant, asof, maximum, overrides):
+    try:
+        files, state = inventory(last, producer, tenant, asof, maximum, overrides)
+        contract = json.loads(CONTRACT.read_text(encoding='utf-8'))
+        required = next(p['requiredFiles'] for p in contract['producers'] if p['producer'] == producer)
+        if not set(required).issubset(files):
+            raise ValueError('Missing required inventory payload')
+        return files, state
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, csv.Error, StopIteration) as exc:
+        return {}, {'Source': producer, 'Qualification': 'Unavailable',
+                    'Coverage State': 'Inventory unavailable or unqualified: ' + str(exc)}
 
 
 class ApprovedAliases(collections.defaultdict):
@@ -622,8 +637,8 @@ def build(args):
         last = Path(args.data_root) / 'DATA-LAST'
         policy = json.loads(Path(args.source_policy).read_text(encoding='utf-8-sig')) if getattr(args, 'source_policy', '') else {}
         maximum, overrides = policy.get('MaxSourceAgeHours', args.max_age_hours), policy.get('AgeOverrides', {})
-        content, content_state = inventory(last, 'SmartM365-SharePoint-OnPrem-Content-Inventory', args.tenant, asof, maximum, overrides)
-        _, infra_state = inventory(last, 'SmartM365-SharePoint-OnPrem-Infrastructure-Inventory', args.tenant, asof, maximum, overrides)
+        content, content_state = optional_inventory(last, 'SmartM365-SharePoint-OnPrem-Content-Inventory', args.tenant, asof, maximum, overrides)
+        _, infra_state = optional_inventory(last, 'SmartM365-SharePoint-OnPrem-Infrastructure-Inventory', args.tenant, asof, maximum, overrides)
         registry = Path(args.data_root) / args.bindings if args.bindings else None
         aliases, targets = bindings(registry, args.tenant, parameters.get('ProjectKey'), asof)
         if registry:
@@ -640,7 +655,7 @@ def build(args):
                 observed.add(url_key(row['SiteUrl']))
         spo_state = {'Source': 'Prepared SPO usage sites', 'Source SHA256': sha(spo), 'Captured UTC': '',
                      'Qualification': 'Observed only', 'Coverage State': 'Usage report; not an exhaustive existence census'}
-        output = resolve(parameters, tables, args.tenant, content['SharePoint_OnPrem_Webs.csv'], content['SharePoint_OnPrem_SiteCollections.csv'],
+        output = resolve(parameters, tables, args.tenant, content.get('SharePoint_OnPrem_Webs.csv', []), content.get('SharePoint_OnPrem_SiteCollections.csv', []),
                          [content_state, infra_state, spo_state], asof, aliases, targets, args.target_tenant_url, args.review_days, sha(source), args.reporting_date)
         for row in output['Plan']:
             if row['Resolved Target URL']:
@@ -700,7 +715,9 @@ def main():
             asof = utc(args.as_of) if args.as_of else dt.datetime.now(UTC)
             policy = json.loads(Path(args.source_policy).read_text(encoding='utf-8-sig')) if args.source_policy else {}
             for producer in ['SmartM365-SharePoint-OnPrem-Content-Inventory','SmartM365-SharePoint-OnPrem-Infrastructure-Inventory']:
-                inventory(Path(args.data_root)/'DATA-LAST',producer,args.tenant,asof,policy.get('MaxSourceAgeHours',args.max_age_hours),policy.get('AgeOverrides',{}))
+                _, state = optional_inventory(Path(args.data_root)/'DATA-LAST',producer,args.tenant,asof,policy.get('MaxSourceAgeHours',args.max_age_hours),policy.get('AgeOverrides',{}))
+                if state['Qualification'] in ('Stale', 'Unavailable'):
+                    print(f"WARNING: {producer}: {state['Coverage State']}")
         print(json.dumps({'SchemaVersion': '6.3', 'Rows': {k: len(v) for k, v in tables.items()}}))
         return
     if not args.tenant or not args.data_root or not args.output_root:
