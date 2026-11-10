@@ -47,7 +47,7 @@
     Resolves options, rules and component integrity, writes nothing on targets and exits.
 
 .VERSION
-    1.0.1
+    1.0.2
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -73,7 +73,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:LauncherVersion = '1.0.1'
+$script:LauncherVersion = '1.0.2'
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected argument(s): {0}. Pass options with -Option @{{ Name = Value }} and PsExec with -PsExecPath." -f ($UnexpectedArguments -join ' '))
@@ -294,6 +294,15 @@ foreach ($archived in @(Invoke-SemtRunArchive -RunContext $script:RunContext -Ol
 }
 
 $computerListPath = $script:RunContext.ComputerListPath
+# Campaign-level archive lists (Waves\<Campaign>\Computers.AlreadyEnrolled.txt, ...) are fed only
+# when the computer list sits in a Wave folder directly under the Campaign Waves root.
+$script:CampaignArchiveRoot = ''
+try {
+    $campaignWaveRoot = [System.IO.Path]::GetFullPath((Get-SemtWaveRoot -PackageRoot $script:PackageRoot -Campaign $Campaign)).TrimEnd('\')
+    $listWaveParent = [System.IO.Path]::GetFullPath((Split-Path -Path (Split-Path -Path $computerListPath -Parent) -Parent)).TrimEnd('\')
+    if ($listWaveParent -ieq $campaignWaveRoot -and (Test-Path -LiteralPath $campaignWaveRoot -PathType Container)) { $script:CampaignArchiveRoot = $campaignWaveRoot }
+}
+catch { Write-Host ("WARNING: the Campaign archive lists are not fed: {0}" -f $_.Exception.Message) -ForegroundColor Yellow }
 if (-not (Opt 'DryRun') -and -not $script:RunContext.SinglePc) {
     try {
         $dedupe = Remove-SemtComputerListDuplicates -Path $computerListPath
@@ -399,6 +408,14 @@ function Invoke-CompletedRules {
             if ($moved.Moved -gt 0) { Write-Host ("Cycle {0}: {1}" -f $CycleNumber,$moved.Detail) -ForegroundColor Green }
         }
         catch { Write-Host ("WARNING: Cycle {0}: {1} move failed: {2}" -f $CycleNumber,$rule.Label,$_.Exception.Message) -ForegroundColor Yellow }
+        if ($script:CampaignArchiveRoot) {
+            $campaignArchivePath = Join-Path -Path $script:CampaignArchiveRoot -ChildPath $rule.ArchiveFileName
+            try {
+                $added = Add-SemtComputersToArchiveList -ArchivePath $campaignArchivePath -ComputerNames $names
+                if ($added -gt 0) { Write-Host ("Cycle {0}: added {1} {2} computer(s) to the Campaign list {3}." -f $CycleNumber,$added,$rule.Label,$campaignArchivePath) -ForegroundColor Green }
+            }
+            catch { Write-Host ("WARNING: Cycle {0}: {1} Campaign list update failed: {2}" -f $CycleNumber,$rule.Label,$_.Exception.Message) -ForegroundColor Yellow }
+        }
     }
 }
 

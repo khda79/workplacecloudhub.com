@@ -283,6 +283,85 @@ try {
         $left = @(Get-SemtComputerList -Path $wave.ComputersPath)
         $left.Count -eq 1 -and $left[0] -eq 'PC-0002' -and (Test-Path (Join-Path $wave.Path 'Computers.Completed.txt'))
     }
+    Test-Step 'Add-SemtComputersToArchiveList feeds a Campaign list without duplicates (short name = FQDN)' {
+        $campaignList = Join-Path (Split-Path -Path $wave.Path -Parent) 'Computers.AlreadyEnrolled.txt'
+        [System.IO.File]::WriteAllLines($campaignList, [string[]]@('PC-A1','PC-A2.contoso.test'), (New-Object System.Text.UTF8Encoding($false)))
+        $first = Add-SemtComputersToArchiveList -ArchivePath $campaignList -ComputerNames @('pc-a1.contoso.test','PC-A2','PC-A3.contoso.test','PC-A3','# comment','  ')
+        $second = Add-SemtComputersToArchiveList -ArchivePath $campaignList -ComputerNames @('PC-A3')
+        $lines = @(Get-Content -LiteralPath $campaignList)
+        $newList = Join-Path (Split-Path -Path $wave.Path -Parent) 'Computers.NewArchive.txt'
+        $created = Add-SemtComputersToArchiveList -ArchivePath $newList -ComputerNames @('PC-B1')
+        $first -eq 1 -and $second -eq 0 -and $lines.Count -eq 3 -and $lines[0] -eq 'PC-A1' -and $lines[1] -eq 'PC-A2.contoso.test' -and $lines[2] -eq 'PC-A3.contoso.test' `
+            -and $created -eq 1 -and @(Get-Content -LiteralPath $newList).Count -eq 1
+    }
+    Test-Step 'launcher completed rules move the computer and also feed the Campaign list' {
+        $rulesWave = New-SemtWave -PackageRoot $packageCopy -Campaign HybridJoin -Name 'WAVE-TEST-RULES' -Computers @('PC-R1','PC-R2') -Source Manual
+        $launcherFile = Join-Path $script:PackageRoot 'Scripts\SmartM365-Invoke-EndpointMigrationWithPsExec.ps1'
+        $rulesText = @(Get-FunctionText -Path $launcherFile -Names @('Invoke-CompletedRules')) -join "`n"
+        $rulesCheck = [scriptblock]::Create(@'
+param($FunctionText, $ListPath, $ArchiveRoot)
+function Opt([string]$Name) { return $false }
+function Write-Host { }
+. ([scriptblock]::Create($FunctionText))
+$script:RunContext = [pscustomobject]@{ SinglePc = $false }
+$script:CampaignProfile = [pscustomobject]@{ CompletedRules = @([pscustomobject]@{ Label = 'already-enrolled'; ArchiveFileName = 'Computers.AlreadyEnrolled.txt'; Test = { param($Row) $Row.Status -eq 'DONE' } }) }
+$script:CampaignArchiveRoot = $ArchiveRoot
+$computerListPath = $ListPath
+Invoke-CompletedRules -Rows @([pscustomobject]@{ ComputerName = 'PC-R1.contoso.test'; Status = 'DONE' }, [pscustomobject]@{ ComputerName = 'PC-R2'; Status = 'OTHER' }) -CycleNumber 1
+'@)
+        try { & $rulesCheck $rulesText $rulesWave.ComputersPath (Split-Path -Path $rulesWave.Path -Parent) }
+        finally { $script:RunContext = $null; $script:CampaignProfile = $null; $script:CampaignArchiveRoot = $null }
+        $campaignLines = @(Get-Content -LiteralPath (Join-Path (Split-Path -Path $rulesWave.Path -Parent) 'Computers.AlreadyEnrolled.txt'))
+        $waveArchive = @(Get-Content -LiteralPath (Join-Path $rulesWave.Path 'Computers.AlreadyEnrolled.txt'))
+        $left = @(Get-SemtComputerList -Path $rulesWave.ComputersPath)
+        ($campaignLines -contains 'PC-R1.contoso.test') -and -not ($campaignLines -match '^PC-R2') -and $waveArchive.Count -eq 1 -and $waveArchive[0] -eq 'PC-R1' -and $left.Count -eq 1 -and $left[0] -eq 'PC-R2'
+    }
+    Test-Step 'Campaign list: two writers in parallel lose no entry, keep existing lines and write UTF-8 without BOM' {
+        $parallelList = Join-Path (Split-Path -Path $wave.Path -Parent) 'Computers.Parallel.txt'
+        [System.IO.File]::WriteAllLines($parallelList, [string[]]@('Existing-PC.Contoso.Test'), (New-Object System.Text.UTF8Encoding($false)))
+        $modulePath = Join-Path $script:PackageRoot 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1'
+        $writer = {
+            param($ModulePath, $ListPath, $Override, $Prefix)
+            $env:SEMT_RUNTIME_ROOT_OVERRIDE = $Override
+            Import-Module $ModulePath -MinimumVersion 1.0.0 -Force
+            $total = 0
+            for ($i = 1; $i -le 40; $i++) { $total += [int](Add-SemtComputersToArchiveList -ArchivePath $ListPath -ComputerNames @(('{0}-{1:D3}.contoso.test' -f $Prefix,$i), 'EXISTING-PC')) }
+            $total
+        }
+        $jobs = @(
+            (Start-Job -ScriptBlock $writer -ArgumentList $modulePath,$parallelList,$env:SEMT_RUNTIME_ROOT_OVERRIDE,'PA'),
+            (Start-Job -ScriptBlock $writer -ArgumentList $modulePath,$parallelList,$env:SEMT_RUNTIME_ROOT_OVERRIDE,'PB')
+        )
+        try {
+            [void](Wait-Job -Job $jobs -Timeout 240)
+            $added = @($jobs | ForEach-Object { [int](Receive-Job -Job $_ | Select-Object -Last 1) })
+            $lines = @(Get-Content -LiteralPath $parallelList)
+            $bytes = [System.IO.File]::ReadAllBytes($parallelList)
+            $noBom = -not ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
+            @($jobs | Where-Object { $_.State -ne 'Completed' }).Count -eq 0 -and $added[0] -eq 40 -and $added[1] -eq 40 -and $lines.Count -eq 81 `
+                -and $lines[0] -eq 'Existing-PC.Contoso.Test' -and @($lines | Select-Object -Unique).Count -eq 81 -and $noBom
+        }
+        finally { $jobs | ForEach-Object { Stop-Job -Job $_ -ErrorAction SilentlyContinue; Remove-Job -Job $_ -Force -ErrorAction SilentlyContinue } }
+    }
+    Test-Step 'Campaign list: an unreadable file is left untouched (the caller only logs a WARNING)' {
+        $lockedList = Join-Path (Split-Path -Path $wave.Path -Parent) 'Computers.Locked.txt'
+        [System.IO.File]::WriteAllLines($lockedList, [string[]]@('PC-L1'), (New-Object System.Text.UTF8Encoding($false)))
+        $before = [System.IO.File]::ReadAllBytes($lockedList)
+        $handle = [System.IO.File]::Open($lockedList, 'Open', 'ReadWrite', 'None')
+        $threw = $false
+        try { [void](Add-SemtComputersToArchiveList -ArchivePath $lockedList -ComputerNames @('PC-L2')) } catch { $threw = $true }
+        finally { $handle.Dispose() }
+        $after = [System.IO.File]::ReadAllBytes($lockedList)
+        $threw -and ([Convert]::ToBase64String($before) -eq [Convert]::ToBase64String($after))
+    }
+    Test-Step 'Wave discovery skips a folder that is not a Wave (Backup of old Waves) and does not descend into it' {
+        $backup = Join-Path (Split-Path -Path $wave.Path -Parent) 'Backup\WAVE-OLD'
+        New-Item -ItemType Directory -Path $backup -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $backup 'Computers.txt') -Value 'PC-OLD' -Encoding ASCII
+        $names = @(Get-SemtWaves -PackageRoot $packageCopy -Campaign HybridJoin | ForEach-Object { $_.Name })
+        ($names -notcontains 'Backup') -and ($names -notcontains 'WAVE-OLD') -and ($names -contains $wave.Name)
+    }
+    Test-Throws 'Add-SemtComputersToArchiveList refuses a missing folder' { Add-SemtComputersToArchiveList -ArchivePath (Join-Path $tempRoot 'Missing\Computers.AlreadyEnrolled.txt') -ComputerNames @('PC-1') } 'SEMT_ARCHIVE_LIST_FOLDER_MISSING'
     #endregion
 
     #region Shared worker cap

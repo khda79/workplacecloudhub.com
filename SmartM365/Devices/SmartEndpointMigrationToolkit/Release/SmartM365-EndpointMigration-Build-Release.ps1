@@ -68,6 +68,7 @@ if ($releaseTag -ne ('endpoint-migration-toolkit-v{0}' -f $packageVersion)) { th
 $excludedPatterns = @(
     '^Runs\\(?!\.gitkeep$)',
     '^Waves\\[^\\]+\\[^\\]+\\',
+    '^Waves\\[^\\]+\\(?!\.gitkeep$)[^\\]+$',
     '^Inventory\\',
     '^DemoAssets\\',
     '^Release\\(Output|Work)\\',

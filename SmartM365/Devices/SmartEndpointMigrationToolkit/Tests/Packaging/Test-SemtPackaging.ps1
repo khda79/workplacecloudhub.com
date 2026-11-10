@@ -63,6 +63,10 @@ try {
     $planted = @(
         'Waves\HybridJoin\WAVE-PRIVATE\Computers.txt',
         'Waves\HybridJoin\WAVE-PRIVATE\Wave.local.json.txt',
+        'Waves\HybridJoin\Computers.AlreadyEnrolled.txt',
+        'Waves\Windows11Upgrade\Computers.HardwareNotCapable.txt',
+        'Waves\Windows11Upgrade\Campaign.Notes.txt',
+        'Waves\Windows11Upgrade\Backup\WAVE-OLD\Computers.txt',
         'Runs\HybridJoin\WAVE-PRIVATE\R1\Logs\SEMT-launcher.log',
         'Config\SmartEndpointMigrationToolkit.local.json.txt',
         'Config\GuiState.HybridJoin.local.json.txt',

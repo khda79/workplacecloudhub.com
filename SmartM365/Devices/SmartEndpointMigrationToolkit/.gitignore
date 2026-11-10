@@ -21,7 +21,8 @@ LOCAL_MEMORY.md
 IMPLEMENTATION-NOTES.md
 
 # Operational Waves, Runs and inventory caches
-/Waves/*/*/
+/Waves/*/*
+!/Waves/*/.gitkeep
 /Runs/*
 !/Runs/.gitkeep
 /Inventory/

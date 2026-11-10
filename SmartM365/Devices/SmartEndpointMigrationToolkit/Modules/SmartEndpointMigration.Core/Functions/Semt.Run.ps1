@@ -74,6 +74,9 @@ function Get-SemtWaves {
     $rows = New-Object System.Collections.Generic.List[object]
     foreach ($folder in @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Sort-Object Name)) {
         $computersPath = Join-Path -Path $folder.FullName -ChildPath 'Computers.txt'
+        # A Wave folder holds Computers.txt or Wave.local.json.txt. Other folders (a Backup of old
+        # Waves, for example) are not Waves: they are not listed and never descended into.
+        if (-not (Test-Path -LiteralPath $computersPath -PathType Leaf) -and -not (Test-Path -LiteralPath (Join-Path -Path $folder.FullName -ChildPath 'Wave.local.json.txt') -PathType Leaf)) { continue }
         $count = 0
         if (Test-Path -LiteralPath $computersPath -PathType Leaf) { try { $count = @(Get-SemtComputerList -Path $computersPath).Count } catch { $count = 0 } }
         $wrappers = @('Start-Wave-Loop.cmd','Start-Wave-Once.cmd','Start-Wave-Loop-IgnoreRunGuard.cmd','Start-Wave-Once-IgnoreRunGuard.cmd')

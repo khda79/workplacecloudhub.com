@@ -198,6 +198,53 @@ function Move-SemtComputersFromList {
     })
 }
 
+function Add-SemtComputersToArchiveList {
+    <#
+    Adds computers to an archive list (for example the Campaign-level
+    Waves\<Campaign>\Computers.AlreadyEnrolled.txt) without duplicates: a short name and its FQDN
+    are the same computer. Existing lines are kept as they are. The file is rewritten atomically
+    under its own computer-list lock, so several Waves can feed it at the same time.
+    Returns the number of computers added.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$ArchivePath,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$ComputerNames
+    )
+
+    $names = New-Object System.Collections.Generic.List[string]
+    foreach ($computer in @($ComputerNames)) {
+        $name = ConvertTo-SemtComputerName -Line $computer
+        if (-not [string]::IsNullOrWhiteSpace($name)) { $names.Add($name) }
+    }
+    if ($names.Count -eq 0) { return 0 }
+    $parent = Split-Path -Path $ArchivePath -Parent
+    if (-not (Test-Path -LiteralPath $parent -PathType Container)) { throw ("SEMT_ARCHIVE_LIST_FOLDER_MISSING: {0}" -f $parent) }
+
+    return [int](Invoke-SemtWithComputerListLock -ComputerListPath $ArchivePath -ArgumentList @($ArchivePath,@($names.ToArray())) -ScriptBlock {
+        param($LockedPath, $LockedNames)
+        $lines = New-Object System.Collections.Generic.List[string]
+        $existing = @{}
+        if (Test-Path -LiteralPath $LockedPath -PathType Leaf) {
+            foreach ($line in @(Get-Content -LiteralPath $LockedPath -ErrorAction Stop)) {
+                $lines.Add([string]$line)
+                $key = Get-SemtComputerKey -ComputerName $line
+                if (-not [string]::IsNullOrWhiteSpace($key)) { $existing[$key] = $true }
+            }
+        }
+        $added = 0
+        foreach ($name in @($LockedNames)) {
+            $key = Get-SemtComputerKey -ComputerName $name
+            if ([string]::IsNullOrWhiteSpace($key) -or $existing.ContainsKey($key)) { continue }
+            $lines.Add([string]$name)
+            $existing[$key] = $true
+            $added++
+        }
+        if ($added -gt 0) { Write-SemtTextLinesAtomic -Path $LockedPath -Lines @($lines.ToArray()) }
+        return $added
+    })
+}
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG

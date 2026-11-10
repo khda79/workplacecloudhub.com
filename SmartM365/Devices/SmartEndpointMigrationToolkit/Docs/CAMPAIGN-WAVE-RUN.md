@@ -18,6 +18,9 @@ Statuses shared by every Campaign: `TARGET_OPERATION_ACTIVE` (`WAIT_ACTIVE_TARGE
 Completed computers leave `Computers.txt` and are archived next to it
 (`Computers.AlreadyEnrolled.txt`, `Computers.AlreadyWindows11.txt`,
 `Computers.HardwareNotCapable.txt`, `Computers.PrerequisitesReady.txt`).
+They are also added, without duplicates (a short name and its FQDN are the same computer), to
+the list of the same name at the Campaign Waves root, for example
+`Waves\HybridJoin\Computers.AlreadyEnrolled.txt`: one list for all the Waves of the Campaign.
 
 ### Prerequisites
 
