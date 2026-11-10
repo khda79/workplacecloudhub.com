@@ -360,6 +360,8 @@ function Request-SemtWorkerLease {
     <#
     Waits for a slot under the shared cap and returns the lease path, or '' when the cap is
     disabled or a controlled stop was requested while waiting.
+    OnPoll runs outside the gate lock after each attempt that found no free slot: the launcher
+    uses it to collect its own finished workers, whose release is often the slot it waits for.
     #>
     [CmdletBinding()]
     param(
@@ -370,12 +372,14 @@ function Request-SemtWorkerLease {
         [Parameter(Mandatory = $true)][string]$Computer,
         [Parameter(Mandatory = $true)][int]$CycleNumber,
         [ValidateRange(1, 60)][int]$PollSeconds = 2,
-        [scriptblock]$OnWaitLog
+        [scriptblock]$OnWaitLog,
+        [scriptblock]$OnPoll
     )
 
     if ($Gate.Limit -lt 1) { return '' }
     $waitStarted = Get-Date
     $lastLog = $null
+    $lastPollErrorLog = $null
     while ($true) {
         if ((Get-SemtCancellationState).Requested) { return '' }
         $attempt = Invoke-SemtWithFileLock -LockPath $Gate.LockPath -TimeoutSeconds 300 -ArgumentList @($Gate,$Campaign,$RunId,$WaveName,$Computer,$CycleNumber) -ScriptBlock {
@@ -420,6 +424,18 @@ function Request-SemtWorkerLease {
             & $OnWaitLog ("Recovered {0} stale worker reservation(s): {1}" -f @($attempt.Removed).Count,((@($attempt.Removed) | ForEach-Object { '{0}/{1}={2}' -f $_.Campaign,$_.Computer,$_.Reason }) -join ', '))
         }
         if (-not [string]::IsNullOrWhiteSpace($attempt.LeasePath)) { return $attempt.LeasePath }
+        # Its output is discarded: this function returns only the lease path. A failure is logged
+        # (at most every 5 minutes) and never ends the wait; stale recovery stays the safety net.
+        if ($OnPoll) {
+            try { $null = & $OnPoll }
+            catch {
+                $pollNow = Get-Date
+                if ($OnWaitLog -and ($null -eq $lastPollErrorLog -or ($pollNow - $lastPollErrorLog).TotalSeconds -ge 300)) {
+                    & $OnWaitLog ("WARNING: collecting finished workers while waiting for a slot failed: {0}" -f $_.Exception.Message)
+                    $lastPollErrorLog = $pollNow
+                }
+            }
+        }
         $now = Get-Date
         if ($OnWaitLog -and ($now - $waitStarted).TotalSeconds -ge 300 -and ($null -eq $lastLog -or ($now - $lastLog).TotalSeconds -ge 300)) {
             & $OnWaitLog ("Waiting for a shared worker slot: Computer={0}; Active={1}; EffectiveLimit={2}; Wait={3:N1} minute(s)." -f $Computer,$attempt.Active,$attempt.EffectiveLimit,($now - $waitStarted).TotalMinutes)

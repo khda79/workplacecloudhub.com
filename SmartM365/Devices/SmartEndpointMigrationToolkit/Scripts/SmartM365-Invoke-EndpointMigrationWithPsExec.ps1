@@ -47,7 +47,7 @@
     Resolves options, rules and component integrity, writes nothing on targets and exits.
 
 .VERSION
-    1.0.0
+    1.0.1
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -73,7 +73,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:LauncherVersion = '1.0.0'
+$script:LauncherVersion = '1.0.1'
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected argument(s): {0}. Pass options with -Option @{{ Name = Value }} and PsExec with -PsExecPath." -f ($UnexpectedArguments -join ' '))
@@ -523,106 +523,11 @@ try {
         $lastProgressLog = Get-Date
         $lastHtml = [datetime]::MinValue
         $cycleIgnoreGuard = [bool]((Opt 'IgnoreEndpointRunGuard') -and ($cycle -eq 1 -or (Opt 'IgnoreEndpointRunGuardEveryCycle')))
-        while ($next -lt $computers.Count -or $running.Count -gt 0) {
-            $cancel = Get-SemtCancellationState
-            if ($cancel.Requested) {
-                if ($null -eq $cancelObservedAt) {
-                    $cancelObservedAt = Get-Date
-                    Set-SemtActiveRunState -Status 'StopRequested' -ReportPath $script:Report.HtmlPath
-                    Write-Host ("Controlled stop requested by {0}: no new computer starts; running workers drain for up to {1} minute(s). A second stop forces the local stop." -f $cancel.Source,(Opt 'CancellationDrainTimeoutMinutes')) -ForegroundColor Yellow
-                }
-                while ($next -lt $computers.Count) { [void]$cycleRows.Add((New-EngineResult -Computer $computers[$next] -CycleNumber $cycle -Status 'CANCELLED_NOT_STARTED' -NextAction 'SAFE_TO_RELAUNCH' -Detail 'Controlled stop requested before this computer was started.')); $next++ }
-                $drainExpired = ((Opt 'CancellationDrainTimeoutMinutes') -eq 0 -or ((Get-Date) - $cancelObservedAt).TotalMinutes -ge (Opt 'CancellationDrainTimeoutMinutes'))
-                if ($running.Count -gt 0 -and ($cancel.Force -or $drainExpired)) {
-                    foreach ($item in @($running | Where-Object { $_.Job.State -eq 'Running' })) {
-                        if (-not $forced.ContainsKey([string]$item.Job.Id)) {
-                            $forced[[string]$item.Job.Id] = $true
-                            Write-Host ("Forcing the local stop of {0}: {1}. The remote endpoint may already be running." -f $item.Computer,(Stop-SemtWorkerProcessTree -LeasePath $item.LeasePath)) -ForegroundColor Red
-                        }
-                        Stop-Job -Job $item.Job -ErrorAction SilentlyContinue
-                    }
-                }
-            }
-
-            while ($next -lt $computers.Count -and $running.Count -lt (Opt 'ThrottleLimit') -and -not (Get-SemtCancellationState).Requested) {
-                $computer = $computers[$next]
-                $next++
-                $target = Resolve-SemtConnectionTarget -ComputerName $computer -DomainSuffix (Opt 'AdDomain')
-                $fqdn = Get-SemtRunGuardFqdn -ComputerName $computer -AdInventoryMap $(if ($script:Inventory.ContainsKey('AD')) { $script:Inventory['AD'].Map } else { $null })
-                $perComputer = New-Object System.Collections.Generic.List[string]
-                if ($cycleIgnoreGuard) { $perComputer.Add('-IgnoreRunGuard') }
-                if ($useRunGuard) {
-                    $decision = $null
-                    try { $decision = & $script:CampaignProfile.Hooks.RunGuardDecision (Get-RunGuardEntry -Fqdn $fqdn) $script:Options }
-                    catch {
-                        [void]$cycleRows.Add((New-EngineResult -Computer $computer -CycleNumber $cycle -Status 'TECH_RUN_GUARD_HISTORY_UNAVAILABLE' -NextAction 'CHECK_TECHNICIAN_STATE_ACCESS' -Detail ('Technician run guard history is unavailable; the computer was not launched. Error={0}' -f $_.Exception.Message)))
-                        continue
-                    }
-                    if ($decision.Block) {
-                        $skip = New-EngineResult -Computer $computer -CycleNumber $cycle -Status $decision.Status -NextAction $decision.NextAction -Detail $decision.Detail
-                        foreach ($fieldName in @($decision.Fields.Keys)) { Set-SemtResultField -Result $skip -Name $fieldName -Value $decision.Fields[$fieldName] }
-                        [void]$cycleRows.Add($skip)
-                        # Why and until when: the previous status and the next eligible local time.
-                        $priorStatus = [string]$(if ($decision.Fields -and $decision.Fields.ContainsKey('BackoffStatus')) { $decision.Fields['BackoffStatus'] } else { '' })
-                        $untilUtc = ConvertTo-SemtUtcDateTime -Value $(if ($decision.Fields -and $decision.Fields.ContainsKey('BackoffUntilUtc')) { $decision.Fields['BackoffUntilUtc'] } else { '' })
-                        $untilText = if ($null -ne $untilUtc) { ' next try after {0:yyyy-MM-dd HH:mm} (local);' -f $untilUtc.ToLocalTime() } else { '' }
-                        Write-Host ("  [{0}] {1} - previous status {2};{3} a run mode 'ignore run guard' bypasses it." -f $decision.Status,$computer,$(if ($priorStatus) { $priorStatus } else { 'unknown' }),$untilText) -ForegroundColor DarkYellow
-                        continue
-                    }
-                    if ($decision.BypassEndpointGuard -and -not $perComputer.Contains('-IgnoreRunGuard')) {
-                        $perComputer.Add('-IgnoreRunGuard')
-                        Write-Host ("  [ENDPOINT_RUN_GUARD_RETRY_BYPASS] {0}: adaptive retry is due; the bypass applies to this attempt only." -f $computer) -ForegroundColor DarkCyan
-                    }
-                }
-                foreach ($argument in @(& $script:CampaignProfile.Hooks.PerComputerArguments $hookContext $computer)) { $perComputer.Add([string]$argument) }
-
-                $leasePath = Request-SemtWorkerLease -Gate $script:Gate -Campaign $Campaign -RunId $script:RunId -WaveName $script:RunContext.WaveName -Computer $computer -CycleNumber $cycle -OnWaitLog { param($message) Write-Host $message -ForegroundColor DarkYellow }
-                if ((Get-SemtCancellationState).Requested) { [void](Remove-SemtWorkerLease -Gate $script:Gate -LeasePath $leasePath); $next--; break }
-
-                $correlationId = [guid]::NewGuid().ToString('N')
-                $arguments = @($baseEndpointArguments) + @($perComputer.ToArray()) + @('-CorrelationId',$correlationId)
-                $waitOption = [string]$script:CampaignProfile.CommunicationLostWaitOption
-                $pollOption = [string]$script:CampaignProfile.CommunicationLostPollOption
-                $contract = New-SemtWorkerContract -RunContext $script:RunContext -Computer $computer -ConnectionTarget $target.ConnectionTarget -CycleNumber $cycle -CorrelationId $correlationId `
-                    -Endpoint @{ RelativePath = $script:CampaignProfile.EndpointScriptRelativePath; ExpectedSha256 = $script:EndpointSha256; ExpectedVersion = $script:EndpointVersion; RemoteDataRoot = $script:TargetDataRoot; RemoteProgramRoot = $script:TargetProgramRoot; Arguments = @($arguments) } `
-                    -PsExec @{ Path = $script:ResolvedPsExec; Sha256 = $script:PsExecEvidence.SHA256; TimeoutMinutes = (Opt 'PsExecTimeoutMinutes'); RpcFailureWindowMinutes = (Opt 'RemoteTaskRpcFailureWindowMinutes'); StartTimeoutMinutes = (Opt 'RemoteTaskStartTimeoutMinutes'); UseElevatedToken = [bool]$script:CampaignProfile.PsExecUseElevatedToken; CommunicationLostWaitMinutes = $(if ($waitOption) { Opt $waitOption } else { 0 }); CommunicationLostPollMinutes = $(if ($pollOption) { Opt $pollOption } else { 10 }) } `
-                    -Evidence @{ Enabled = [bool](Opt 'CentralLogCollection'); Mode = (Opt 'CentralLogCollectionMode'); KeepHistory = [bool](Opt 'KeepCentralLogHistory'); LogRoot = $script:RunContext.PsExecLogRoot; CentralLogRoot = $script:RunContext.CentralLogRoot } `
-                    -Flags @{ DryRun = [bool](Opt 'DryRun'); ComponentIntegrityMode = (Opt 'ComponentIntegrityMode'); RemoteExecutionMode = (Opt 'RemoteExecutionMode') } `
-                    -Gate @{ LeasePath = $leasePath } -Prerequisites $script:AutoPrerequisites
-                $jobName = 'SEMT_{0}_C{1}_{2}' -f $Campaign,$cycle,$computer
-                $start = Start-WorkerJobWithRetry -JobName $jobName -WorkerPath $workerPath -ContractPath $contract.Path -Computer $computer
-                if (-not $start.Succeeded) {
-                    [void](Remove-SemtWorkerLease -Gate $script:Gate -LeasePath $leasePath)
-                    $failed = New-EngineResult -Computer $computer -CycleNumber $cycle -Status 'LOCAL_WORKER_START_FAILED' -NextAction 'RETRY_LAUNCH' -Detail ('The local worker could not start after 3 attempts; the endpoint was not contacted. {0}' -f $start.Detail)
-                    [void]$cycleRows.Add($failed)
-                    continue
-                }
-                [void](Update-SemtWorkerLease -LeasePath $leasePath -LockPath $script:Gate.LockPath -Properties @{ JobId = [string]$start.Job.Id; JobName = $jobName })
-                if ($useRunGuard) { try { Update-RunGuardEntry -Fqdn $fqdn -Computer $computer -State Started -Result $null -JobId ([string]$start.Job.Id) -CycleNumber $cycle } catch { Write-Host ("TECH_RUN_GUARD_HISTORY_WRITE_DEFERRED: Started; {0}; {1}" -f $computer,$_.Exception.Message) -ForegroundColor Yellow } }
-                [void]$running.Add([pscustomobject]@{ Job = $start.Job; Computer = $computer; Target = $target.ConnectionTarget; LeasePath = $leasePath; ContractPath = $contract.Path; CorrelationId = $correlationId; StartedAt = Get-Date; Fqdn = $fqdn })
-                Write-Host ("Queued {0} ({1}/{2}); running={3}" -f $computer,$next,$computers.Count,$running.Count) -ForegroundColor DarkCyan
-                if ((Opt 'DelayBetweenComputersSeconds') -gt 0 -and $next -lt $computers.Count) { [void](Wait-SemtCancellationAware -Seconds (Opt 'DelayBetweenComputersSeconds')) }
-            }
-
-            $finished = @($running | Where-Object { $_.Job.State -ne 'Running' -and $_.Job.State -ne 'NotStarted' })
-            if ($finished.Count -eq 0) {
-                if (((Get-Date) - $lastProgressLog).TotalMinutes -ge 5 -and $running.Count -gt 0) {
-                    Write-Host ("Waiting for {0} worker(s); elapsed {1:N1} min; running: {2}" -f $running.Count,((Get-Date) - $cycleStart).TotalMinutes,((@($running) | ForEach-Object { '{0} ({1:N1}m)' -f $_.Computer,((Get-Date) - $_.StartedAt).TotalMinutes }) -join ', '))
-                    $lastProgressLog = Get-Date
-                }
-                if (((Get-Date) - $lastHtml).TotalSeconds -ge 60) {
-                    try {
-                        $runningRows = @($running | ForEach-Object { [pscustomobject]@{ ComputerName = $_.Computer; ConnectionTarget = $_.Target; JobId = [string]$_.Job.Id; State = [string]$_.Job.State; Started = $_.StartedAt.ToString('yyyy-MM-dd HH:mm:ss'); ElapsedMinutes = [math]::Round(((Get-Date) - $_.StartedAt).TotalMinutes, 1) } })
-                        [void](Write-SemtRunHtmlReport -State $script:Report -CycleNumber $cycle -IsLive -CurrentCycleRows @($cycleRows.ToArray()) -CurrentProgress (New-SemtProgressRow -CycleNumber $cycle -CycleStart $cycleStart -Total ($computers.Count + $preRows.Count) -Queued $next -Completed $cycleRows.Count -Running $running.Count -ComputerListStats $listStats) -RunningRows $runningRows)
-                        $lastHtml = Get-Date
-                    }
-                    catch { Write-Host ("WARNING: live report update failed: {0}" -f $_.Exception.Message) -ForegroundColor Yellow }
-                }
-                Start-Sleep -Seconds 2
-                continue
-            }
-
-            foreach ($item in $finished) {
+        # Collects this launcher's finished workers and releases their shared slots. It also runs
+        # while Request-SemtWorkerLease waits for a slot: otherwise our own finished workers keep
+        # their slots until another launcher recovers them as stale (WorkerProcessExited).
+        $collectFinishedWorkers = {
+            foreach ($item in @($running | Where-Object { $_.Job.State -ne 'Running' -and $_.Job.State -ne 'NotStarted' })) {
                 $jobErrors = New-Object System.Collections.Generic.List[string]
                 $received = @()
                 try {
@@ -681,6 +586,107 @@ try {
                 Remove-Job -Job $item.Job -Force -ErrorAction SilentlyContinue
                 $running.Remove($item)
             }
+        }
+        while ($next -lt $computers.Count -or $running.Count -gt 0) {
+            $cancel = Get-SemtCancellationState
+            if ($cancel.Requested) {
+                if ($null -eq $cancelObservedAt) {
+                    $cancelObservedAt = Get-Date
+                    Set-SemtActiveRunState -Status 'StopRequested' -ReportPath $script:Report.HtmlPath
+                    Write-Host ("Controlled stop requested by {0}: no new computer starts; running workers drain for up to {1} minute(s). A second stop forces the local stop." -f $cancel.Source,(Opt 'CancellationDrainTimeoutMinutes')) -ForegroundColor Yellow
+                }
+                while ($next -lt $computers.Count) { [void]$cycleRows.Add((New-EngineResult -Computer $computers[$next] -CycleNumber $cycle -Status 'CANCELLED_NOT_STARTED' -NextAction 'SAFE_TO_RELAUNCH' -Detail 'Controlled stop requested before this computer was started.')); $next++ }
+                $drainExpired = ((Opt 'CancellationDrainTimeoutMinutes') -eq 0 -or ((Get-Date) - $cancelObservedAt).TotalMinutes -ge (Opt 'CancellationDrainTimeoutMinutes'))
+                if ($running.Count -gt 0 -and ($cancel.Force -or $drainExpired)) {
+                    foreach ($item in @($running | Where-Object { $_.Job.State -eq 'Running' })) {
+                        if (-not $forced.ContainsKey([string]$item.Job.Id)) {
+                            $forced[[string]$item.Job.Id] = $true
+                            Write-Host ("Forcing the local stop of {0}: {1}. The remote endpoint may already be running." -f $item.Computer,(Stop-SemtWorkerProcessTree -LeasePath $item.LeasePath)) -ForegroundColor Red
+                        }
+                        Stop-Job -Job $item.Job -ErrorAction SilentlyContinue
+                    }
+                }
+            }
+
+            while ($next -lt $computers.Count -and $running.Count -lt (Opt 'ThrottleLimit') -and -not (Get-SemtCancellationState).Requested) {
+                $computer = $computers[$next]
+                $next++
+                $target = Resolve-SemtConnectionTarget -ComputerName $computer -DomainSuffix (Opt 'AdDomain')
+                $fqdn = Get-SemtRunGuardFqdn -ComputerName $computer -AdInventoryMap $(if ($script:Inventory.ContainsKey('AD')) { $script:Inventory['AD'].Map } else { $null })
+                $perComputer = New-Object System.Collections.Generic.List[string]
+                if ($cycleIgnoreGuard) { $perComputer.Add('-IgnoreRunGuard') }
+                if ($useRunGuard) {
+                    $decision = $null
+                    try { $decision = & $script:CampaignProfile.Hooks.RunGuardDecision (Get-RunGuardEntry -Fqdn $fqdn) $script:Options }
+                    catch {
+                        [void]$cycleRows.Add((New-EngineResult -Computer $computer -CycleNumber $cycle -Status 'TECH_RUN_GUARD_HISTORY_UNAVAILABLE' -NextAction 'CHECK_TECHNICIAN_STATE_ACCESS' -Detail ('Technician run guard history is unavailable; the computer was not launched. Error={0}' -f $_.Exception.Message)))
+                        continue
+                    }
+                    if ($decision.Block) {
+                        $skip = New-EngineResult -Computer $computer -CycleNumber $cycle -Status $decision.Status -NextAction $decision.NextAction -Detail $decision.Detail
+                        foreach ($fieldName in @($decision.Fields.Keys)) { Set-SemtResultField -Result $skip -Name $fieldName -Value $decision.Fields[$fieldName] }
+                        [void]$cycleRows.Add($skip)
+                        # Why and until when: the previous status and the next eligible local time.
+                        $priorStatus = [string]$(if ($decision.Fields -and $decision.Fields.ContainsKey('BackoffStatus')) { $decision.Fields['BackoffStatus'] } else { '' })
+                        $untilUtc = ConvertTo-SemtUtcDateTime -Value $(if ($decision.Fields -and $decision.Fields.ContainsKey('BackoffUntilUtc')) { $decision.Fields['BackoffUntilUtc'] } else { '' })
+                        $untilText = if ($null -ne $untilUtc) { ' next try after {0:yyyy-MM-dd HH:mm} (local);' -f $untilUtc.ToLocalTime() } else { '' }
+                        Write-Host ("  [{0}] {1} - previous status {2};{3} a run mode 'ignore run guard' bypasses it." -f $decision.Status,$computer,$(if ($priorStatus) { $priorStatus } else { 'unknown' }),$untilText) -ForegroundColor DarkYellow
+                        continue
+                    }
+                    if ($decision.BypassEndpointGuard -and -not $perComputer.Contains('-IgnoreRunGuard')) {
+                        $perComputer.Add('-IgnoreRunGuard')
+                        Write-Host ("  [ENDPOINT_RUN_GUARD_RETRY_BYPASS] {0}: adaptive retry is due; the bypass applies to this attempt only." -f $computer) -ForegroundColor DarkCyan
+                    }
+                }
+                foreach ($argument in @(& $script:CampaignProfile.Hooks.PerComputerArguments $hookContext $computer)) { $perComputer.Add([string]$argument) }
+
+                $leasePath = Request-SemtWorkerLease -Gate $script:Gate -Campaign $Campaign -RunId $script:RunId -WaveName $script:RunContext.WaveName -Computer $computer -CycleNumber $cycle -OnWaitLog { param($message) Write-Host $message -ForegroundColor DarkYellow } -OnPoll $collectFinishedWorkers
+                if ((Get-SemtCancellationState).Requested) { [void](Remove-SemtWorkerLease -Gate $script:Gate -LeasePath $leasePath); $next--; break }
+
+                $correlationId = [guid]::NewGuid().ToString('N')
+                $arguments = @($baseEndpointArguments) + @($perComputer.ToArray()) + @('-CorrelationId',$correlationId)
+                $waitOption = [string]$script:CampaignProfile.CommunicationLostWaitOption
+                $pollOption = [string]$script:CampaignProfile.CommunicationLostPollOption
+                $contract = New-SemtWorkerContract -RunContext $script:RunContext -Computer $computer -ConnectionTarget $target.ConnectionTarget -CycleNumber $cycle -CorrelationId $correlationId `
+                    -Endpoint @{ RelativePath = $script:CampaignProfile.EndpointScriptRelativePath; ExpectedSha256 = $script:EndpointSha256; ExpectedVersion = $script:EndpointVersion; RemoteDataRoot = $script:TargetDataRoot; RemoteProgramRoot = $script:TargetProgramRoot; Arguments = @($arguments) } `
+                    -PsExec @{ Path = $script:ResolvedPsExec; Sha256 = $script:PsExecEvidence.SHA256; TimeoutMinutes = (Opt 'PsExecTimeoutMinutes'); RpcFailureWindowMinutes = (Opt 'RemoteTaskRpcFailureWindowMinutes'); StartTimeoutMinutes = (Opt 'RemoteTaskStartTimeoutMinutes'); UseElevatedToken = [bool]$script:CampaignProfile.PsExecUseElevatedToken; CommunicationLostWaitMinutes = $(if ($waitOption) { Opt $waitOption } else { 0 }); CommunicationLostPollMinutes = $(if ($pollOption) { Opt $pollOption } else { 10 }) } `
+                    -Evidence @{ Enabled = [bool](Opt 'CentralLogCollection'); Mode = (Opt 'CentralLogCollectionMode'); KeepHistory = [bool](Opt 'KeepCentralLogHistory'); LogRoot = $script:RunContext.PsExecLogRoot; CentralLogRoot = $script:RunContext.CentralLogRoot } `
+                    -Flags @{ DryRun = [bool](Opt 'DryRun'); ComponentIntegrityMode = (Opt 'ComponentIntegrityMode'); RemoteExecutionMode = (Opt 'RemoteExecutionMode') } `
+                    -Gate @{ LeasePath = $leasePath } -Prerequisites $script:AutoPrerequisites
+                $jobName = 'SEMT_{0}_C{1}_{2}' -f $Campaign,$cycle,$computer
+                $start = Start-WorkerJobWithRetry -JobName $jobName -WorkerPath $workerPath -ContractPath $contract.Path -Computer $computer
+                if (-not $start.Succeeded) {
+                    [void](Remove-SemtWorkerLease -Gate $script:Gate -LeasePath $leasePath)
+                    $failed = New-EngineResult -Computer $computer -CycleNumber $cycle -Status 'LOCAL_WORKER_START_FAILED' -NextAction 'RETRY_LAUNCH' -Detail ('The local worker could not start after 3 attempts; the endpoint was not contacted. {0}' -f $start.Detail)
+                    [void]$cycleRows.Add($failed)
+                    continue
+                }
+                [void](Update-SemtWorkerLease -LeasePath $leasePath -LockPath $script:Gate.LockPath -Properties @{ JobId = [string]$start.Job.Id; JobName = $jobName })
+                if ($useRunGuard) { try { Update-RunGuardEntry -Fqdn $fqdn -Computer $computer -State Started -Result $null -JobId ([string]$start.Job.Id) -CycleNumber $cycle } catch { Write-Host ("TECH_RUN_GUARD_HISTORY_WRITE_DEFERRED: Started; {0}; {1}" -f $computer,$_.Exception.Message) -ForegroundColor Yellow } }
+                [void]$running.Add([pscustomobject]@{ Job = $start.Job; Computer = $computer; Target = $target.ConnectionTarget; LeasePath = $leasePath; ContractPath = $contract.Path; CorrelationId = $correlationId; StartedAt = Get-Date; Fqdn = $fqdn })
+                Write-Host ("Queued {0} ({1}/{2}); running={3}" -f $computer,$next,$computers.Count,$running.Count) -ForegroundColor DarkCyan
+                if ((Opt 'DelayBetweenComputersSeconds') -gt 0 -and $next -lt $computers.Count) { [void](Wait-SemtCancellationAware -Seconds (Opt 'DelayBetweenComputersSeconds')) }
+            }
+
+            $finished = @($running | Where-Object { $_.Job.State -ne 'Running' -and $_.Job.State -ne 'NotStarted' })
+            if ($finished.Count -eq 0) {
+                if (((Get-Date) - $lastProgressLog).TotalMinutes -ge 5 -and $running.Count -gt 0) {
+                    Write-Host ("Waiting for {0} worker(s); elapsed {1:N1} min; running: {2}" -f $running.Count,((Get-Date) - $cycleStart).TotalMinutes,((@($running) | ForEach-Object { '{0} ({1:N1}m)' -f $_.Computer,((Get-Date) - $_.StartedAt).TotalMinutes }) -join ', '))
+                    $lastProgressLog = Get-Date
+                }
+                if (((Get-Date) - $lastHtml).TotalSeconds -ge 60) {
+                    try {
+                        $runningRows = @($running | ForEach-Object { [pscustomobject]@{ ComputerName = $_.Computer; ConnectionTarget = $_.Target; JobId = [string]$_.Job.Id; State = [string]$_.Job.State; Started = $_.StartedAt.ToString('yyyy-MM-dd HH:mm:ss'); ElapsedMinutes = [math]::Round(((Get-Date) - $_.StartedAt).TotalMinutes, 1) } })
+                        [void](Write-SemtRunHtmlReport -State $script:Report -CycleNumber $cycle -IsLive -CurrentCycleRows @($cycleRows.ToArray()) -CurrentProgress (New-SemtProgressRow -CycleNumber $cycle -CycleStart $cycleStart -Total ($computers.Count + $preRows.Count) -Queued $next -Completed $cycleRows.Count -Running $running.Count -ComputerListStats $listStats) -RunningRows $runningRows)
+                        $lastHtml = Get-Date
+                    }
+                    catch { Write-Host ("WARNING: live report update failed: {0}" -f $_.Exception.Message) -ForegroundColor Yellow }
+                }
+                Start-Sleep -Seconds 2
+                continue
+            }
+
+            & $collectFinishedWorkers
         }
 
         $rows = @($cycleRows.ToArray())

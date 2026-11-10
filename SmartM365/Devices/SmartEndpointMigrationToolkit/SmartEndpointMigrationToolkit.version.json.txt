@@ -8,7 +8,7 @@
   "WorkerContractVersion": 1,
   "Campaigns": [ "HybridJoin", "Windows11Upgrade", "Prerequisites" ],
   "Components": {
-    "Engine": "1.0.0",
+    "Engine": "1.0.1",
     "Worker": "1.0.2",
     "CoreModule": "1.0.0",
     "GUI": "1.1.0",

@@ -325,6 +325,47 @@ try {
         }
         finally { Stop-Job -Job $job -ErrorAction SilentlyContinue; Remove-Job -Job $job -Force -ErrorAction SilentlyContinue }
     }
+    Test-Step 'limit 1, two launchers: a waiting launcher frees its finished worker slot through OnPoll, without stale recovery' {
+        # Launcher A holds the only slot for a worker job that ends after a few seconds. Its
+        # reservation never becomes stale here (live launcher, fresh heartbeat, no worker PID), so
+        # only the OnPoll collection can free it. The first OnPoll call fails: the wait goes on.
+        $pollRoot = Join-Path $tempRoot 'GateOnPoll'
+        $gateA = Initialize-SemtWorkerGate -Limit 1 -LeaseTimeoutMinutes 120 -HeartbeatStaleMinutes 20 -Root $pollRoot
+        $gateB = Initialize-SemtWorkerGate -Limit 1 -LeaseTimeoutMinutes 120 -HeartbeatStaleMinutes 20 -Root $pollRoot
+        $script:SemtTestPoll = @{ Calls = 0; Releases = 0; ReleasedAfterJobEnd = $false; Logs = (New-Object System.Collections.Generic.List[string]) }
+        $script:SemtTestPoll.Lease = Request-SemtWorkerLease -Gate $gateA -Campaign HybridJoin -RunId RA -WaveName WA -Computer PC-A1 -CycleNumber 1
+        $script:SemtTestPoll.Job = Start-Job -ScriptBlock { Start-Sleep -Seconds 4 }
+        $script:SemtTestPoll.Gate = $gateA
+        $fullForB = ((Get-SemtWorkerGateSnapshot -Gate $gateB).Active.Count -eq 1)
+        try {
+            $started = Get-Date
+            $next = Request-SemtWorkerLease -Gate $gateA -Campaign HybridJoin -RunId RA -WaveName WA -Computer PC-A2 -CycleNumber 1 -PollSeconds 1 -OnWaitLog { param($message) $script:SemtTestPoll.Logs.Add([string]$message) } -OnPoll {
+                $script:SemtTestPoll.Calls++
+                if ($script:SemtTestPoll.Calls -eq 1) { throw 'simulated collection failure' }
+                $job = $script:SemtTestPoll.Job
+                if ($job -and $job.State -ne 'Running' -and $job.State -ne 'NotStarted') {
+                    $script:SemtTestPoll.ReleasedAfterJobEnd = ($job.State -eq 'Completed')
+                    [void](Remove-SemtWorkerLease -Gate $script:SemtTestPoll.Gate -LeasePath $script:SemtTestPoll.Lease)
+                    $script:SemtTestPoll.Releases++
+                    Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+                    $script:SemtTestPoll.Job = $null
+                }
+                'output that must not reach the caller'
+            }
+            $waitedSeconds = ((Get-Date) - $started).TotalSeconds
+            $logs = @($script:SemtTestPoll.Logs.ToArray())
+            $ok = $fullForB -and @($next).Count -eq 1 -and ([string]$next) -like '*lease_*' -and (Test-Path -LiteralPath ([string]$next)) `
+                -and $waitedSeconds -ge 2 -and $waitedSeconds -lt 60 `
+                -and $script:SemtTestPoll.Releases -eq 1 -and $script:SemtTestPoll.ReleasedAfterJobEnd `
+                -and -not (Test-Path -LiteralPath $script:SemtTestPoll.Lease) `
+                -and @($logs | Where-Object { $_ -like 'WARNING: collecting finished workers*simulated collection failure*' }).Count -eq 1 `
+                -and @($logs | Where-Object { $_ -like 'Recovered*' }).Count -eq 0 `
+                -and (Get-SemtWorkerGateSnapshot -Gate $gateB).Active.Count -eq 1
+            [void](Remove-SemtWorkerLease -Gate $gateA -LeasePath ([string]$next))
+            $ok
+        }
+        finally { if ($script:SemtTestPoll.Job) { Stop-Job -Job $script:SemtTestPoll.Job -ErrorAction SilentlyContinue; Remove-Job -Job $script:SemtTestPoll.Job -Force -ErrorAction SilentlyContinue } }
+    }
     #endregion
 
     #region Wave lock
