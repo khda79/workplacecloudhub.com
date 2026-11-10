@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collect native Entra direct membership and Intune policy/assignment evidence.
 .VERSION
-1.0.17
+1.0.18
 .NOTES
 Candidate collector. Not automatically scheduled until production qualification.
 Graph beta membership avoids the documented v1.0 service-principal omission.
@@ -12,7 +12,11 @@ Hidden groups require Member.Read.Hidden; missing access is fatal, not empty.
 [CmdletBinding()]
 param([string]$Tenant='test', [switch]$InteractiveAuth, [switch]$ValidateOnly,
     [switch]$EnableConfiguredExternalActions, [string]$OutputPath, [string]$LatestCsvFolderPath,
-    [ValidateRange(0,10000000)][int]$MaxItems=0)
+    [ValidateRange(0,10000000)][int]$MaxItems=0,
+    # Groups read per Graph $batch request for direct membership; 0 = sequential traversal only.
+    [ValidateRange(0,20)][int]$MembershipBatchSize=20,
+    # Qualification: N random batch-read groups are re-read sequentially in the same run and compared.
+    [ValidateRange(0,100000)][int]$VerifyBatchSample=0)
 function ConvertTo-InventoryIsoDate {
     param([AllowNull()][object]$Value)
     # Round-trip preserves DateTime.Kind/DateTimeOffset.Offset. Unspecified stays offsetless.
@@ -153,6 +157,82 @@ try {
         $badRequest = $badRequest -or ($text -match '\[Request_BadRequest\]') -or $directoryToken
         return ($badRequest -and ($directoryToken -or $text -match '\bThe page token is not valid\b'))
     }
+    # Graph $batch prefetch of complete single-page memberships. Only a 200 response without a next page is
+    # accepted; any other outcome (404, paging, throttling left after retries, malformed batch) leaves the group
+    # to Get-WorkplaceDirectMembers, whose retry, page-token and absence rules are unchanged.
+    $membershipBatchStats = @{BatchRequests=0;BatchServed=0;Paged=0;NonSuccess=0;TransientExhausted=0;BatchFailures=0}
+    function Read-WorkplaceMembershipBatch {
+        param([Parameter(Mandatory)][string[]]$GroupIds)
+        $served = @{}
+        $pending = @($GroupIds)
+        for ($round=1; $round -le 3 -and $pending.Count -gt 0; $round++) {
+            $requests = for ($i=0; $i -lt $pending.Count; $i++) {
+                [ordered]@{id=[string]$i; method='GET'; url=('/groups/{0}/members?$top=999' -f [uri]::EscapeDataString($pending[$i]))}
+            }
+            $body = ConvertTo-Json -InputObject @{requests=@($requests)} -Depth 5 -Compress
+            $membershipBatchStats.BatchRequests++
+            try {
+                $response = Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/beta/$batch' -Body $body -ContentType 'application/json' -OutputType PSObject -ErrorAction Stop
+            } catch {
+                $membershipBatchStats.BatchFailures++
+                Write-SmartM365EvidenceLog ("Membership batch request failed; {0} group(s) use the sequential traversal: {1}" -f $pending.Count, $_.Exception.Message)
+                return $served
+            }
+            $responses = @(Get-WorkplaceSourceValue $response @('responses') @())
+            $answered = @{}
+            $accepted = @{}
+            $retry = [Collections.Generic.List[string]]::new()
+            $wait = 0
+            $malformed = $false
+            foreach ($sub in $responses) {
+                $requestId = [string](Get-WorkplaceSourceValue $sub @('id') '')
+                $index = -1
+                if (-not [int]::TryParse($requestId, [ref]$index) -or $index -lt 0 -or $index -ge $pending.Count -or $answered.ContainsKey($index)) { $malformed = $true; break }
+                $answered[$index] = $true
+                $groupId = $pending[$index]
+                $status = 0
+                [void][int]::TryParse([string](Get-WorkplaceSourceValue $sub @('status') 0), [ref]$status)
+                if ($status -eq 200) {
+                    $subBody = Get-WorkplaceSourceValue $sub @('body') $null
+                    # The value property must be present (an empty array is a valid empty group); its absence is not.
+                    $valueProperty = if ($null -ne $subBody) { $subBody.PSObject.Properties['value'] } else { $null }
+                    if ($null -eq $valueProperty -or $null -eq $valueProperty.Value) { $membershipBatchStats.NonSuccess++; continue }
+                    if (-not [string]::IsNullOrWhiteSpace([string](Get-WorkplaceSourceValue $subBody @('@odata.nextLink') ''))) { $membershipBatchStats.Paged++; continue }
+                    $accepted[$groupId] = [pscustomobject]@{Members=@($valueProperty.Value); CollectedAtUtc=[datetime]::UtcNow.ToString('o')}
+                } elseif ($status -in @(429,500,502,503,504)) {
+                    $retry.Add($groupId)
+                    $headers = Get-WorkplaceSourceValue $sub @('headers') $null
+                    $retryAfter = 0
+                    [void][int]::TryParse([string](Get-WorkplaceSourceValue $headers @('Retry-After','retry-after') 0), [ref]$retryAfter)
+                    $wait = [Math]::Max($wait, [Math]::Min(300, [Math]::Max($retryAfter, 5 * [Math]::Pow(2, $round - 1))))
+                } else {
+                    $membershipBatchStats.NonSuccess++
+                }
+            }
+            if ($malformed) {
+                $membershipBatchStats.BatchFailures++
+                Write-SmartM365EvidenceLog ("Membership batch response was malformed or ambiguous; {0} group(s) use the sequential traversal." -f $pending.Count)
+                return $served
+            }
+            foreach ($groupId in $accepted.Keys) { $served[$groupId] = $accepted[$groupId] }
+            $membershipBatchStats.BatchServed += $accepted.Count
+            # Requests left unanswered stay with the sequential traversal.
+            $pending = $retry.ToArray()
+            if ($pending.Count -gt 0) {
+                if ($round -lt 3) { Start-Sleep -Seconds ([int][Math]::Ceiling($wait)) }
+                else { $membershipBatchStats.TransientExhausted += $pending.Count }
+            }
+        }
+        return $served
+    }
+    function Get-WorkplaceMemberKeySet {
+        param([object[]]$Members)
+        $keys = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($member in $Members) {
+            [void]$keys.Add(('{0}|{1}' -f ([string]$member.Id).Trim().ToLowerInvariant(), [string](Get-WorkplaceSourceValue $member @('@odata.type','OdataType'))))
+        }
+        return ,$keys
+    }
     # Catalog properties and membership scope share this single enumeration.
     Write-SmartM365EvidenceLog 'Reading the Entra group catalog (single paged enumeration).'
     $catalogTimer = [Diagnostics.Stopwatch]::StartNew()
@@ -171,13 +251,55 @@ try {
     $seenGroups = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     # Without this line the job log stayed silent for hours and the orchestrator reported the job as stalled.
     $membershipProgress = New-SmartM365EvidenceProgress -Activity 'Direct membership' -Total $groups.Count -Unit 'groups'
+    if ($MembershipBatchSize -gt 0) {
+        Write-SmartM365EvidenceLog ("Direct membership mode: Graph `$batch, {0} group(s) per request, `$top=999; a group with a further page or a non-200 response uses the sequential traversal." -f $MembershipBatchSize)
+    } else {
+        Write-SmartM365EvidenceLog 'Direct membership mode: sequential traversal (MembershipBatchSize=0).'
+    }
+    $verifyGroups = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    if ($MembershipBatchSize -gt 0 -and $VerifyBatchSample -gt 0 -and $groups.Count -gt 0) {
+        foreach ($sampled in @($groups | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Id) } | Get-Random -Count ([Math]::Min($VerifyBatchSample, $groups.Count)))) { [void]$verifyGroups.Add([string]$sampled.Id) }
+    }
+    $verifyStats = @{Compared=0;Identical=0;Different=0;NotBatchServed=0}
+    $prefetched = @{}
+    $groupPosition = 0
     foreach ($group in $groups) {
         [void](Write-SmartM365EvidenceProgress -Progress $membershipProgress -Processed $seenGroups.Count -Detail "membership rows=$($memberships.Count); absent groups=$($absentGroups.Count)")
         if ([string]::IsNullOrWhiteSpace([string]$group.Id) -or -not $seenGroups.Add(([string]$group.Id).Trim().ToLowerInvariant())) { throw 'Missing or duplicate Entra group identity.' }
-        $memberRead = Get-WorkplaceDirectMembers -GroupId $group.Id
-        if ($memberRead.Absent) { $absentGroups.Add([string]$group.Id); continue }
-        $members = @($memberRead.Members)
-        $collected = [datetime]::UtcNow.ToString('o')
+        if ($MembershipBatchSize -gt 0 -and ($groupPosition % $MembershipBatchSize) -eq 0) {
+            $chunkIds = @($groups[$groupPosition..([Math]::Min($groups.Count, $groupPosition + $MembershipBatchSize) - 1)] | ForEach-Object { [string]$_.Id } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            $prefetched = if ($chunkIds.Count) { Read-WorkplaceMembershipBatch -GroupIds $chunkIds } else { @{} }
+        }
+        $groupPosition++
+        $groupKey = [string]$group.Id
+        if ($prefetched.ContainsKey($groupKey)) {
+            $batchRead = $prefetched[$groupKey]
+            $prefetched.Remove($groupKey)
+            $members = @($batchRead.Members)
+            $collected = $batchRead.CollectedAtUtc
+            if ($verifyGroups.Contains($groupKey)) {
+                $sequentialRead = Get-WorkplaceDirectMembers -GroupId $group.Id
+                $verifyStats.Compared++
+                $batchKeys = Get-WorkplaceMemberKeySet $members
+                $sequentialKeys = if ($sequentialRead.Absent) { $null } else { Get-WorkplaceMemberKeySet @($sequentialRead.Members) }
+                if ($null -ne $sequentialKeys -and $batchKeys.SetEquals($sequentialKeys)) { $verifyStats.Identical++ }
+                else {
+                    $verifyStats.Different++
+                    $sequentialCount = if ($null -eq $sequentialKeys) { 'absent' } else { [string]$sequentialKeys.Count }
+                    Write-SmartM365EvidenceLog ("Batch membership verification difference; the sequential read is published. GroupId={0}; batchMembers={1}; sequentialMembers={2}." -f $groupKey, $batchKeys.Count, $sequentialCount) -Level WARNING
+                    # The reference method wins: publish exactly what sequential mode would have published.
+                    if ($sequentialRead.Absent) { $absentGroups.Add([string]$group.Id); continue }
+                    $members = @($sequentialRead.Members)
+                    $collected = [datetime]::UtcNow.ToString('o')
+                }
+            }
+        } else {
+            if ($verifyGroups.Contains($groupKey)) { $verifyStats.NotBatchServed++ }
+            $memberRead = Get-WorkplaceDirectMembers -GroupId $group.Id
+            if ($memberRead.Absent) { $absentGroups.Add([string]$group.Id); continue }
+            $members = @($memberRead.Members)
+            $collected = [datetime]::UtcNow.ToString('o')
+        }
         $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         foreach ($member in $members) {
             if ([string]::IsNullOrWhiteSpace([string]$member.Id) -or -not $seen.Add(([string]$member.Id).Trim().ToLowerInvariant())) { throw 'Missing or duplicate Entra member identity.' }
@@ -198,6 +320,14 @@ try {
     }
     if ($memberships.Count -gt 0 -and [string]::IsNullOrWhiteSpace([string]$script:Runtime.RunId)) { throw 'Missing RunId on Entra membership rows.' }
     Write-SmartM365EvidenceLog ("Direct membership collection completed in {0:N1} min: {1} membership row(s) validated while collected." -f $membershipTimer.Elapsed.TotalMinutes, $memberships.Count)
+    if ($MembershipBatchSize -gt 0) {
+        Write-SmartM365EvidenceLog ("Direct membership batch summary: batchRequests={0}; groupsServedByBatch={1}; sequential fallbacks: paged={2}; nonSuccess={3}; throttledAfterRetries={4}; failedBatchRequests={5}." -f $membershipBatchStats.BatchRequests, $membershipBatchStats.BatchServed, $membershipBatchStats.Paged, $membershipBatchStats.NonSuccess, $membershipBatchStats.TransientExhausted, $membershipBatchStats.BatchFailures)
+    }
+    if ($verifyGroups.Count) {
+        $verifyVerdict = if ($verifyStats.Different -eq 0 -and $verifyStats.Compared -gt 0) { 'PASS' } elseif ($verifyStats.Different -gt 0) { 'FAIL' } else { 'INCONCLUSIVE' }
+        $verifyLevel = if ($verifyVerdict -eq 'PASS') { 'SUCCESS' } else { 'WARNING' }
+        Write-SmartM365EvidenceLog ("Batch membership verification {0}: sampled={1}; compared={2}; identical={3}; different={4}; sampledButSequential={5}." -f $verifyVerdict, $verifyGroups.Count, $verifyStats.Compared, $verifyStats.Identical, $verifyStats.Different, $verifyStats.NotBatchServed) -Level $verifyLevel
+    }
     if ($absentGroups.Count) {
         # Corroborate targeted 404s with a successful fresh full enumeration.
         Write-SmartM365EvidenceLog "Verifying absence of $($absentGroups.Count) group(s) with a fresh full group enumeration."

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline coherent group catalog/membership acquisition tests. No tenant calls.
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 param()
@@ -25,10 +25,14 @@ function Invoke-CatalogFixture([object[]]$Groups, [switch]$FailMembers, [switch]
     [int]$Member404Count=0, [string[]]$ParentResults=@('Absent','Absent'), [switch]$Reappears,
     [switch]$FailFinalCatalog, [switch]$DuplicateFinalCatalog, [switch]$CodeOnly404, [int]$MemberStatus=0,
     [ValidateSet('HttpStatus','ResponseStatus','ResponseObject','Inner')][string]$ErrorShape='HttpStatus',
-    [string[]]$MemberErrors=@()) {
+    [string[]]$MemberErrors=@(), [int]$BatchSize=0, [int]$VerifySample=0,
+    [ValidateSet('Success','NextLink','NotFound','Throttle','ThrottleOnce','PostFailure','Malformed','Different')][string]$BatchMode='Success') {
     $fixture = New-Module -ScriptBlock {
         param($rows, $block, $memberFailure, $duplicate, $policyFailure, $missingCount, $parents,
-            $reappears, $finalFailure, $finalDuplicate, $codeOnly, $memberStatus, $errorShape, $memberErrors)
+            $reappears, $finalFailure, $finalDuplicate, $codeOnly, $memberStatus, $errorShape, $memberErrors,
+            $batchSize, $verifySample, $batchMode)
+        $script:BatchSize=$batchSize; $script:VerifySample=$verifySample; $script:BatchMode=$batchMode
+        $script:BatchCalls=0; $script:BatchRounds=@{}
         Set-StrictMode -Version Latest
         $script:Runtime = [pscustomobject]@{RunId='synthetic-runtime-run'}
         $script:Groups = @($rows); $script:Block = $block
@@ -112,6 +116,34 @@ function Invoke-CatalogFixture([object[]]$Groups, [switch]$FailMembers, [switch]
                 [pscustomobject]@{Id=$(if ($script:DuplicateMember) {'user-one'} else {'principal-one'});OdataType='#microsoft.graph.servicePrincipal'}
             }
         }
+        function Invoke-MgGraphRequest {
+            [CmdletBinding()] param([string]$Method, [string]$Uri, [string]$Body, [string]$ContentType, [string]$OutputType)
+            if ($Method -ne 'POST' -or $Uri -cne 'https://graph.microsoft.com/beta/$batch') { throw "Unexpected Graph request: $Method $Uri" }
+            $script:BatchCalls++
+            if ($script:BatchMode -eq 'PostFailure') { throw 'Synthetic batch POST failure' }
+            $requests = @((ConvertFrom-Json -InputObject $Body).requests)
+            if ($requests.Count -gt 20) { throw 'Graph batch limit exceeded.' }
+            $responses = foreach ($request in $requests) {
+                if ($request.method -ne 'GET' -or $request.url -notmatch '^/groups/([^/]+)/members\?\$top=999$') { throw "Unexpected batch sub-request: $($request.url)" }
+                $groupId = [uri]::UnescapeDataString($Matches[1])
+                if (-not $script:BatchRounds.ContainsKey($groupId)) { $script:BatchRounds[$groupId]=0 }
+                $script:BatchRounds[$groupId]++
+                $requestId = if ($script:BatchMode -eq 'Malformed') { '99' } else { $request.id }
+                $values = @()
+                if ($groupId -eq 'group-one') {
+                    if ($script:BatchMode -eq 'NotFound') { [pscustomobject]@{id=$requestId;status=404;body=[pscustomobject]@{error=[pscustomobject]@{code='Request_ResourceNotFound'}}}; continue }
+                    if ($script:BatchMode -eq 'Throttle' -or ($script:BatchMode -eq 'ThrottleOnce' -and $script:BatchRounds[$groupId] -eq 1)) {
+                        [pscustomobject]@{id=$requestId;status=429;headers=[pscustomobject]@{'Retry-After'='2'};body=$null}; continue
+                    }
+                    $values = @([pscustomobject]@{id='user-one';'@odata.type'='#microsoft.graph.user'})
+                    if ($script:BatchMode -ne 'Different') { $values += [pscustomobject]@{id='principal-one';'@odata.type'='#microsoft.graph.servicePrincipal'} }
+                }
+                $subBody = [pscustomobject]@{value=$values}
+                if ($groupId -eq 'group-one' -and $script:BatchMode -eq 'NextLink') { $subBody | Add-Member -NotePropertyName '@odata.nextLink' -NotePropertyValue 'https://graph.microsoft.com/beta/groups/group-one/members?$skiptoken=synthetic' }
+                [pscustomobject]@{id=$requestId;status=200;body=$subBody}
+            }
+            [pscustomobject]@{responses=@($responses)}
+        }
         function Get-WorkplaceSourceValue {
             param($Row, [string[]]$Names, $Default='')
             if ($null -eq $Row) { return $Default }
@@ -143,15 +175,16 @@ function Invoke-CatalogFixture([object[]]$Groups, [switch]$FailMembers, [switch]
         }
         function Set-SmartM365CmdbSourceScope { param($CompleteScope, $Scope, $Qualifications) $script:Scope=$Scope; $script:Qualifications=@($Qualifications) }
         function Invoke-SyntheticCatalog {
-            $MaxItems = 0
+            $MaxItems = 0; $MembershipBatchSize = $script:BatchSize; $VerifyBatchSample = $script:VerifySample
             try { & $script:Block } catch { $script:ErrorText = $_.Exception.Message }
-            [pscustomobject]@{Exports=$script:Exports;GroupCalls=$script:GroupCalls;MemberCalls=$script:MemberCalls;
+            [pscustomobject]@{Exports=$script:Exports;GroupCalls=$script:GroupCalls;MemberCalls=$script:MemberCalls;BatchCalls=$script:BatchCalls;
                              Properties=$script:Properties;Scope=$script:Scope;ErrorText=$script:ErrorText;
                              ParentCalls=$script:ParentCalls;Sleeps=$script:Sleeps.ToArray();Logs=$script:Logs.ToArray();Qualifications=$script:Qualifications;
                              CallsByGroup=$script:CallsByGroup;ProgressCalls=$script:ProgressCalls.ToArray()}
         }
     } -ArgumentList @($Groups, $collectionBlock, [bool]$FailMembers, [bool]$DuplicateMember, [bool]$FailPolicies,
-        $Member404Count, $ParentResults, [bool]$Reappears, [bool]$FailFinalCatalog, [bool]$DuplicateFinalCatalog, [bool]$CodeOnly404, $MemberStatus, $ErrorShape, $MemberErrors)
+        $Member404Count, $ParentResults, [bool]$Reappears, [bool]$FailFinalCatalog, [bool]$DuplicateFinalCatalog, [bool]$CodeOnly404, $MemberStatus, $ErrorShape, $MemberErrors,
+        $BatchSize, $VerifySample, $BatchMode)
     try { & $fixture { Invoke-SyntheticCatalog } }
     finally { Remove-Module $fixture -ErrorAction SilentlyContinue }
 }
@@ -292,6 +325,58 @@ foreach ($option in @('DuplicateMember','FailPolicies')) {
     $lateFailure=Invoke-CatalogFixture @($empty,$group) -MemberErrors @('InvalidPageToken','Success') @switches
     Assert-Catalog ($lateFailure.ErrorText -and $lateFailure.Exports.Count -eq 0 -and -not $lateFailure.Scope) 'Recovered pagination weakened downstream duplicate or policy validation.'
 }
+function Get-BatchMemberSignature($Result) {
+    (@($Result.Exports['M365_EntraGroupMemberships_All'].Rows | ForEach-Object { '{0}|{1}|{2}|{3}|{4}' -f $_.GroupId, $_.MemberId, $_.MemberType, $_.MembershipKind, $_.CollectionStatus }) -join ';') +
+    '#' + (@($Result.Exports['M365_EntraGroupMembershipScope'].Rows | ForEach-Object { '{0}|{1}|{2}' -f $_.GroupId, $_.MemberCount, $_.MemberCollectionStatus }) -join ';')
+}
+# Graph $batch: same published rows as the sequential reference; anything not a complete 200 page falls back.
+$reference = Invoke-CatalogFixture @($group,$empty)
+$referenceSignature = Get-BatchMemberSignature $reference
+foreach ($size in @(20,1)) {
+    $batched = Invoke-CatalogFixture @($group,$empty) -BatchSize $size
+    Assert-Catalog (-not $batched.ErrorText -and $batched.Exports.Count -eq 4) "Batch collection failed: $($batched.ErrorText)"
+    Assert-Catalog ($batched.MemberCalls -eq 0 -and $batched.BatchCalls -eq $(if($size -eq 1){2}else{1}) -and $batched.Sleeps.Count -eq 0) 'Batch size or sequential traversal count changed.'
+    Assert-Catalog ((Get-BatchMemberSignature $batched) -ceq $referenceSignature) 'Batch rows differ from the sequential reference.'
+    $batchScope = $batched.Exports['M365_EntraGroupMembershipScope'].Rows
+    foreach ($row in $batched.Exports['M365_EntraGroupMemberships_All'].Rows) {
+        Assert-Catalog ($row.CollectedAtUtc -ceq $batchScope[0].CollectedAtUtc -and $row.RunId -ceq 'synthetic-runtime-run') 'Batch rows lost lineage.'
+    }
+    Assert-Catalog ((@($batched.ProgressCalls | Where-Object Activity -eq 'Direct membership').Processed -join ',') -ceq '0,1') 'Batch mode changed per-group progress.'
+    Assert-Catalog (@($batched.Logs | Where-Object { $_.Message -match 'batchRequests=\d+; groupsServedByBatch=2; sequential fallbacks: paged=0; nonSuccess=0; throttledAfterRetries=0; failedBatchRequests=0\.' }).Count -eq 1) 'Batch summary line missing.'
+}
+$sequentialOnly = Invoke-CatalogFixture @($group,$empty) -BatchSize 0
+Assert-Catalog ($sequentialOnly.BatchCalls -eq 0 -and $sequentialOnly.MemberCalls -eq 2 -and @($sequentialOnly.Logs | Where-Object Message -match 'sequential traversal \(MembershipBatchSize=0\)').Count -eq 1) 'MembershipBatchSize 0 did not keep the sequential method.'
+foreach ($case in @(
+    @{Mode='NextLink';Batch=1;Member=1;Sleeps='';Stat='paged=1'},
+    @{Mode='NotFound';Batch=1;Member=1;Sleeps='';Stat='nonSuccess=1'},
+    @{Mode='Throttle';Batch=3;Member=1;Sleeps='5,10';Stat='throttledAfterRetries=1'},
+    @{Mode='ThrottleOnce';Batch=2;Member=0;Sleeps='5';Stat='groupsServedByBatch=2'},
+    @{Mode='PostFailure';Batch=1;Member=2;Sleeps='';Stat='failedBatchRequests=1'},
+    @{Mode='Malformed';Batch=1;Member=2;Sleeps='';Stat='failedBatchRequests=1'}
+)) {
+    $fallback = Invoke-CatalogFixture @($group,$empty) -BatchSize 20 -BatchMode $case.Mode
+    Assert-Catalog (-not $fallback.ErrorText -and (Get-BatchMemberSignature $fallback) -ceq $referenceSignature) "Batch fallback changed published rows: $($case.Mode); $($fallback.ErrorText)"
+    Assert-Catalog ($fallback.BatchCalls -eq $case.Batch -and $fallback.MemberCalls -eq $case.Member -and ($fallback.Sleeps -join ',') -ceq $case.Sleeps) "Batch fallback calls changed: $($case.Mode); batch=$($fallback.BatchCalls); member=$($fallback.MemberCalls); sleeps=$($fallback.Sleeps -join ',')"
+    Assert-Catalog (@($fallback.Logs | Where-Object { $_.Message -match "batch summary: .*$($case.Stat)" }).Count -eq 1) "Batch fallback was not counted: $($case.Mode)"
+}
+# A batch 404 keeps the sequential retry, parent probes and corroborated absence rules.
+$batchGone = Invoke-CatalogFixture @($group,$empty) -BatchSize 20 -BatchMode NotFound -Member404Count 9
+Assert-Catalog (-not $batchGone.ErrorText -and $batchGone.ParentCalls -eq 2 -and $batchGone.GroupCalls -eq 2 -and ($batchGone.Sleeps -join ',') -ceq '5,15,15') 'Batch 404 bypassed sequential absence verification.'
+Assert-Catalog ($batchGone.Exports['M365_EntraGroupMembershipScope'].Rows.Count -eq 1) 'Batch 404 group was not excluded as in sequential mode.'
+$batchFailure = Invoke-CatalogFixture @($group,$empty) -BatchSize 20 -BatchMode NextLink -FailMembers
+Assert-Catalog ($batchFailure.ErrorText -match 'Synthetic membership failure' -and $batchFailure.Exports.Count -eq 0) 'Sequential fallback failure did not fail closed.'
+$batchDuplicate = Invoke-CatalogFixture @($group,$group) -BatchSize 20
+Assert-Catalog ($batchDuplicate.ErrorText -match 'duplicate Entra group' -and $batchDuplicate.Exports.Count -eq 0) 'Batch mode skipped duplicate group validation.'
+# In-run qualification sample.
+$verified = Invoke-CatalogFixture @($group,$empty) -BatchSize 20 -VerifySample 2
+Assert-Catalog (-not $verified.ErrorText -and $verified.MemberCalls -eq 2 -and (Get-BatchMemberSignature $verified) -ceq $referenceSignature) 'Verification sample changed the collection.'
+Assert-Catalog (@($verified.Logs | Where-Object { $_.Level -eq 'SUCCESS' -and $_.Message -match '^Batch membership verification PASS: sampled=2; compared=2; identical=2; different=0; sampledButSequential=0\.$' }).Count -eq 1) 'Verification PASS summary missing.'
+$different = Invoke-CatalogFixture @($group,$empty) -BatchSize 20 -VerifySample 2 -BatchMode Different
+Assert-Catalog (-not $different.ErrorText -and (Get-BatchMemberSignature $different) -ceq $referenceSignature) 'A verification difference did not publish the sequential reference.'
+Assert-Catalog (@($different.Logs | Where-Object { $_.Level -eq 'WARNING' -and $_.Message -match 'GroupId=group-one; batchMembers=1; sequentialMembers=2' }).Count -eq 1) 'Verification difference lacks the group identity.'
+Assert-Catalog (@($different.Logs | Where-Object { $_.Level -eq 'WARNING' -and $_.Message -match '^Batch membership verification FAIL: .*different=1;' }).Count -eq 1) 'Verification FAIL summary missing.'
+$unsampled = Invoke-CatalogFixture @($group,$empty) -BatchSize 20 -BatchMode Different
+Assert-Catalog ($unsampled.MemberCalls -eq 0 -and @($unsampled.Logs | Where-Object Message -match 'verification').Count -eq 0) 'Verification ran without a sample.'
 Write-Output "PASS: $script:checks offline catalog/membership checks. No collectors, APIs, mail or live writes."
 
 # SIG # Begin signature block
