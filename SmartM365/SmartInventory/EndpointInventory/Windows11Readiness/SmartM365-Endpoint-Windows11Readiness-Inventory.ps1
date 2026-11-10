@@ -2,7 +2,7 @@
 .SYNOPSIS
     Collects Windows 11 hardware-readiness evidence from an explicit list of PCs.
 .DESCRIPTION
-    Version 1.0.0. Separate from Intune eligibility and SWI. The target list defines
+    Version 1.0.1. Separate from Intune eligibility and SWI. The target list defines
     this run's scope, not the whole tenant. PowerShell remoting and existing rights
     are required for remote targets; localhost uses the current process identity.
     A partial run produces timestamped evidence and errors but never promotes latest
@@ -25,7 +25,7 @@ param(
     [pscredential]$Credential
 )
 $ErrorActionPreference='Stop'
-$ScriptVersion='1.0.0'
+$ScriptVersion='1.0.1'
 $root=$PSScriptRoot
 while ($root -and -not (Test-Path -LiteralPath (Join-Path $root 'Config/SmartM365-TenantContext.ps1') -PathType Leaf)) {
     $parent=Split-Path $root -Parent
@@ -133,7 +133,7 @@ try {
     throw
 } finally {
     try { Complete-SmartM365InventoryRun -State $smartM365RunGuard } finally { if ($runLock) { $runLock.Dispose() } }
-    if ($smartM365RunGuard.ExitCode -eq 130) { exit 130 }
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
 }
 if ($smartM365RunGuard.ExitCode -ne 0) { exit $smartM365RunGuard.ExitCode }
 

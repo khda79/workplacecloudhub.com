@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline lifecycle regression: no collector, tenant initialization, preparation or provider request.
 .VERSION
-1.0.7
+1.0.8
 #>
 [CmdletBinding()]
 param([switch]$ReceiptOnly)
@@ -113,7 +113,7 @@ try {
         $_.FullName -notmatch '[\\/](Tests|TestRuns)[\\/]' -and
         [IO.File]::ReadAllText($_.FullName).Contains('Start-SmartM365InventoryRun -ScriptPath $PSCommandPath')
     })
-    Assert-Lifecycle ($targets.Count -eq 58) 'Approved envelope count changed'
+    Assert-Lifecycle ($targets.Count -eq 59) "Approved envelope count changed: $($targets.Count)"
     foreach($target in $targets){
         $ast=Read-LifecycleAst $target.FullName
         $outer=@($ast.EndBlock.Statements|Where-Object {$_ -is [Management.Automation.Language.TryStatementAst] -and $_.Finally -and $_.Finally.Extent.Text.Contains('Complete-SmartM365InventoryRun -State')})
@@ -131,6 +131,8 @@ try {
         }
         foreach($scenario in @('Success','Error','Cancelled','CancelledAfterBusiness')){
             Reset-LifecycleFixture
+            # Entry variables declared before the envelope try (Windows 11 readiness run lock).
+            $runLock=$null
             $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $target.FullName -RequireReturn
             $smartM365RunGuard.Initialized=$true
             $smartM365RunGuard.ReachedTerminal=$scenario -in @('Success','CancelledAfterBusiness')
