@@ -2,7 +2,7 @@
 .SYNOPSIS
   Offline checks for the license views by AD domain and country and the per-domain license summary emails.
 .VERSION
-1.4.3
+1.4.4
 #>
 
 [CmdletBinding()]
@@ -25,7 +25,7 @@ $names = @(
   'Get-LicensesSuiteProduct', 'Get-LicensesOptionalProperty', 'Get-LicensesFocusedSummaryRows', 'Get-LicensesAdditionalOverviewRows', 'Get-LicensesOtherProduct', 'New-LicensesOverviewCardHtml',
   'ConvertTo-LicensesActivityDate', 'ConvertTo-LicensesMailboxSizeGb', 'Get-LicensesQualifiedPartialAdCoverage', 'Get-LicensesCsvSource', 'Get-LicensesPublicationPath',
   'Import-LicensesSourceCsv', 'Import-LicensesSourceCsvCached', 'Read-LicensesIndexedSource', 'Get-LicensesMailboxGapSummary', 'Get-LicensesAdAccountActivitySummary',
-  'Get-LicensesUserAdScopes', 'Get-LicensesUserScope', 'Get-LicensesScopeBreakdown', 'Get-LicensesFocusedUsageRows', 'Format-LicensesMetric',
+  'Get-LicensesUserAdScopes', 'Get-LicensesUserScope', 'Get-LicensesScopeBreakdown', 'Get-LicensesFocusedUsageRows', 'Get-LicensesSharedConversionBatch', 'ConvertTo-LicensesSignInUtc', 'Get-LicensesSharedConversionDetails', 'Get-LicensesSharedConversionCounts', 'Format-LicensesMetric',
   'Get-LicensesAlertSummary', 'New-LicensesRecoveryWorkbook', 'Publish-LicensesReportCsv', 'Get-LicensesStandalonePlan2Stock', 'Get-LicensesEquivalentPlan2Stock', 'Get-LicensesSharedMigrationEvidence', 'Publish-LicensesReportSnapshot', 'Write-LicensesDailyMailState', 'Enter-LicensesDailyMailGate',
   'Read-LicensesTenantSnapshot', 'ConvertFrom-LicensesJsonElement', 'ConvertTo-LicensesCountTable', 'Read-LicensesPublishedReport', 'Get-LicensesDomainPublishedReport',
   'New-LicensesScopeTablesHtml', 'New-LicensesSummaryMailContent', 'ConvertTo-LicensesMailSchedule', 'Get-LicensesMailSchedule', 'Get-LicensesDomainMailSettings', 'Get-LicensesDomainMailStatePath', 'Send-LicensesSummaryMailScope',
@@ -268,12 +268,12 @@ try {
   $tenantBook = $tenantMail.Book
   Check ($tenantBook.Name -eq "M365_Licenses_Recovery_prod_$today.xlsx" -and $alphaMail.Book.Name -eq "M365_Licenses_Recovery_$($alpha)_$today.xlsx") 'Attachment names carry the tenant or the domain and the date'
   Check (-not (Test-Path -LiteralPath $tenantBook.Folder)) 'Temporary attachment folder is removed after sending'
-  Check (($tenantBook.Sheets -join '|') -eq 'Overview|Recovery candidates|E3 to F3 review|Awaiting licenses|Licensing errors') 'Overview is the first of five sheets'
+  Check (($tenantBook.Sheets -join '|') -eq 'Overview|Recovery candidates|E3 to F3 review|Shared conversion|Awaiting licenses|Licensing errors') 'Overview is the first of six sheets'
   Check ($tenantBook.Title -eq 'License recovery workbook' -and $tenantBook.Scope -like 'example.invalid*Snapshot*' -and $alphaMail.Book.Scope -like "AD domain $alpha*") 'Overview header names the scope and the snapshot'
   Check ($tenantBook.Headers -contains 'AD domain' -and $tenantBook.Headers -contains 'Country' -and $tenantBook.Headers -contains 'Last AD logon') 'Tenant workbook has readable headers with AD domain and country'
   Check ($alphaMail.Book.Headers -notcontains 'AD domain' -and $alphaMail.Book.Headers -contains 'Country') 'Domain workbook keeps the country but not its own domain'
   Check (@($tenantMail.Candidates | Where-Object { $_.'User ID' -eq 'c1' })[0].'AD domain' -eq 'Cloud-only (no AD account)' -and @($tenantMail.Candidates | Where-Object { $_.'User ID' -eq 'b1' })[0].Country -eq 'Spain') 'Candidate rows carry their AD domain and country'
-  Check ($tenantBook.Rules -ge 6 -and $tenantBook.Links -eq 4) 'Recovery reasons, Intune PC, old dates and banding are colored; Overview links every sheet'
+  Check ($tenantBook.Rules -ge 6 -and $tenantBook.Links -eq 5) 'Recovery reasons, Intune PC, old dates and banding are colored; Overview links every sheet'
   Check ($tenantBook.HeaderFill -match 'EAF1F8$' -and $tenantBook.Landscape -and $tenantBook.RepeatRows -match '1:\$?1') 'Headers use the email color and pages print landscape with repeated headers'
 
   $sentAgain = Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath

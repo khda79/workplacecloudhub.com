@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline checks for the license report published by every full licensing run and declared as optional receipt outputs.
 .VERSION
-1.1.6
+1.1.7
 .NOTES
   Synthetic data only. Uses the real SmartM365.Core receipt commands and exports; no tenant, Graph, mail or SharePoint access.
 #>
@@ -25,7 +25,7 @@ if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
 $names = @(
   'Get-LicensesSuiteProduct', 'Get-LicensesFocusedSummaryRows', 'Get-LicensesAdditionalOverviewRows', 'Get-LicensesOtherProduct', 'New-LicensesOverviewCardHtml', 'ConvertTo-LicensesActivityDate',
   'ConvertTo-LicensesMailboxSizeGb', 'Get-LicensesQualifiedPartialAdCoverage', 'Get-LicensesCsvSource', 'Get-LicensesPublicationPath', 'Import-LicensesSourceCsv',
-  'Read-LicensesIndexedSource', 'Get-LicensesMailboxGapSummary', 'Get-LicensesAdAccountActivitySummary', 'Get-LicensesFocusedUsageRows', 'Import-LicensesSourceCsvCached', 'Get-LicensesUserAdScopes', 'Get-LicensesUserScope', 'Get-LicensesScopeBreakdown', 'New-LicensesScopeTablesHtml', 'New-LicensesSummaryMailContent', 'Send-LicensesSummaryMailScope', 'ConvertTo-LicensesMailSchedule', 'Get-LicensesMailSchedule', 'Get-LicensesDomainMailSettings', 'Get-LicensesDomainMailStatePath', 'Get-LicensesDomainPublishedReport',
+  'Read-LicensesIndexedSource', 'Get-LicensesMailboxGapSummary', 'Get-LicensesAdAccountActivitySummary', 'Get-LicensesFocusedUsageRows', 'Get-LicensesSharedConversionBatch', 'ConvertTo-LicensesSignInUtc', 'Get-LicensesSharedConversionDetails', 'Get-LicensesSharedConversionCounts', 'Import-LicensesSourceCsvCached', 'Get-LicensesUserAdScopes', 'Get-LicensesUserScope', 'Get-LicensesScopeBreakdown', 'New-LicensesScopeTablesHtml', 'New-LicensesSummaryMailContent', 'Send-LicensesSummaryMailScope', 'ConvertTo-LicensesMailSchedule', 'Get-LicensesMailSchedule', 'Get-LicensesDomainMailSettings', 'Get-LicensesDomainMailStatePath', 'Get-LicensesDomainPublishedReport',
   'Format-LicensesMetric', 'Get-LicensesAssignmentIssues', 'Get-LicensesAlertSummary', 'New-LicensesRecoveryWorkbook', 'Publish-LicensesReportCsv',
   'Get-LicensesStandalonePlan2Stock', 'Get-LicensesEquivalentPlan2Stock', 'Get-LicensesSharedMigrationEvidence', 'Publish-LicensesReportSnapshot', 'Write-LicensesDailyMailState', 'Enter-LicensesDailyMailGate', 'Send-LicensesFocusedSummaryEmail',
   'Read-LicensesTenantSnapshot', 'Publish-LicensesRunReport', 'Invoke-LicensesReportUpload', 'ConvertFrom-LicensesJsonElement', 'ConvertTo-LicensesCountTable',

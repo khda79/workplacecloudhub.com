@@ -30,8 +30,13 @@
   The recovery workbook uses the email style (1.61): an Overview sheet with KPI tiles, recovery by license and sheet links,
   readable headers, AD domain and country columns, colored reasons and dates, print setup and a tenant or domain file name.
   The script parses under Windows PowerShell 5.1 again (1.65), so SmartInventory.cmd can resolve and start it.
+  Section 08 (1.77) lists EXO user mailboxes convertible to shared mailboxes. The classification comes from
+  MailboxSharedConversionEvidence.csv of the latest qualified prepared batch (DATA-POWERBI, at most 7 days old, normally
+  the previous day because the Prepared build follows this run); it is never recomputed here. Licenses come from this
+  run, and a Strong candidate whose owner signed in after the batch or is no longer found is shown as changed.
+  The gain overlaps recovery candidates; the workbook adds a Shared conversion tab.
 .VERSION
-1.76
+1.77
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -39,7 +44,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-     Version : 1.76
+     Version : 1.77
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -1364,7 +1369,7 @@ function Get-LicensesFocusedUsageRows {
     $unavailableRows = foreach ($product in $products) {
       [pscustomobject]@{ Product=$product.Name; Counts=@{}; Available=$false }
     }
-    return [pscustomobject]@{ Rows=@($unavailableRows); RecoveryDetails=@(); DowngradeReview=$null; DowngradeDetails=@(); Sources=$sources.ToArray(); SharedSourceReady=$false; IntuneSourceReady=$false; AdSourceForced=$false; MailboxGap=$null; AdGapActivity=$null; AdScope=$null }
+    return [pscustomobject]@{ Rows=@($unavailableRows); RecoveryDetails=@(); DowngradeReview=$null; DowngradeDetails=@(); Sources=$sources.ToArray(); SharedSourceReady=$false; IntuneSourceReady=$false; AdSourceForced=$false; MailboxGap=$null; AdGapActivity=$null; AdScope=$null; SharedConversion=$null }
   }
 
   $sharedSource = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'Exchange_EXO_Mailboxes_AllDomains.csv' -Columns @(
@@ -1782,7 +1787,11 @@ function Get-LicensesFocusedUsageRows {
       WriteLog -Message ("License views by AD domain and country unavailable: {0}" -f $adScope.Reason) 'WARNING'
     }
   }
-  return [pscustomobject]@{ Rows=@($tenantMeasure.Rows); RecoveryDetails=$tenantMeasure.RecoveryDetails; DowngradeReview=$tenantMeasure.DowngradeReview; DowngradeDetails=$tenantMeasure.DowngradeDetails; Sources=$sources.ToArray(); SharedSourceReady=$mailboxes.Ready; IntuneSourceReady=$intuneSource.Ready; AdSourceForced=$adSource.Forced; MailboxGap=$mailboxGap; AdGapActivity=$adGapActivity; AdScope=$adScope }
+  # Additive: user mailboxes convertible to shared, classified by the prepared batch and revalidated on this run.
+  $conversionBatch = Get-LicensesSharedConversionBatch -Folder $CsvFolderPath -TenantKey $ExpectedTenantKey -AsOfUtc $AsOfUtc
+  $sharedConversion = Get-LicensesSharedConversionDetails -Batch $conversionBatch -ActiveSource $activeSource -ExpectedTenantKey $ExpectedTenantKey `
+    -AllSkusByUser $allSkusByUser -TargetSuitesByUser $targetSuitesByUser -RecoveryDetails @($tenantMeasure.RecoveryDetails) -ReadCache $readCache
+  return [pscustomobject]@{ Rows=@($tenantMeasure.Rows); RecoveryDetails=$tenantMeasure.RecoveryDetails; DowngradeReview=$tenantMeasure.DowngradeReview; DowngradeDetails=$tenantMeasure.DowngradeDetails; Sources=$sources.ToArray(); SharedSourceReady=$mailboxes.Ready; IntuneSourceReady=$intuneSource.Ready; AdSourceForced=$adSource.Forced; MailboxGap=$mailboxGap; AdGapActivity=$adGapActivity; AdScope=$adScope; SharedConversion=$sharedConversion }
 }
 
 function Format-LicensesMetric {
@@ -2187,6 +2196,7 @@ function New-LicensesRecoveryWorkbook {
     $guide = @(
       @{ Sheet='Recovery candidates'; Text='One row per qualified recovery candidate and suite, with the reason, primary Intune PC and last activity dates.' }
       @{ Sheet='E3 to F3 review'; Text='Enabled E3 user mailboxes meeting every downgrade check; a manual review list, not recoverable licenses.' }
+      @{ Sheet='Shared conversion'; Text='User mailboxes used only through delegates (Strong candidates, licensed Review): convert to shared before removing a license.' }
       @{ Sheet='Awaiting licenses'; Text='Users waiting for capacity on a F1/F3/E3/E5 assignment (CountViolation without an effective suite).' }
       @{ Sheet='Licensing errors'; Text='Other failed assignment paths, with error codes and assigning groups.' }
     )
@@ -2287,6 +2297,26 @@ function New-LicensesRecoveryWorkbook {
       }
     }
     & $band $sheet $reviewRows.Count $reviewColumns.Count
+
+    # Strong candidates and licensed Review mailboxes of section 08, in the email scope.
+    $conversion = if ($Usage -and $Usage.PSObject.Properties['SharedConversion']) { $Usage.SharedConversion } else { $null }
+    $toNumber = { param($Value) $text = ([string]$Value).Trim(); $number = [decimal]0
+      if ($text -and [decimal]::TryParse($text, [Globalization.NumberStyles]::Number, [Globalization.CultureInfo]::InvariantCulture, [ref]$number)) { $number } else { $null } }
+    $conversionColumns = @(
+      @{ Header='Conversion state'; Width=16 }, @{ Header='Same-day check'; Width=26; Wrap=$true }, @{ Header='Mailbox'; Width=36 }, @{ Header='Owner user ID'; Width=38 },
+      @{ Header='AD domain'; Width=20 }, @{ Header='Country'; Width=16 }, @{ Header='Current licenses'; Width=30; Wrap=$true }, @{ Header='Target suites'; Width=14 },
+      @{ Header='Already in recovery'; Width=14 }, @{ Header='Days since owner sign-in'; Width=12; Center=$true }, @{ Header='Active delegates'; Width=11; Center=$true },
+      @{ Header='Delegates'; Width=10; Center=$true }, @{ Header='Mailbox (GB)'; Width=12; Format='0.00' }, @{ Header='Decision reason'; Width=40; Wrap=$true })
+    $conversionRows = @(if ($conversion -and $conversion.Available) {
+      foreach ($item in (@($conversion.Rows) | Where-Object { [string]$_.State -ceq 'Strong candidate' -or ([string]$_.Licenses).Trim() } | Sort-Object @{ Expression={ [string]$_.State -cne 'Strong candidate' } }, PrimarySmtpAddress)) {
+        [ordered]@{ 'Conversion state'=[string]$item.State; 'Same-day check'=[string]$item.SameDayCheck; 'Mailbox'=(& $safeText $item.PrimarySmtpAddress); 'Owner user ID'=[string]$item.UserId
+          'AD domain'=$(if ($item.Domain) { [string]$item.Domain } else { 'Unknown' }); 'Country'=(& $safeText $item.Country); 'Current licenses'=[string]$item.Licenses; 'Target suites'=[string]$item.TargetSuites
+          'Already in recovery'=[string]$item.RecoveryLicenses; 'Days since owner sign-in'=(& $toNumber $item.DaysSinceOwnerSignIn); 'Active delegates'=(& $toNumber $item.ActiveDelegates)
+          'Delegates'=(& $toNumber $item.Delegates); 'Mailbox (GB)'=(& $toNumber $item.MailboxSizeGB); 'Decision reason'=(& $safeText $item.DecisionReason) }
+      }
+    })
+    $sheet = & $writeSheet $package 'Shared conversion' 'LicenseSharedConversion' $conversionColumns $conversionRows '#2563eb'
+    & $band $sheet $conversionRows.Count $conversionColumns.Count
 
     $issueColumns = @(@{ Header='License'; Width=18 }) + $identity + $scopeHeaders + @(
       @{ Header='Account enabled'; Width=11; Center=$true }, @{ Header='User type'; Width=10; Center=$true }, @{ Header='Identity status'; Width=12 },
@@ -2584,6 +2614,228 @@ function Get-LicensesSharedMigrationEvidence {
   } catch { WriteLog -Message 'Prepared shared mailbox migration evidence is unavailable or unqualified.' 'WARNING'; return $null }
 }
 
+function Get-LicensesSharedConversionBatch {
+  param(
+    [Parameter(Mandatory)][string]$Folder,
+    [Parameter(Mandatory)][string]$TenantKey,
+    [datetime]$AsOfUtc = [datetime]::UtcNow,
+    [int]$MaxAgeDays = 7
+  )
+  # SWI owns the user mailbox to shared mailbox classification: read it from the latest prepared
+  # batch, never recompute it here. The licensing run precedes the Prepared build, so this batch
+  # is normally the previous day's one; the caller revalidates it against this run's sources.
+  $result = [pscustomobject]@{ Ready=$false; Reason=''; BatchId=''; BatchCreatedUtc=''; ReferenceUtc=''; NotCandidate=0L; Rows=@() }
+  $evidenceName = 'MailboxSharedConversionEvidence.csv'
+  $qualificationName = 'DirectoryCleanupSourceQualification.csv'
+  $required = @('TenantKey','Mailbox GUID','Primary SMTP Address','Owner Entra Object ID','AD Domain','Country','Mailbox Size GB',
+    'Active Delegate Count','Delegate Count','Owner Last Sign-In','Days Since Owner Sign-In','Owner Licenses','Conversion State','Decision Reason','Secondary Reasons')
+  try {
+    $root = Join-Path (Split-Path -Parent ([IO.Path]::GetFullPath($Folder))) 'DATA-POWERBI'
+    $pointerPath = Join-Path $root 'current.json.txt'
+    if (-not (Test-Path -LiteralPath $pointerPath -PathType Leaf)) { throw 'no prepared batch pointer' }
+    $pointerHash = (Get-FileHash -LiteralPath $pointerPath -Algorithm SHA256).Hash
+    $pointer = [IO.File]::ReadAllText($pointerPath) | ConvertFrom-Json -ErrorAction Stop
+    $batchId = [string]$pointer.BatchId
+    if ([string]$pointer.SchemaVersion -ne '1' -or [string]$pointer.TenantKey -cne $TenantKey -or $batchId -notmatch '^\d{8}T\d{9}Z-[0-9a-f]{8}$') {
+      throw 'prepared batch pointer identity is invalid'
+    }
+    $batchFolder = Join-Path (Join-Path $root 'batches') $batchId
+    $manifestPath = Join-Path $batchFolder 'batch.json.txt'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'prepared batch manifest is missing' }
+    $manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash
+    if ($manifestHash -cne ([string]$pointer.ManifestSHA256).ToUpperInvariant()) { throw 'prepared batch manifest does not match its pointer' }
+    $manifestText = [IO.File]::ReadAllText($manifestPath)
+    $manifest = $manifestText | ConvertFrom-Json -ErrorAction Stop
+    if ([string]$manifest.BatchId -cne $batchId -or [string]$manifest.TenantKey -cne $TenantKey) { throw 'prepared batch identity mismatch' }
+    # ConvertFrom-Json can coerce ISO timestamps to local DateTime and lose the offset.
+    $document = [Text.Json.JsonDocument]::Parse($manifestText)
+    try { $createdText = $document.RootElement.GetProperty('CreatedUtc').GetString() } finally { $document.Dispose() }
+    $created = [datetimeoffset]::MinValue
+    if (-not [datetimeoffset]::TryParse([string]$createdText, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$created) -or
+        $created.UtcDateTime -gt $AsOfUtc.AddMinutes(5) -or $created.UtcDateTime -lt $AsOfUtc.AddDays(-$MaxAgeDays)) {
+      throw "prepared batch is older than $MaxAgeDays days or has an invalid creation time"
+    }
+    $records = @{}
+    foreach ($name in @($evidenceName, $qualificationName)) {
+      $entries = @(@($manifest.Files) | Where-Object { [string]$_.File -ceq $name })
+      if ($entries.Count -ne 1) { throw "prepared batch does not publish $name" }
+      $sha = [string]$entries[0].SHA256
+      $rowsValue = $entries[0].Rows
+      if ($sha -notmatch '^[0-9a-fA-F]{64}$' -or ($rowsValue -isnot [long] -and $rowsValue -isnot [int]) -or [long]$rowsValue -lt 0) { throw "prepared file record is invalid: $name" }
+      $path = Join-Path $batchFolder $name
+      if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -cne $sha.ToUpperInvariant()) {
+        throw "prepared file differs from its batch manifest: $name"
+      }
+      $records[$name] = [pscustomobject]@{ Path=$path; SHA256=$sha.ToUpperInvariant(); Rows=[long]$rowsValue }
+    }
+    $qualification = @(Import-Csv -LiteralPath $records[$qualificationName].Path -ErrorAction Stop)
+    if ($qualification.Count -ne $records[$qualificationName].Rows) { throw 'prepared qualification row count mismatch' }
+    if (@($qualification | Where-Object { [string]$_.TenantKey -cne $TenantKey }).Count) { throw 'prepared qualification contains another tenant' }
+    $conversionRow = @($qualification | Where-Object { [string]$_.Source -ceq 'Shared mailbox conversion (EXO user mailboxes)' })
+    if ($conversionRow.Count -ne 1 -or [string]$conversionRow[0].Status -cne 'Observed') { throw 'shared mailbox conversion is not observed in the prepared batch' }
+    $header = @(((Get-Content -LiteralPath $records[$evidenceName].Path -TotalCount 1 -ErrorAction Stop).TrimStart([char]0xFEFF).Replace('"','')).Split(','))
+    foreach ($column in $required) { if ($column -notin $header) { throw "prepared conversion evidence is missing column: $column" } }
+    $rows = [Collections.Generic.List[object]]::new()
+    $seen = @{}
+    $count = 0L
+    $notCandidate = 0L
+    foreach ($row in (Import-Csv -LiteralPath $records[$evidenceName].Path -ErrorAction Stop)) {
+      $count++
+      if ([string]$row.TenantKey -cne $TenantKey) { throw 'prepared conversion evidence contains another tenant' }
+      $guid = ([string]$row.'Mailbox GUID').Trim().ToLowerInvariant()
+      if (-not $guid -or $seen.ContainsKey($guid)) { throw 'prepared conversion evidence has a missing or duplicate mailbox GUID' }
+      $seen[$guid] = $true
+      $state = [string]$row.'Conversion State'
+      if ($state -ceq 'Not candidate') { $notCandidate++; continue }
+      if ($state -cnotin @('Strong candidate','Review')) { throw "prepared conversion evidence has an unknown state: $state" }
+      $owner = ([string]$row.'Owner Entra Object ID').Trim().ToLowerInvariant()
+      if ($state -ceq 'Strong candidate' -and -not $owner) { throw 'a Strong candidate has no owner Entra object ID' }
+      $domain = ([string]$row.'AD Domain').Trim().ToLowerInvariant()
+      $rows.Add([pscustomobject][ordered]@{
+        State = $state; MailboxGuid = $guid; PrimarySmtpAddress = [string]$row.'Primary SMTP Address'; UserId = $owner
+        Domain = $(if ($domain -ceq 'unknown') { '' } else { $domain }); Country = [string]$row.Country
+        DecisionReason = [string]$row.'Decision Reason'; SecondaryReasons = [string]$row.'Secondary Reasons'
+        ActiveDelegates = [string]$row.'Active Delegate Count'; Delegates = [string]$row.'Delegate Count'; MailboxSizeGB = [string]$row.'Mailbox Size GB'
+        OwnerLastSignInUtc = [string]$row.'Owner Last Sign-In'; DaysSinceOwnerSignIn = [string]$row.'Days Since Owner Sign-In'; BatchLicenses = [string]$row.'Owner Licenses'
+      })
+    }
+    if ($count -ne $records[$evidenceName].Rows) { throw 'prepared conversion evidence row count mismatch' }
+    foreach ($record in $records.Values) {
+      if ((Get-FileHash -LiteralPath $record.Path -Algorithm SHA256).Hash -cne $record.SHA256) { throw 'prepared file changed during read' }
+    }
+    if ((Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash -cne $manifestHash -or (Get-FileHash -LiteralPath $pointerPath -Algorithm SHA256).Hash -cne $pointerHash) {
+      throw 'prepared batch pointer or manifest changed during read'
+    }
+    $result.BatchId = $batchId
+    $result.BatchCreatedUtc = $created.UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture)
+    $result.ReferenceUtc = [string]$conversionRow[0].'Reference UTC'
+    $result.NotCandidate = $notCandidate
+    $result.Rows = $rows.ToArray()
+    $result.Ready = $true
+  }
+  catch {
+    $result.Reason = $_.Exception.Message
+    WriteLog -Message ("Prepared shared mailbox conversion evidence is unavailable or unqualified: {0}" -f $result.Reason) 'WARNING'
+  }
+  return $result
+}
+
+function ConvertTo-LicensesSignInUtc {
+  param([AllowNull()]$Value)
+  $text = ([string]$Value).Trim()
+  if (-not $text) { return $null }
+  $parsed = [datetimeoffset]::MinValue
+  if ([datetimeoffset]::TryParse($text, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$parsed)) { return $parsed.UtcDateTime }
+  return $null
+}
+
+function Get-LicensesSharedConversionDetails {
+  param(
+    [Parameter(Mandatory)]$Batch,
+    [Parameter(Mandatory)]$ActiveSource,
+    [Parameter(Mandatory)][string]$ExpectedTenantKey,
+    [Parameter(Mandatory)][System.Collections.IDictionary]$AllSkusByUser,
+    [Parameter(Mandatory)][System.Collections.IDictionary]$TargetSuitesByUser,
+    [AllowEmptyCollection()][object[]]$RecoveryDetails = @(),
+    [AllowNull()][hashtable]$ReadCache
+  )
+  # The classification comes from the prepared batch; licenses and the owner sign-in come from this run.
+  $result = [pscustomobject]@{ Available=$false; Reason=''; BatchId=[string]$Batch.BatchId; BatchCreatedUtc=[string]$Batch.BatchCreatedUtc
+    ReferenceUtc=[string]$Batch.ReferenceUtc; NotCandidate=$null; Rows=@() }
+  if (-not $Batch.Ready) { $result.Reason = "prepared batch: $([string]$Batch.Reason)"; return $result }
+  if (-not $ActiveSource.Ready) { $result.Reason = "Entra users source: $([string]$ActiveSource.Reason)"; return $result }
+  try {
+    $owners = @{}
+    foreach ($row in @($Batch.Rows)) { if ($row.UserId) { $owners[[string]$row.UserId] = $true } }
+    $accounts = @{}
+    $duplicates = @{}
+    foreach ($row in (Import-LicensesSourceCsvCached -Source $ActiveSource -Cache $ReadCache)) {
+      if ([string]$row.TenantKey -ine $ExpectedTenantKey) { throw 'another tenant is present in the Entra users source' }
+      $id = ([string]$row.'Object Id').Trim().ToLowerInvariant()
+      if (-not $id -or -not $owners.ContainsKey($id)) { continue }
+      if ($accounts.ContainsKey($id)) { $duplicates[$id] = $true; continue }
+      $accounts[$id] = $row
+    }
+    $recoveryByUser = @{}
+    foreach ($item in @($RecoveryDetails)) {
+      $id = ([string]$item.UserId).Trim().ToLowerInvariant()
+      if (-not $id) { continue }
+      if (-not $recoveryByUser.ContainsKey($id)) { $recoveryByUser[$id] = [Collections.Generic.List[string]]::new() }
+      $recoveryByUser[$id].Add(([string]$item.License).Replace('Microsoft 365 ',''))
+    }
+    $rows = foreach ($row in @($Batch.Rows)) {
+      $id = [string]$row.UserId
+      $check = 'Confirmed'
+      if ($row.State -ceq 'Strong candidate') {
+        if (-not $accounts.ContainsKey($id) -or $duplicates.ContainsKey($id)) { $check = 'Owner not found in the current Entra export' }
+        else {
+          $account = $accounts[$id]
+          $latest = $null
+          foreach ($name in @('LastSignInDateTimeIso8601','LastNonInteractiveSignInDateTimeIso8601','LastSuccessfulSignInDateTimeIso8601','LastSuccessfulSignInDateTime')) {
+            $value = ConvertTo-LicensesSignInUtc (Get-LicensesOptionalProperty $account $name)
+            if ($null -ne $value -and ($null -eq $latest -or $value -gt $latest)) { $latest = $value }
+          }
+          $batchLatest = ConvertTo-LicensesSignInUtc $row.OwnerLastSignInUtc
+          # One minute absorbs the second rounding between the two exports.
+          if ($null -ne $latest -and ($null -eq $batchLatest -or $latest -gt $batchLatest.AddMinutes(1))) { $check = 'Owner signed in after the prepared batch' }
+        }
+      }
+      $skus = if ($id -and $AllSkusByUser.Contains($id)) { @($AllSkusByUser[$id].Keys | Sort-Object) } else { @() }
+      $suites = if ($id -and $TargetSuitesByUser.Contains($id)) { @($TargetSuitesByUser[$id].Keys | Sort-Object | ForEach-Object { ([string]$_).Replace('Microsoft 365 ','') }) } else { @() }
+      $recovery = if ($id -and $recoveryByUser.ContainsKey($id)) { @($recoveryByUser[$id] | Sort-Object -Unique) } else { @() }
+      [pscustomobject][ordered]@{
+        State = [string]$row.State; SameDayCheck = $check; MailboxGuid = [string]$row.MailboxGuid; PrimarySmtpAddress = [string]$row.PrimarySmtpAddress
+        UserId = $id; Domain = [string]$row.Domain; Country = [string]$row.Country
+        Licenses = ($skus -join '; '); TargetSuites = ($suites -join '; '); RecoveryLicenses = ($recovery -join '; ')
+        DecisionReason = [string]$row.DecisionReason; SecondaryReasons = [string]$row.SecondaryReasons
+        ActiveDelegates = [string]$row.ActiveDelegates; Delegates = [string]$row.Delegates; MailboxSizeGB = [string]$row.MailboxSizeGB
+        DaysSinceOwnerSignIn = [string]$row.DaysSinceOwnerSignIn
+      }
+    }
+    $result.Rows = @($rows)
+    $result.NotCandidate = [long]$Batch.NotCandidate
+    $result.Available = $true
+  }
+  catch { $result.Reason = $_.Exception.Message; $result.Rows = @() }
+  return $result
+}
+
+function Get-LicensesSharedConversionCounts {
+  param([AllowEmptyCollection()][object[]]$Rows = @())
+  # Pure function of the published rows, so the tenant and every AD domain view reconcile by construction.
+  $suiteNames = @('F1','F3','E3','E5')
+  $counts = [ordered]@{ Strong=0L; StrongChanged=0L; StrongConfirmed=0L; StrongLicensed=0L; StrongTargetSuite=0L; StrongOtherSkusOnly=0L; StrongInRecovery=0L
+    Review=0L; ReviewLicensed=0L; ReviewTargetSuite=0L; StrongSuites=[ordered]@{}; ReviewSuites=[ordered]@{}; ReviewReasons=@() }
+  foreach ($name in $suiteNames) { $counts.StrongSuites[$name] = 0L; $counts.ReviewSuites[$name] = 0L }
+  $reasons = @{}
+  foreach ($row in @($Rows)) {
+    $suites = @(([string]$row.TargetSuites).Split(';') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $licensed = [bool]([string]$row.Licenses).Trim()
+    if ([string]$row.State -ceq 'Strong candidate') {
+      $counts.Strong++
+      if ([string]$row.SameDayCheck -cne 'Confirmed') { $counts.StrongChanged++; continue }
+      $counts.StrongConfirmed++
+      if (-not $licensed) { continue }
+      $counts.StrongLicensed++
+      if ($suites.Count) { $counts.StrongTargetSuite++ } else { $counts.StrongOtherSkusOnly++ }
+      if (([string]$row.RecoveryLicenses).Trim()) { $counts.StrongInRecovery++ }
+      foreach ($suite in $suites) { if ($counts.StrongSuites.Contains($suite)) { $counts.StrongSuites[$suite]++ } }
+    }
+    elseif ([string]$row.State -ceq 'Review') {
+      $counts.Review++
+      $reason = ([string]$row.DecisionReason).Trim()
+      if ($reason) { $reasons[$reason] = 1L + $(if ($reasons.ContainsKey($reason)) { $reasons[$reason] } else { 0L }) }
+      if (-not $licensed) { continue }
+      $counts.ReviewLicensed++
+      if ($suites.Count) { $counts.ReviewTargetSuite++ }
+      foreach ($suite in $suites) { if ($counts.ReviewSuites.Contains($suite)) { $counts.ReviewSuites[$suite]++ } }
+    }
+  }
+  $counts.ReviewReasons = @($reasons.GetEnumerator() | Sort-Object @{ Expression={ $_.Value }; Descending=$true }, @{ Expression={ $_.Key } } |
+    Select-Object -First 3 | ForEach-Object { [pscustomobject]@{ Reason=[string]$_.Key; Count=[long]$_.Value } })
+  return [pscustomobject]$counts
+}
+
 function Publish-LicensesReportSnapshot {
   param(
     [Parameter(Mandatory)][string]$Folder,
@@ -2818,6 +3070,8 @@ function Publish-LicensesReportSnapshot {
     ExchangePlan2StandaloneStock = $plan2Stock
     ExchangePlan2EquivalentStock = $equivalentStock
     SharedMailboxMigrationEvidence = $sharedMigration
+    # Additive in schema 2: prepared conversion classification revalidated with this run's licenses and sign-ins.
+    SharedConversion = if ($Usage -and $Usage.PSObject.Properties['SharedConversion']) { $Usage.SharedConversion } else { $null }
     Products = @($products)
     OtherProducts = @($otherProducts)
     E3ToF3Review = if ($Usage -and $Usage.DowngradeReview) { $Usage.DowngradeReview } else { $null }
@@ -3634,6 +3888,7 @@ function Read-LicensesPublishedReport {
       AdSourceForced = [bool]$rendering.AdSourceForced
       MailboxGap = $mailboxGap
       AdGapActivity = $document.AdGapActivity
+      SharedConversion = if ($document.PSObject.Properties['SharedConversion']) { $document.SharedConversion } else { $null }
     }
   }
   $issues = $document.AssignmentIssues
@@ -3704,6 +3959,13 @@ function Get-LicensesDomainPublishedReport {
       AdSourceForced = $Report.Usage.AdSourceForced
       MailboxGap = $mailboxGap
       AdGapActivity = $domainScope.AdGapActivity
+      # Tenant-wide evidence restricted to the AD domain of each mailbox owner (SWI AD join); Not candidate stays tenant-only.
+      SharedConversion = if ($Report.Usage.PSObject.Properties['SharedConversion'] -and $Report.Usage.SharedConversion) {
+        $tenantConversion = $Report.Usage.SharedConversion
+        [pscustomobject]@{ Available=[bool]$tenantConversion.Available; Reason=[string]$tenantConversion.Reason; BatchId=[string]$tenantConversion.BatchId
+          BatchCreatedUtc=[string]$tenantConversion.BatchCreatedUtc; ReferenceUtc=[string]$tenantConversion.ReferenceUtc; NotCandidate=$null
+          Rows=@($tenantConversion.Rows | Where-Object { ([string]$_.Domain) -ceq $key }) }
+      } else { $null }
     }
   }
   $assignmentIssues = $null
@@ -3933,6 +4195,34 @@ function New-LicensesSummaryMailContent {
   $adGapDisabled = if ($adGapReady) { [string]$adGap.AdDisabled } else { 'N/D' }
   $adGapStateUnknown = if ($adGapReady) { [string]$adGap.AdEnabledUnknown } else { 'N/D' }
   $adGapStatus = if ($adGapReady -and $adGap.Provisional) { 'Provisional AD source' } elseif ($adGapReady) { 'Qualified AD source' } else { 'AD source N/D' }
+  $conversion = if ($usage -and $usage.PSObject.Properties['SharedConversion']) { $usage.SharedConversion } else { $null }
+  $conversionCell = 'padding:10px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;line-height:17px;color:#334155;vertical-align:top;'
+  $conversionHead = 'padding:9px 8px;background:#eaf1f8;border-bottom:2px solid #cbd5e1;text-align:left;font-size:11px;line-height:15px;color:#334155;vertical-align:bottom;'
+  $conversionHtml = if (-not $conversion) {
+    '<p style="margin:0 0 8px;font-size:12px;line-height:18px;color:#9a3412;">N/D - this report has no shared conversion evidence.</p>'
+  } elseif (-not $conversion.Available) {
+    '<p style="margin:0 0 8px;font-size:12px;line-height:18px;color:#9a3412;">N/D - {0}</p>' -f [System.Net.WebUtility]::HtmlEncode([string]$conversion.Reason)
+  } else {
+    $cc = Get-LicensesSharedConversionCounts -Rows @($conversion.Rows)
+    $suiteRows = foreach ($suite in @('F1','F3','E3','E5')) {
+      '<tr><td style="{0}font-weight:700;">{1}</td><td style="{0}font-weight:700;color:#0f766e;">{2}</td><td style="{0}">{3}</td></tr>' -f $conversionCell, $suite, [long]$cc.StrongSuites[$suite], [long]$cc.ReviewSuites[$suite]
+    }
+    $suiteRows += '<tr><td style="{0}font-weight:700;">Other SKUs only</td><td style="{0}">{1}</td><td style="{0}">{2}</td></tr>' -f $conversionCell, [long]$cc.StrongOtherSkusOnly, ([long]$cc.ReviewLicensed - [long]$cc.ReviewTargetSuite)
+    $reasonText = if (@($cc.ReviewReasons).Count) { (@($cc.ReviewReasons | ForEach-Object { '{0} ({1})' -f [System.Net.WebUtility]::HtmlEncode([string]$_.Reason), [long]$_.Count })) -join '; ' } else { 'none' }
+    $notCandidateText = if ($null -ne $conversion.NotCandidate) { ' Not candidate: {0}.' -f [long]$conversion.NotCandidate } else { '' }
+    $kpi = { param($Value, $Label, $Accent, $Ink) '<td width="25%" style="width:25%;padding:6px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid {2};"><tr><td style="padding:12px 10px;"><div style="font-size:22px;line-height:27px;font-weight:700;color:{3};">{0}</div><div style="font-size:12px;line-height:17px;color:#334155;">{1}</div></td></tr></table></td>' -f $Value, $Label, $Accent, $Ink }
+    @(
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#eff6f8;border:1px solid #cbdfe2;"><tr>'
+      (& $kpi $cc.StrongConfirmed 'Strong candidates confirmed today' '#0f766e' '#0f766e')
+      (& $kpi ('{0} <span style="font-size:13px;color:#64748b;">({1} in recovery)</span>' -f $cc.StrongLicensed, $cc.StrongInRecovery) 'Strong candidates still licensed' '#2563eb' '#1d4ed8')
+      (& $kpi $cc.StrongChanged 'Changed since the prepared batch' '#d97706' '#b45309')
+      (& $kpi $cc.Review 'Review (not counted as gain)' '#64748b' '#475569')
+      '</tr></table>'
+      ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="{0}margin-top:10px;"><thead><tr><th style="{1}">Owner license</th><th style="{1}">Strong candidates (confirmed)</th><th style="{1}">Review</th></tr></thead><tbody>{2}</tbody></table>' -f 'width:100%;border-collapse:collapse;table-layout:fixed;font-family:Segoe UI,Arial,sans-serif;font-size:12px;line-height:17px;color:#334155;', $conversionHead, ($suiteRows -join ''))
+      ('<p style="margin:8px 0;font-size:12px;line-height:18px;color:#334155;">Licenses releasable after conversion: <strong>{0}</strong> Strong candidates hold at least one F1/F3/E3/E5 suite and {1} hold other SKUs only; {2} of the licensed Strong candidates are already counted in section 02 (disabled owner), so this gain overlaps recovery and must not be added to it. Review: {3} mailboxes, {4} licensed. Main review reasons: {5}.{6}</p>' -f $cc.StrongTargetSuite, $cc.StrongOtherSkusOnly, $cc.StrongInRecovery, $cc.Review, $cc.ReviewLicensed, $reasonText, $notCandidateText)
+      ('<p style="margin:8px 0;font-size:11px;line-height:16px;color:#64748b;">Classification: prepared batch {0}, created {1} (reference {2}); it normally precedes this licensing run by one day. Licenses come from this run and each Strong candidate is rechecked against this run''s Entra export: an owner sign-in after the batch, or an owner no longer found, moves it to Changed since the prepared batch.</p>' -f [System.Net.WebUtility]::HtmlEncode([string]$conversion.BatchId), [System.Net.WebUtility]::HtmlEncode([string]$conversion.BatchCreatedUtc), [System.Net.WebUtility]::HtmlEncode([string]$conversion.ReferenceUtc))
+    ) -join "`n"
+  }
   $e3Review = if ($usage) { $usage.DowngradeReview } else { $null }
   $e3ReviewAssigned = if ($e3Review -and $e3Review.Available) { [string]$e3Review.Assigned } else { 'N/D' }
   $e3ReviewCandidates = if ($e3Review -and $e3Review.Available) { [string]$e3Review.Candidates } else { 'N/D' }
@@ -4016,7 +4306,7 @@ function New-LicensesSummaryMailContent {
       <td width="25%" style="width:25%;padding:6px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid #d97706;"><tr><td style="padding:12px 10px;"><div style="font-size:22px;line-height:27px;font-weight:700;color:#b45309;">$e3ReviewCandidates</div><div style="font-size:12px;line-height:17px;color:#334155;">E3 to F3 downgrade review</div></td></tr></table></td>
     </tr>
   </table>
-  <p style="margin:8px 0 20px;font-size:11px;line-height:16px;color:#64748b;">Recovery cards count license assignments for each suite. F3/F1 adds both suite counts; a user with both may count twice. The E3 to F3 card counts separate manual review candidates, excludes users already in recovery and is not a recoverable license count. N/D indicates unqualified users.</p>
+  <p style="margin:8px 0 20px;font-size:11px;line-height:16px;color:#64748b;">Recovery cards count license assignments for each suite. F3/F1 adds both suite counts; a user with both may count twice. The E3 to F3 card counts separate manual review candidates, excludes users already in recovery and is not a recoverable license count. N/D indicates unqualified users. User mailboxes convertible to shared, and their licenses, are in section 08.</p>
   <p style="margin:0 0 5px;font-size:11px;line-height:16px;font-weight:700;color:#475569;">MICROSOFT 365 SUITES</p>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#eff6f8;border:1px solid #cbdfe2;"><tr>$($suiteCards -join "`n")</tr></table>
   <p style="margin:14px 0 5px;font-size:11px;line-height:16px;font-weight:700;color:#475569;">COPILOT, DYNAMICS 365 AND POWER BI</p>
@@ -4053,6 +4343,10 @@ function New-LicensesSummaryMailContent {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">AD enabled, active in 90d</th><th style="$headStyle">AD enabled, inactive 90d</th><th style="$headStyle">AD enabled, no logon date</th><th style="$headStyle">AD disabled</th><th style="$headStyle">AD state N/D</th></tr></thead><tbody><tr><td style="$cell">$adGapRecent</td><td style="$cell">$adGapInactive</td><td style="$cell">$adGapNoDate</td><td style="$cell">$adGapDisabled</td><td style="$cell">$adGapStateUnknown</td></tr></tbody></table>
   <p style="margin:5px 0 0;font-size:11px;line-height:16px;color:#64748b;">AD activity uses the replicated LastLogonDate and is approximate. No AD match means no unique match in the available AD export, not proof that no AD account exists. AD and Entra enabled states are separate.</p>
   $($gapNotes -join "`n")
+  <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">08 &nbsp; User mailboxes convertible to shared</h2>
+  <p style="margin:0 0 8px;font-size:12px;line-height:18px;color:#334155;">EXO user mailboxes used only through delegates while the owner no longer signs in. The owner Entra sign-in decides; EXO last logon only informs, because delegates and system processes update it. A shared mailbox needs no license up to 50 GB.</p>
+  $conversionHtml
+  <div style="margin:8px 0 0;padding:11px 14px;background:#fff7ed;border-left:4px solid #d97706;font-size:12px;line-height:18px;color:#7c2d12;"><strong>Human decision required.</strong> Organization retention policies and in-place holds are not assessed. Confirm with the delegates and the owner's manager, convert the mailbox to shared, block sign-in, and only then remove the license: an unlicensed user mailbox is deleted after its grace period and the delegates lose access. Direct use of the owner account (SMTP AUTH devices, POP, IMAP, mobile) stops working after conversion. The attached workbook lists the Strong candidates and the licensed Review mailboxes in its Shared conversion tab.</div>
   <div style="margin:22px 0 0;padding:14px 16px;background:#f8fafc;border-left:3px solid #94a3b8;font-size:11px;line-height:17px;color:#475569;">
     <strong style="color:#0f172a;">How to read this report</strong><br />
     Recovery candidates are distinct licensed users per product with a disabled non-shared account, no observed M365 activity in 90 days, or a qualifying shared mailbox under 50 GB. Disabled users and activity/overlap indicators exclude identified shared mailboxes; an unqualified mailbox type is N/D. M365 activity includes Exchange, OneDrive, SharePoint, Teams, Skype for Business and Yammer, plus qualified mailbox, email-action and Apps usage reports. Shared mailbox candidates exclude active archives and litigation or retention holds. The Intune PC column counts recovery candidates assigned as Primary User of a Windows device; this assignment does not prove recent PC use and does not change the recovery count. Having no primary Intune PC also does not prove that a license is unused. Review advanced compliance features, assignment path and the commercial contract before removing a license. Indicators overlap and must not be added together.<br /><br />
@@ -4994,7 +5288,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.76"
+$ScriptVersion = "1.77"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''

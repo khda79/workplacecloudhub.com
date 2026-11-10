@@ -152,6 +152,27 @@ separately. The prepared batch and exception snapshot dates are printed because
 they can differ from the license-stock snapshot. If Python or a qualified batch
 is unavailable or older than seven days, migration evidence is `N/D`. The
 prepared-batch reader never runs Prepare and never modifies a Power BI project.
+Section 08 of the license email (script 1.77) lists Exchange Online user mailboxes
+convertible to shared mailboxes. The classification is owned by SWI
+(`New-DirectoryCleanupEvidence.ps1`, see
+`SmartWorkplaceIntelligence/docs/DIRECTORY-CLEANUP.md`) and is never recomputed
+here: the report reads `MailboxSharedConversionEvidence.csv` from the same
+`DATA-POWERBI` batch pointer after checking the pointer, manifest, tenant, file
+hash and row count, and the `Shared mailbox conversion` qualification row. A
+batch older than seven days, missing, or unqualified makes the section `N/D`,
+never zero. Because the Prepared build runs after this collector, the batch is
+normally the previous day's one. Licenses therefore come from this run, and each
+Strong candidate is rechecked against this run's Entra export: an owner sign-in
+after the batch, or an owner no longer found, moves it to "Changed since the
+prepared batch" and out of the gain. The section shows confirmed Strong
+candidates, those still licensed (by F1/F3/E3/E5 suite or other SKUs only), how
+many are already recovery candidates (disabled owner, so the gain overlaps
+section 02), and Review separately with its main reasons. Organization retention
+policies and in-place holds are not assessed; conversion is a human decision and
+must precede license removal. AD domain emails keep the mailboxes whose owner is
+in that domain (SWI AD join). The workbook adds a `Shared conversion` tab with
+the Strong candidates and the licensed Review mailboxes.
+
 Full runs also publish the snapshot-integrity CSV with the report outputs. It
 does not change the existing report CSV headers. Older snapshots without this
 receipt-bound proof do not qualify newly introduced snapshot-only metrics.

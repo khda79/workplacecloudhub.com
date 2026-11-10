@@ -188,7 +188,9 @@ A delegate is active when its own qualified sign-in is within the active thresho
 
 Licenses (`M365_Licenses_Users.csv`) and email app usage (`M365_Email_AppUsage.csv`) are read for
 this table only; they never change cleanup decisions. Owner Licenses lists distinct SKUs, so a
-license gain still needs a licensing review. Organization retention policies and in-place holds
+license gain still needs a licensing review. The license report (`SmartM365-Licences-Inventory.ps1`
+1.77, section 08) consumes this table from the prepared batch and joins its own current licenses;
+renaming its columns or states breaks that consumer. Organization retention policies and in-place holds
 of Exchange Online mailboxes are not assessed and are stated on every Strong candidate. A Strong
 candidate is evidence for review: confirm with the delegates and the owner's manager, then convert
 and keep sign-in blocked. Direct use of the owner account (SMTP AUTH devices, POP, IMAP, mobile)
