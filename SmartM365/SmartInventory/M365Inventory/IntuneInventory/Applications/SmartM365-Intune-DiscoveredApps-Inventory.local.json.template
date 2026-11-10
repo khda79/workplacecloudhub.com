@@ -36,6 +36,11 @@
   "DeviceDetailCacheMaxAgeDays": 7,
   "TopAppsByDeviceCount": 500,
   "ProgressEveryApps": 250,
+  "RelationSource": "Graph",
+  "RelationExportVerifyRandomApps": 50,
+  "RelationExportVerifyTopApps": 10,
+  "RelationExportVerifyMismatchApps": 20,
+  "RelationExportJobTimeoutSeconds": 1800,
   "EnableWeeklyHistory": true,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Intune\\Applications\\DiscoveredApps\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 5

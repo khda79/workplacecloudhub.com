@@ -41,10 +41,21 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.41
+
+.PARAMETER RelationSource
+    Graph (default) reads every app/device relation from Graph. Export reads them from
+    the Intune AppInvRawData export (ApplicationKey and DeviceId only), keeps only keys
+    of the stable Graph catalog, then compares a Graph sample set by set: every catalog
+    app absent from the export, the largest apps, catalog count mismatches, random apps
+    and absent catalog keys. Any difference or failure falls back to the Graph method in
+    the same run; nothing from the export is published then. Local key: RelationSource.
+
+.PARAMETER RelationExportVerifyRandomApps
+    Number of random apps compared with Graph in Export mode (default 50).
+    Version : 1.42
 
 .VERSION
-1.41
+1.42
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -53,7 +64,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.41
+    Version : 1.42
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -107,6 +118,14 @@ param(
     [Parameter(Mandatory = $false)]
     [ValidateRange(0, [int]::MaxValue)]
     [int]$DeviceDetailCacheMaxAgeDays = 7,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('Graph', 'Export')]
+    [string]$RelationSource = 'Graph',
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(0, 100000)]
+    [int]$RelationExportVerifyRandomApps = 50,
     [int]$MaxItems = 0
 )
 # Local lifecycle only; no collection or publication is performed by this guard.
@@ -214,7 +233,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.41"
+$ScriptVersion = "1.42"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -260,6 +279,19 @@ if (-not $PSBoundParameters.ContainsKey('ProgressEveryApps')) {
 if (-not $PSBoundParameters.ContainsKey('DeviceDetailCacheMaxAgeDays')) {
     $DeviceDetailCacheMaxAgeDays = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceDetailCacheMaxAgeDays' -DefaultValue 7)
 }
+if (-not $PSBoundParameters.ContainsKey('RelationSource')) {
+    $RelationSource = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RelationSource' -DefaultValue 'Graph')
+}
+if ($RelationSource -notin @('Graph', 'Export')) {
+    throw "Invalid RelationSource '$RelationSource'. Valid values: Graph, Export."
+}
+if (-not $PSBoundParameters.ContainsKey('RelationExportVerifyRandomApps')) {
+    $RelationExportVerifyRandomApps = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RelationExportVerifyRandomApps' -DefaultValue 50)
+}
+$script:RelationExportVerifyTopApps = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RelationExportVerifyTopApps' -DefaultValue 10)
+$script:RelationExportVerifyMismatchApps = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RelationExportVerifyMismatchApps' -DefaultValue 20)
+$script:RelationExportJobTimeoutSeconds = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RelationExportJobTimeoutSeconds' -DefaultValue 1800)
+$script:RelationSourceUsed = 'Graph'
 $script:UsePreviousDeviceDetailCache = -not $RefreshDeviceDetailCache -and $DeviceDetailMode -ne 'All'
 $script:GraphMaxRetryAttempts = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphMaxRetryAttempts' -DefaultValue 8)
 $script:GraphBatchMaxRetryAttempts = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'GraphBatchMaxRetryAttempts' -DefaultValue 3)
@@ -314,6 +346,7 @@ try {
     WriteLog -Message "ResetResume        : $ResetResume"
     WriteLog -Message "FreshDeviceDetails : $FreshDeviceDetails"
     WriteLog -Message "ResumeVerifiedFreshCheckpoint: $ResumeVerifiedFreshCheckpoint"
+    WriteLog -Message ("RelationSource     : {0} (verification: random={1}; top={2}; countMismatch={3}; jobTimeout={4}s)" -f $RelationSource, $RelationExportVerifyRandomApps, $script:RelationExportVerifyTopApps, $script:RelationExportVerifyMismatchApps, $script:RelationExportJobTimeoutSeconds)
 } catch {
     Write-Host "Initialization failed: $_" -ForegroundColor Red
     $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
@@ -1828,6 +1861,383 @@ function Remove-LegacyDiscoveredAppsDeviceDetailExport {
 
     WriteLog -Message 'Legacy export Intune_DiscoveredApps_DeviceDetail.csv is disabled.' 'INFO'
 }
+
+# ==========================================================
+# Relation source: Intune AppInvRawData export, verified against Graph
+# ==========================================================
+function Invoke-DiscoveredAppsGraphSingleRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('GET', 'POST')][string]$Method,
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [AllowNull()][string]$Body,
+        [int[]]$AcceptedStatusCodes = @(),
+        [int]$MaxRetries = $script:GraphMaxRetryAttempts
+    )
+
+    if ($MaxRetries -lt 1) { $MaxRetries = 1 }
+    $safeUri = ($Uri -split '\?')[0]
+    for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
+        $graphStatusCode = $null
+        $graphResponseHeaders = $null
+        $response = $null
+        $errorRecord = $null
+        $statusCode = 0
+        try {
+            $script:Stat_GraphCalls++
+            $request = @{
+                Method                  = $Method
+                Uri                     = $Uri
+                OutputType              = 'PSObject'
+                SkipHttpErrorCheck      = $true
+                StatusCodeVariable      = 'graphStatusCode'
+                ResponseHeadersVariable = 'graphResponseHeaders'
+                ErrorAction             = 'Stop'
+            }
+            if (-not [string]::IsNullOrEmpty($Body)) {
+                $request.Body = $Body
+                $request.ContentType = 'application/json'
+            }
+            $response = Invoke-MgGraphRequest @request
+            try { $statusCode = [int]$graphStatusCode } catch { $statusCode = 0 }
+        }
+        catch {
+            $errorRecord = $_
+        }
+
+        if ($null -eq $errorRecord) {
+            if (($statusCode -ge 200 -and $statusCode -lt 300) -or $AcceptedStatusCodes -contains $statusCode) {
+                return [pscustomobject]@{ StatusCode = $statusCode; Body = $response }
+            }
+            $message = Get-DiscoveredAppsGraphHttpErrorMessage -Response $response -StatusCode $statusCode
+            $isTransient = $statusCode -notin @(401, 403, 404) -and ($statusCode -in @(408, 429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable')
+            if (-not $isTransient -or $attempt -ge $MaxRetries) {
+                throw ("Graph request failed. Method={0}; Status={1}; Attempts={2}; Uri={3}; Message={4}" -f $Method, $statusCode, $attempt, $safeUri, $message)
+            }
+            $headerRecord = $null
+            $serverRetryAfter = $null
+            try { if ($graphResponseHeaders) { $serverRetryAfter = @($graphResponseHeaders['Retry-After'])[0] } } catch { $serverRetryAfter = $null }
+            if ($serverRetryAfter) {
+                $headerException = [Exception]::new('Retry-After from the Graph response.')
+                $headerException.Data['Retry-After'] = [string]$serverRetryAfter
+                $headerRecord = [Management.Automation.ErrorRecord]::new($headerException, 'GraphRetryAfter', 'NotSpecified', $null)
+            }
+            $retryDelay = Get-GraphRetryDelaySeconds -ErrorRecord $headerRecord -Attempt $attempt -DefaultSeconds $script:GraphRetryDefaultSeconds -MaximumSeconds $script:GraphRetryMaxSeconds
+        }
+        else {
+            $classification = Test-SmartM365GraphRetryableError -ErrorRecord $errorRecord
+            $statusCode = $classification.StatusCode
+            $message = Get-ShortGraphErrorMessage -ErrorRecord $errorRecord
+            if (-not $statusCode -and $message -match 'TooManyRequests|\b429\b') { $statusCode = 429 }
+            $isTransient = $classification.Retry -or ($statusCode -eq 429)
+            if (-not $isTransient -or $attempt -ge $MaxRetries) {
+                $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
+                throw ("Graph request failed. Method={0}; Status={1}; Attempts={2}; Uri={3}; Message={4}" -f $Method, $statusText, $attempt, $safeUri, $message)
+            }
+            $retryDelay = Get-GraphRetryDelaySeconds -ErrorRecord $errorRecord -Attempt $attempt -DefaultSeconds $script:GraphRetryDefaultSeconds -MaximumSeconds $script:GraphRetryMaxSeconds
+        }
+
+        $script:Stat_ThrottleRetries++
+        WriteLog -Message ("Graph transient failure on [{0}]. Status={1}; attempt {2}/{3}; waiting {4}s." -f $safeUri, $statusCode, $attempt, $MaxRetries, $retryDelay) 'INFO'
+        Start-Sleep -Seconds $retryDelay
+    }
+    throw "Graph request retries exhausted: $safeUri"
+}
+
+function Get-DiscoveredAppsRelationExportCsv {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$WorkingFolder,
+        [ValidateRange(60, 86400)][int]$TimeoutSeconds = 1800,
+        [ValidateRange(1, 300)][int]$PollSeconds = 10
+    )
+
+    $jobsUri = 'https://graph.microsoft.com/v1.0/deviceManagement/reports/exportJobs'
+    # Only the two relation identifiers are requested: no device, user or mail column leaves Intune.
+    $body = [ordered]@{
+        reportName       = 'AppInvRawData'
+        format           = 'csv'
+        localizationType = 'ReplaceLocalizableValues'
+        select           = @('ApplicationKey', 'DeviceId')
+    } | ConvertTo-Json -Depth 4 -Compress
+    $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+    $job = (Invoke-DiscoveredAppsGraphSingleRequest -Method POST -Uri $jobsUri -Body $body).Body
+    $jobId = [string]$job.id
+    if ([string]::IsNullOrWhiteSpace($jobId)) { throw 'AppInvRawData export job creation returned no job id.' }
+    $requestDateTime = [string]$job.requestDateTime
+    WriteLog -Message ("Relation export job created: JobId={0}; RequestDateTime={1}" -f $jobId, $requestDateTime) 'INFO'
+
+    $deadline = [datetime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([string]$job.status -ne 'completed' -or [string]::IsNullOrWhiteSpace([string]$job.url)) {
+        if ([string]$job.status -eq 'failed') { throw "AppInvRawData export job failed: JobId=$jobId." }
+        if ([datetime]::UtcNow -ge $deadline) { throw "AppInvRawData export job timed out after ${TimeoutSeconds}s: JobId=$jobId; Status=$([string]$job.status)." }
+        Start-Sleep -Seconds $PollSeconds
+        $job = (Invoke-DiscoveredAppsGraphSingleRequest -Method GET -Uri ($jobsUri + '/' + [uri]::EscapeDataString($jobId))).Body
+    }
+    $jobSeconds = [int]$stopwatch.Elapsed.TotalSeconds
+
+    $zipPath = Join-Path -Path $WorkingFolder -ChildPath 'AppInvRawData.zip'
+    $extractPath = Join-Path -Path $WorkingFolder -ChildPath 'content'
+    Invoke-SmartM365ExportFileDownload -Url ([string]$job.url) -OutFile $zipPath -Operation 'Intune export download (AppInvRawData)' | Out-Null
+    Expand-Archive -LiteralPath $zipPath -DestinationPath $extractPath -Force
+    $files = @(Get-ChildItem -LiteralPath $extractPath -File -Recurse)
+    if ($files.Count -ne 1 -or $files[0].Extension -ne '.csv') {
+        throw "AppInvRawData export must contain exactly one CSV file; found $($files.Count) file(s)."
+    }
+    WriteLog -Message ("Relation export downloaded: JobId={0}; JobSeconds={1}; TotalSeconds={2}; ZipBytes={3}; CsvBytes={4}" -f $jobId, $jobSeconds, [int]$stopwatch.Elapsed.TotalSeconds, (Get-Item -LiteralPath $zipPath).Length, $files[0].Length) 'INFO'
+    return [pscustomobject]@{
+        CsvPath         = $files[0].FullName
+        JobId           = $jobId
+        RequestDateTime = $requestDateTime
+    }
+}
+
+function Read-DiscoveredAppsRelationExportCsv {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$CatalogAppIds
+    )
+
+    $canonicalIds = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $devicesByAppId = [Collections.Generic.Dictionary[string, Collections.Generic.List[string]]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($catalogAppId in $CatalogAppIds) {
+        if ($canonicalIds.ContainsKey($catalogAppId)) { throw "Relation export catalog contains a repeated AppId: $catalogAppId." }
+        $canonicalIds[$catalogAppId] = $catalogAppId
+        $devicesByAppId[$catalogAppId] = [Collections.Generic.List[string]]::new()
+    }
+    $unknownKeys = [Collections.Generic.Dictionary[string, int64]]::new([StringComparer]::OrdinalIgnoreCase)
+    $fieldPattern = '"(?:[^"]|"")*"|[^",]*'
+    $linePattern = [regex]::new('^(' + $fieldPattern + '),(' + $fieldPattern + ')$', [Text.RegularExpressions.RegexOptions]::Compiled)
+    $guidPattern = [regex]::new('^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$', [Text.RegularExpressions.RegexOptions]::Compiled)
+    [int64]$dataRows = 0
+    [int64]$acceptedRows = 0
+    [int64]$unknownKeyRows = 0
+
+    $reader = [IO.StreamReader]::new($Path, [Text.UTF8Encoding]::new($false), $true)
+    try {
+        $header = $reader.ReadLine()
+        if ($null -eq $header) { throw 'Relation export CSV is empty.' }
+        $header = $header.TrimStart([char]0xFEFF)
+        $headerMatch = $linePattern.Match($header)
+        if (-not $headerMatch.Success) { throw "Relation export CSV header is not the expected two-column header: $header" }
+        $names = @(foreach ($groupIndex in 1, 2) {
+            $value = $headerMatch.Groups[$groupIndex].Value
+            if ($value.StartsWith('"')) { $value.Substring(1, $value.Length - 2).Replace('""', '"') } else { $value }
+        })
+        $keyIndex = [array]::IndexOf($names, 'ApplicationKey') + 1
+        $deviceIndex = [array]::IndexOf($names, 'DeviceId') + 1
+        if ($keyIndex -lt 1 -or $deviceIndex -lt 1) { throw "Relation export CSV header is unexpected: $header" }
+
+        [int64]$lineNumber = 1
+        while ($null -ne ($line = $reader.ReadLine())) {
+            $lineNumber++
+            $lineMatch = $linePattern.Match($line)
+            if (-not $lineMatch.Success) { throw "Relation export CSV line $lineNumber is malformed." }
+            $key = $lineMatch.Groups[$keyIndex].Value
+            if ($key.StartsWith('"')) { $key = $key.Substring(1, $key.Length - 2).Replace('""', '"') }
+            $deviceId = $lineMatch.Groups[$deviceIndex].Value
+            if ($deviceId.StartsWith('"')) { $deviceId = $deviceId.Substring(1, $deviceId.Length - 2).Replace('""', '"') }
+            if ([string]::IsNullOrWhiteSpace($key) -or $key -cne $key.Trim() -or -not $guidPattern.IsMatch($deviceId)) {
+                throw "Relation export CSV line $lineNumber has an invalid ApplicationKey or DeviceId; refusing to drop it silently."
+            }
+            $dataRows++
+            $canonicalId = $null
+            if ($canonicalIds.TryGetValue($key, [ref]$canonicalId)) {
+                $devicesByAppId[$canonicalId].Add($deviceId)
+                $acceptedRows++
+            }
+            else {
+                # Keys absent from the stable Graph catalog are never published (Graph returns 404 for them).
+                $previousRows = 0L
+                [void]$unknownKeys.TryGetValue($key, [ref]$previousRows)
+                $unknownKeys[$key] = $previousRows + 1
+                $unknownKeyRows++
+            }
+        }
+    }
+    finally {
+        $reader.Dispose()
+    }
+
+    foreach ($entry in $devicesByAppId.GetEnumerator()) {
+        $deviceIds = $entry.Value
+        $deviceIds.Sort([StringComparer]::OrdinalIgnoreCase)
+        for ($index = 1; $index -lt $deviceIds.Count; $index++) {
+            if ([string]::Equals($deviceIds[$index - 1], $deviceIds[$index], [StringComparison]::OrdinalIgnoreCase)) {
+                throw "Repeated app/device pair in the relation export: AppId=$($entry.Key); coverage cannot be qualified."
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        DevicesByAppId = $devicesByAppId
+        DataRows       = $dataRows
+        AcceptedRows   = $acceptedRows
+        UnknownKeyRows = $unknownKeyRows
+        UnknownKeys    = [string[]]@($unknownKeys.Keys)
+    }
+}
+
+function Select-DiscoveredAppsRandomItems {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Items,
+        [Parameter(Mandatory = $true)][int]$Count,
+        [Parameter(Mandatory = $true)][Random]$Random
+    )
+
+    $pool = [object[]]$Items.Clone()
+    $take = [math]::Min([math]::Max(0, $Count), $pool.Count)
+    for ($index = 0; $index -lt $take; $index++) {
+        $swap = $Random.Next($index, $pool.Count)
+        $current = $pool[$index]
+        $pool[$index] = $pool[$swap]
+        $pool[$swap] = $current
+    }
+    if ($take -eq 0) { return @() }
+    return @($pool[0..($take - 1)])
+}
+
+function Test-DiscoveredAppsRelationExportSample {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Apps,
+        [Parameter(Mandatory = $true)]$DevicesByAppId,
+        [AllowEmptyCollection()][string[]]$UnknownKeys = @(),
+        [ValidateRange(0, 100000)][int]$RandomApps = 50,
+        [ValidateRange(0, 100000)][int]$TopApps = 10,
+        [ValidateRange(0, 100000)][int]$MismatchApps = 20,
+        [ValidateRange(0, 100000)][int]$UnknownKeyChecks = 20,
+        [ValidateRange(0, 100000)][int]$MaxAbsentApps = 500,
+        [Parameter(Mandatory = $true)][int]$Seed
+    )
+
+    $random = [Random]::new($Seed)
+    $absentApps = [Collections.Generic.List[object]]::new()
+    $presentApps = [Collections.Generic.List[object]]::new()
+    foreach ($app in $Apps) {
+        if ($DevicesByAppId[[string]$app.id].Count -eq 0) { $absentApps.Add($app) } else { $presentApps.Add($app) }
+    }
+    $result = [ordered]@{ Passed = $false; Reason = ''; Seed = $Seed; AbsentApps = $absentApps.Count; CheckedApps = 0; CheckedPairs = 0L; CheckedUnknownKeys = 0 }
+    if ($absentApps.Count -gt $MaxAbsentApps) {
+        $result.Reason = "Coverage: $($absentApps.Count) catalog app(s) are absent from the export (limit $MaxAbsentApps)."
+        return [pscustomobject]$result
+    }
+
+    $selected = [Collections.Specialized.OrderedDictionary]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($app in $absentApps) { $selected[[string]$app.id] = 'AbsentFromExport' }
+    $presentArray = $presentApps.ToArray()
+    foreach ($app in @($presentArray | Sort-Object -Property @{ Expression = { $DevicesByAppId[[string]$_.id].Count }; Descending = $true }, @{ Expression = { [string]$_.id } } | Select-Object -First $TopApps)) {
+        if (-not $selected.Contains([string]$app.id)) { $selected[[string]$app.id] = 'Top' }
+    }
+    $countMismatchApps = @($presentArray | Where-Object { $DevicesByAppId[[string]$_.id].Count -ne (Get-DiscoveredAppsAppDeviceCount -App $_) })
+    foreach ($app in @(Select-DiscoveredAppsRandomItems -Items $countMismatchApps -Count $MismatchApps -Random $random)) {
+        if (-not $selected.Contains([string]$app.id)) { $selected[[string]$app.id] = 'CatalogCountMismatch' }
+    }
+    foreach ($app in @(Select-DiscoveredAppsRandomItems -Items $presentArray -Count $RandomApps -Random $random)) {
+        if (-not $selected.Contains([string]$app.id)) { $selected[[string]$app.id] = 'Random' }
+    }
+
+    foreach ($appId in @($selected.Keys)) {
+        $uri = 'https://graph.microsoft.com/v1.0/deviceManagement/detectedApps/' + $appId + '/managedDevices?$top=999&$select=id'
+        $graphIds = [string[]]@(Get-DiscoveredAppsStableDeviceIds -Devices @(Invoke-GraphPagedRequest -InitialUri $uri) -AppId $appId -InitialUri $uri)
+        $graphSet = [Collections.Generic.HashSet[string]]::new($graphIds, [StringComparer]::OrdinalIgnoreCase)
+        $exportSet = [Collections.Generic.HashSet[string]]::new([string[]]$DevicesByAppId[$appId].ToArray(), [StringComparer]::OrdinalIgnoreCase)
+        $result.CheckedApps++
+        $result.CheckedPairs += $graphSet.Count
+        if (-not $graphSet.SetEquals($exportSet)) {
+            $onlyGraph = 0; foreach ($id in $graphSet) { if (-not $exportSet.Contains($id)) { $onlyGraph++ } }
+            $onlyExport = 0; foreach ($id in $exportSet) { if (-not $graphSet.Contains($id)) { $onlyExport++ } }
+            $result.Reason = "Mismatch: AppId=$appId; Check=$($selected[$appId]); GraphDevices=$($graphSet.Count); ExportDevices=$($exportSet.Count); OnlyGraph=$onlyGraph; OnlyExport=$onlyExport."
+            return [pscustomobject]$result
+        }
+    }
+
+    foreach ($key in @(Select-DiscoveredAppsRandomItems -Items @($UnknownKeys) -Count $UnknownKeyChecks -Random $random)) {
+        $lookup = Invoke-DiscoveredAppsGraphSingleRequest -Method GET -Uri ('https://graph.microsoft.com/v1.0/deviceManagement/detectedApps/' + [uri]::EscapeDataString([string]$key) + '?$select=id') -AcceptedStatusCodes @(404)
+        $result.CheckedUnknownKeys++
+        if ($lookup.StatusCode -ne 404) {
+            $result.Reason = "UnknownKey: export key $key is absent from the catalog but Graph returned HTTP $($lookup.StatusCode)."
+            return [pscustomobject]$result
+        }
+    }
+
+    $result.Passed = $true
+    $result.Reason = 'Verified'
+    return [pscustomobject]$result
+}
+
+function Write-DiscoveredAppsRelationExportRows {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Apps,
+        [Parameter(Mandatory = $true)]$DevicesByAppId,
+        [Parameter(Mandatory = $true)][string]$TenantKey
+    )
+
+    if ([string]::IsNullOrWhiteSpace($TenantKey)) { throw 'Relation export rows require a TenantKey.' }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Relation export partial CSV does not exist: $Path" }
+    $header = ([string](Get-Content -LiteralPath $Path -TotalCount 1 -ErrorAction Stop)).TrimStart([char]0xFEFF)
+    if ($header -cne '"TenantKey","AppId","DeviceId"' -or (Get-DiscoveredAppsCsvDataRowCount -Path $Path) -ne 0) {
+        throw "Relation export rows require an empty partial CSV with the compact relation header: $Path"
+    }
+
+    $quotedTenantKey = '"' + $TenantKey.Replace('"', '""') + '"'
+    $countsByAppId = @{}
+    [int64]$rows = 0
+    $writer = [IO.StreamWriter]::new($Path, $true, [Text.UTF8Encoding]::new($false))
+    try {
+        foreach ($app in $Apps) {
+            $appId = [string]$app.id
+            $deviceIds = $DevicesByAppId[$appId]
+            if ($null -eq $deviceIds) { throw "Relation export has no device list for AppId=$appId." }
+            $prefix = $quotedTenantKey + ',"' + $appId.Replace('"', '""') + '","'
+            foreach ($deviceId in $deviceIds) {
+                $writer.WriteLine($prefix + $deviceId + '"')
+                $rows++
+            }
+            $countsByAppId[$appId] = $deviceIds.Count
+        }
+    }
+    finally {
+        $writer.Dispose()
+    }
+    return [pscustomobject]@{ Rows = $rows; CountsByAppId = $countsByAppId }
+}
+
+function Invoke-DiscoveredAppsRelationExportSource {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Apps,
+        [ValidateRange(60, 86400)][int]$TimeoutSeconds = 1800,
+        [ValidateRange(0, 100000)][int]$RandomApps = 50,
+        [ValidateRange(0, 100000)][int]$TopApps = 10,
+        [ValidateRange(0, 100000)][int]$MismatchApps = 20,
+        [Parameter(Mandatory = $true)][int]$Seed
+    )
+
+    $workingFolder = Join-Path -Path ([IO.Path]::GetTempPath()) -ChildPath ('SmartM365-DiscoveredApps-Export-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $workingFolder -Force -ErrorAction Stop | Out-Null
+    try {
+        $exportFile = Get-DiscoveredAppsRelationExportCsv -WorkingFolder $workingFolder -TimeoutSeconds $TimeoutSeconds
+        $read = Read-DiscoveredAppsRelationExportCsv -Path $exportFile.CsvPath -CatalogAppIds ([string[]]@($Apps | ForEach-Object { [string]$_.id }))
+    }
+    finally {
+        Remove-Item -LiteralPath $workingFolder -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    WriteLog -Message ("Relation export read: DataRows={0}; CatalogRows={1}; NonCatalogRows={2}; NonCatalogKeys={3}." -f $read.DataRows, $read.AcceptedRows, $read.UnknownKeyRows, $read.UnknownKeys.Count) 'INFO'
+
+    $verification = Test-DiscoveredAppsRelationExportSample -Apps $Apps -DevicesByAppId $read.DevicesByAppId -UnknownKeys $read.UnknownKeys -RandomApps $RandomApps -TopApps $TopApps -MismatchApps $MismatchApps -Seed $Seed
+    WriteLog -Message ("Relation export Graph verification: Passed={0}; Seed={1}; AbsentApps={2}; CheckedApps={3}; CheckedPairs={4}; CheckedNonCatalogKeys={5}; Result={6}" -f $verification.Passed, $verification.Seed, $verification.AbsentApps, $verification.CheckedApps, $verification.CheckedPairs, $verification.CheckedUnknownKeys, $verification.Reason) $(if ($verification.Passed) { 'INFO' } else { 'WARNING' })
+    return [pscustomobject]@{
+        Passed         = [bool]$verification.Passed
+        Reason         = [string]$verification.Reason
+        JobId          = $exportFile.JobId
+        DevicesByAppId = $read.DevicesByAppId
+    }
+}
 # ==========================================================
 # MAIN TRY / CATCH / FINALLY
 # ==========================================================
@@ -2083,6 +2493,55 @@ try {
         }
 
 
+        $relationExportUsed = $false
+        if ($RelationSource -eq 'Export') {
+            $relationExportBlockers = @(
+                if (-not $streamingEnabled) { 'DryRun' }
+                if ($DeviceDetailMode -ne 'All') { "DeviceDetailMode=$DeviceDetailMode" }
+                if ($MaxApps -ne 0 -or $MaxItems -ne 0) { 'bounded app or item run' }
+                if ($ResumeVerifiedFreshCheckpoint -or $resumeStateCompatible -or $processedAppIds.Count -gt 0) { 'resumed or reused relations' }
+            )
+            if ($relationExportBlockers.Count -gt 0) {
+                $script:RelationSourceUsed = 'Graph (export not applicable: ' + ($relationExportBlockers -join ', ') + ')'
+                WriteLog -Message ("Relation export not applicable ({0}); Graph relation collection is used." -f ($relationExportBlockers -join ', ')) 'WARNING'
+            }
+            else {
+                $relationExportWriteStarted = $false
+                try {
+                    $relationExportSeed = Get-Random -Minimum 1 -Maximum ([int]::MaxValue)
+                    $relationExport = Invoke-DiscoveredAppsRelationExportSource -Apps $detailApps -TimeoutSeconds $script:RelationExportJobTimeoutSeconds `
+                        -RandomApps $RelationExportVerifyRandomApps -TopApps $script:RelationExportVerifyTopApps -MismatchApps $script:RelationExportVerifyMismatchApps -Seed $relationExportSeed
+                    if ($relationExport.Passed) {
+                        $relationTenantKey = [string](@([pscustomobject]@{ AppId = 'tenant-key'; DeviceId = 'tenant-key' } | Add-SmartM365TenantKey)[0].TenantKey)
+                        $relationExportWriteStarted = $true
+                        $relationExportRows = Write-DiscoveredAppsRelationExportRows -Path $script:DeviceDetailPartialPath -Apps $detailApps -DevicesByAppId $relationExport.DevicesByAppId -TenantKey $relationTenantKey
+                        foreach ($exportApp in $detailApps) {
+                            $exportAppId = [string]$exportApp.id
+                            $actualDeviceCountsByAppId[$exportAppId] = [int]$relationExportRows.CountsByAppId[$exportAppId]
+                            [void]$processedAppIds.Add($exportAppId)
+                        }
+                        $script:Stat_AppsProcessed += $detailApps.Count
+                        $script:Stat_DeviceDetailRows += $relationExportRows.Rows
+                        $relationExportUsed = $true
+                        $script:RelationSourceUsed = "AppInvRawData (JobId=$($relationExport.JobId); Graph-verified)"
+                        WriteLog -Message ("Relation export published to the partial CSV: Apps={0}; Rows={1}; JobId={2}." -f $detailApps.Count, $relationExportRows.Rows, $relationExport.JobId) 'INFO'
+                    }
+                    else {
+                        $script:RelationSourceUsed = 'Graph (export fallback: ' + $relationExport.Reason + ')'
+                        WriteLog -Message ("Relation export rejected; Graph relation collection is used. Reason: {0}" -f $relationExport.Reason) 'WARNING'
+                    }
+                }
+                catch {
+                    # Once rows reach the partial CSV a failure cannot fall back safely: the run stops instead.
+                    if ($relationExportWriteStarted) { throw }
+                    $script:RelationSourceUsed = 'Graph (export fallback: ' + (Get-ShortGraphErrorMessage -ErrorRecord $_) + ')'
+                    WriteLog -Message ("Relation export failed; Graph relation collection is used. Reason: {0}" -f (Get-ShortGraphErrorMessage -ErrorRecord $_)) 'WARNING'
+                }
+                $relationExport = $null
+            }
+        }
+        $relationLoopApps = if ($relationExportUsed) { @() } else { $detailApps }
+
         $seenAppDevicePairs = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
         $appsForRelationBatch = @($detailApps | Where-Object { -not $processedAppIds.Contains([string]$_.id) })
         $relationPrefetchAppCount = 200
@@ -2092,7 +2551,7 @@ try {
         WriteLog -Message ("Device relation prefetch will stream {0} remaining app(s) in chunks of at most {1}." -f $appsForRelationBatch.Count, $relationPrefetchAppCount) 'INFO'
 
         $appIndex = 0
-        foreach ($app in $detailApps) {
+        foreach ($app in $relationLoopApps) {
             $appIndex++
             if ($processedAppIds.Contains([string]$app.id)) {
                 if (-not $cachedAppIds.Contains([string]$app.id)) {
@@ -2441,6 +2900,7 @@ $($global:LogTextFile)
     WriteLog -Message "  Graph API calls                      : $($script:Stat_GraphCalls)"
     WriteLog -Message "  Throttle retries (429)               : $($script:Stat_ThrottleRetries)"
     WriteLog -Message "  Apps sent to sequential fallback     : $($script:Stat_BatchFallbackApps)"
+    WriteLog -Message "  Relation source                      : $($script:RelationSourceUsed)"
     WriteLog -Message "  Elapsed time                         : $elapsedStr"
     WriteLog -Message "$TaskName completed."
 
