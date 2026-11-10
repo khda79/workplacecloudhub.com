@@ -2,15 +2,19 @@
 <#
 .SYNOPSIS
 Collects Microsoft 365 Backup protected SharePoint site and OneDrive protection units.
+.PARAMETER InteractiveAuth
+Uses delegated interactive Microsoft Graph authentication. Enabled by default, as in the protected mailbox
+inventory, because Microsoft 365 Backup Storage answers app-only calls from a client that is not a registered
+Backup service app with HTTP 403 AppNotRegistered. Use -InteractiveAuth:$false only to request app-only
+certificate authentication explicitly.
 .VERSION
-1.0.8
+1.0.9
 .REQUIREMENTS
-Microsoft Graph application or delegated permission BackupRestore-Configuration.Read.All.
-Microsoft 365 Backup Storage answers app-only calls from a client that is not a registered Backup service app
-with HTTP 403 AppNotRegistered; the delegated job M365-BackupProtectedSitesAndDrives-Interactive is then required.
+Microsoft Graph delegated permission BackupRestore-Configuration.Read.All (default), or the application
+permission for the explicit app-only mode.
 #>
 [CmdletBinding()]
-param([string]$Tenant='test',[switch]$InteractiveAuth,[switch]$IncludeNonProtected,[switch]$ValidateOnly,[switch]$SelfTest,[switch]$EnableConfiguredExternalActions,[string]$OutputPath,[string]$LatestCsvFolderPath,[ValidateRange(0,10000000)][int]$MaxItems=0)
+param([string]$Tenant='test',[switch]$InteractiveAuth=$true,[switch]$IncludeNonProtected,[switch]$ValidateOnly,[switch]$SelfTest,[switch]$EnableConfiguredExternalActions,[string]$OutputPath,[string]$LatestCsvFolderPath,[ValidateRange(0,10000000)][int]$MaxItems=0)
 # Local lifecycle only; no collection or publication is performed by this guard.
 $smartM365LifecycleRoot=$PSScriptRoot
 while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
@@ -23,7 +27,7 @@ if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; 
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
 try {
 Set-StrictMode -Version Latest
-$ErrorActionPreference='Stop';$ScriptVersion='1.0.8';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
+$ErrorActionPreference='Stop';$ScriptVersion='1.0.9';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
 
 function ConvertTo-BackupProtectionRows{
     param([object[]]$Units,[ValidateSet('SharePointSite','OneDrive')][string]$Workload,[string]$RunId,[string]$CollectedAtUtc,[switch]$KeepNonProtected)
@@ -54,7 +58,7 @@ function Get-BackupStorageAccessFailureMessage{
     }
     $cause="Microsoft 365 Backup Storage refused {0} with HTTP 403 AppNotRegistered ('Service app is not found') for {1} client application {2}. Probable cause: this client is not a registered Backup Storage service app (solutions/backupRestore/serviceApps). This code does not mean that the Backup service is disabled or that BackupRestore-Configuration.Read.All is missing." -f $Uri,$AuthMode,$client
     if($AuthMode -ieq 'AppOnly'){
-        $action="Action: run the delegated job M365-BackupProtectedSitesAndDrives-Interactive (-InteractiveAuth), as the protected mailbox inventory does. Do not register this inventory application as a Backup service app: registration requires BackupRestore-Control.ReadWrite.All, and activation makes it the Microsoft 365 Backup controller (billing, 7 to 30 day grace period)."
+        $action="Action: run with the default delegated authentication (do not pass -InteractiveAuth:`$false), as the protected mailbox inventory does, or use the job M365-BackupProtectedSitesAndDrives-Interactive. Do not register this inventory application as a Backup service app: registration requires BackupRestore-Control.ReadWrite.All, and activation makes it the Microsoft 365 Backup controller (billing, 7 to 30 day grace period)."
     }else{
         $action='Action: check the Microsoft 365 Backup Storage service apps and the delegated sign-in with a Microsoft 365 Backup administrator; the delegated client was refused as well.'
     }
