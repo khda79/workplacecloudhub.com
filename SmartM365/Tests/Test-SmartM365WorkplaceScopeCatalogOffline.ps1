@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline coherent group catalog/membership acquisition tests. No tenant calls.
 .VERSION
-1.0.4
+1.0.5
 #>
 [CmdletBinding()]
 param()
@@ -144,12 +144,14 @@ function Invoke-CatalogFixture([object[]]$Groups, [switch]$FailMembers, [switch]
             }
             [pscustomobject]@{responses=@($responses)}
         }
+        # Same return semantics as SmartM365.WorkplaceSource.psm1 (arrays returned as one value with the comma operator).
         function Get-WorkplaceSourceValue {
-            param($Row, [string[]]$Names, $Default='')
+            param([AllowNull()]$Row, [string[]]$Names, [AllowNull()]$Default='')
             if ($null -eq $Row) { return $Default }
             foreach ($name in $Names) {
+                if ($Row -is [Collections.IDictionary] -and $Row.Contains($name)) { return ,$Row[$name] }
                 $property = $Row.PSObject.Properties[$name]
-                if ($null -ne $property) { return $property.Value }
+                if ($null -ne $property) { return ,$property.Value }
             }
             return $Default
         }

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collect native Entra direct membership and Intune policy/assignment evidence.
 .VERSION
-1.0.18
+1.0.19
 .NOTES
 Candidate collector. Not automatically scheduled until production qualification.
 Graph beta membership avoids the documented v1.0 service-principal omission.
@@ -178,7 +178,10 @@ try {
                 Write-SmartM365EvidenceLog ("Membership batch request failed; {0} group(s) use the sequential traversal: {1}" -f $pending.Count, $_.Exception.Message)
                 return $served
             }
-            $responses = @(Get-WorkplaceSourceValue $response @('responses') @())
+            # Get-WorkplaceSourceValue already returns the array as one value; wrapping it in @() would nest it.
+            $responses = Get-WorkplaceSourceValue $response @('responses') $null
+            if ($null -eq $responses) { $responses = @() }
+            $responses = [object[]]$responses
             $answered = @{}
             $accepted = @{}
             $retry = [Collections.Generic.List[string]]::new()
@@ -211,7 +214,7 @@ try {
             }
             if ($malformed) {
                 $membershipBatchStats.BatchFailures++
-                Write-SmartM365EvidenceLog ("Membership batch response was malformed or ambiguous; {0} group(s) use the sequential traversal." -f $pending.Count)
+                Write-SmartM365EvidenceLog ("Membership batch response was malformed or ambiguous (responses={0}; requests={1}); the groups use the sequential traversal." -f $responses.Count, $pending.Count) -Level WARNING
                 return $served
             }
             foreach ($groupId in $accepted.Keys) { $served[$groupId] = $accepted[$groupId] }
