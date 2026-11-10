@@ -266,7 +266,7 @@ cd %SMARTM365_ROOT%
 
 The script writes the URLs to `Config/Tenants/<profile>.teams.local.json.txt` (or `.local.json` where the JSON transport selects it), sets `EnableTeamsNotifications` to `true` in the tenant profile, then sends a test card. The private file can contain `TeamsAlertsWebhookUrl`, `TeamsInfosWebhookUrl`, and `TeamsWebhookUrl`. Protect it with permissions for the service account and administrators; Git ignores it. Existing URLs in the tenant profile remain supported. For each channel a nonempty private value takes precedence, then the old channel value, then the private and old generic fallback. Explicit `-WebhookUrl` still takes precedence over configuration. A malformed private file blocks the notification instead of silently using an old URL. Remove old tenant values only after the private file has been deployed and tested on all execution hosts. An explicit `-ConfigPath` retains the legacy write behavior.
 
-Example private file (use actual workflow URLs only in the private file):
+To create a private file manually, copy `Config/Tenants/tenant.teams.local.json.template` to the selected profile's `*.teams.local.json.txt` file, then fill in the URLs. This template is an example; notification loading does not automatically create or enrich the private file. Use actual workflow URLs only in the private file:
 
 ```json
 {
