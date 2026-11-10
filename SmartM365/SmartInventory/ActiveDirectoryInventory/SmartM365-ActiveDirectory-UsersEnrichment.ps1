@@ -2,7 +2,7 @@
 .SYNOPSIS
     Builds enriched Active Directory user CSV columns required by the SmartWorkplace Power BI model.
 .VERSION
-1.17
+1.18
 .NOTES
     1.17: optional external account type source (private ExternalAccountTypeSource section, off by default)
     takes priority over the SWI rules; AccountTypeSource, RulesAccountType, ExternalAccountType,
@@ -529,6 +529,7 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         throw ("Configured site attribute is not present in AD user evidence: {0}" -f $siteClassification.SiteAttribute)
     }
 
+    $lookupTimer = [System.Diagnostics.Stopwatch]::StartNew()
     $remoteScopeByGuid = New-IdentityRemoteScopeIndex $remoteMailboxes
     $localByDomainSam = @{}; $localBySmtp = @{}
     foreach ($row in $localMailboxes) { Add-SmartM365MapValue $localByDomainSam (Get-Key (Get-Value $row @('DomainAndSam'))) $row; Add-SmartM365MapValue $localBySmtp (Get-Key (Get-Value $row @('PrimarySMTPaddress','PrimarySmtpAddress'))) $row }
@@ -558,8 +559,16 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
     $currentUtcDate = [datetime]::UtcNow.Date
     $exchangeLastLogon90DayCutoff = $currentUtcDate.AddDays(-90)
     $exchangeLastLogon180DayCutoff = $currentUtcDate.AddDays(-180)
+    $progressInterval = 5000
+    $sourceRowCount = $users.Count
+    WriteLog -Message ("AD users enrichment lookups built in {0:N1} min; enriching {1} user row(s)" -f $lookupTimer.Elapsed.TotalMinutes, $sourceRowCount)
+    $loopTimer = [System.Diagnostics.Stopwatch]::StartNew()
 
     foreach ($user in $users) {
+        # Periodic progress tells a slow run apart from a stalled one.
+        if ($enrichedRows.Count -gt 0 -and ($enrichedRows.Count % $progressInterval) -eq 0) {
+            WriteLog -Message ("AD users enrichment progress: {0}/{1} row(s) ({2:N0}%); loop {3:N1} min; managed memory {4:N0} MB" -f $enrichedRows.Count, $sourceRowCount, (100.0 * $enrichedRows.Count / $sourceRowCount), $loopTimer.Elapsed.TotalMinutes, ([GC]::GetTotalMemory($false) / 1MB))
+        }
         $out = [ordered]@{}
         foreach ($property in $user.PSObject.Properties) { $out[$property.Name] = $property.Value }
         foreach ($column in $calculatedColumns) { if (-not $out.Contains($column)) { $out[$column] = '' } }
@@ -845,6 +854,7 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
 
         [void]$enrichedRows.Add([pscustomobject]$out)
     }
+    WriteLog -Message ("AD users enrichment loop completed in {0:N1} min; {1} row(s); managed memory {2:N0} MB" -f $loopTimer.Elapsed.TotalMinutes, $enrichedRows.Count, ([GC]::GetTotalMemory($false) / 1MB))
 
     if ($unlistedExternalTypes.Count -gt 0) {
         WriteLog -Message ("WARNING: External account type(s) absent from the Population section are Review required: {0}" -f (@($unlistedExternalTypes | Sort-Object) -join ', '))

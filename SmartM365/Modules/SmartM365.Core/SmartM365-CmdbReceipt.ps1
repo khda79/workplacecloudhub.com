@@ -2,7 +2,7 @@
 .SYNOPSIS
 Producer-owned, current-only SmartInventory source receipts. Dot-sourced helper.
 .VERSION
-1.4.6
+1.4.7
 .NOTES
 Compatible with Windows PowerShell 5.1. Optional daily capture maintenance is
 delegated to Core only for explicitly opted-in producers; no collection or report refresh.
@@ -448,10 +448,15 @@ function Complete-SmartM365CmdbSourceReceipt {
                 } | ForEach-Object {[IO.Path]::GetFileName($_)} | Sort-Object -Unique)
                 if($published.Count -eq 0){throw 'No canonical CSV was published in this run.'}
                 foreach($name in $context.ExpectedFiles){if($published -notcontains $name){throw "Required canonical CSV was not published in this run: $name"}}
+                # Receipts re-read every CSV (hash, parse, hash); timings make this silent phase observable.
+                WriteLog -Message ("Source receipt: verifying {0} CSV(s) before publication" -f $published.Count) -Level INFO
+                $receiptTimer=[Diagnostics.Stopwatch]::StartNew()
                 foreach($name in $published){
                     $canonical=Join-Path $context.SourceRoot $name
                     $path=if($context.StagedFiles.ContainsKey($canonical)){$context.StagedFiles[$canonical]}else{$canonical}
+                    $fileTimer=[Diagnostics.Stopwatch]::StartNew()
                     $record=Get-SmartM365CmdbCsvReceipt -Path $path -TenantKey $context.TenantKey -Identity $context
+                    WriteLog -Message ("Source receipt verified: {0}; {1} row(s); {2:N1} MB; {3:N1} s" -f $name,$record.Rows,((Get-Item -LiteralPath $path).Length/1MB),$fileTimer.Elapsed.TotalSeconds) -Level INFO
                     $record.File=$name
                     if($context.PublishedHashes.ContainsKey($canonical) -and $context.PublishedHashes[$canonical] -cne $record.SHA256){throw 'CSV changed after current-run publication.'}
                     foreach($field in @('Producer','ScriptVersion','RunId','StartedAtUtc')){$record[$field]=$context[$field]}
@@ -465,6 +470,7 @@ function Complete-SmartM365CmdbSourceReceipt {
                     $current=if($context.StagedFiles.ContainsKey($canonical)){$context.StagedFiles[$canonical]}else{$canonical}
                     if((Get-FileHash -LiteralPath $current -Algorithm SHA256).Hash -ne $record.SHA256){throw 'CSV changed while completing the producer batch.'}
                 }
+                WriteLog -Message ("Source receipt: {0} CSV(s) verified in {1:N1} min (including the final hash check)" -f $files.Count,$receiptTimer.Elapsed.TotalMinutes) -Level INFO
             }catch{$complete=$false;$reason=$_.Exception.Message;$files=@()}
             # Staged CSVs replace DATA-LAST only now, under the Publishing fence; the receipt follows them.
             if($complete -and ($context.StagedFiles.Count -or $context.StagedArtifacts.Count)){

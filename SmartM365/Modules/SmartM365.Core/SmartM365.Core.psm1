@@ -12,7 +12,7 @@ Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumV
 . (Join-Path $PSScriptRoot 'SmartM365-SharePointUploadPolicy.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-TeamsPrivateConfig.ps1')
 # SmartM365.Core.psm1
-# Version: 1.0.126
+# Version: 1.0.127
 # Core utilities: logging, initialization, cleanup, CSV export, mail, remote scheduling, cloud connections.
 
 function Get-ModuleLocalConfig {
