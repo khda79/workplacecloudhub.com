@@ -1,5 +1,5 @@
 # Offline, single-tenant preparation and versioned local publication. No tenant APIs.
-# Version: 1.2.10
+# Version: 1.2.11
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:ProductRoot = Split-Path -Parent $PSScriptRoot
@@ -612,8 +612,8 @@ function Publish-PreparedEvidenceBatch {
             }
             try {
                 $header = $reader.ReadLine()
-                if (-not $stagingTenant -and $header -match '^"?TenantKey"?,') { throw 'Staging must not contain a published TenantKey prefix.' }
-                if ($stagingTenant -and $header -notmatch '^"?TenantKey"?,') {throw 'Tenant-aware staging must start with TenantKey.'}
+                if (-not $stagingTenant -and $header -match '^"?TenantKey"?,') { throw "Staging must not contain a published TenantKey prefix: $($table.file) (declare stagingIncludesTenantKey in the contract if the generator writes TenantKey)." }
+                if ($stagingTenant -and $header -notmatch '^"?TenantKey"?,') {throw "Tenant-aware staging must start with TenantKey: $($table.file)."}
             } finally { $reader.Dispose() }
             if ($stagingTenant) {
                 # Only explicitly declared tenant-aware tables may retain this prefix.
