@@ -3,9 +3,11 @@
 .SYNOPSIS
 Collects Microsoft 365 Backup protected SharePoint site and OneDrive protection units.
 .VERSION
-1.0.7
+1.0.8
 .REQUIREMENTS
 Microsoft Graph application or delegated permission BackupRestore-Configuration.Read.All.
+Microsoft 365 Backup Storage answers app-only calls from a client that is not a registered Backup service app
+with HTTP 403 AppNotRegistered; the delegated job M365-BackupProtectedSitesAndDrives-Interactive is then required.
 #>
 [CmdletBinding()]
 param([string]$Tenant='test',[switch]$InteractiveAuth,[switch]$IncludeNonProtected,[switch]$ValidateOnly,[switch]$SelfTest,[switch]$EnableConfiguredExternalActions,[string]$OutputPath,[string]$LatestCsvFolderPath,[ValidateRange(0,10000000)][int]$MaxItems=0)
@@ -21,13 +23,76 @@ if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; 
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
 try {
 Set-StrictMode -Version Latest
-$ErrorActionPreference='Stop';$ScriptVersion='1.0.7';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
+$ErrorActionPreference='Stop';$ScriptVersion='1.0.8';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
 
 function ConvertTo-BackupProtectionRows{
     param([object[]]$Units,[ValidateSet('SharePointSite','OneDrive')][string]$Workload,[string]$RunId,[string]$CollectedAtUtc,[switch]$KeepNonProtected)
     return @($Units|Where-Object{$KeepNonProtected-or [string](Get-SmartM365EvidenceProperty $_ @('status'))-ieq'protected'}|ForEach-Object{[pscustomobject][ordered]@{RunId=$RunId;CollectedAtUtc=$CollectedAtUtc;CollectionStatus='Observed';IsPartialInventory=$false;SourceScriptVersion=$ScriptVersion;Workload=$Workload;ProtectionUnitId=[string](Get-SmartM365EvidenceProperty $_ @('id'));DirectoryObjectId=[string](Get-SmartM365EvidenceProperty $_ @('siteId','driveId','userId'));DisplayName=[string](Get-SmartM365EvidenceProperty $_ @('siteName','displayName'));WebUrl=[string](Get-SmartM365EvidenceProperty $_ @('siteWebUrl','webUrl'));Email=[string](Get-SmartM365EvidenceProperty $_ @('email'));Status=[string](Get-SmartM365EvidenceProperty $_ @('status'));CreatedDateTime=[string](Get-SmartM365EvidenceProperty $_ @('createdDateTime'));LastModifiedDateTime=[string](Get-SmartM365EvidenceProperty $_ @('lastModifiedDateTime'));RawIdentityJson=ConvertTo-SmartM365EvidenceJson $_}})
 }
-if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.23' -Force;$test=ConvertTo-BackupProtectionRows @([pscustomobject]@{id='1';siteId='s';status='protected'},[pscustomobject]@{id='2';status='unprotected'}) SharePointSite r n;if($test.Count-ne 1 -or $test[0].DirectoryObjectId-ne's'){throw 'Backup protection self-test failed.'};'PASS: Backup sites and drives offline contract';$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
+
+# The Graph error code sits in the response body (ErrorDetails), not in the exception message "Forbidden".
+function Get-BackupStorageErrorCode{
+    param([Parameter(Mandatory)][Management.Automation.ErrorRecord]$ErrorRecord)
+    $texts=[Collections.Generic.List[string]]::new()
+    if($ErrorRecord.ErrorDetails -and -not [string]::IsNullOrWhiteSpace([string]$ErrorRecord.ErrorDetails.Message)){$texts.Add([string]$ErrorRecord.ErrorDetails.Message)}
+    $exception=$ErrorRecord.Exception
+    while($null -ne $exception){$texts.Add([string]$exception.Message);$exception=$exception.InnerException}
+    foreach($text in $texts){
+        $match=[regex]::Match($text,'"code"\s*:\s*"(?<Code>[^"]+)"')
+        if($match.Success){return $match.Groups['Code'].Value}
+        if($text -match '(?i)\bAppNotRegistered\b'){return 'AppNotRegistered'}
+    }
+    return ''
+}
+
+function Get-BackupStorageAccessFailureMessage{
+    param([string]$ErrorCode,[string]$Uri,[string]$AuthMode,[string]$ClientId,[string]$OriginalMessage)
+    $client=if([string]::IsNullOrWhiteSpace($ClientId)){'<unknown>'}else{$ClientId}
+    if($ErrorCode -ine 'AppNotRegistered'){
+        $codeText=if([string]::IsNullOrWhiteSpace($ErrorCode)){''}else{" Graph error code: $ErrorCode."}
+        return ("Microsoft 365 Backup Storage access probe failed for {0} ({1} client {2}): {3}{4}" -f $Uri,$AuthMode,$client,$OriginalMessage,$codeText)
+    }
+    $cause="Microsoft 365 Backup Storage refused {0} with HTTP 403 AppNotRegistered ('Service app is not found') for {1} client application {2}. Probable cause: this client is not a registered Backup Storage service app (solutions/backupRestore/serviceApps). This code does not mean that the Backup service is disabled or that BackupRestore-Configuration.Read.All is missing." -f $Uri,$AuthMode,$client
+    if($AuthMode -ieq 'AppOnly'){
+        $action="Action: run the delegated job M365-BackupProtectedSitesAndDrives-Interactive (-InteractiveAuth), as the protected mailbox inventory does. Do not register this inventory application as a Backup service app: registration requires BackupRestore-Control.ReadWrite.All, and activation makes it the Microsoft 365 Backup controller (billing, 7 to 30 day grace period)."
+    }else{
+        $action='Action: check the Microsoft 365 Backup Storage service apps and the delegated sign-in with a Microsoft 365 Backup administrator; the delegated client was refused as well.'
+    }
+    return "$cause $action"
+}
+
+# Read-only probe of both endpoints before collection, so that an access refusal is explained, not only "Forbidden".
+function Assert-BackupStorageAccess{
+    param([Parameter(Mandatory)][string[]]$Uris,[string]$AuthMode,[string]$ClientId,[scriptblock]$Invoker)
+    foreach($uri in $Uris){
+        try{
+            $requestParameters=@{Uri=$uri;Operation='Microsoft 365 Backup Storage access probe'}
+            if($Invoker){$requestParameters.Invoker=$Invoker;$requestParameters.NoSleep=$true}
+            Invoke-SmartM365EvidenceGraphRequest @requestParameters|Out-Null
+            if(-not $Invoker){Write-SmartM365EvidenceLog -Message ("Microsoft 365 Backup Storage access probe OK: {0}" -f $uri)}
+        }catch{
+            if($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]){throw}
+            $message=Get-BackupStorageAccessFailureMessage -ErrorCode (Get-BackupStorageErrorCode -ErrorRecord $_) -Uri $uri -AuthMode $AuthMode -ClientId $ClientId -OriginalMessage $_.Exception.Message
+            throw [InvalidOperationException]::new($message,$_.Exception)
+        }
+    }
+}
+
+if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.23' -Force;$test=ConvertTo-BackupProtectionRows @([pscustomobject]@{id='1';siteId='s';status='protected'},[pscustomobject]@{id='2';status='unprotected'}) SharePointSite r n;if($test.Count-ne 1 -or $test[0].DirectoryObjectId-ne's'){throw 'Backup protection self-test failed.'}
+    # The Graph request helper reads the HTTP status through Core, as in a real run.
+    Import-Module -Name (Join-Path $smartM365LifecycleRoot 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.121' -Global -ErrorAction Stop
+    $denied=[Management.Automation.ErrorRecord]::new([Exception]::new('Response status code does not indicate success: Forbidden (Forbidden).'),'GraphForbidden',[Management.Automation.ErrorCategory]::PermissionDenied,$null)
+    $denied.ErrorDetails=[Management.Automation.ErrorDetails]::new('{"error":{"code":"AppNotRegistered","message":"Service app is not found. Please register this service app."}}')
+    if((Get-BackupStorageErrorCode -ErrorRecord $denied) -ne 'AppNotRegistered'){throw 'Backup protection self-test failed: AppNotRegistered code not read from the response body.'}
+    $probeFailure=$null
+    try{Assert-BackupStorageAccess -Uris @('https://graph.microsoft.test/probe') -AuthMode AppOnly -ClientId 'client-test' -Invoker {param($m,$u,$b) throw $denied}}catch{$probeFailure=$_}
+    if($null -eq $probeFailure -or $probeFailure.Exception.Message -notmatch 'AppNotRegistered' -or $probeFailure.Exception.Message -notmatch 'client-test' -or $probeFailure.Exception.Message -notmatch 'M365-BackupProtectedSitesAndDrives-Interactive'){throw 'Backup protection self-test failed: AppNotRegistered refusal not explained.'}
+    $other=[Management.Automation.ErrorRecord]::new([Exception]::new('Response status code does not indicate success: Forbidden (Forbidden).'),'GraphForbidden',[Management.Automation.ErrorCategory]::PermissionDenied,$null)
+    $other.ErrorDetails=[Management.Automation.ErrorDetails]::new('{"error":{"code":"Authorization_RequestDenied","message":"Insufficient privileges."}}')
+    $otherFailure=$null
+    try{Assert-BackupStorageAccess -Uris @('https://graph.microsoft.test/probe') -AuthMode AppOnly -ClientId 'client-test' -Invoker {param($m,$u,$b) throw $other}}catch{$otherFailure=$_}
+    if($null -eq $otherFailure -or $otherFailure.Exception.Message -notmatch 'Authorization_RequestDenied' -or $otherFailure.Exception.Message -match 'serviceApps'){throw 'Backup protection self-test failed: other refusals must keep their own Graph code.'}
+    'PASS: Backup sites and drives offline contract';$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
 try{
     $tenantContextPath=Join-Path (Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent) 'Config\SmartM365-TenantContext.ps1';. $tenantContextPath
     $effectiveConfig=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -35,8 +100,22 @@ try{
     $script:Runtime=Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effectiveConfig -DefaultOutputRelativePath 'M365\Backup\ProtectedSitesAndDrives' -OutputPath $OutputPath -LatestCsvFolderPath $LatestCsvFolderPath -ValidateOnly:$ValidateOnly -EnableConfiguredExternalActions:$EnableConfiguredExternalActions
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $script:Runtime.LatestCsvFolderPath -ReadOnly:($ValidateOnly -or $SelfTest) -ScopeParameters @{IncludeNonProtected=$IncludeNonProtected}
     Connect-SmartM365EvidenceGraph $script:Runtime @('BackupRestore-Configuration.Read.All') -InteractiveAuth:$InteractiveAuth
-    $sites=@(Get-SmartM365EvidenceGraphCollection -Uri 'https://graph.microsoft.com/v1.0/solutions/backupRestore/protectionUnits/microsoft.graph.siteProtectionUnit' -MaxItems $MaxItems)
-    $drives=@(Get-SmartM365EvidenceGraphCollection -Uri 'https://graph.microsoft.com/v1.0/solutions/backupRestore/protectionUnits/microsoft.graph.driveProtectionUnit' -MaxItems $MaxItems)
+    $graphContext=Get-MgContext
+    $authMode=if($InteractiveAuth){'Delegated'}else{'AppOnly'}
+    $clientId=''
+    if($null -ne $graphContext){
+        if(-not [string]::IsNullOrWhiteSpace([string]$graphContext.AuthType)){$authMode=[string]$graphContext.AuthType}
+        $clientId=[string]$graphContext.ClientId
+    }
+    Write-SmartM365EvidenceLog -Message ("Microsoft Graph authentication: {0}; client application: {1}." -f $authMode,$(if($clientId){$clientId}else{'<unknown>'}))
+    $preflightParameters=@{ScriptName=[IO.Path]::GetFileNameWithoutExtension($PSCommandPath);OutputPaths=@($script:Runtime.OutputPath,$script:Runtime.LatestCsvFolderPath)}
+    if($authMode -ieq 'AppOnly'){$preflightParameters.RequiredGraphApplicationPermissions=@('BackupRestore-Configuration.Read.All')}
+    Invoke-SmartM365Preflight @preflightParameters|Out-Null
+    $siteUri='https://graph.microsoft.com/v1.0/solutions/backupRestore/protectionUnits/microsoft.graph.siteProtectionUnit'
+    $driveUri='https://graph.microsoft.com/v1.0/solutions/backupRestore/protectionUnits/microsoft.graph.driveProtectionUnit'
+    Assert-BackupStorageAccess -Uris @(($siteUri+'?$top=1'),($driveUri+'?$top=1')) -AuthMode $authMode -ClientId $clientId
+    $sites=@(Get-SmartM365EvidenceGraphCollection -Uri $siteUri -MaxItems $MaxItems)
+    $drives=@(Get-SmartM365EvidenceGraphCollection -Uri $driveUri -MaxItems $MaxItems)
     if($ValidateOnly){Write-SmartM365EvidenceLog -Message ("Backup protection endpoints available; sites={0}, drives={1}. No CSV published." -f $sites.Count,$drives.Count) -Level SUCCESS;$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
     $siteRows=ConvertTo-BackupProtectionRows $sites SharePointSite $script:Runtime.RunId $script:Runtime.CollectedAtUtc -KeepNonProtected:$IncludeNonProtected
     $driveRows=ConvertTo-BackupProtectionRows $drives OneDrive $script:Runtime.RunId $script:Runtime.CollectedAtUtc -KeepNonProtected:$IncludeNonProtected
