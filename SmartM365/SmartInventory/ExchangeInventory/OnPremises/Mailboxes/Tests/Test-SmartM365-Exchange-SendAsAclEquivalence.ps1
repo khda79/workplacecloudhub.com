@@ -18,7 +18,7 @@ Run on an Exchange 2016 inventory server (Windows PowerShell 5.1), with the same
 service account as the orchestrator job.
 
 .VERSION
-1.0.0
+1.0.1
 
 .PARAMETER DomainName
 Optional list of domain FQDNs to test (default: all domains of the forest).
@@ -43,7 +43,9 @@ param(
 # No StrictMode: the old-method block must behave exactly like production
 # (for example .Count on a single unique SendAs string).
 $ErrorActionPreference = 'Stop'
-$script:QualificationVersion = '1.0.0'
+$script:QualificationVersion = '1.0.1'
+# powershell.exe -File passes "a,b,c" as one string: split it here.
+$DomainName = @($DomainName | ForEach-Object { [string]$_ -split '[,;\s]+' } | Where-Object { $_ } | ForEach-Object { $_.Trim().ToLowerInvariant() })
 $script:LogFile = $null
 
 function Write-QualificationLog {
@@ -203,13 +205,16 @@ try {
     $selected = New-Object 'System.Collections.Generic.List[object]'
     $groups = $mailboxes | Group-Object { Get-DomainFqdnFromDn ([string]$_.DistinguishedName) } | Sort-Object Name
     foreach ($group in $groups) {
-        if ($DomainName.Count -gt 0 -and $DomainName -notcontains $group.Name) { continue }
+        if ($DomainName.Count -gt 0 -and $DomainName -notcontains ([string]$group.Name).ToLowerInvariant()) { continue }
         $take = @($group.Group | Sort-Object { [string]$_.DistinguishedName })
         if ($MaxMailboxesPerDomain -gt 0 -and $take.Count -gt $MaxMailboxesPerDomain) { $take = @($take | Select-Object -First $MaxMailboxesPerDomain) }
         foreach ($m in $take) { $selected.Add($m) }
         Write-QualificationLog ("Domain {0}: {1} mailboxes selected of {2}" -f $group.Name, $take.Count, $group.Count)
     }
 
+    if ($selected.Count -eq 0) {
+        throw ('No mailbox selected. Requested domains: [{0}]. Available domains: [{1}]' -f ($DomainName -join ', '), ((@($groups) | ForEach-Object { $_.Name }) -join ', '))
+    }
     $total = $selected.Count
     $i = 0
     $lastProgress = Get-Date
