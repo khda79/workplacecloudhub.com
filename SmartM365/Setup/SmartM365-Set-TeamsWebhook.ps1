@@ -6,7 +6,7 @@
 
 .DESCRIPTION
     Validates that the provided URL is an HTTPS Teams Workflows / Power Automate webhook URL,
-    writes it to the selected tenant local profile as TeamsWebhookUrl, then sends a test notification
+    writes it to a private per-profile Teams JSON file, then sends a test notification
     through Send-SmartM365TeamsNotification.
 
     This script intentionally rejects legacy Office 365 Connector incoming webhook URLs.
@@ -23,7 +23,7 @@
     Tenant profile key. Defaults to test.
 
 .PARAMETER ConfigPath
-    Optional explicit JSON config path. Defaults to Config\Tenants\<Tenant>.local.json.
+    Optional explicit legacy tenant JSON config path. When specified, the URL is written there.
 
 .PARAMETER TestOnly
     Sends the test notification without writing the selected tenant profile.
@@ -38,7 +38,7 @@
     .\Setup\SmartM365-Set-TeamsWebhook.ps1 -Channel Infos -WebhookUrl "https://prod-00.westeurope.logic.azure.com/workflows/..." -TestOnly
 
 .VERSION
-1.4
+1.5
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -149,6 +149,7 @@ function Read-SmartM365JsonConfig {
 }
 
 $uri = Test-SmartM365TeamsWorkflowWebhookUrl -Url $WebhookUrl
+$explicitConfigPath = -not [string]::IsNullOrWhiteSpace($ConfigPath)
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     $ConfigPath = Join-Path -Path $script:SmartM365RootPath -ChildPath ("Config\Tenants\{0}.local.json" -f $Tenant)
 }
@@ -175,10 +176,28 @@ if (-not $TestOnly) {
     $configReceipt=Read-SmartM365JsonDocument $resolvedConfigPath
     $config=$configReceipt.Document
     $configHash=$configReceipt.SHA256
-    if ($null -eq $config.PSObject.Properties[$configPropertyName]) {
+    if (-not $explicitConfigPath) {
+        if ($Tenant -notmatch '^[A-Za-z0-9][A-Za-z0-9_-]*$') { throw 'Invalid Teams configuration profile key.' }
+        $privatePath = Join-Path $script:SmartM365RootPath ("Config\Tenants\{0}.teams.local.json" -f $Tenant)
+        $privatePath = Resolve-SmartM365JsonConfigurationPath $privatePath
+        $privateHash = 'ABSENT'
+        $privateConfig = [pscustomobject]@{}
+        if (Test-Path -LiteralPath $privatePath) {
+            $privateReceipt = Read-SmartM365JsonDocument $privatePath
+            $privateConfig = $privateReceipt.Document
+            $privateHash = $privateReceipt.SHA256
+            if ($privateConfig -isnot [pscustomobject]) { throw 'Private Teams configuration must be an object.' }
+        }
+        if ($null -eq $privateConfig.PSObject.Properties[$configPropertyName]) { $privateConfig | Add-Member -NotePropertyName $configPropertyName -NotePropertyValue $uri.AbsoluteUri }
+        else { $privateConfig.$configPropertyName = $uri.AbsoluteUri }
+        if ($PSCmdlet.ShouldProcess($privatePath, 'Write private Teams webhook')) {
+            Write-SmartM365JsonBytesAtomically -Path $privatePath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($privateConfig | ConvertTo-Json -Depth 20))) -ExpectedSHA256 $privateHash -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Configuration must be an object.'}} | Out-Null
+        }
+    }
+    elseif ($null -eq $config.PSObject.Properties[$configPropertyName]) {
         $config | Add-Member -NotePropertyName $configPropertyName -NotePropertyValue $uri.AbsoluteUri
     }
-    else {
+    elseif ($explicitConfigPath) {
         $config.$configPropertyName = $uri.AbsoluteUri
     }
 
@@ -198,7 +217,8 @@ if (-not $TestOnly) {
 
     if ($PSCmdlet.ShouldProcess($resolvedConfigPath, 'Write TeamsWebhookUrl')) {
         Write-SmartM365JsonBytesAtomically -Path $resolvedConfigPath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($config | ConvertTo-Json -Depth 20))) -ExpectedSHA256 $configHash -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Configuration must be an object.'}} | Out-Null
-        Write-Information ("[OK] {0} written to {1}" -f $configPropertyName, $resolvedConfigPath) -InformationAction Continue
+        if ($explicitConfigPath) { Write-Information ("[OK] {0} written to the specified configuration; a private profile value takes precedence if present." -f $configPropertyName) -InformationAction Continue }
+        else { Write-Information ("[OK] {0} written to private Teams configuration; tenant notifications enabled." -f $configPropertyName) -InformationAction Continue }
     }
 }
 else {

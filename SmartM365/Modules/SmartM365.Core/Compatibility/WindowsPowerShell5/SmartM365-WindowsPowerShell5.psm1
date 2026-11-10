@@ -8,8 +8,9 @@ Import-Module (Join-Path $PSScriptRoot '../../SmartM365.JsonTransport.psd1') -Mi
 . (Join-Path $PSScriptRoot '../../SmartM365-ImportExcelHealth.ps1')
 . (Join-Path $PSScriptRoot '../../SmartM365-InventoryLifecycle.ps1')
 . (Join-Path $PSScriptRoot '../../SmartM365-SharePointUploadPolicy.ps1')
+. (Join-Path $PSScriptRoot '../../SmartM365-TeamsPrivateConfig.ps1')
 
-# Version: 1.0.72
+# Version: 1.0.73
 function Get-ModuleLocalConfig {
     [CmdletBinding()]
     param()
@@ -1214,7 +1215,11 @@ function Send-SmartM365TeamsNotification {
             }
 
             $webhookConfigName = if ($effectiveChannel -eq 'Alerts') { 'TeamsAlertsWebhookUrl' } else { 'TeamsInfosWebhookUrl' }
-            $WebhookUrl = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name $webhookConfigName -DefaultValue ''
+            $WebhookUrl = Get-SmartM365PrivateTeamsWebhook -Name $webhookConfigName
+            if ([string]::IsNullOrWhiteSpace($WebhookUrl)) { $WebhookUrl = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name $webhookConfigName -DefaultValue '' }
+            if ([string]::IsNullOrWhiteSpace($WebhookUrl)) {
+                $WebhookUrl = Get-SmartM365PrivateTeamsWebhook -Name 'TeamsWebhookUrl'
+            }
             if ([string]::IsNullOrWhiteSpace($WebhookUrl)) {
                 $WebhookUrl = Get-ModuleLocalConfigValue -Config $moduleLocalConfig -Name 'TeamsWebhookUrl' -DefaultValue $WebhookUrl
             }

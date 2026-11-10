@@ -255,16 +255,28 @@ Create the Teams Workflow URL for `Alerts`:
 
 Repeat the same steps for the `Infos` channel, with a workflow name such as `SmartM365 Infos Webhook`, and select the `Infos` channel.
 
-Store and test the URLs from PowerShell:
+Store and test the URLs from PowerShell. Select the intended profile with `-Tenant`; otherwise the script defaults to `test`:
 
 ```powershell
 cd %SMARTM365_ROOT%
 
-.\Setup\SmartM365-Set-TeamsWebhook.ps1 -Channel Alerts -WebhookUrl "<Alerts workflow URL>"
-.\Setup\SmartM365-Set-TeamsWebhook.ps1 -Channel Infos  -WebhookUrl "<Infos workflow URL>"
+.\Setup\SmartM365-Set-TeamsWebhook.ps1 -Tenant "<profile>" -Channel Alerts -WebhookUrl "<Alerts workflow URL>"
+.\Setup\SmartM365-Set-TeamsWebhook.ps1 -Tenant "<profile>" -Channel Infos  -WebhookUrl "<Infos workflow URL>"
 ```
 
-The script writes the URLs to the selected tenant profile as `TeamsAlertsWebhookUrl` and `TeamsInfosWebhookUrl`, sets `EnableTeamsNotifications` to `true`, then sends a test card to the selected channel. The local JSON file is ignored by Git and must never be committed.
+The script writes the URLs to `Config/Tenants/<profile>.teams.local.json.txt` (or `.local.json` where the JSON transport selects it), sets `EnableTeamsNotifications` to `true` in the tenant profile, then sends a test card. The private file can contain `TeamsAlertsWebhookUrl`, `TeamsInfosWebhookUrl`, and `TeamsWebhookUrl`. Protect it with permissions for the service account and administrators; Git ignores it. Existing URLs in the tenant profile remain supported. For each channel a nonempty private value takes precedence, then the old channel value, then the private and old generic fallback. Explicit `-WebhookUrl` still takes precedence over configuration. A malformed private file blocks the notification instead of silently using an old URL. Remove old tenant values only after the private file has been deployed and tested on all execution hosts. An explicit `-ConfigPath` retains the legacy write behavior.
+
+Example private file (use actual workflow URLs only in the private file):
+
+```json
+{
+  "TeamsAlertsWebhookUrl": "",
+  "TeamsInfosWebhookUrl": "",
+  "TeamsWebhookUrl": ""
+}
+```
+
+LocalCache copies the Config directory to the execution host; secure the local cache as well as the shared source. Restricting a file is an operational step, not an automatic ACL applied by this feature.
 
 Useful options:
 
