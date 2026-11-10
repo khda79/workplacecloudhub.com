@@ -31,7 +31,7 @@
   readable headers, AD domain and country columns, colored reasons and dates, print setup and a tenant or domain file name.
   The script parses under Windows PowerShell 5.1 again (1.65), so SmartInventory.cmd can resolve and start it.
 .VERSION
-1.75
+1.76
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -39,7 +39,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-     Version : 1.75
+     Version : 1.76
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -4994,7 +4994,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.75"
+$ScriptVersion = "1.76"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -5263,9 +5263,20 @@ try {
   # User/SKU pairs written to the service-plan states, checked against the assignment paths before publication.
   $servicePlanStatePairs = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
   $userSnapshotRefreshes = 0
+  # Periodic progress line: the user loop runs for over an hour without other log writes,
+  # and the orchestrator reports a job as stalled after 60 silent minutes.
+  $userLoopStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+  $userLoopProgressInterval = [TimeSpan]::FromMinutes(10)
+  $userLoopNextProgress = $userLoopProgressInterval
 
   foreach ($u in $users) {
     $uIndex++
+    if ($userLoopStopwatch.Elapsed -ge $userLoopNextProgress) {
+      $elapsedMinutes = $userLoopStopwatch.Elapsed.TotalMinutes
+      $usersPerMinute = if ($elapsedMinutes -gt 0) { ($uIndex - 1) / $elapsedMinutes } else { 0 }
+      WriteLog -Message ("License resolution progress: {0:N0}/{1:N0} users; elapsed={2:N1} min; rate={3:N0} users/min; service-plan rows={4:N0}; working set={5:N1} MB." -f ($uIndex - 1), $uTotal, $elapsedMinutes, $usersPerMinute, $servicePlanRowCount, ((Get-Process -Id $PID).WorkingSet64 / 1MB)) 'INFO'
+      while ($userLoopNextProgress -le $userLoopStopwatch.Elapsed) { $userLoopNextProgress += $userLoopProgressInterval }
+    }
     $pct = if ($uTotal -gt 0) { [math]::Floor(($uIndex * 100.0) / $uTotal) } else { 100 }
     Write-Progress -Activity "Processing users" -Status "[$uIndex/$uTotal] $($u.UserPrincipalName)" -PercentComplete $pct
 
