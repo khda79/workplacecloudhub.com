@@ -45,6 +45,9 @@ Removes the scheduled task instead of installing it. No credential is requested.
 .PARAMETER Interactive
 Forces the guided interactive workflow. This is used by the CMD launcher.
 
+.PARAMETER UninstallInteractive
+Guides removal of the local task, including a clean orchestrator stop.
+
 .PARAMETER CreateOnlyDisabled
 Creates a disabled task without replacing an existing or legacy task, starting
 the task or changing shortcuts. The password is requested interactively.
@@ -59,7 +62,7 @@ Requires the account to resolve to the reviewed SID before registration.
 ./Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1 -Tenant prod -Uninstall
 
 .VERSION
-1.3.2
+1.3.3
 
 .REQUIREMENTS
     Windows PowerShell 5.1 or PowerShell 7. The script requests UAC elevation when needed.
@@ -77,9 +80,11 @@ param(
     [switch]$StartNow,
     [switch]$Uninstall,
     [switch]$Interactive,
+    [switch]$UninstallInteractive,
     [switch]$CreateOnlyDisabled,
     [string]$ExpectedServiceSid = ''
 )
+if ($UninstallInteractive -and ($Interactive -or $Uninstall -or $StartNow -or $CreateOnlyDisabled -or $ServiceAccount -or $TaskName -or $PSBoundParameters.ContainsKey('Tenant'))) {throw 'UninstallInteractive cannot be combined with task, tenant or installation options.'}
 if ($CreateOnlyDisabled -and ($StartNow -or $Uninstall -or $Interactive)) {throw 'CreateOnlyDisabled cannot be combined with StartNow, Uninstall or Interactive.'}
 if ($CreateOnlyDisabled -and ($ExpectedServiceSid -notmatch '^S-1-(?:\d+-)+\d+$' -or $ExpectedServiceSid -eq 'S-1-5-18')) {throw 'A reviewed service account SID is required.'}
 if ($CreateOnlyDisabled -and $ServiceAccount.Trim().EndsWith('$')) {throw 'Managed service accounts are not supported in this mode.'}
@@ -354,7 +359,7 @@ function Complete-InstallerExecution {
     Write-SmartM365CompletionBanner -Status $Status -ScriptName $global:SmartM365ScriptName -StartedAt $script:InstallerStartedAt -LogPath $global:LogTextFile
 }
 
-$script:InteractiveMode = $Interactive -or $PSBoundParameters.Count -eq 0
+$script:InteractiveMode = $Interactive -or $UninstallInteractive -or $PSBoundParameters.Count -eq 0
 $interactiveTaskEnabled = $true
 
 trap {
@@ -383,7 +388,11 @@ if ($hostLaunchMode -ne 'Current') {
         (ConvertTo-QuotedArgument -Value $MyInvocation.MyCommand.Path)
     )
 
-    if ($script:InteractiveMode) {
+    if ($UninstallInteractive) {
+        $elevationArguments += '-UninstallInteractive'
+        if ($WhatIfPreference) { $elevationArguments += '-WhatIf' }
+    }
+    elseif ($script:InteractiveMode) {
         $elevationArguments += '-Interactive'
     }
     else {
@@ -420,15 +429,19 @@ if ($hostLaunchMode -ne 'Current') {
 
 if ($script:InteractiveMode) {
     Write-InstallerMessage 'SmartM365 Inventory Orchestrator scheduled-task installer'
-    Write-InstallerMessage '1 - Install or update the scheduled task'
-    Write-InstallerMessage '2 - Uninstall the scheduled task'
-    $actionChoice = Read-InstallerChoice -Prompt 'Select an action [1-2]' -AllowedValues @('1', '2')
-    $Uninstall = $actionChoice -eq '2'
+    if ($UninstallInteractive) { $Uninstall = $true }
+    else {
+        Write-InstallerMessage '1 - Install or update the scheduled task'
+        Write-InstallerMessage '2 - Uninstall the scheduled task'
+        $actionChoice = Read-InstallerChoice -Prompt 'Select an action [1-2]' -AllowedValues @('1', '2')
+        $Uninstall = $actionChoice -eq '2'
+    }
 
     $Tenant = Read-InstallerProfile -Root $smartM365Root
 
     if ($Uninstall) {
-        if (-not (Read-InstallerYesNo -Prompt "Remove SmartM365 Inventory Orchestrator - $Tenant?")) {
+        $prompt = if ($UninstallInteractive) { "Disable the task, stop the local orchestrator and remove SmartM365 Inventory Orchestrator - $Tenant on $env:COMPUTERNAME?" } else { "Remove SmartM365 Inventory Orchestrator - $Tenant?" }
+        if (-not (Read-InstallerYesNo -Prompt $prompt)) {
             Write-InstallerMessage 'Uninstall cancelled.'
             Wait-InteractiveClose
             Complete-InstallerExecution -Status 'CompletedWithWarnings'
@@ -463,6 +476,25 @@ $guiShortcutPaths = @(
 if ($Uninstall) {
     if ($StartNow) {
         throw 'StartNow cannot be combined with Uninstall.'
+    }
+
+    if ($UninstallInteractive) {
+        if (-not $PSCmdlet.ShouldProcess("$env:COMPUTERNAME / $Tenant", 'Disable task and stop local orchestrator')) {
+            Write-InstallerMessage 'Uninstall was not performed.'
+            Wait-InteractiveClose
+            Complete-InstallerExecution -Status 'CompletedWithWarnings'
+            $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
+        }
+        foreach ($candidateTaskPath in @($taskPath, $legacyTaskPath)) {
+            $existingTask = Get-ScheduledTask -TaskPath $candidateTaskPath -TaskName $TaskName -ErrorAction SilentlyContinue
+            if ($null -ne $existingTask) {
+                Disable-ScheduledTask -TaskPath $candidateTaskPath -TaskName $TaskName -ErrorAction Stop | Out-Null
+                Write-InstallerMessage "Scheduled task disabled: $candidateTaskPath$TaskName"
+            }
+        }
+        Write-InstallerMessage "Stopping the local orchestrator for tenant $Tenant."
+        & (Get-PowerShell7Path) -NoProfile -ExecutionPolicy Bypass -File $orchestratorPath -Tenant $Tenant -Stop -StopTimeoutSeconds 180
+        if ($LASTEXITCODE -ne 0) { throw "Orchestrator stop failed (exit code $LASTEXITCODE). Task removal cancelled; any disabled task remains disabled." }
     }
 
     $taskWasFound = $false
@@ -742,10 +774,10 @@ Complete-InstallerExecution
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 
 # SIG # Begin signature block
-# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCnBzgSfPrBf81a
-# rLrYlNDJWfydetjbUGdxoCVIE1jixKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBLWrN4KX2cBIQl
+# Uw97yPaNnF8cudzaVEwXhp3z4f73qKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -770,19 +802,139 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
-# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
-# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
-# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
-# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB42HUqXBry59JoXEOf+1S/
-# ttJLCZoaVwunsaddon77TzANBgkqhkiG9w0BAQEFAASCAYCoItt2S1FdnG+PIepN
-# gwaQWyYDZCVHWpKBNKvQ01yu3slCu8VM50fAZw4F4X63eJUkcZoSc6bDJDaKCwR0
-# BcyV01GFYdW/j3PSLnaOo+U0zvHMOeoaK/o1ofs/op/mAlSjQxRSsregjRPnA0cX
-# 63HqQbsJKsds7kiMyjl0Qok8HIrupEh8OeNCMZYdEGsW/5lGqv1jAIQ99dFOQIT+
-# w/96GkLQn33HZI9ib/Bss/aEyAbxcmT17yiXyoW3/ws2tu2JwtNv5WujbZdvoS13
-# pAxhJyg/kv5+ajT+mEsiyaLSsNTgQ5qz5QJTTn0XgvsvlNyrBTkw1J5cJAndx4eh
-# jwLsK7g0H27omCNXaTAgnr0JVxcdQInNzVjXx4MCJFs9kU3THUvJJ3LfmkDALfzy
-# tuFgRvJ1sMkXBsuAZ/wLlbmNtFVNSBHlqB2zW9IUtfOqJiYLbO8cOIkYx0K+Qhda
-# PY54OYcRdGWvo630/gf3nx4ZX/ntSsOPfzXIJ2XT1kJOBJo=
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
+# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
+# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
+# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
+# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
+# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
+# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
+# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
+# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
+# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
+# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
+# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
+# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
+# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
+# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
+# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
+# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
+# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
+# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
+# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
+# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
+# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
+# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
+# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
+# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
+# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
+# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
+# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
+# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
+# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
+# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
+# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
+# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
+# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
+# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
+# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
+# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
+# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
+# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
+# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
+# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
+# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
+# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
+# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
+# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
+# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
+# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
+# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
+# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
+# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
+# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
+# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
+# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
+# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
+# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
+# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
+# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
+# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
+# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
+# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
+# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
+# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
+# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
+# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
+# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
+# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
+# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
+# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
+# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
+# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
+# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
+# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
+# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
+# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
+# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
+# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
+# hvcNAQkEMSIEIHXSlcDCycJlH4p+kMA5TnrMQt97hMtHFhz3HVD0snIIMA0GCSqG
+# SIb3DQEBAQUABIIBgEnVUKcUmln9hFm01b3UIlbdKP6enUy96r8L+MQHqQUGc+N6
+# wTrjXgNzuQYUlWIOYgTe44Ndhx08C+WMfvytX2fdMV0g3LA/EspecEpdfO/OAgwN
+# qeb6i6Wxfj8F+kszTY01MifnBDgiELcUPxEvwH0cb9/TRRod4ZHKVE5ktGtn3DQ0
+# GMXZvOrEXDzHG45+zoVLPdYEze1mbMpoCU51seD7qcS5EGWm5EecLC8fMofc5Kef
+# n5WRh9pQdCpti7FS7gcFoFU0OeDBpBiGa8H5XyBDuiyAdspCnhigFWt4Se6TEnYA
+# R8Lm5sqX44joT/fnlzRWDTSAR43OC6hUye3/l+ZKE7oWLRK4x9pAWUK9e6ketYgJ
+# BqAjyxSJ+XhIzUzMX0He9YkRlK5ybBH+U1h0XnoAu3pb7Oc+r3C8yM1aUgQpoeAi
+# m+bWhwuIZAVjxeft8nHQwYdg/HrYeKMB18P8v/71Cf3eiH8BGNesqxxVqlQLokjf
+# H+nEQoEUP123Fqu42qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
+# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTAwOTAw
+# MDlaMC8GCSqGSIb3DQEJBDEiBCDt3b5mE8aUqr5F5/b5fOAtGHiWMvS2D5zqTVg0
+# iuftqTANBgkqhkiG9w0BAQEFAASCAgAKKOJhBMhPGPiq55nZL/GZvArtgBYJbjFZ
+# aAaAKAVRV23kydd4mjOuSwQCVL/q9nWaGQNmmDUrlrY6KpHpU6BleZZFmM55CZU4
+# IhTC5fR2PxDCHv0kB4dEwnvdgiBxoxyX6KP7qR8dkxvyf4P+3T2nPFZA7iB66xF7
+# qh5K77L5wWOCp9/GAFCCBxgv45XD/gU40Y34FacoDjDw0LDbgbw9eGo8jDL+hHOm
+# hUvgAIXkTZ7Wjh8iDgI/AVlfJF2sXyOJobnhfqIaDWTGfc7hE5aTZxEaDFjfDD35
+# p+II8hZQRzCpqLKU6E36B7TjCibAU/v9AnFT35NYX0jLoHSbiQ6uYnzPzcnvBhD9
+# o1bTXXuhhEdqbJSnsvqI86+fUIRfHBX5jFOCIdXIxt4rdFLuFRTVJwI8Cw9cZrYm
+# YzaBt05fyLfkShu1EjM6rRxEXq+jWcB3BaPY9gsZAZ0kq014mVDAnK4ypD9naE+I
+# 9fcQeg3Zs0GMtqaQwAQXh+qmT28qysoM8PhanIFLTbFMPc8QGTv1jVUC/7pBy9Fh
+# 7kvZOPI6tP2TD/Ph94tZBVEDiImeKo+1B5WjgofSh2XIrytQB1GUcxn9yir5TH9G
+# s2iNyZ4Mm9bOtp4lZtL0b5Pel6wv7zwmVbAngrg1pSaAYDev8ilg5wRLrFtMblwg
+# OIdRDwkyxw==
 # SIG # End signature block

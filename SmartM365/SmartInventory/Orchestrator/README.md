@@ -941,6 +941,8 @@ For interactive setup, run the manual catalog entry below. The PowerShell instal
 
 The installation also creates the Start menu shortcut `WorkplaceCloudHub\SmartM365 Orchestrator - <Tenant>`: PowerShell 7 hidden (`-WindowStyle Hidden`, started minimized), so the GUI opens without a console window. Uninstalling removes it.
 
+For guided removal on the local server, run `Launchers\Orchestrator\Start-SmartM365-Inventory-OrchestratorScheduledTask-Uninstaller.cmd` from the SmartInventory folder. Select the profile and confirm: it disables the matching tasks, requests a clean local orchestrator stop, then removes the tasks and GUI shortcuts. If the stop fails, removal is cancelled and any disabled tasks stay disabled. Remove the server separately from the cluster configuration after confirming the stop.
+
 Running the PowerShell installer directly without parameters opens the same guided workflow. Supplying parameters keeps it suitable for repeatable administration and deployment automation.
 
 ```powershell
