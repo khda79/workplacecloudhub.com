@@ -3061,6 +3061,222 @@
       ]
     },
     {
+      "table": "Mailbox Shared Conversion Evidence",
+      "file": "MailboxSharedConversionEvidence.csv",
+      "uniqueKey": ["Shared Conversion Key"],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "Shared Conversion Key",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox GUID",
+          "type": "string"
+        },
+        {
+          "name": "Primary SMTP Address",
+          "type": "string"
+        },
+        {
+          "name": "Recipient Type",
+          "type": "string"
+        },
+        {
+          "name": "Owner Entra Object ID",
+          "type": "string"
+        },
+        {
+          "name": "Owner AD Object GUID",
+          "type": "string"
+        },
+        {
+          "name": "Owner Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Owner Account State",
+          "type": "string"
+        },
+        {
+          "name": "AD Domain",
+          "type": "string"
+        },
+        {
+          "name": "Country",
+          "type": "string"
+        },
+        {
+          "name": "Country Basis",
+          "type": "string"
+        },
+        {
+          "name": "Account Type",
+          "type": "string"
+        },
+        {
+          "name": "Account Population",
+          "type": "string"
+        },
+        {
+          "name": "Workforce Persona",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Size GB",
+          "type": "double"
+        },
+        {
+          "name": "Archive State",
+          "type": "string"
+        },
+        {
+          "name": "Litigation Hold",
+          "type": "string"
+        },
+        {
+          "name": "Retention Hold",
+          "type": "string"
+        },
+        {
+          "name": "Hold State",
+          "type": "string"
+        },
+        {
+          "name": "Delegate Count",
+          "type": "int64"
+        },
+        {
+          "name": "FullAccess Delegate Count",
+          "type": "int64"
+        },
+        {
+          "name": "SendAs Delegate Count",
+          "type": "int64"
+        },
+        {
+          "name": "SendOnBehalf Delegate Count",
+          "type": "int64"
+        },
+        {
+          "name": "Resolved Delegate Count",
+          "type": "int64"
+        },
+        {
+          "name": "Unresolved Delegate Count",
+          "type": "int64"
+        },
+        {
+          "name": "Unresolved SID Delegate Count",
+          "type": "int64"
+        },
+        {
+          "name": "Active Delegate Count",
+          "type": "int64"
+        },
+        {
+          "name": "Owner Last Sign-In",
+          "type": "dateTime"
+        },
+        {
+          "name": "Owner Last Sign-In Source",
+          "type": "string"
+        },
+        {
+          "name": "Owner Last Sign-In Quality",
+          "type": "string"
+        },
+        {
+          "name": "Days Since Owner Sign-In",
+          "type": "int64"
+        },
+        {
+          "name": "EXO Last Logon",
+          "type": "dateTime"
+        },
+        {
+          "name": "EXO Last Logon Quality",
+          "type": "string"
+        },
+        {
+          "name": "Direct Protocol Use",
+          "type": "string"
+        },
+        {
+          "name": "Direct Protocol Quality",
+          "type": "string"
+        },
+        {
+          "name": "Owner Licenses",
+          "type": "string"
+        },
+        {
+          "name": "Owner License Count",
+          "type": "int64"
+        },
+        {
+          "name": "Conversion State",
+          "type": "string"
+        },
+        {
+          "name": "State Sort",
+          "type": "int64"
+        },
+        {
+          "name": "Decision Reason",
+          "type": "string"
+        },
+        {
+          "name": "Secondary Reasons",
+          "type": "string"
+        },
+        {
+          "name": "Recommended Action",
+          "type": "string"
+        },
+        {
+          "name": "EXO Source Status",
+          "type": "string"
+        },
+        {
+          "name": "EXO Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Entra Source Status",
+          "type": "string"
+        },
+        {
+          "name": "Entra Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "License Source Status",
+          "type": "string"
+        },
+        {
+          "name": "Email App Usage Source Status",
+          "type": "string"
+        },
+        {
+          "name": "Email App Usage Report Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Reference UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
       "table": "Directory Cleanup Source Qualification",
       "file": "DirectoryCleanupSourceQualification.csv",
       "uniqueKey": ["Source"],

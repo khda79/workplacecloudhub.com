@@ -162,6 +162,39 @@ not. A mailbox without a known hold can be a candidate, with the secondary reaso
 | Computer | `Disable computer` when enabled, `Delete computer object` when disabled | `Review evidence` | `Keep` |
 | Mailbox | `Remove mailbox after retention check` when the owner is disabled, otherwise `Review owner` | `Review owner` when the owner is not found or ambiguous, otherwise `Review evidence` | `Keep` |
 
+## Shared mailbox conversion
+
+`MailboxSharedConversionEvidence.csv` (table `Mailbox Shared Conversion Evidence`) has one row per
+Exchange Online user mailbox. It answers a different question from cleanup: is the mailbox used
+only through delegates while its owner never signs in? Such a mailbox can become a shared
+mailbox, which needs no license up to 50 GB.
+
+The owner Entra sign-in decides: the latest qualified interactive, non-interactive or successful
+sign-in of the strongly matched owner. Delegates sign in with their own accounts, so their access
+never moves the owner sign-in. EXO `LastLogonTime` and Microsoft 365 mailbox activity also change
+when delegates or system processes open the mailbox; they are published for information only and
+never decide. `LastUserActionTime` is not used (Microsoft deprecates it in Exchange Online).
+
+Delegates are the distinct FullAccess, SendAs and SendOnBehalf tokens, without the owner UPN or
+primary SMTP address. A token resolves only to one exact Entra UPN, or to the primary SMTP address
+of one EXO mailbox and its Entra object. SIDs and display names stay unresolved and are counted.
+A delegate is active when its own qualified sign-in is within the active threshold.
+
+| State | Rule |
+|---|---|
+| Not candidate | No delegate other than the owner, or the owner signed in within `OwnerActiveDays` (default 90). |
+| Review | Imperative first: EXO or Entra source not qualified, owner not found or ambiguous, owner Entra match not unique, future or timezone-less sign-in. Otherwise any unmet Strong candidate condition, listed in Decision Reason and Secondary Reasons. |
+| Strong candidate | Owner disabled in Entra or AD; no owner sign-in, or none within `OwnerInactiveDays` (default 180); at least one resolved delegate signed in within `OwnerActiveDays`; size known and at most `SharedMailboxFreeSizeGB` (default 50); no litigation or retention hold; archive not active; no POP3, IMAP4 or SMTP use reported by the qualified email app usage report; owner population not Non-human. |
+
+Licenses (`M365_Licenses_Users.csv`) and email app usage (`M365_Email_AppUsage.csv`) are read for
+this table only; they never change cleanup decisions. Owner Licenses lists distinct SKUs, so a
+license gain still needs a licensing review. Organization retention policies and in-place holds
+of Exchange Online mailboxes are not assessed and are stated on every Strong candidate. A Strong
+candidate is evidence for review: confirm with the delegates and the owner's manager, then convert
+and keep sign-in blocked. Direct use of the owner account (SMTP AUTH devices, POP, IMAP, mobile)
+breaks after conversion. The qualification table publishes one `Shared mailbox conversion` row
+with the thresholds used.
+
 ## Data Trust
 
 Data Trust (1.4.0) also lists the Exchange Online and on-premises mailbox inventories, the

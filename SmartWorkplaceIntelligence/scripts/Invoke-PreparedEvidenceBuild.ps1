@@ -1,4 +1,4 @@
-# Version 1.9.1: directory cleanup candidates (AD users, AD workstations, user mailboxes); earlier: optional Microsoft 365 usage signals, hybrid identity findings and device readiness gap facts.
+# Version 1.9.2: shared mailbox conversion evidence from the directory cleanup task; 1.9.1: directory cleanup candidates (AD users, AD workstations, user mailboxes); earlier: optional Microsoft 365 usage signals, hybrid identity findings and device readiness gap facts.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$DataRoot,
@@ -130,7 +130,7 @@ if ($null -ne $classificationStart) {
 }
 Add-Task 'HybridIdentity' 'HybridIdentity' 'New-HybridIdentityEvidence.ps1' $hybridArgs -DependsOn 'Workforce' -BeforeStart $beforeHybrid
 $cleanupArgs=@('-DataRoot',$DataRoot,'-TenantKey',$TenantKey,'-UserInventoryPath',(OutPath 'UserInventoryEvidence'),'-AllDevicesPath',(OutPath 'AllDevicesEvidence'),
-    '-UserOutputPath',(OutPath 'UserCleanupEvidence'),'-ComputerOutputPath',(OutPath 'ComputerCleanupEvidence'),'-MailboxOutputPath',(OutPath 'MailboxCleanupEvidence'),'-QualificationOutputPath',(OutPath 'DirectoryCleanupSourceQualification'))
+    '-UserOutputPath',(OutPath 'UserCleanupEvidence'),'-ComputerOutputPath',(OutPath 'ComputerCleanupEvidence'),'-MailboxOutputPath',(OutPath 'MailboxCleanupEvidence'),'-QualificationOutputPath',(OutPath 'DirectoryCleanupSourceQualification'),'-SharedConversionOutputPath',(OutPath 'MailboxSharedConversionEvidence'))
 if ($AccountClassificationConfigPath) { $cleanupArgs+=@('-AccountClassificationConfigPath',$AccountClassificationConfigPath) }
 $cleanupArgs+=$clockArgs
 $beforeCleanup = $null

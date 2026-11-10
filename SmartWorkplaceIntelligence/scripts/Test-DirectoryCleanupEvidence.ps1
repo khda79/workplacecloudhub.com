@@ -1,4 +1,4 @@
-# Version 1.1.0: Persona Basis and Account Type Source; 1.0.0: directory cleanup decisions, boundaries, matching, holds, scope and source qualification.
+# Version 1.2.0: shared mailbox conversion evidence; 1.1.0: Persona Basis and Account Type Source; 1.0.0: directory cleanup decisions, boundaries, matching, holds, scope and source qualification.
 [CmdletBinding()]
 param([string]$TestRoot = (Join-Path ([IO.Path]::GetTempPath()) 'SmartM365-OfflineTests'))
 # Synthetic local files only. No collectors, tenant calls, production data or uploads.
@@ -9,7 +9,7 @@ $script:checks = 0
 function Check([bool]$Pass, [string]$Message) { if (-not $Pass) { throw $Message }; $script:checks++ }
 
 $product = Split-Path -Parent $PSScriptRoot
-$tableNames = @('User Cleanup Evidence', 'Computer Cleanup Evidence', 'Mailbox Cleanup Evidence', 'Directory Cleanup Source Qualification')
+$tableNames = @('User Cleanup Evidence', 'Computer Cleanup Evidence', 'Mailbox Cleanup Evidence', 'Directory Cleanup Source Qualification', 'Mailbox Shared Conversion Evidence')
 $now = [datetimeoffset]::new(2026, 10, 28, 12, 0, 0, [TimeSpan]::Zero)
 $fixture = Join-Path ([IO.Path]::GetFullPath($TestRoot)) ([guid]::NewGuid().ToString('N'))
 $raw = Join-Path $fixture 'raw'
@@ -30,6 +30,7 @@ $producers = @{
     'Intune_ManagedDevices_All.csv' = 'SmartM365-Devices-Inventory.ps1'; 'Exchange_EXO_Mailboxes_AllDomains.csv' = 'SmartM365-EXO-Mailboxes-Inventory.ps1'
     'Exchange_OnPrem_Mailboxes_AllDomains.csv' = 'SmartM365-Exchange-Local-Mailboxes-Inventory.ps1'
     'M365_Users_Activity.csv' = 'SmartM365-M365UserActivity-Inventory.ps1'; 'M365_Mailbox_Usage.csv' = 'SmartM365-M365UserActivity-Inventory.ps1'
+    'M365_Email_AppUsage.csv' = 'SmartM365-M365UserActivity-Inventory.ps1'; 'M365_Licenses_Users.csv' = 'SmartM365-Licences-Inventory.ps1'
 }
 function Write-Receipts([hashtable]$CompletedOverride = @{}, [datetimeoffset]$At = $now) {
     # One completed, non-partial SmartInventory receipt per producer, hashing each captured file.
@@ -50,7 +51,7 @@ function Invoke-Cleanup([datetimeoffset]$AsOf = $now) {
     $log = & $shell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'New-DirectoryCleanupEvidence.ps1') -DataRoot $raw -TenantKey $tenant `
         -UserInventoryPath (Join-Path $prepared 'UserInventoryEvidence.csv') -AllDevicesPath (Join-Path $prepared 'AllDevicesEvidence.csv') `
         -UserOutputPath (Join-Path $output 'UserCleanupEvidence.csv') -ComputerOutputPath (Join-Path $output 'ComputerCleanupEvidence.csv') `
-        -MailboxOutputPath (Join-Path $output 'MailboxCleanupEvidence.csv') -QualificationOutputPath (Join-Path $output 'DirectoryCleanupSourceQualification.csv') `
+        -MailboxOutputPath (Join-Path $output 'MailboxCleanupEvidence.csv') -QualificationOutputPath (Join-Path $output 'DirectoryCleanupSourceQualification.csv') -SharedConversionOutputPath (Join-Path $output 'MailboxSharedConversionEvidence.csv') `
         -AccountClassificationConfigPath $rules -AsOfUtc $AsOf.ToString('o') 3>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Directory cleanup generator failed with exit code $LASTEXITCODE. $log" }
     @{
@@ -59,6 +60,7 @@ function Invoke-Cleanup([datetimeoffset]$AsOf = $now) {
         Computers = @(Import-Csv -LiteralPath (Join-Path $output 'ComputerCleanupEvidence.csv'))
         Mailboxes = @(Import-Csv -LiteralPath (Join-Path $output 'MailboxCleanupEvidence.csv'))
         Sources = @(Import-Csv -LiteralPath (Join-Path $output 'DirectoryCleanupSourceQualification.csv'))
+        Shared = @(Import-Csv -LiteralPath (Join-Path $output 'MailboxSharedConversionEvidence.csv'))
     }
 }
 function Test-Outputs {
@@ -188,10 +190,11 @@ try {
     # Contracts and build wiring.
     $evidenceContract = Get-Content -LiteralPath (Join-Path $product 'config/prepared-evidence-contract.json.txt') -Raw | ConvertFrom-Json
     $script:evidenceTables = @($evidenceContract.tables | Where-Object { $_.table -in $tableNames })
-    Check ($script:evidenceTables.Count -eq 4) 'Every directory cleanup table must be declared once in the evidence contract'
+    Check ($script:evidenceTables.Count -eq 5) 'Every directory cleanup table must be declared once in the evidence contract'
     Check (@($script:evidenceTables | Where-Object { $_.table -match 'History|Trend' }).Count -eq 0) 'Cleanup tables are current snapshots, never history-coverage tables'
     $build = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Invoke-PreparedEvidenceBuild.ps1') -Raw
     Check ($build -match "Add-Task 'DirectoryCleanup' 'DirectoryCleanup' 'New-DirectoryCleanupEvidence\.ps1' \`$cleanupArgs -DependsOn 'Workforce','Estate'") 'Build does not run directory cleanup after Workforce and Estate'
+    Check ($build -match [regex]::Escape("'-SharedConversionOutputPath',(OutPath 'MailboxSharedConversionEvidence')")) 'Build does not publish the shared conversion evidence'
 
     # 1. Qualified estate.
     Write-Estate; Write-Receipts
@@ -244,6 +247,65 @@ Check ($u.user10.'Cleanup State' -eq 'Review' -and $u.user10.'Decision Reason' -
     Check (@($run.Mailboxes | Where-Object 'Mailbox GUID' -eq (Guid 5007)).Count -eq 0 -and $run.Log -match 'mailbox rows without a unique mailbox GUID') 'Duplicated mailbox GUID must not be published silently'
     Check (@($run.Sources | Where-Object Source -like 'User mailboxes*').'Unkeyable Rows' -eq '2') 'Unkeyable mailbox rows must be counted'
 
+    # 1b. Shared mailbox conversion: the owner sign-in decides; mailbox logons never do.
+    $s1 = $now.AddDays(-120)
+    $sharedAd = @(foreach ($n in @(30..42) + @(50, 51)) { New-AdUser $n @{Enabled = $(if ($n -in 32, 40, 50, 51) { 'True' } else { 'False' }); HasMailbox = 'True'} })
+    Write-Csv (Join-Path $last 'AD_Users_AllDomains.csv') $sharedAd
+    Write-Csv (Join-Path $last 'M365_Users_Active.csv') @(
+        foreach ($n in 31, 33, 34, 35, 36, 38, 39, 41) { New-EntraUser $n @{AccountEnabled = 'False'} }
+        New-EntraUser 32 @{LastSignInDateTimeIso8601 = (Iso $recent); LastSuccessfulSignInDateTimeIso8601 = (Iso $recent)}
+        New-EntraUser 37 @{AccountEnabled = 'False'; LastSignInDateTimeIso8601 = ''; LastSuccessfulSignInDateTimeIso8601 = ''; LastNonInteractiveSignInDateTimeIso8601 = (Iso $s1)}
+        New-EntraUser 40 @{LastSignInDateTimeIso8601 = ''; LastSuccessfulSignInDateTimeIso8601 = ''}
+        New-EntraUser 50 @{LastSignInDateTimeIso8601 = (Iso $recent)}
+        New-EntraUser 51
+    )
+    $fa = 'user50@contoso.example'
+    Write-Csv (Join-Path $last 'Exchange_EXO_Mailboxes_AllDomains.csv') @(
+        New-Exo 31 31 @{FullAccess = $fa; SendAs = ''; GrantSendOnBehalfTo = ''; AccountEnabled = 'False'; TotalItemSizeGB = '2.5'; ArchiveStatus = 'None'; LastLogonTimeIso8601 = (Iso $recent)}   # Strong candidate
+        New-Exo 32 32 @{FullAccess = $fa; TotalItemSizeGB = '1'}                                                                       # owner active
+        New-Exo 33 33 @{FullAccess = 'user33@contoso.example'; SendAs = 'mbx33@contoso.example'; TotalItemSizeGB = '1'}               # owner only
+        New-Exo 34 34 @{FullAccess = $fa; GrantSendOnBehalfTo = 'Synthetic Delegate'; TotalItemSizeGB = '60'}                         # too large
+        New-Exo 35 35 @{FullAccess = $fa; LitigationHoldEnabled = 'True'; TotalItemSizeGB = '1'}                                       # hold
+        New-Exo 36 36 @{SendAs = 'S-1-5-21-5-5-5-1'; TotalItemSizeGB = '1'}                                                           # SID only
+        New-Exo 37 37 @{FullAccess = $fa; TotalItemSizeGB = '1'}                                                                       # 120-day sign-in
+        New-Exo 38 38 @{FullAccess = 'user51@contoso.example'; TotalItemSizeGB = '1'}                                                 # inactive delegate
+        New-Exo 39 39 @{FullAccess = $fa; TotalItemSizeGB = '1'}                                                                       # POP3 use
+        New-Exo 40 40 @{FullAccess = $fa; TotalItemSizeGB = '1'}                                                                       # owner enabled, never signed in
+        New-Exo 41 41 @{FullAccess = 'MBX50@contoso.example'; TotalItemSizeGB = ''; ArchiveStatus = 'None'}                           # SMTP delegate, size unknown
+        New-Exo 42 42 @{FullAccess = $fa; TotalItemSizeGB = '1'}                                                                       # no Entra object
+        New-Exo 50 50 @{TotalItemSizeGB = '1'}
+        New-Exo 60 50 @{RecipientTypeDetails = 'SharedMailbox'; FullAccess = $fa}
+    )
+    Write-Csv (Join-Path $last 'M365_Licenses_Users.csv') @(
+        [pscustomobject]@{UserId = (Guid 1031); SkuPartNumber = 'SPE_F1'}; [pscustomobject]@{UserId = (Guid 1031); SkuPartNumber = 'SPE_F1'}; [pscustomobject]@{UserId = (Guid 1031); SkuPartNumber = 'FLOW_FREE'}
+    )
+    Write-Csv (Join-Path $last 'M365_Email_AppUsage.csv') @(
+        [pscustomobject]@{'User Principal Name' = 'user39@contoso.example'; 'Is Deleted' = 'False'; 'POP3 App' = 'Yes'; 'IMAP4 App' = ''; 'SMTP App' = ''; 'Report Refresh Date' = (Day $now.AddDays(-3))}
+        [pscustomobject]@{'User Principal Name' = 'user31@contoso.example'; 'Is Deleted' = 'False'; 'POP3 App' = ''; 'IMAP4 App' = ''; 'SMTP App' = 'Undetermined'; 'Report Refresh Date' = (Day $now.AddDays(-3))}
+    )
+    Write-Receipts
+    $sharedRun = Invoke-Cleanup
+    Test-Outputs
+    $x = @{}; foreach ($r in $sharedRun.Shared) { $x[$r.'Primary SMTP Address'] = $r }
+    Check ($sharedRun.Shared.Count -eq 13 -and -not $x.ContainsKey('mbx60@contoso.example')) 'Shared conversion covers EXO user mailboxes only'
+    $a = $x['mbx31@contoso.example']
+    Check ($a.'Conversion State' -eq 'Strong candidate' -and $a.'Delegate Count' -eq '1' -and $a.'Active Delegate Count' -eq '1' -and $a.'Owner Account State' -eq 'Disabled') 'Disabled owner without sign-in, active delegate and small mailbox must be a strong candidate'
+    Check ($a.'Secondary Reasons' -match 'Recent EXO last logon from delegates' -and $a.'EXO Last Logon Quality' -eq 'Qualified') 'A recent EXO last logon must stay informational'
+    Check ($a.'Owner Licenses' -eq 'FLOW_FREE; SPE_F1' -and $a.'Owner License Count' -eq '2' -and $a.'Direct Protocol Use' -eq 'None reported') 'Licenses must be distinct per owner; Undetermined is not protocol use'
+    Check ($x['mbx32@contoso.example'].'Conversion State' -eq 'Not candidate' -and $x['mbx32@contoso.example'].'Decision Reason' -match 'Owner signed in within 90 days') 'An owner sign-in within 90 days must make the mailbox Not candidate'
+    Check ($x['mbx33@contoso.example'].'Conversion State' -eq 'Not candidate' -and $x['mbx33@contoso.example'].'Delegate Count' -eq '0') 'The owner own address is not a delegate'
+    Check ($x['mbx34@contoso.example'].'Conversion State' -eq 'Review' -and $x['mbx34@contoso.example'].'Decision Reason' -eq 'Mailbox above 50 GB' -and $x['mbx34@contoso.example'].'Unresolved Delegate Count' -eq '1' -and $x['mbx34@contoso.example'].'Delegate Count' -eq '2') 'Large mailbox must be Review; display-name delegates stay unresolved'
+    Check ($x['mbx35@contoso.example'].'Decision Reason' -eq 'Mailbox hold') 'Hold must be Review'
+    Check ($x['mbx36@contoso.example'].'Decision Reason' -eq 'Only unresolved SID delegates' -and $x['mbx36@contoso.example'].'Unresolved SID Delegate Count' -eq '1') 'SID-only delegation must be Review'
+    Check ($x['mbx37@contoso.example'].'Decision Reason' -eq 'Owner signed in between 90 and 180 days ago' -and $x['mbx37@contoso.example'].'Owner Last Sign-In Source' -eq 'Non-interactive') 'A non-interactive owner sign-in counts'
+    Check ($x['mbx38@contoso.example'].'Decision Reason' -eq 'No delegate signed in within 90 days') 'Inactive delegates must be Review'
+    Check ($x['mbx39@contoso.example'].'Decision Reason' -eq 'Direct protocol use: POP3' -and $x['mbx39@contoso.example'].'Direct Protocol Use' -eq 'POP3') 'Direct protocol use must be Review'
+    Check ($x['mbx40@contoso.example'].'Decision Reason' -eq 'Owner account enabled' -and $x['mbx40@contoso.example'].'Owner Last Sign-In Quality' -eq 'No sign-in recorded') 'An enabled owner never makes a strong candidate'
+    Check ($x['mbx41@contoso.example'].'Resolved Delegate Count' -eq '1' -and $x['mbx41@contoso.example'].'Decision Reason' -eq 'Mailbox size unknown') 'SMTP delegate must resolve through the EXO mailbox; unknown size is Review'
+    Check ($x['mbx42@contoso.example'].'Conversion State' -eq 'Review' -and $x['mbx42@contoso.example'].'Decision Reason' -eq 'Owner Entra match: Not found') 'Owner without Entra object must be Review'
+    Check ([int]$a.'State Sort' -eq 1 -and $a.'Shared Conversion Key' -like "$tenant|shared-conversion|*" -and @($sharedRun.Shared.'Shared Conversion Key' | Sort-Object -Unique).Count -eq 13) 'Shared conversion keys and sort order'
+    Check (@($sharedRun.Sources | Where-Object Source -like 'Shared mailbox conversion*').Rows -eq '13' -and @($sharedRun.Sources | Where-Object File -eq 'M365_Licenses_Users.csv').Status -eq 'Observed') 'Shared conversion qualification must be published'
+
     # 2. Leap-day boundaries: the one-year limit of 29 February is 28 February.
     $leap = [datetimeoffset]::new(2028, 2, 29, 12, 0, 0, [TimeSpan]::Zero)
     $boundary = @(New-AdUser 20 @{LastLogonDateIso8601 = '2027-02-28T12:00:00Z'; UserPrincipalName = 'x20@contoso.example'; ObjectSID = 'S-1-5-21-7-7-7-20'; ImmutableId_AD = 'x20=='}
@@ -264,6 +326,7 @@ Check ($u.user10.'Cleanup State' -eq 'Review' -and $u.user10.'Decision Reason' -
     $s = @{}; foreach ($r in $degraded.Sources) { $s[$r.File] = $r }
     Check ($s['M365_Users_Active.csv'].Status -eq 'Stale' -and $s['M365_Mailbox_Usage.csv'].Status -eq 'Not collected' -and $s['M365_Entra_Devices.csv'].Status -eq 'Freshness unknown') 'Source statuses must come from receipts and report dates'
     Check ($d.user2.'Cleanup State' -eq 'Review' -and $d.user2.'Identity Match Status' -eq 'Unknown') 'A stale Entra source must stop candidates'
+    Check (@($degraded.Shared | Where-Object 'Conversion State' -eq 'Strong candidate').Count -eq 0) 'No shared conversion candidate may survive a stale identity source'
     Check (@($degraded.Users | Where-Object 'Cleanup State' -eq 'Candidate').Count -eq 0) 'No candidate may survive a stale identity source'
     Check (@($degraded.Computers | Where-Object { $_.'Cleanup State' -eq 'Candidate' }).Count -eq 0) 'An unqualified Entra device capture must stop computer candidates'
     Check ($degraded.Log -match 'Directory cleanup source Entra users: Stale') 'Unqualified sources must be reported as warnings'
@@ -274,7 +337,7 @@ Check ($u.user10.'Cleanup State' -eq 'Review' -and $u.user10.'Decision Reason' -
     Write-Csv (Join-Path $last 'AD_Users_AllDomains.csv') @(New-AdUser 1)
     Write-Receipts
     $minimal = Invoke-Cleanup
-    Check ($minimal.Computers.Count -eq 0 -and $minimal.Mailboxes.Count -eq 0 -and $minimal.Users.Count -eq 1 -and $minimal.Users[0].'Cleanup State' -eq 'Review') 'Missing sources must give empty tables and Review, never candidates'
+    Check ($minimal.Computers.Count -eq 0 -and $minimal.Mailboxes.Count -eq 0 -and $minimal.Users.Count -eq 1 -and $minimal.Users[0].'Cleanup State' -eq 'Review' -and $minimal.Shared.Count -eq 0) 'Missing sources must give empty tables and Review, never candidates'
     Test-Outputs
 
     Write-Host "Directory cleanup evidence offline test passed ($script:checks checks)."

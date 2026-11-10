@@ -1,4 +1,4 @@
-# Version 1.1.0: Persona Basis (User Inventory, else the AD inventory persona) and Account Type Source; 1.0.0: directory cleanup candidates for AD user accounts, AD workstation accounts and user mailboxes.
+# Version 1.2.0: shared mailbox conversion evidence (EXO user mailboxes used only through delegates; the owner sign-in decides, never mailbox activity); 1.1.0: Persona Basis (User Inventory, else the AD inventory persona) and Account Type Source; 1.0.0: directory cleanup candidates for AD user accounts, AD workstation accounts and user mailboxes.
 # Read-only evidence: an object is a candidate only when none of its qualified activity signals
 # (AD, Entra, Exchange, Intune, Microsoft 365 usage, console) is more recent than one year and
 # every applicable source is qualified. Weak matches, missing or stale sources, unknown holds and
@@ -17,6 +17,13 @@ param(
     [string]$ComputerOutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\ComputerCleanupEvidence.csv'),
     [string]$MailboxOutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\MailboxCleanupEvidence.csv'),
     [string]$QualificationOutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\DirectoryCleanupSourceQualification.csv'),
+    [string]$SharedConversionOutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\MailboxSharedConversionEvidence.csv'),
+    # Shared conversion: an owner sign-in within this many days makes the mailbox Not candidate.
+    [ValidateRange(7, 365)][int]$OwnerActiveDays = 90,
+    # Shared conversion: a Strong candidate needs no owner sign-in for longer than this many days.
+    [ValidateRange(30, 730)][int]$OwnerInactiveDays = 180,
+    # Shared conversion: size a shared mailbox keeps without a license (Microsoft 365 service limit).
+    [ValidateRange(1, 100)][double]$SharedMailboxFreeSizeGB = 50,
     [string]$AccountClassificationConfigPath,
     # Collection age above which a receipt-qualified source is Stale (same default as Prepare's publication-age limit).
     [ValidateRange(1, 8760)][int]$SourceMaxAgeHours = 336,
@@ -210,10 +217,13 @@ $sources = [ordered]@{
     EntraUsers  = Get-Source 'Entra users' 'M365_Users_Active.csv' 'SmartM365-ActiveUsers-Inventory.ps1' @('Object Id', 'User principal name', 'OnPremisesSecurityIdentifier', 'OnPremisesImmutableId', 'AccountEnabled', 'LastSignInDateTimeIso8601', 'LastNonInteractiveSignInDateTimeIso8601', 'LastSuccessfulSignInDateTimeIso8601')
     EntraDevices = Get-Source 'Entra devices' 'M365_Entra_Devices.csv' 'SmartM365-EntraDevices-Inventory.ps1' @('DeviceId')
     Intune      = Get-Source 'Intune devices' 'Intune_ManagedDevices_All.csv' 'SmartM365-Devices-Inventory.ps1' @('AzureADDeviceId', 'LastSyncDateTime') @() @('ManagedDeviceId')
-    Exo         = Get-Source 'Exchange Online mailboxes' 'Exchange_EXO_Mailboxes_AllDomains.csv' 'SmartM365-EXO-Mailboxes-Inventory.ps1' @('MailboxGuid', 'RecipientTypeDetails', 'UserPrincipalName', 'PrimarySmtpAddress', 'ExternalDirectoryObjectId', 'OnPremisesImmutableId', 'LitigationHoldEnabled', 'RetentionHoldEnabled', 'LastUserActionTimeIso8601', 'LastLogonTimeIso8601') @() @('ImmutableId', 'WhenMailboxCreatedIso8601')
+    Exo         = Get-Source 'Exchange Online mailboxes' 'Exchange_EXO_Mailboxes_AllDomains.csv' 'SmartM365-EXO-Mailboxes-Inventory.ps1' @('MailboxGuid', 'RecipientTypeDetails', 'UserPrincipalName', 'PrimarySmtpAddress', 'ExternalDirectoryObjectId', 'OnPremisesImmutableId', 'LitigationHoldEnabled', 'RetentionHoldEnabled', 'LastUserActionTimeIso8601', 'LastLogonTimeIso8601') @() @('ImmutableId', 'WhenMailboxCreatedIso8601', 'AccountEnabled', 'FullAccess', 'SendAs', 'GrantSendOnBehalfTo', 'TotalItemSizeGB', 'ArchiveStatus')
     OnPrem      = Get-Source 'On-premises mailboxes' 'Exchange_OnPrem_Mailboxes_AllDomains.csv' 'SmartM365-Exchange-Local-Mailboxes-Inventory.ps1' @('ExchangeGuid', 'ObjectGUID', 'RecipientType', 'PrimarySMTPaddress', 'LitigationHoldEnabled', 'RetentionHoldEnabled', 'InPlaceHolds', 'LastLogonTimeIso8601') @() @('DomainName', 'PrimarySmtpAddress', 'WhenMailboxCreatedIso8601')
     Activity    = Get-Source 'Microsoft 365 user activity' 'M365_Users_Activity.csv' 'SmartM365-M365UserActivity-Inventory.ps1' @('UserPrincipalName', 'LastActivityDate') @('Report Refresh Date', 'ReportRefreshDate') @('IsDeleted', 'Is Deleted')
     MailboxUsage = Get-Source 'Mailbox usage' 'M365_Mailbox_Usage.csv' 'SmartM365-M365UserActivity-Inventory.ps1' @('User Principal Name', 'Last Activity Date') @('Report Refresh Date', 'ReportRefreshDate') @('Is Deleted', 'IsDeleted', 'Storage Used (Byte)')
+    # Shared conversion only: license gain and direct protocol use. They never change the cleanup decisions.
+    Licenses    = Get-Source 'Microsoft 365 licenses' 'M365_Licenses_Users.csv' 'SmartM365-Licences-Inventory.ps1' @('UserId', 'SkuPartNumber')
+    EmailApps   = Get-Source 'Email app usage' 'M365_Email_AppUsage.csv' 'SmartM365-M365UserActivity-Inventory.ps1' @('User Principal Name', 'POP3 App', 'IMAP4 App', 'SMTP App') @('Report Refresh Date', 'ReportRefreshDate') @('Is Deleted', 'IsDeleted')
 }
 function Test-Ready([string]$Name) { $sources[$Name].Status -eq 'Observed' }
 $excluded = @{Servers = 0; SharedOrResourceMailboxes = 0; UnkeyableUsers = 0; UnkeyableComputers = 0; UnkeyableMailboxes = 0}
@@ -620,6 +630,154 @@ foreach ($guid in @($groups.Keys | Sort-Object)) {
     }
 }
 
+# --- Shared mailbox conversion ----------------------------------------------------------------
+# One row per EXO user mailbox. The question is whether only delegates use it while the owner never
+# signs in. Delegates sign in with their own accounts, so the owner Entra sign-in is the deciding
+# signal. EXO LastLogonTime and Microsoft 365 mailbox activity also move for delegates and system
+# processes: they are shown for information only and never make a mailbox active or inactive here.
+$sharedRows = [Collections.Generic.List[object]]::new()
+$sharedUnkeyable = 0
+$ownerActiveFloor = $R.AddDays(-$OwnerActiveDays); $ownerInactiveFloor = $R.AddDays(-$OwnerInactiveDays)
+$exoBySmtp = @{}; foreach ($m in $sources.Exo.Rows) { $Fast::Add($exoBySmtp, $Fast::KF($m, 'PrimarySmtpAddress'), $m) }
+$licensesByUserId = @{}; foreach ($l in $sources.Licenses.Rows) { $Fast::Add($licensesByUserId, $Fast::KF($l, 'UserId'), $l) }
+$emailAppsByUpn = @{}; foreach ($a in $sources.EmailApps.Rows) { if (-not ($Fast::BF($a, 'Is Deleted', 'IsDeleted'))) { $Fast::Add($emailAppsByUpn, $Fast::KF($a, 'User Principal Name'), $a) } }
+function Get-SignIn([AllowNull()]$EntraRow, [string]$Match) {
+    # Latest qualified owner sign-in among the interactive, non-interactive and successful dates.
+    $signals = @(
+        $Fast::NewSignal('Interactive', $Fast::F($EntraRow, 'LastSignInDateTimeIso8601'), $sources.EntraUsers.Status, $Match, $R)
+        $Fast::NewSignal('Non-interactive', $Fast::F($EntraRow, 'LastNonInteractiveSignInDateTimeIso8601'), $sources.EntraUsers.Status, $Match, $R)
+        $Fast::NewSignal('Successful', $Fast::F($EntraRow, 'LastSuccessfulSignInDateTimeIso8601'), $sources.EntraUsers.Status, $Match, $R)
+    )
+    $latest = $Fast::Latest($signals)
+    $bad = @(foreach ($s in $signals) { if ($s.Quality -in @('Future date', 'Unqualified timezone')) { "$($s.Name) sign-in: $($s.Quality)" } })
+    $quality = if ($null -ne $latest) { $latest.Quality } elseif ($Match -ne 'Qualified') { $Match } elseif ($sources.EntraUsers.Status -ne 'Observed') { $sources.EntraUsers.Status } else { 'No sign-in recorded' }
+    [pscustomobject]@{Latest = $latest; Quality = $quality; Bad = $bad}
+}
+function Resolve-Delegate([string]$Token) {
+    # Exact, unique principal only: Entra UPN, else the primary SMTP address of an EXO mailbox and its Entra object.
+    if ($Token -match '^(?i)S-1-5-') { return [pscustomobject]@{Kind = 'SID'; Entra = $null} }
+    if ($Token -notmatch '@') { return [pscustomobject]@{Kind = 'Unresolved'; Entra = $null} }
+    $hit = $Fast::One($entraByUpn, $Token.ToLowerInvariant())
+    if ($hit.Count -eq 1) { return [pscustomobject]@{Kind = 'Resolved'; Entra = $hit.Row} }
+    if ($hit.Count -eq 0) {
+        $mbx = $Fast::One($exoBySmtp, $Token.ToLowerInvariant())
+        if ($mbx.Count -eq 1) { $e = $Fast::One($entraById, $Fast::KF($mbx.Row, 'ExternalDirectoryObjectId')); if ($e.Count -eq 1) { return [pscustomobject]@{Kind = 'Resolved'; Entra = $e.Row} } }
+    }
+    [pscustomobject]@{Kind = 'Unresolved'; Entra = $null}
+}
+$sharedGroups = @{}; foreach ($m in $exoUser) { $g = $Fast::KF($m, 'MailboxGuid'); if (-not $g) { $sharedUnkeyable++; continue }; $Fast::Add($sharedGroups, $g, $m) }
+foreach ($guid in @($sharedGroups.Keys | Sort-Object)) {
+    $same = @($sharedGroups[$guid]); if ($same.Count -ne 1) { $sharedUnkeyable += $same.Count; continue }
+    $exo = $same[0]
+    $owner = Resolve-Owner ([pscustomobject]@{Side = 'exo'; Guid = $guid; Row = $exo})
+    $ad = $owner.Ad; $entraRow = $owner.Entra
+    $imperative = [Collections.Generic.List[string]]::new(); $unmet = [Collections.Generic.List[string]]::new(); $secondary = [Collections.Generic.List[string]]::new()
+    if (-not (Test-Ready 'Exo')) { $imperative.Add("Exchange Online mailboxes: $($sources.Exo.Status)") }
+    if (-not (Test-Ready 'EntraUsers')) { $imperative.Add("Entra users: $($sources.EntraUsers.Status)") }
+    switch ($owner.Status) { 'Not found' { $imperative.Add('Owner not found') } 'Ambiguous' { $imperative.Add('Owner match ambiguous') } }
+    if ((Test-Ready 'EntraUsers') -and $owner.EntraStatus -ne 'Matched') { $imperative.Add("Owner Entra match: $($owner.EntraStatus)") }
+
+    # Delegates: FullAccess, SendAs and SendOnBehalf tokens, owner excluded, one count per distinct token.
+    $ownTokens = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($t in @($Fast::F($exo, 'UserPrincipalName'), $Fast::F($exo, 'PrimarySmtpAddress'), $Fast::F($entraRow, 'User principal name'))) { if ($t) { $null = $ownTokens.Add($t) } }
+    $byRight = [ordered]@{FullAccess = 0; SendAs = 0; GrantSendOnBehalfTo = 0}
+    $delegates = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($right in @($byRight.Keys)) {
+        $seenRight = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($raw in ($Fast::F($exo, $right) -split ';')) {
+            $token = $raw.Trim(); if (-not $token -or $ownTokens.Contains($token) -or -not $seenRight.Add($token)) { continue }
+            $byRight[$right]++
+            if (-not $delegates.ContainsKey($token)) { $delegates[$token] = Resolve-Delegate $token }
+        }
+    }
+    $resolved = 0; $unresolved = 0; $sidOnly = 0; $activeDelegates = 0
+    foreach ($d in $delegates.Values) {
+        switch ($d.Kind) {
+            'Resolved' { $resolved++; $s = (Get-SignIn $d.Entra 'Qualified').Latest; if ($null -ne $s -and $s.Utc -gt $ownerActiveFloor) { $activeDelegates++ } }
+            'SID' { $sidOnly++ }
+            default { $unresolved++ }
+        }
+    }
+
+    # Owner account state: disabled in Entra or AD is decisive; conflicting states stay visible.
+    $entraEnabled = if ($null -ne $entraRow -and ($Fast::F($entraRow, 'AccountEnabled'))) { $Fast::BF($entraRow, 'AccountEnabled') } else { $null }
+    $adEnabled = if ($null -ne $ad) { $Fast::BF($ad, 'Enabled') } else { $null }
+    $ownerState = if ($entraEnabled -eq $false -or $adEnabled -eq $false) { 'Disabled' } elseif ($entraEnabled -eq $true) { 'Enabled' } else { 'Unknown' }
+    if ($null -ne $entraEnabled -and $null -ne $adEnabled -and $entraEnabled -ne $adEnabled) { $secondary.Add('AD and Entra account states differ') }
+
+    $signIn = Get-SignIn $entraRow $(if ($owner.EntraStatus -eq 'Matched') { 'Qualified' } else { 'Ambiguous match' })
+    foreach ($b in $signIn.Bad) { $imperative.Add($b) }
+    $ownerLatest = $signIn.Latest
+
+    $sizeText = $Fast::F($exo, 'TotalItemSizeGB') -replace ',', '.'; $size = 0.0
+    $sizeKnown = [double]::TryParse($sizeText, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$size)
+    $archive = $Fast::F($exo, 'ArchiveStatus'); $archiveActive = $archive -ieq 'Active'
+    $hold = ($Fast::BF($exo, 'LitigationHoldEnabled')) -or ($Fast::BF($exo, 'RetentionHoldEnabled'))
+    $accountType = if ($null -ne $ad) { $Fast::F($ad, 'AccountType') } else { '' }
+    $population = if ($null -ne $ad) { Get-Population $accountType } else { 'Review required' }
+    $class = Get-Classification $entraRow; $inv = $class.Row
+    $persona = Get-Persona $inv $ad
+    $country = if ($null -ne $inv) { $Fast::F($inv, 'Country') } elseif ($null -ne $ad) { $Fast::F($ad, 'CountryName', 'Country') } else { '' }
+
+    # Direct protocol use by the owner account would break once sign-in is blocked on a shared mailbox.
+    $apps = Get-ReportMatch $emailAppsByUpn 'EmailApps' $entraRow $owner.EntraStatus
+    $protocols = @(foreach ($p in @(@('POP3 App', 'POP3'), @('IMAP4 App', 'IMAP4'), @('SMTP App', 'SMTP'))) { if (($Fast::KF($apps.Row, $p[0])) -in @('yes', 'true', '1')) { $p[1] } })
+    $protocolQuality = if (-not (Test-Ready 'EmailApps')) { $sources.EmailApps.Status } else { $apps.Match }
+    $protocolText = if ($protocols.Count) { $protocols -join '; ' } elseif ($protocolQuality -in @('Qualified', 'No report row')) { 'None reported' } else { '' }
+
+    $skus = @(foreach ($l in $Fast::List($licensesByUserId, $Fast::KF($entraRow, 'Object Id'))) { $Fast::F($l, 'SkuPartNumber') }) | Where-Object { $_ } | Sort-Object -Unique
+    $exoLogon = $Fast::NewSignal('EXO Last Logon', $Fast::F($exo, 'LastLogonTimeIso8601'), $sources.Exo.Status, 'Qualified', $R)
+
+    # Decision. Priority: no delegate, imperative Review, owner active, Strong candidate, Review.
+    $state = ''; $reason = ''
+    if ($delegates.Count -eq 0) { $state = 'Not candidate'; $reason = 'No delegate other than the owner' }
+    elseif ($imperative.Count) { $state = 'Review'; $reason = $imperative[0]; for ($i = 1; $i -lt $imperative.Count; $i++) { $secondary.Add($imperative[$i]) } }
+    elseif ($null -ne $ownerLatest -and $ownerLatest.Utc -gt $ownerActiveFloor) { $state = 'Not candidate'; $reason = "Owner signed in within $OwnerActiveDays days ($($ownerLatest.Name))" }
+    else {
+        if ($ownerState -ne 'Disabled') { $unmet.Add("Owner account $($ownerState.ToLowerInvariant())") }
+        if ($null -ne $ownerLatest -and $ownerLatest.Utc -gt $ownerInactiveFloor) { $unmet.Add("Owner signed in between $OwnerActiveDays and $OwnerInactiveDays days ago") }
+        if ($resolved -eq 0 -and $unresolved -eq 0) { $unmet.Add('Only unresolved SID delegates') }
+        elseif ($resolved -eq 0) { $unmet.Add('Delegates not resolved to an Entra account') }
+        elseif ($activeDelegates -eq 0) { $unmet.Add("No delegate signed in within $OwnerActiveDays days") }
+        if (-not $sizeKnown) { $unmet.Add('Mailbox size unknown') } elseif ($size -gt $SharedMailboxFreeSizeGB) { $unmet.Add("Mailbox above $SharedMailboxFreeSizeGB GB") }
+        if ($hold) { $unmet.Add('Mailbox hold') }
+        if ($archiveActive) { $unmet.Add('Archive mailbox active') }
+        if ($protocols.Count) { $unmet.Add('Direct protocol use: ' + ($protocols -join ', ')) }
+        elseif ($protocolQuality -notin @('Qualified', 'No report row')) { $unmet.Add("Email app usage: $protocolQuality") }
+        if ($population -eq 'Non-human') { $unmet.Add('Non-human account population') }
+        if ($unmet.Count) { $state = 'Review'; $reason = $unmet[0]; for ($i = 1; $i -lt $unmet.Count; $i++) { $secondary.Add($unmet[$i]) } }
+        else { $state = 'Strong candidate'; $reason = $(if ($null -eq $ownerLatest) { 'Owner disabled, no sign-in recorded, delegates active' } else { "Owner disabled, no sign-in for over $OwnerInactiveDays days, delegates active" }) }
+    }
+    if ($state -ne 'Not candidate' -or $delegates.Count) {
+        if ($sidOnly) { $secondary.Add("$sidOnly unresolved SID delegate(s)") }
+        if ($null -ne $exoLogon.Utc -and $exoLogon.Utc -gt $ownerActiveFloor -and ($null -eq $ownerLatest -or $ownerLatest.Utc -le $ownerActiveFloor)) { $secondary.Add('Recent EXO last logon from delegates or system processes, not the owner') }
+    }
+    if ($state -eq 'Strong candidate') { $secondary.Add('Organization retention policies and in-place holds not assessed') }
+    $stateSort = @{'Strong candidate' = 1; 'Review' = 2; 'Not candidate' = 3}[$state]
+    $action = switch ($state) { 'Strong candidate' { 'Confirm with the delegates, then convert to a shared mailbox and block sign-in' } 'Review' { 'Review evidence' } default { 'None' } }
+
+    $sharedRows.Add([pscustomobject][ordered]@{
+        'Shared Conversion Key' = (New-Key 'shared-conversion' $guid); 'Mailbox GUID' = $guid; 'Primary SMTP Address' = ($Fast::F($exo, 'PrimarySmtpAddress')); 'Recipient Type' = ($Fast::F($exo, 'RecipientTypeDetails'))
+        'Owner Entra Object ID' = ($Fast::F($entraRow, 'Object Id')); 'Owner AD Object GUID' = ($Fast::KF($ad, 'ObjectGUID')); 'Owner Match Status' = $owner.Status; 'Owner Account State' = $ownerState
+        'AD Domain' = $(if ($Fast::F($ad, 'DomainName')) { $Fast::F($ad, 'DomainName') } else { 'Unknown' }); 'Country' = $(if ($country) { $country } else { 'Unknown' })
+        'Country Basis' = $(if ($null -ne $inv) { 'User Inventory Evidence' } elseif ($country) { 'AD attribute' } else { 'Unknown' })
+        'Account Type' = $(if ($accountType) { $accountType } elseif ($null -ne $ad) { 'Unclassified Account' } else { 'Unknown' }); 'Account Population' = $population; 'Workforce Persona' = $persona.Persona
+        'Mailbox Size GB' = $(if ($sizeKnown) { $size.ToString('0.###', [Globalization.CultureInfo]::InvariantCulture) } else { '' }); 'Archive State' = $(if ($archive) { $archive } else { 'Unknown' })
+        'Litigation Hold' = $(if ($Fast::BF($exo, 'LitigationHoldEnabled')) { 'True' } else { 'False' }); 'Retention Hold' = $(if ($Fast::BF($exo, 'RetentionHoldEnabled')) { 'True' } else { 'False' }); 'Hold State' = $(if ($hold) { 'Hold' } else { 'No mailbox-level hold' })
+        'Delegate Count' = [string]$delegates.Count; 'FullAccess Delegate Count' = [string]$byRight.FullAccess; 'SendAs Delegate Count' = [string]$byRight.SendAs; 'SendOnBehalf Delegate Count' = [string]$byRight.GrantSendOnBehalfTo
+        'Resolved Delegate Count' = [string]$resolved; 'Unresolved Delegate Count' = [string]$unresolved; 'Unresolved SID Delegate Count' = [string]$sidOnly; 'Active Delegate Count' = [string]$activeDelegates
+        'Owner Last Sign-In' = ($Fast::Utc($(if ($null -ne $ownerLatest) { $ownerLatest.Utc } else { $null }))); 'Owner Last Sign-In Source' = $(if ($null -ne $ownerLatest) { $ownerLatest.Name } else { 'None' }); 'Owner Last Sign-In Quality' = $signIn.Quality
+        'Days Since Owner Sign-In' = $(if ($null -ne $ownerLatest) { [string][math]::Floor(($R - $ownerLatest.Utc).TotalDays) } else { '' })
+        'EXO Last Logon' = ($Fast::Utc($exoLogon.Utc)); 'EXO Last Logon Quality' = $exoLogon.Quality
+        'Direct Protocol Use' = $protocolText; 'Direct Protocol Quality' = $protocolQuality
+        'Owner Licenses' = ($skus -join '; '); 'Owner License Count' = $(if (Test-Ready 'Licenses') { [string]@($skus).Count } else { '' })
+        'Conversion State' = $state; 'State Sort' = [string]$stateSort; 'Decision Reason' = $reason; 'Secondary Reasons' = (Join-Unique $secondary); 'Recommended Action' = $action
+        'EXO Source Status' = $sources.Exo.Status; 'EXO Collected UTC' = ($Fast::Utc($sources.Exo.CollectedUtc)); 'Entra Source Status' = $sources.EntraUsers.Status; 'Entra Collected UTC' = ($Fast::Utc($sources.EntraUsers.CollectedUtc))
+        'License Source Status' = $sources.Licenses.Status; 'Email App Usage Source Status' = $sources.EmailApps.Status; 'Email App Usage Report Date' = [string]$sources.EmailApps.RefreshDate
+        'Reference UTC' = $referenceText; 'Evidence Date' = $evidenceDate; 'Evidence Status' = $(if ((Test-Ready 'Exo') -and (Test-Ready 'EntraUsers')) { 'Observed' } else { 'Not ready' })
+    })
+}
+
 # --- Outputs ----------------------------------------------------------------------------------
 function Write-Evidence([string]$Path, [object[]]$Rows, [string[]]$Header) {
     New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force | Out-Null
@@ -648,6 +806,13 @@ $mailboxHeader = @('Mailbox Cleanup Key', 'Mailbox Identity Basis', 'Mailbox GUI
 Write-Evidence $UserOutputPath @($userRows) $userHeader
 Write-Evidence $ComputerOutputPath @($computerRows) $computerHeader
 Write-Evidence $MailboxOutputPath @($mailboxRows) $mailboxHeader
+$sharedHeader = @('Shared Conversion Key', 'Mailbox GUID', 'Primary SMTP Address', 'Recipient Type', 'Owner Entra Object ID', 'Owner AD Object GUID', 'Owner Match Status', 'Owner Account State',
+    'AD Domain', 'Country', 'Country Basis', 'Account Type', 'Account Population', 'Workforce Persona', 'Mailbox Size GB', 'Archive State', 'Litigation Hold', 'Retention Hold', 'Hold State',
+    'Delegate Count', 'FullAccess Delegate Count', 'SendAs Delegate Count', 'SendOnBehalf Delegate Count', 'Resolved Delegate Count', 'Unresolved Delegate Count', 'Unresolved SID Delegate Count', 'Active Delegate Count',
+    'Owner Last Sign-In', 'Owner Last Sign-In Source', 'Owner Last Sign-In Quality', 'Days Since Owner Sign-In', 'EXO Last Logon', 'EXO Last Logon Quality', 'Direct Protocol Use', 'Direct Protocol Quality',
+    'Owner Licenses', 'Owner License Count', 'Conversion State', 'State Sort', 'Decision Reason', 'Secondary Reasons', 'Recommended Action',
+    'EXO Source Status', 'EXO Collected UTC', 'Entra Source Status', 'Entra Collected UTC', 'License Source Status', 'Email App Usage Source Status', 'Email App Usage Report Date', 'Reference UTC', 'Evidence Date', 'Evidence Status')
+Write-Evidence $SharedConversionOutputPath @($sharedRows) $sharedHeader
 
 $counts = @{AdUsers = @{Excluded = 0; Unkeyable = $excluded.UnkeyableUsers}; AdComputers = @{Excluded = $excluded.Servers; Unkeyable = $excluded.UnkeyableComputers}; Exo = @{Excluded = 0; Unkeyable = 0}; OnPrem = @{Excluded = 0; Unkeyable = 0}}
 foreach ($name in $sources.Keys) {
@@ -660,13 +825,15 @@ foreach ($name in $sources.Keys) {
     })
 }
 $qualification.Add([pscustomobject][ordered]@{'Source' = 'User mailboxes (EXO and on-premises)'; 'File' = ''; 'Producer' = ''; 'Status' = $(if ($exchangeReady) { 'Observed' } else { 'Not ready' }); 'Reason' = 'Shared, room, equipment and discovery mailboxes are out of scope'; 'Rows' = [string]$mailboxRows.Count; 'Collected UTC' = ''; 'Report Refresh Date' = ''; 'Out Of Scope Rows' = [string]$excluded.SharedOrResourceMailboxes; 'Unkeyable Rows' = [string]$excluded.UnkeyableMailboxes; 'Reference UTC' = $referenceText; 'Evidence Date' = $evidenceDate})
+$qualification.Add([pscustomobject][ordered]@{'Source' = 'Shared mailbox conversion (EXO user mailboxes)'; 'File' = ''; 'Producer' = ''; 'Status' = $(if ((Test-Ready 'Exo') -and (Test-Ready 'EntraUsers')) { 'Observed' } else { 'Not ready' }); 'Reason' = "Owner Entra sign-in decides; EXO last logon and mailbox activity are informational. Not candidate within $OwnerActiveDays days, Strong candidate after $OwnerInactiveDays days, free size $SharedMailboxFreeSizeGB GB"; 'Rows' = [string]$sharedRows.Count; 'Collected UTC' = ''; 'Report Refresh Date' = ''; 'Out Of Scope Rows' = [string]$excluded.SharedOrResourceMailboxes; 'Unkeyable Rows' = [string]$sharedUnkeyable; 'Reference UTC' = $referenceText; 'Evidence Date' = $evidenceDate})
 Write-Evidence $QualificationOutputPath @($qualification) @('Source', 'File', 'Producer', 'Status', 'Reason', 'Rows', 'Collected UTC', 'Report Refresh Date', 'Out Of Scope Rows', 'Unkeyable Rows', 'Reference UTC', 'Evidence Date')
 
+if ($sharedUnkeyable) { Write-Warning "Shared conversion: $sharedUnkeyable EXO user mailbox rows without a unique mailbox GUID were not published." }
 if ($excluded.UnkeyableMailboxes) { Write-Warning "Directory cleanup: $($excluded.UnkeyableMailboxes) mailbox rows without a unique mailbox GUID were not published." }
 if ($excluded.UnkeyableUsers -or $excluded.UnkeyableComputers) { Write-Warning "Directory cleanup: $($excluded.UnkeyableUsers) user and $($excluded.UnkeyableComputers) computer rows without a unique AD ObjectGUID were not published." }
 foreach ($s in $sources.Values) { if ($s.Status -ne 'Observed') { Write-Warning "Directory cleanup source $($s.Name): $($s.Status) ($($s.Reason)); affected objects are Review." } }
-$summary = foreach ($pair in @(@('users', $userRows), @('computers', $computerRows), @('mailboxes', $mailboxRows))) {
-    $byState = @($pair[1] | Group-Object 'Cleanup State' | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Count)" }) -join ', '
+$summary = foreach ($pair in @(@('users', $userRows, 'Cleanup State'), @('computers', $computerRows, 'Cleanup State'), @('mailboxes', $mailboxRows, 'Cleanup State'), @('shared conversion', $sharedRows, 'Conversion State'))) {
+    $byState = @($pair[1] | Group-Object $pair[2] | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Count)" }) -join ', '
     "$($pair[0]) $($pair[1].Count) ($byState)"
 }
 Write-Host ('Directory cleanup evidence: ' + ($summary -join '; ') + "; reference $referenceText.")
