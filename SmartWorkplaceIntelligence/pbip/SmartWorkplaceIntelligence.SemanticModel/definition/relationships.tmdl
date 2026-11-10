@@ -735,3 +735,11 @@ relationship a21191c4-6814-40ae-8c8e-9be31800a421
 	fromColumn: 'Historical Windows Readiness'.'Candidate Device Source ID'
 	toColumn: 'Windows Migration Evidence'.'Device Source ID'
 
+relationship shared_conversion_country
+	fromColumn: 'Mailbox Shared Conversion Evidence'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship shared_conversion_domain
+	fromColumn: 'Mailbox Shared Conversion Evidence'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+

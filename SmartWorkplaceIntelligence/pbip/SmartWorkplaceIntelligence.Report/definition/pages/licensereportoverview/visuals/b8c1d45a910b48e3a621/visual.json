@@ -12,5 +12,6 @@
   "visualGroup": {
     "displayName": "Shared mailbox licenses",
     "groupMode": "ScaleMode"
-  }
+  },
+  "isHidden": true
 }

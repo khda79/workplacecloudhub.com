@@ -1,0 +1,391 @@
+/// Prepared shared mailbox conversion evidence: EXO user mailboxes used through delegates. The owner Entra sign-in decides; EXO last logon is informational because delegates and system processes update it.
+table 'Mailbox Shared Conversion Evidence'
+	lineageTag: 9919d660-b7a4-551e-b4d1-331359669bca
+
+	/// EXO user mailboxes assessed for conversion to a shared mailbox.
+	measure 'Shared Conversion Mailboxes' =
+			VAR _q = CALCULATE(COUNTROWS('Directory Cleanup Source Qualification'), REMOVEFILTERS('Directory Cleanup Source Qualification'))
+			RETURN IF(_q > 0, COALESCE(CALCULATE(COUNTROWS('Mailbox Shared Conversion Evidence')), 0), BLANK())
+		formatString: #,0
+		displayFolder: Shared Mailbox Conversion
+		lineageTag: 36d246b0-4a01-50a0-bdd0-7bc47d0776e9
+
+	/// Owner disabled, no owner sign-in beyond the inactive threshold, an active delegate, free size, no hold, no archive, no direct protocol use.
+	measure 'Shared Conversion Strong Candidates' =
+			VAR _q = CALCULATE(COUNTROWS('Directory Cleanup Source Qualification'), REMOVEFILTERS('Directory Cleanup Source Qualification'))
+			RETURN IF(_q > 0, COALESCE(CALCULATE(COUNTROWS('Mailbox Shared Conversion Evidence'), KEEPFILTERS('Mailbox Shared Conversion Evidence'[Conversion State] = "Strong candidate")), 0), BLANK())
+		formatString: #,0
+		displayFolder: Shared Mailbox Conversion
+		lineageTag: f7f5fc7e-22d6-5578-97bf-d91b124b23a0
+
+	/// Delegated mailboxes whose owner has not signed in recently but at least one condition is unmet or unqualified.
+	measure 'Shared Conversion Review' =
+			VAR _q = CALCULATE(COUNTROWS('Directory Cleanup Source Qualification'), REMOVEFILTERS('Directory Cleanup Source Qualification'))
+			RETURN IF(_q > 0, COALESCE(CALCULATE(COUNTROWS('Mailbox Shared Conversion Evidence'), KEEPFILTERS('Mailbox Shared Conversion Evidence'[Conversion State] = "Review")), 0), BLANK())
+		formatString: #,0
+		displayFolder: Shared Mailbox Conversion
+		lineageTag: 6c0bc773-b4ef-5ab9-a07e-3cb3a7b32f4b
+
+	/// No delegate, or the owner signed in within the active threshold.
+	measure 'Shared Conversion Not Candidate' =
+			VAR _q = CALCULATE(COUNTROWS('Directory Cleanup Source Qualification'), REMOVEFILTERS('Directory Cleanup Source Qualification'))
+			RETURN IF(_q > 0, COALESCE(CALCULATE(COUNTROWS('Mailbox Shared Conversion Evidence'), KEEPFILTERS('Mailbox Shared Conversion Evidence'[Conversion State] = "Not candidate")), 0), BLANK())
+		formatString: #,0
+		displayFolder: Shared Mailbox Conversion
+		lineageTag: 505a8b6d-1827-55a4-876f-0edd3d49bdc2
+
+	/// Strong candidates whose owner still holds at least one license; the license gain needs a human licensing review.
+	measure 'Shared Conversion Licensed Strong Candidates' =
+			VAR _q = CALCULATE(COUNTROWS('Directory Cleanup Source Qualification'), REMOVEFILTERS('Directory Cleanup Source Qualification'))
+			RETURN IF(_q > 0, COALESCE(CALCULATE(COUNTROWS('Mailbox Shared Conversion Evidence'), KEEPFILTERS('Mailbox Shared Conversion Evidence'[Conversion State] = "Strong candidate"), KEEPFILTERS('Mailbox Shared Conversion Evidence'[Owner License Count] > 0)), 0), BLANK())
+		formatString: #,0
+		displayFolder: Shared Mailbox Conversion
+		lineageTag: 5039782f-81f8-5fac-bb05-42de8406f205
+
+	column TenantKey
+		dataType: string
+		lineageTag: db0afd81-f6a9-51fc-b0fa-22669707cbc1
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	column 'Shared Conversion Key'
+		dataType: string
+		lineageTag: 0b5d36c9-b18e-52f8-988c-f1777aa7d6ef
+		summarizeBy: none
+		sourceColumn: Shared Conversion Key
+
+	column 'Mailbox GUID'
+		dataType: string
+		lineageTag: 5b8825a2-7617-5531-bf73-2688cf703542
+		summarizeBy: none
+		sourceColumn: Mailbox GUID
+
+	column 'Primary SMTP Address'
+		dataType: string
+		lineageTag: 513c8171-a259-5508-a983-4c78c11088f3
+		summarizeBy: none
+		sourceColumn: Primary SMTP Address
+
+	column 'Recipient Type'
+		dataType: string
+		lineageTag: 9468c13f-21cc-514b-ae00-6249aa039dc3
+		summarizeBy: none
+		sourceColumn: Recipient Type
+
+	column 'Owner Entra Object ID'
+		dataType: string
+		lineageTag: c9279ea1-1c27-5163-a5a7-935a76413c0e
+		summarizeBy: none
+		sourceColumn: Owner Entra Object ID
+
+	column 'Owner AD Object GUID'
+		dataType: string
+		lineageTag: a13dd0c7-4aaa-575e-a78f-3e3ebb8f724f
+		summarizeBy: none
+		sourceColumn: Owner AD Object GUID
+
+	column 'Owner Match Status'
+		dataType: string
+		lineageTag: d82a8600-cf01-5902-a5df-bf75a64c43f7
+		summarizeBy: none
+		sourceColumn: Owner Match Status
+
+	column 'Owner Account State'
+		dataType: string
+		lineageTag: 83c48fe7-e733-5387-8344-6cfa6d435b23
+		summarizeBy: none
+		sourceColumn: Owner Account State
+
+	column 'AD Domain'
+		dataType: string
+		lineageTag: 5136c395-cde9-58f7-8789-fa58418d4d56
+		summarizeBy: none
+		sourceColumn: AD Domain
+
+	column Country
+		dataType: string
+		lineageTag: adc85db2-3f22-533e-b09f-13e27eba4a7b
+		summarizeBy: none
+		sourceColumn: Country
+
+	column 'Country Basis'
+		dataType: string
+		lineageTag: 6073074f-96c6-5f66-9880-aa65852ddfb6
+		summarizeBy: none
+		sourceColumn: Country Basis
+
+	column 'Account Type'
+		dataType: string
+		lineageTag: d6d35e79-21eb-53cc-89d4-c959dc947d7d
+		summarizeBy: none
+		sourceColumn: Account Type
+
+	column 'Account Population'
+		dataType: string
+		lineageTag: 59b56c08-02d5-5c12-9d88-021175184ed2
+		summarizeBy: none
+		sourceColumn: Account Population
+
+	column 'Workforce Persona'
+		dataType: string
+		lineageTag: 88e5c7d0-b976-580e-8597-e47f4d4d4816
+		summarizeBy: none
+		sourceColumn: Workforce Persona
+
+	column 'Mailbox Size GB'
+		dataType: double
+		lineageTag: dff807f8-5da9-5520-8499-c8e0b76d0bbf
+		summarizeBy: none
+		sourceColumn: Mailbox Size GB
+
+	column 'Archive State'
+		dataType: string
+		lineageTag: b68aea11-3c08-525c-99c4-77c8f7107a95
+		summarizeBy: none
+		sourceColumn: Archive State
+
+	column 'Litigation Hold'
+		dataType: string
+		lineageTag: bcd8862b-621d-5756-af58-62b81a7ddb22
+		summarizeBy: none
+		sourceColumn: Litigation Hold
+
+	column 'Retention Hold'
+		dataType: string
+		lineageTag: b6c4f8e3-924a-508a-8308-b9ec1fe7867b
+		summarizeBy: none
+		sourceColumn: Retention Hold
+
+	column 'Hold State'
+		dataType: string
+		lineageTag: 25054726-4857-562a-9ffa-0dcf04560ed3
+		summarizeBy: none
+		sourceColumn: Hold State
+
+	column 'Delegate Count'
+		dataType: int64
+		lineageTag: 346b6c8c-98c7-50eb-ae03-7d1b3d153681
+		summarizeBy: none
+		sourceColumn: Delegate Count
+
+	column 'FullAccess Delegate Count'
+		dataType: int64
+		lineageTag: 20b9be81-08ad-56f6-bc10-472d58af4275
+		summarizeBy: none
+		sourceColumn: FullAccess Delegate Count
+
+	column 'SendAs Delegate Count'
+		dataType: int64
+		lineageTag: ae6c09ab-af16-564a-97eb-f70364e74a12
+		summarizeBy: none
+		sourceColumn: SendAs Delegate Count
+
+	column 'SendOnBehalf Delegate Count'
+		dataType: int64
+		lineageTag: ee198680-e4db-5752-a22c-4ff61432ce05
+		summarizeBy: none
+		sourceColumn: SendOnBehalf Delegate Count
+
+	column 'Resolved Delegate Count'
+		dataType: int64
+		lineageTag: 88489d3e-cb70-5aa7-a75d-73fcaa6fa303
+		summarizeBy: none
+		sourceColumn: Resolved Delegate Count
+
+	column 'Unresolved Delegate Count'
+		dataType: int64
+		lineageTag: 9c1800b6-4aba-5750-8ff3-0d0873fa92d2
+		summarizeBy: none
+		sourceColumn: Unresolved Delegate Count
+
+	column 'Unresolved SID Delegate Count'
+		dataType: int64
+		lineageTag: 398fa3b6-5320-5fe4-97f8-904b933023f0
+		summarizeBy: none
+		sourceColumn: Unresolved SID Delegate Count
+
+	column 'Active Delegate Count'
+		dataType: int64
+		lineageTag: a6c8c228-b9cb-5941-bd96-3884fe11d202
+		summarizeBy: none
+		sourceColumn: Active Delegate Count
+
+	column 'Owner Last Sign-In'
+		dataType: dateTime
+		lineageTag: 79d15b0c-4c7b-52a4-9e80-036e6d5be9a3
+		summarizeBy: none
+		sourceColumn: Owner Last Sign-In
+
+	column 'Owner Last Sign-In Source'
+		dataType: string
+		lineageTag: 7e9cb953-2e96-5838-8eca-467e35fa23bb
+		summarizeBy: none
+		sourceColumn: Owner Last Sign-In Source
+
+	column 'Owner Last Sign-In Quality'
+		dataType: string
+		lineageTag: 16086ca6-f25c-54a9-8c1a-941128466528
+		summarizeBy: none
+		sourceColumn: Owner Last Sign-In Quality
+
+	column 'Days Since Owner Sign-In'
+		dataType: int64
+		lineageTag: e282f023-1995-565f-ba54-df13bb4e4497
+		summarizeBy: none
+		sourceColumn: Days Since Owner Sign-In
+
+	column 'EXO Last Logon'
+		dataType: dateTime
+		lineageTag: 8606cc07-06ef-5f54-a89e-a1e80fc3ee57
+		summarizeBy: none
+		sourceColumn: EXO Last Logon
+
+	column 'EXO Last Logon Quality'
+		dataType: string
+		lineageTag: 6ff4127d-7027-5cf7-9871-337d1e1664f6
+		summarizeBy: none
+		sourceColumn: EXO Last Logon Quality
+
+	column 'Direct Protocol Use'
+		dataType: string
+		lineageTag: 61e16c5f-c689-51af-ab33-2937282785b9
+		summarizeBy: none
+		sourceColumn: Direct Protocol Use
+
+	column 'Direct Protocol Quality'
+		dataType: string
+		lineageTag: 651dae90-abd6-58b3-a666-a7ad28af0e58
+		summarizeBy: none
+		sourceColumn: Direct Protocol Quality
+
+	column 'Owner Licenses'
+		dataType: string
+		lineageTag: b58febb7-a510-5bda-9723-63f63a7b5c1f
+		summarizeBy: none
+		sourceColumn: Owner Licenses
+
+	column 'Owner License Count'
+		dataType: int64
+		lineageTag: cbc2c598-bbb4-5883-b643-2e5c0752083f
+		summarizeBy: none
+		sourceColumn: Owner License Count
+
+	column 'Conversion State'
+		dataType: string
+		lineageTag: 7d2fa6de-00a4-56bb-b237-f47e7199cd3b
+		summarizeBy: none
+		sourceColumn: Conversion State
+		sortByColumn: 'State Sort'
+
+	column 'State Sort'
+		dataType: int64
+		lineageTag: 7cf15703-cadf-5561-84a1-23c5f2892b62
+		summarizeBy: none
+		sourceColumn: State Sort
+
+	column 'Decision Reason'
+		dataType: string
+		lineageTag: 5c0f9e56-762c-5ae5-9e69-7e1142e36c6e
+		summarizeBy: none
+		sourceColumn: Decision Reason
+
+	column 'Secondary Reasons'
+		dataType: string
+		lineageTag: 8e5790ca-c473-5c99-ab18-ab52d4c3227d
+		summarizeBy: none
+		sourceColumn: Secondary Reasons
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: 669e2f74-7e47-5919-9fac-46856032d7d6
+		summarizeBy: none
+		sourceColumn: Recommended Action
+
+	column 'EXO Source Status'
+		dataType: string
+		lineageTag: 606bb229-9ad9-5a5d-b94c-1513109ad3d5
+		summarizeBy: none
+		sourceColumn: EXO Source Status
+
+	column 'EXO Collected UTC'
+		dataType: dateTime
+		lineageTag: 0444bf47-2dd5-58fe-a782-2d72de2b18a5
+		summarizeBy: none
+		sourceColumn: EXO Collected UTC
+
+	column 'Entra Source Status'
+		dataType: string
+		lineageTag: c2a5d89d-77ce-5fb9-87e4-b81f7397bde3
+		summarizeBy: none
+		sourceColumn: Entra Source Status
+
+	column 'Entra Collected UTC'
+		dataType: dateTime
+		lineageTag: 7ca82dfa-e39b-57fa-9e39-42f047efcf7f
+		summarizeBy: none
+		sourceColumn: Entra Collected UTC
+
+	column 'License Source Status'
+		dataType: string
+		lineageTag: eaf43a34-087f-5100-a307-fe2b4d3547b6
+		summarizeBy: none
+		sourceColumn: License Source Status
+
+	column 'Email App Usage Source Status'
+		dataType: string
+		lineageTag: 54863952-fe69-5745-9400-81344a597743
+		summarizeBy: none
+		sourceColumn: Email App Usage Source Status
+
+	column 'Email App Usage Report Date'
+		dataType: dateTime
+		lineageTag: a6bcc29b-729f-5c1e-b442-9b32fcc86454
+		summarizeBy: none
+		sourceColumn: Email App Usage Report Date
+
+	column 'Reference UTC'
+		dataType: dateTime
+		lineageTag: 0cb56c2d-f1f6-5259-8a27-9d6b02a2657c
+		summarizeBy: none
+		sourceColumn: Reference UTC
+
+	column 'Evidence Date'
+		dataType: dateTime
+		lineageTag: f759bc98-125b-52d5-9f74-6ab9daf379f6
+		summarizeBy: none
+		sourceColumn: Evidence Date
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 3c1e07a2-ffc1-5bfb-a625-9dfbb6b5c812
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+	column 'Loaded Batch ID'
+		dataType: string
+		lineageTag: 6c8519f9-dfb1-44d8-adb9-08d0bc9c8422
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Mailbox Shared Conversion Evidence' = m
+		mode: import
+		source =
+				let
+				 Readers = CreatePreparedReaders(),
+				 Raw = Table.PromoteHeaders(Csv.Document(Readers[GetPreparedEvidenceFile]("MailboxSharedConversionEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv, ExtraValues=ExtraValues.Error]), [PromoteAllScalars=true]),
+				 Selected = Table.SelectColumns(Raw, {"TenantKey", "Shared Conversion Key", "Mailbox GUID", "Primary SMTP Address", "Recipient Type", "Owner Entra Object ID", "Owner AD Object GUID", "Owner Match Status", "Owner Account State", "AD Domain", "Country", "Country Basis", "Account Type", "Account Population", "Workforce Persona", "Mailbox Size GB", "Archive State", "Litigation Hold", "Retention Hold", "Hold State", "Delegate Count", "FullAccess Delegate Count", "SendAs Delegate Count", "SendOnBehalf Delegate Count", "Resolved Delegate Count", "Unresolved Delegate Count", "Unresolved SID Delegate Count", "Active Delegate Count", "Owner Last Sign-In", "Owner Last Sign-In Source", "Owner Last Sign-In Quality", "Days Since Owner Sign-In", "EXO Last Logon", "EXO Last Logon Quality", "Direct Protocol Use", "Direct Protocol Quality", "Owner Licenses", "Owner License Count", "Conversion State", "State Sort", "Decision Reason", "Secondary Reasons", "Recommended Action", "EXO Source Status", "EXO Collected UTC", "Entra Source Status", "Entra Collected UTC", "License Source Status", "Email App Usage Source Status", "Email App Usage Report Date", "Reference UTC", "Evidence Date", "Evidence Status"}),
+				 Scoped = if List.AllTrue(List.Transform(Table.Column(Selected, "TenantKey"), each _ = PreparedExpectedTenantKey)) then Selected else error "Foreign or missing tenant",
+				 Nulls = Table.ReplaceValue(Scoped, "", null, Replacer.ReplaceValue, {"Mailbox Size GB", "Delegate Count", "FullAccess Delegate Count", "SendAs Delegate Count", "SendOnBehalf Delegate Count", "Resolved Delegate Count", "Unresolved Delegate Count", "Unresolved SID Delegate Count", "Active Delegate Count", "Days Since Owner Sign-In", "Owner License Count", "State Sort"}),
+				 Typed = Table.TransformColumnTypes(Nulls, {{"TenantKey", type text}, {"Shared Conversion Key", type text}, {"Mailbox GUID", type text}, {"Primary SMTP Address", type text}, {"Recipient Type", type text}, {"Owner Entra Object ID", type text}, {"Owner AD Object GUID", type text}, {"Owner Match Status", type text}, {"Owner Account State", type text}, {"AD Domain", type text}, {"Country", type text}, {"Country Basis", type text}, {"Account Type", type text}, {"Account Population", type text}, {"Workforce Persona", type text}, {"Mailbox Size GB", type number}, {"Archive State", type text}, {"Litigation Hold", type text}, {"Retention Hold", type text}, {"Hold State", type text}, {"Delegate Count", Int64.Type}, {"FullAccess Delegate Count", Int64.Type}, {"SendAs Delegate Count", Int64.Type}, {"SendOnBehalf Delegate Count", Int64.Type}, {"Resolved Delegate Count", Int64.Type}, {"Unresolved Delegate Count", Int64.Type}, {"Unresolved SID Delegate Count", Int64.Type}, {"Active Delegate Count", Int64.Type}, {"Owner Last Sign-In", type text}, {"Owner Last Sign-In Source", type text}, {"Owner Last Sign-In Quality", type text}, {"Days Since Owner Sign-In", Int64.Type}, {"EXO Last Logon", type text}, {"EXO Last Logon Quality", type text}, {"Direct Protocol Use", type text}, {"Direct Protocol Quality", type text}, {"Owner Licenses", type text}, {"Owner License Count", Int64.Type}, {"Conversion State", type text}, {"State Sort", Int64.Type}, {"Decision Reason", type text}, {"Secondary Reasons", type text}, {"Recommended Action", type text}, {"EXO Source Status", type text}, {"EXO Collected UTC", type text}, {"Entra Source Status", type text}, {"Entra Collected UTC", type text}, {"License Source Status", type text}, {"Email App Usage Source Status", type text}, {"Email App Usage Report Date", type text}, {"Reference UTC", type text}, {"Evidence Date", type text}, {"Evidence Status", type text}}, "en-US"),
+				 Dates = Table.TransformColumns(Typed, {{"Owner Last Sign-In", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"EXO Last Logon", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"EXO Collected UTC", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Entra Collected UTC", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Email App Usage Report Date", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Reference UTC", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Evidence Date", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}}),
+				 QualifiedCountry = Table.AddColumn(Dates, "__Qualified Country", each if [Country] = null or Text.Trim([Country]) = "" then "Unknown" else [Country], type text),
+				 CountryRemoved = Table.RemoveColumns(QualifiedCountry, {"Country"}),
+				 CountryRenamed = Table.RenameColumns(CountryRemoved, {{"__Qualified Country", "Country"}}),
+				 OwnerLicenses = Table.TransformColumns(CountryRenamed, {{"Owner Licenses", each if _ = null or Text.Trim(_) = "" then "No license" else _, type text}})
+				in
+				 Readers[Finish](OwnerLicenses)
+
+	annotation PBI_ResultType = Exception
+

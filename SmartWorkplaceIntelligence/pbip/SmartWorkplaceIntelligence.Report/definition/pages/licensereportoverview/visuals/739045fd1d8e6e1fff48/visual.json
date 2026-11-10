@@ -1,0 +1,788 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "739045fd1d8e6e1fff48",
+  "position": {
+    "x": 32,
+    "y": 680,
+    "z": 10200,
+    "height": 312,
+    "width": 1856,
+    "tabOrder": 10200
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "Primary SMTP Address"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.Primary SMTP Address",
+              "nativeQueryRef": "Primary SMTP Address",
+              "displayName": "Primary SMTP Address"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "Conversion State"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.Conversion State",
+              "nativeQueryRef": "Conversion State",
+              "displayName": "Conversion State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "Decision Reason"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.Decision Reason",
+              "nativeQueryRef": "Decision Reason",
+              "displayName": "Decision Reason"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "Owner Account State"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.Owner Account State",
+              "nativeQueryRef": "Owner Account State",
+              "displayName": "Owner Account State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "Owner Last Sign-In"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.Owner Last Sign-In",
+              "nativeQueryRef": "Owner Last Sign-In",
+              "displayName": "Owner Last Sign-In"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "Days Since Owner Sign-In"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.Days Since Owner Sign-In",
+              "nativeQueryRef": "Days Since Owner Sign-In",
+              "displayName": "Days Since Owner Sign-In"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "Owner Last Sign-In Source"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.Owner Last Sign-In Source",
+              "nativeQueryRef": "Owner Last Sign-In Source",
+              "displayName": "Owner Last Sign-In Source"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "Delegate Count"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.Delegate Count",
+              "nativeQueryRef": "Delegate Count",
+              "displayName": "Delegate Count"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "Active Delegate Count"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.Active Delegate Count",
+              "nativeQueryRef": "Active Delegate Count",
+              "displayName": "Active Delegate Count"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "Unresolved SID Delegate Count"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.Unresolved SID Delegate Count",
+              "nativeQueryRef": "Unresolved SID Delegate Count",
+              "displayName": "Unresolved SID Delegate Count"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "Mailbox Size GB"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.Mailbox Size GB",
+              "nativeQueryRef": "Mailbox Size GB",
+              "displayName": "Mailbox Size GB"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "Archive State"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.Archive State",
+              "nativeQueryRef": "Archive State",
+              "displayName": "Archive State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "Hold State"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.Hold State",
+              "nativeQueryRef": "Hold State",
+              "displayName": "Hold State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "Direct Protocol Use"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.Direct Protocol Use",
+              "nativeQueryRef": "Direct Protocol Use",
+              "displayName": "Direct Protocol Use"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "Owner Licenses"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.Owner Licenses",
+              "nativeQueryRef": "Owner Licenses",
+              "displayName": "Owner Licenses"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "AD Domain"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.AD Domain",
+              "nativeQueryRef": "AD Domain",
+              "displayName": "AD Domain"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "Country"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.Country",
+              "nativeQueryRef": "Country",
+              "displayName": "Country"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "Account Population"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.Account Population",
+              "nativeQueryRef": "Account Population",
+              "displayName": "Account Population"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "Secondary Reasons"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.Secondary Reasons",
+              "nativeQueryRef": "Secondary Reasons",
+              "displayName": "Secondary Reasons"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "Recommended Action"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.Recommended Action",
+              "nativeQueryRef": "Recommended Action",
+              "displayName": "Recommended Action"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Shared Conversion Evidence"
+                    }
+                  },
+                  "Property": "EXO Last Logon"
+                }
+              },
+              "queryRef": "Mailbox Shared Conversion Evidence.EXO Last Logon",
+              "nativeQueryRef": "EXO Last Logon",
+              "displayName": "EXO Last Logon"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "Mailbox Shared Conversion Evidence"
+                  }
+                },
+                "Property": "Conversion State"
+              }
+            },
+            "direction": "Ascending"
+          },
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "Mailbox Shared Conversion Evidence"
+                  }
+                },
+                "Property": "Days Since Owner Sign-In"
+              }
+            },
+            "direction": "Descending"
+          }
+        ],
+        "isDefaultSort": true
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#215E9E'"
+                    }
+                  }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F0F5FA'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "total": [
+        {
+          "properties": {
+            "totals": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Strong candidate and review mailboxes with the evidence behind each decision.'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Conversion detail · strong candidates and review · owner Entra sign-in decides; EXO last logon is informational · manual decision'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "13D"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#CBD8E5'"
+                    }
+                  }
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "stylePreset": [
+        {
+          "properties": {
+            "name": {
+              "expr": {
+                "Literal": {
+                  "Value": "'None'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "7e61f0bd03a39541731d",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "7a1c23a2c9c7346f3cd0",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Mailbox Shared Conversion Evidence"
+              }
+            },
+            "Property": "Conversion State"
+          }
+        },
+        "type": "Categorical",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "s",
+              "Entity": "Mailbox Shared Conversion Evidence",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "In": {
+                  "Expressions": [
+                    {
+                      "Column": {
+                        "Expression": {
+                          "SourceRef": {
+                            "Source": "s"
+                          }
+                        },
+                        "Property": "Conversion State"
+                      }
+                    }
+                  ],
+                  "Values": [
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'Strong candidate'"
+                        }
+                      }
+                    ],
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'Review'"
+                        }
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "howCreated": "User"
+      }
+    ]
+  }
+}

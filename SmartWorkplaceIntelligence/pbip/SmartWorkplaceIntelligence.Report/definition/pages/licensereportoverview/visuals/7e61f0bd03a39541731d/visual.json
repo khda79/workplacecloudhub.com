@@ -1,0 +1,16 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "7e61f0bd03a39541731d",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 8500,
+    "height": 1080,
+    "width": 1920,
+    "tabOrder": 8500
+  },
+  "visualGroup": {
+    "displayName": "UserMailbox → Shared",
+    "groupMode": "ScaleMode"
+  }
+}
