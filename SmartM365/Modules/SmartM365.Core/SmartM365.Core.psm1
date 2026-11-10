@@ -12,7 +12,7 @@ Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumV
 . (Join-Path $PSScriptRoot 'SmartM365-SharePointUploadPolicy.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-TeamsPrivateConfig.ps1')
 # SmartM365.Core.psm1
-# Version: 1.0.127
+# Version: 1.0.128
 # Core utilities: logging, initialization, cleanup, CSV export, mail, remote scheduling, cloud connections.
 
 function Get-ModuleLocalConfig {
@@ -1022,11 +1022,6 @@ function Complete-SmartM365ExecutionContext {
     if ($global:SmartM365ExecutionSummaryWritten) { return }
     $global:SmartM365ExecutionSummaryWritten = $true
 
-    $ended = Get-Date
-    $started = if ($global:SmartM365ExecutionStartTime) { [datetime]$global:SmartM365ExecutionStartTime } else { $ended }
-    $duration = $ended - $started
-    $durationText = '{0:00}:{1:00}:{2:00}' -f ([int][Math]::Floor($duration.TotalHours)), $duration.Minutes, $duration.Seconds
-
     $warningCount = if ($null -ne $global:SmartM365WarningCount) { [int]$global:SmartM365WarningCount } else { 0 }
     $errorCount = if ($null -ne $global:SmartM365ErrorCount) { [int]$global:SmartM365ErrorCount } else { 0 }
     $failureMessage = ''
@@ -1079,6 +1074,12 @@ function Complete-SmartM365ExecutionContext {
         WriteLog -Message "Execution failed$failureContext; no earlier ERROR log entry was recorded.$failureDetail" -Level 'ERROR'
         $errorCount = [int]$global:SmartM365ErrorCount
     }
+
+    # Measured after source receipt verification and promotion, so Duration covers that tail.
+    $ended = Get-Date
+    $started = if ($global:SmartM365ExecutionStartTime) { [datetime]$global:SmartM365ExecutionStartTime } else { $ended }
+    $duration = $ended - $started
+    $durationText = '{0:00}:{1:00}:{2:00}' -f ([int][Math]::Floor($duration.TotalHours)), $duration.Minutes, $duration.Seconds
 
     $summary = [ordered]@{
         Status            = $Status

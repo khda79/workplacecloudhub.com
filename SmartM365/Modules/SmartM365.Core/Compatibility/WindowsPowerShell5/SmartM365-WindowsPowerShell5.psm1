@@ -10,7 +10,7 @@ Import-Module (Join-Path $PSScriptRoot '../../SmartM365.JsonTransport.psd1') -Mi
 . (Join-Path $PSScriptRoot '../../SmartM365-SharePointUploadPolicy.ps1')
 . (Join-Path $PSScriptRoot '../../SmartM365-TeamsPrivateConfig.ps1')
 
-# Version: 1.0.73
+# Version: 1.0.74
 function Get-ModuleLocalConfig {
     [CmdletBinding()]
     param()
@@ -992,11 +992,6 @@ function Complete-SmartM365ExecutionContext {
     if ($global:SmartM365ExecutionSummaryWritten) { return }
     $global:SmartM365ExecutionSummaryWritten = $true
 
-    $ended = Get-Date
-    $started = if ($global:SmartM365ExecutionStartTime) { [datetime]$global:SmartM365ExecutionStartTime } else { $ended }
-    $duration = $ended - $started
-    $durationText = '{0:00}:{1:00}:{2:00}' -f ([int][Math]::Floor($duration.TotalHours)), $duration.Minutes, $duration.Seconds
-
     $warningCount = if ($null -ne $global:SmartM365WarningCount) { [int]$global:SmartM365WarningCount } else { 0 }
     $errorCount = if ($null -ne $global:SmartM365ErrorCount) { [int]$global:SmartM365ErrorCount } else { 0 }
 
@@ -1021,6 +1016,12 @@ function Complete-SmartM365ExecutionContext {
     }
     $warningCount = [int]$global:SmartM365WarningCount
     if($automaticStatus -and $Status -eq 'Success' -and $warningCount -gt 0){$Status='CompletedWithWarnings';$global:SmartM365ExecutionStatus=$Status}
+
+    # Measured after source receipt verification and promotion, so Duration covers that tail.
+    $ended = Get-Date
+    $started = if ($global:SmartM365ExecutionStartTime) { [datetime]$global:SmartM365ExecutionStartTime } else { $ended }
+    $duration = $ended - $started
+    $durationText = '{0:00}:{1:00}:{2:00}' -f ([int][Math]::Floor($duration.TotalHours)), $duration.Minutes, $duration.Seconds
 
     $summary = [ordered]@{
         Status            = $Status
