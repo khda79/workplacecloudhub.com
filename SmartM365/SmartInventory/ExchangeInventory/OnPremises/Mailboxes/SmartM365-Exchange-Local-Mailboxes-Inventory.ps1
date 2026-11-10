@@ -17,15 +17,16 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.77
+1.78
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules: SmartM365 WindowsPowerShell5 compatibility module; Exchange remote PowerShell (default) or local snap-in (rollback); ActiveDirectory when AD permission export is enabled.
     Minimum permissions: Exchange on-premises recipient read access for mailbox/remote mailbox data; AD read access for recipient and optional AD permission data.
     Optional switches: -IncludeADPermission and -OnlyADPermission require read access to AD mailbox permission ACLs.
+    SendAs is read from the mailbox object DACL (nTSecurityDescriptor) with the ActiveDirectory module; Get-ADPermission is the per-mailbox fallback.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-Version: 1.77
+Version: 1.78
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access. Remote uses the current Windows identity with Kerberos.
@@ -150,7 +151,11 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.77"
+$ScriptVersion = "1.78"
+$script:SendAsRightGuids = $null
+$script:SendAsSidCache = @{}
+$script:SendAsAclReadCount = 0
+$script:SendAsAclFallbackCount = 0
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -819,6 +824,93 @@ function Get-SmartM365ExchangeRemoteMailboxDelegationSummary {
     }
     catch { $result.SendAsUsers = "ERROR: $($_.Exception.Message)" }
     return [pscustomobject]$result
+}
+
+function Get-SmartM365SendAsFromSecurityDescriptor {
+    # Same semantics as the former Get-ADPermission filter: explicit (non-inherited) ACEs whose
+    # extended right name matches '*Send*', Allow and Deny alike (the former filter did not test
+    # Deny), 'NT AUTHORITY\SELF' and unresolved S-1-5-21 SIDs excluded, case-sensitive unique.
+    # Qualified identical to Get-ADPermission by Test-SmartM365-Exchange-SendAsAclEquivalence.ps1.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][System.DirectoryServices.ActiveDirectorySecurity]$SecurityDescriptor,
+        [Parameter(Mandatory = $true)][hashtable]$SendRightGuids,
+        [Parameter(Mandatory = $true)][scriptblock]$ResolveSid
+    )
+
+    $all = $SecurityDescriptor.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])
+    $extendedRight = [System.DirectoryServices.ActiveDirectoryRights]::ExtendedRight
+    $users = @()
+    $explicitCount = 0
+    $matchedCount = 0
+    $denyMatchedCount = 0
+    $allExtendedRightsCount = 0
+    foreach ($rule in $all) {
+        if ($rule.IsInherited) { continue }
+        $explicitCount++
+        if (($rule.ActiveDirectoryRights -band $extendedRight) -ne $extendedRight) { continue }
+        if ($rule.ObjectType -eq [guid]::Empty) { $allExtendedRightsCount++; continue }
+        if (-not $SendRightGuids.ContainsKey($rule.ObjectType.ToString('D'))) { continue }
+        $matchedCount++
+        if ($rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Deny) { $denyMatchedCount++ }
+        $name = [string](& $ResolveSid $rule.IdentityReference.Value)
+        if ($name -notlike 'NT AUTHORITY\SELF' -and $name -notmatch '^S-1-5-21-') { $users += $name }
+    }
+    $unique = @($users | Select-Object -Unique)
+    [pscustomobject]@{
+        Users                   = $unique
+        TotalAceCount           = @($all).Count
+        ExplicitAceCount        = $explicitCount
+        MatchedAceCount         = $matchedCount
+        DenyMatchedAceCount     = $denyMatchedCount
+        AllExtendedRightsAceCount = $allExtendedRightsCount
+    }
+}
+
+function Initialize-SmartM365SendAsAclContext {
+    [CmdletBinding()]
+    param()
+
+    if ($null -ne $script:SendAsRightGuids) { return }
+    if (-not (Get-Command -Name Get-ADObject -ErrorAction SilentlyContinue)) { Import-Module ActiveDirectory -ErrorAction Stop }
+    $configNc = (Get-ADRootDSE -ErrorAction Stop).configurationNamingContext
+    $rightsRows = @(Get-ADObject -SearchBase ("CN=Extended-Rights,$configNc") -LDAPFilter '(objectClass=controlAccessRight)' -Properties rightsGuid -ErrorAction Stop)
+    $map = @{}
+    foreach ($row in $rightsRows) {
+        $rightsGuid = [guid]::Empty
+        if ([guid]::TryParse([string]$row.rightsGuid, [ref]$rightsGuid) -and ([string]$row.Name -like '*Send*')) {
+            $map[$rightsGuid.ToString('D')] = [string]$row.Name
+        }
+    }
+    if ($map.Count -eq 0) { throw 'No extended right named like *Send* was found in the configuration partition.' }
+    $script:SendAsSidCache = @{}
+    $script:SendAsRightGuids = $map
+    WriteLog -Message ("SendAs ACL reader ready: {0} extended rights match '*Send*' ({1})." -f $map.Count, (($map.Values | Sort-Object) -join ', '))
+}
+
+function Resolve-SmartM365SendAsSid {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Sid)
+
+    if ($script:SendAsSidCache.ContainsKey($Sid)) { return $script:SendAsSidCache[$Sid] }
+    $name = $Sid
+    try { $name = ([System.Security.Principal.SecurityIdentifier]$Sid).Translate([System.Security.Principal.NTAccount]).Value }
+    catch { $name = $Sid }
+    $script:SendAsSidCache[$Sid] = $name
+    return $name
+}
+
+function Get-SmartM365MailboxSendAsUsers {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$DistinguishedName)
+
+    Initialize-SmartM365SendAsAclContext
+    $domainFqdn = (@($DistinguishedName -split ',' | Where-Object { $_ -like 'DC=*' } | ForEach-Object { $_.Substring(3) }) -join '.')
+    if (-not $domainFqdn) { throw "No domain component in distinguished name '$DistinguishedName'." }
+    $adObject = Get-ADObject -Identity $DistinguishedName -Server $domainFqdn -Properties nTSecurityDescriptor -ErrorAction Stop
+    if ($null -eq $adObject -or $null -eq $adObject.nTSecurityDescriptor) { throw 'nTSecurityDescriptor was not returned.' }
+    $result = Get-SmartM365SendAsFromSecurityDescriptor -SecurityDescriptor $adObject.nTSecurityDescriptor -SendRightGuids $script:SendAsRightGuids -ResolveSid ${function:Resolve-SmartM365SendAsSid}
+    return @($result.Users)
 }
 
 function ConvertTo-SmartM365ExchangeRemoteMailboxRecord {
@@ -2282,6 +2374,7 @@ try { # Main try block for script execution and interruption handling
             }
             Write-LogMailboxesProcessing "Starting detailed processing of $totalMailBox mailboxes for current scope."
             $MailboxScanStartTime = Get-Date
+            $MailboxProgressLastLogTime = $MailboxScanStartTime
 
             $LocalAllOutput = @() # Collection for data from this specific MailboxesProcessing2 call
 
@@ -2707,20 +2800,32 @@ try { # Main try block for script execution and interruption handling
 						$SendAsUsersList  = @()
 						$SendAsUserCount  = 0
 
-						$sendAsPermissions = Get-ADPermission -Identity $Mbx.DistinguishedName | Where-Object {
-							($_.ExtendedRights -like "*Send*") -and
-							($_.IsInherited -eq $false) -and
-							($_.User -notlike "NT AUTHORITY\SELF") -and
-							($_.User -notmatch '^S-1-5-21-')   # Ignore unresolved SIDs
+						# Direct DACL read (qualified equivalent to Get-ADPermission, about 400x faster on large ACLs).
+						# Get-ADPermission stays as the per-mailbox fallback when the AD read fails.
+						try {
+							$SendAsUsersList = @(Get-SmartM365MailboxSendAsUsers -DistinguishedName ([string]$Mbx.DistinguishedName))
+							$script:SendAsAclReadCount++
+						}
+						catch {
+							$sendAsAclError = [string]$_.Exception.Message
+							$script:SendAsAclFallbackCount++
+							$warningMessage = "SendAs ACL read failed for $($Mbx.DistinguishedName): $sendAsAclError. Falling back to Get-ADPermission."
+							WriteLog -Message $warningMessage -Level 'WARNING'
+							Write-LogMailboxesProcessing "WARNING: $warningMessage"
+							$SendAsUsersList = @()
+							$sendAsPermissions = Get-ADPermission -Identity $Mbx.DistinguishedName | Where-Object {
+								($_.ExtendedRights -like "*Send*") -and
+								($_.IsInherited -eq $false) -and
+								($_.User -notlike "NT AUTHORITY\SELF") -and
+								($_.User -notmatch '^S-1-5-21-')   # Ignore unresolved SIDs
+							}
+							foreach ($perm in @($sendAsPermissions)) { $SendAsUsersList += $perm.User }
+							$SendAsUsersList = @($SendAsUsersList | Select-Object -Unique)
 						}
 
-						if ($sendAsPermissions) {
+						if ($SendAsUsersList.Count -gt 0) {
 							Write-Host "`nMailbox: $($Mbx.DisplayName)"
-							foreach ($perm in $sendAsPermissions) {
-								$SendAsUsersList += $perm.User
-								Write-Host "  SendAs granted to: $($perm.User)"
-							}
-							$SendAsUsersList = $SendAsUsersList | Select-Object -Unique
+							foreach ($sendAsUser in $SendAsUsersList) { Write-Host "  SendAs granted to: $sendAsUser" }
 							$SendAsUserCount = $SendAsUsersList.Count
 						}
 
@@ -2821,7 +2926,15 @@ try { # Main try block for script execution and interruption handling
                     $TimeSpan = [TimeSpan]::FromSeconds($EstimatedTimeRemainingSeconds)
                     $EstimatedTimeRemaining = "{0:d2}:{1:d2}:{2:d2}" -f $TimeSpan.Hours, $TimeSpan.Minutes, $TimeSpan.Seconds
                     Write-Progress -Activity "Processing mailbox $($Mbx.Name) - ($($Domain))" -Status "Scanned: $i of $totalMailBox ($([int](($i / $totalMailBox) * 100))%). Estimated time remaining: $EstimatedTimeRemaining" -PercentComplete (($i / $totalMailBox) * 100)
+                    # Main-log heartbeat: the orchestrator stall alert fires after 60 minutes without a log write.
+                    if ($i -eq $totalMailBox -or ($i % 100) -eq 0 -or ((Get-Date) - $MailboxProgressLastLogTime).TotalMinutes -ge 10) {
+                        WriteLog -Message ("Mailbox progress for current scope: {0} of {1} processed (last domain '{2}'); elapsed {3:hh\:mm\:ss}; estimated remaining {4}." -f $i, $totalMailBox, $Domain, $TimeElapsed, $EstimatedTimeRemaining)
+                        $MailboxProgressLastLogTime = Get-Date
+                    }
                 }
+            }
+            if ($IncludeADPermission) {
+                WriteLog -Message ("SendAs source for this run so far: ACL reads={0}; Get-ADPermission fallbacks={1}." -f [int]$script:SendAsAclReadCount, [int]$script:SendAsAclFallbackCount)
             }
             Write-Progress -Activity "Mailbox Processing" -Status "Completed." -Completed
             Write-LogMailboxesProcessing "END - Detailed processing of mailboxes."

@@ -70,6 +70,17 @@ coverage, sizes/quotas/archives/dates, FullAccess and SendAs, CSV receipts and
 session cleanup. A passing offline suite is not deployment or live collection
 proof. Do not change the Calendar or Infrastructure collectors as part of this lot.
 
+Since 1.78, `-IncludeADPermission` reads SendAs from the mailbox object DACL
+(`nTSecurityDescriptor`, explicit ACEs, extended rights named like `*Send*`)
+with the ActiveDirectory module instead of `Get-ADPermission`, which returned
+and resolved every ACE (about 900 per object in some domains). The filters and
+output are unchanged; `Get-ADPermission` remains the per-mailbox fallback and
+each fallback is logged as a warning. `Tests/Test-SmartM365-Exchange-SendAsAclEquivalence.ps1`
+is the read-only server qualification comparing both methods mailbox by mailbox;
+`SmartM365/Tests/Test-SmartM365ExchangeSendAsAclOffline.ps1` is the offline check.
+The mailbox loop also writes a progress line to the main log every 100 mailboxes
+or 10 minutes.
+
 SharePoint upload is inherited from the tenant/global configuration by default. If `SmartM365-Exchange-Local-Mailboxes-Inventory.local.json` already exists on an Exchange server from an older template, make sure it contains:
 
 ```json
