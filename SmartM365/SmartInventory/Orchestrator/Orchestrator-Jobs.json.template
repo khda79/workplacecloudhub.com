@@ -1632,7 +1632,7 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "21:00"
+          "18:15"
         ],
         "DaysOfWeek": [],
         "MissedRunPolicy": "RunOnce"

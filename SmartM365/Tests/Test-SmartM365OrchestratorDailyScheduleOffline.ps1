@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validate the single daily inventory cycle and weekly exceptions offline.
 .VERSION
-1.2.14
+1.2.15
 .NOTES
 Reads the repository template and an optional additional local manifest.
 No tenant initialization, collectors, scheduling, authentication or publication.
@@ -53,7 +53,7 @@ $daily = @{
         'M365-TeamsPhonePstnUsage-Inventory' = '05:15'
         'Intune-EndpointAnalytics-Inventory' = '02:45'
         # Evening run read by the next 07:45 preparation; serialized with it by a shared ConcurrencyKey.
-        'Intune-DiscoveredApps-Inventory' = '21:00'
+        'Intune-DiscoveredApps-Inventory' = '18:15'
         'EXO-QuarantineMessages-Report' = '08:15'
         'M365-SecureScore-Inventory' = '02:00'
         'M365-AuthenticationMethodsRegistration-Inventory' = '02:10'
