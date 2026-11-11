@@ -1625,18 +1625,16 @@
       "Group": "Intune",
       "DependsOn": [],
       "AllowedServers": [],
-      "TimeoutMinutes": 8640,
+      "TimeoutMinutes": 1380,
       "MaxRetries": 1,
       "RetryDelaySeconds": 600,
       "ContinueOnError": true,
       "Schedule": {
-        "Type": "Weekly",
+        "Type": "Daily",
         "Times": [
-          "20:00"
+          "10:00"
         ],
-        "DaysOfWeek": [
-          "Saturday"
-        ],
+        "DaysOfWeek": [],
         "MissedRunPolicy": "RunOnce"
       },
       "AssignmentMode": "Elected",
@@ -1648,7 +1646,7 @@
         "DeviceManagementApps.Read.All",
         "DeviceManagementManagedDevices.Read.All"
       ],
-      "EstimatedDurationMinutes": 1500
+      "EstimatedDurationMinutes": 30
     },
     {
       "Name": "M365-Teams-Inventory",

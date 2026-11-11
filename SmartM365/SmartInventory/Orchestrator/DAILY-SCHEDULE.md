@@ -52,6 +52,7 @@ editing the template.
 | Intune-EnrollmentFailures-Inventory | Daily 05:30 |
 | M365-SyncHealth-Inventory | Daily 00:20, 02:20, 04:20, 06:20, 08:20, 10:20, 12:20, 14:20, 16:20, 18:20, 20:20, 22:20 |
 | EXO-MigrationJobs-Inventory | Daily 06:00, 12:00, 18:00 |
+| Intune-DiscoveredApps-Inventory | Daily 10:00, after preparation |
 
 The five central identity, device and license producers have one overnight
 collection, with no afternoon repeat. Readiness runs once at 07:00 and unified
@@ -86,7 +87,6 @@ do not trigger full identity/device/license recollection.
 | EXO-Mailboxes-Inventory | Saturday 06:00, after the same Saturday's Fast |
 | EXO-Mailboxes-CalendarPermissions | Tuesday, Thursday 20:00 |
 | Exchange2016-Mailboxes-CalendarPermissions | Monday, Wednesday, Friday 04:00 |
-| Intune-DiscoveredApps-Inventory | Saturday 20:00 |
 | Exchange2016-FreeBusy-Check | Sunday 05:00, Exchange hybrid free/busy check with CSS-Exchange Free/Busy Checker (same concurrency key as the other Exchange on-premises jobs) |
 
 Daily EXO Fast refreshes unrestricted mailbox details without live statistics.
@@ -141,8 +141,11 @@ new dependencies to the shared jobs file explicitly.
 
 Workplace retains the former CMDB producer dependencies. Its scheduler completion-age gate
 uses `DependencyMaxAgeHours = 48` as a floor: each dependency accepts the larger of
-48 hours and its automatic age (longest schedule gap plus 2 hours), so weekly Apps
-are accepted up to about 170 hours. The former 240-hour CMDB gate was not carried
+48 hours and its automatic age (longest schedule gap plus 2 hours). Since DiscoveredApps
+runs daily (AppInvRawData relation source), its last success is therefore accepted for
+48 hours instead of about 170 hours for the former weekly run. It runs at 10:00, after
+preparation, so a running Apps collection (including a full Graph fallback) never holds
+the 07:45 preparation; preparation reads the previous day's 10:00 relations. The former 240-hour CMDB gate was not carried
 over. The preparation contract independently enforces acquisition limits: core
 sources 48 hours; DiscoveredApps warning after 168 hours and maximum 240 hours.
 Preparation does not renew acquisition dates or silently fall back to unrelated
@@ -197,7 +200,7 @@ In particular, AD's observed duration does not imply error-free domain coverage.
 | Intune-Configurations-Inventory | 30 |
 | Intune-ManagedApps-Inventory | 60 |
 | Intune-EnrollmentFailures-Inventory | 10 |
-| Intune-DiscoveredApps-Inventory | 1500 |
+| Intune-DiscoveredApps-Inventory | 30 |
 | EXO-Mailboxes-Inventory-Fast | 90 |
 | EXO-Mailboxes-Inventory | 1200 |
 | EXO-Mailboxes-Permissions | 150 |

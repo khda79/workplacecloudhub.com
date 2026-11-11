@@ -36,7 +36,7 @@
   "DeviceDetailCacheMaxAgeDays": 7,
   "TopAppsByDeviceCount": 500,
   "ProgressEveryApps": 250,
-  "RelationSource": "Graph",
+  "RelationSource": "Export",
   "RelationExportVerifyRandomApps": 50,
   "RelationExportVerifyTopApps": 10,
   "RelationExportVerifyMismatchApps": 20,

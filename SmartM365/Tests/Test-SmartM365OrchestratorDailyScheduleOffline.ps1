@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validate the single daily inventory cycle and weekly exceptions offline.
 .VERSION
-1.2.12
+1.2.13
 .NOTES
 Reads the repository template and an optional additional local manifest.
 No tenant initialization, collectors, scheduling, authentication or publication.
@@ -52,6 +52,8 @@ $daily = @{
         'M365-CopilotUsage-Inventory' = '05:00'
         'M365-TeamsPhonePstnUsage-Inventory' = '05:15'
         'Intune-EndpointAnalytics-Inventory' = '02:45'
+        # After WorkplaceEvidence-Prepare (07:45): a long Graph fallback run can never hold preparation.
+        'Intune-DiscoveredApps-Inventory' = '10:00'
         'EXO-QuarantineMessages-Report' = '08:15'
         'M365-SecureScore-Inventory' = '02:00'
         'M365-AuthenticationMethodsRegistration-Inventory' = '02:10'
@@ -72,7 +74,6 @@ $weekly = @{
         'EXO-Mailboxes-Inventory' = 'Saturday|06:00'
         'EXO-Mailboxes-CalendarPermissions' = 'Tuesday,Thursday|20:00'
         'Exchange2016-Mailboxes-CalendarPermissions' = 'Monday,Wednesday,Friday|04:00'
-        'Intune-DiscoveredApps-Inventory' = 'Saturday|20:00'
         'Exchange2016-FreeBusy-Check' = 'Sunday|05:00'
         'Maintenance-ServerDataCleanup' = 'Sunday|06:00'
 }
@@ -88,7 +89,7 @@ $estimates = @{
         'Intune-Configurations-Inventory' = 30
         'Intune-ManagedApps-Inventory' = 60
         'Intune-EnrollmentFailures-Inventory' = 10
-        'Intune-DiscoveredApps-Inventory' = 1500
+        'Intune-DiscoveredApps-Inventory' = 30
         'EXO-Mailboxes-Inventory-Fast' = 90
         'EXO-Mailboxes-Inventory' = 1200
         'EXO-Mailboxes-Permissions' = 150
@@ -192,7 +193,7 @@ foreach ($path in $paths) {
     }
     Assert-True (@($prepare.DependsOn | Sort-Object -Unique).Count -eq @($prepare.DependsOn).Count) 'Workplace preparation lists a dependency twice.'
     $apps = @($document.Jobs | Where-Object Name -eq 'Intune-DiscoveredApps-Inventory')[0]
-    Assert-True ([string]$apps.Arguments -ceq '-DeviceDetailMode All -FreshDeviceDetails') 'Weekly application acquisition is no longer complete and fresh.'
+    Assert-True ([string]$apps.Arguments -ceq '-DeviceDetailMode All -FreshDeviceDetails') 'Daily application acquisition is no longer complete and fresh.'
     $full = @($document.Jobs | Where-Object Name -eq 'EXO-Mailboxes-Inventory')[0]
     $fast = @($document.Jobs | Where-Object Name -eq 'EXO-Mailboxes-Inventory-Fast')[0]
     Assert-True ($full.ConcurrencyKey -eq 'EXOMailboxes' -and $fast.ConcurrencyKey -eq $full.ConcurrencyKey) 'Concurrent full and fast EXO acquisition can launch.'
