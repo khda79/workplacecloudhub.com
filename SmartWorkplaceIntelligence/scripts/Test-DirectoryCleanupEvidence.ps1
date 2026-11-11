@@ -1,4 +1,4 @@
-# Version 1.2.0: shared mailbox conversion evidence; 1.1.0: Persona Basis and Account Type Source; 1.0.0: directory cleanup decisions, boundaries, matching, holds, scope and source qualification.
+# Version 1.2.1: missing shared conversion protocol, hold and archive evidence; 1.2.0: shared mailbox conversion evidence; 1.1.0: Persona Basis and Account Type Source; 1.0.0: directory cleanup decisions, boundaries, matching, holds, scope and source qualification.
 [CmdletBinding()]
 param([string]$TestRoot = (Join-Path ([IO.Path]::GetTempPath()) 'SmartM365-OfflineTests'))
 # Synthetic local files only. No collectors, tenant calls, production data or uploads.
@@ -100,7 +100,7 @@ function New-EntraUser([int]$N, [hashtable]$Values = @{}) {
 function New-Exo([int]$Mailbox, [int]$Owner, [hashtable]$Values = @{}) {
     $row = [ordered]@{MailboxGuid = (Guid (5000 + $Mailbox)); RecipientTypeDetails = 'UserMailbox'; UserPrincipalName = "user$Owner@contoso.example"; PrimarySmtpAddress = "mbx$Mailbox@contoso.example"
         ExternalDirectoryObjectId = (Guid (1000 + $Owner)); OnPremisesImmutableId = "imm$Owner=="; LitigationHoldEnabled = 'False'; RetentionHoldEnabled = 'False'; LastUserActionTimeIso8601 = ''; LastLogonTimeIso8601 = (Iso $old)
-        WhenMailboxCreatedIso8601 = $created}
+        WhenMailboxCreatedIso8601 = $created; ArchiveStatus = 'None'}
     foreach ($k in $Values.Keys) { $row[$k] = $Values[$k] }
     [pscustomobject]$row
 }
@@ -249,10 +249,10 @@ Check ($u.user10.'Cleanup State' -eq 'Review' -and $u.user10.'Decision Reason' -
 
     # 1b. Shared mailbox conversion: the owner sign-in decides; mailbox logons never do.
     $s1 = $now.AddDays(-120)
-    $sharedAd = @(foreach ($n in @(30..42) + @(50, 51)) { New-AdUser $n @{Enabled = $(if ($n -in 32, 40, 50, 51) { 'True' } else { 'False' }); HasMailbox = 'True'} })
+    $sharedAd = @(foreach ($n in @(30..47) + @(50, 51)) { New-AdUser $n @{Enabled = $(if ($n -in 32, 40, 50, 51) { 'True' } else { 'False' }); HasMailbox = 'True'} })
     Write-Csv (Join-Path $last 'AD_Users_AllDomains.csv') $sharedAd
     Write-Csv (Join-Path $last 'M365_Users_Active.csv') @(
-        foreach ($n in 31, 33, 34, 35, 36, 38, 39, 41) { New-EntraUser $n @{AccountEnabled = 'False'} }
+        foreach ($n in 31, 33, 34, 35, 36, 38, 39, 41, 43, 44, 45, 46, 47) { New-EntraUser $n @{AccountEnabled = 'False'} }
         New-EntraUser 32 @{LastSignInDateTimeIso8601 = (Iso $recent); LastSuccessfulSignInDateTimeIso8601 = (Iso $recent)}
         New-EntraUser 37 @{AccountEnabled = 'False'; LastSignInDateTimeIso8601 = ''; LastSuccessfulSignInDateTimeIso8601 = ''; LastNonInteractiveSignInDateTimeIso8601 = (Iso $s1)}
         New-EntraUser 40 @{LastSignInDateTimeIso8601 = ''; LastSuccessfulSignInDateTimeIso8601 = ''}
@@ -273,6 +273,11 @@ Check ($u.user10.'Cleanup State' -eq 'Review' -and $u.user10.'Decision Reason' -
         New-Exo 40 40 @{FullAccess = $fa; TotalItemSizeGB = '1'}                                                                       # owner enabled, never signed in
         New-Exo 41 41 @{FullAccess = 'MBX50@contoso.example'; TotalItemSizeGB = ''; ArchiveStatus = 'None'}                           # SMTP delegate, size unknown
         New-Exo 42 42 @{FullAccess = $fa; TotalItemSizeGB = '1'}                                                                       # no Entra object
+        New-Exo 43 43 @{FullAccess = $fa; TotalItemSizeGB = '1'}                                                                       # no usage row
+        New-Exo 44 44 @{FullAccess = $fa; TotalItemSizeGB = '1'; LitigationHoldEnabled = ''}                                           # unknown hold
+        New-Exo 45 45 @{FullAccess = $fa; TotalItemSizeGB = '1'; ArchiveStatus = ''}                                                  # unknown archive
+        New-Exo 46 46 @{FullAccess = $fa; TotalItemSizeGB = '1'}                                                                       # qualified, no license
+        New-Exo 47 47 @{FullAccess = $fa; TotalItemSizeGB = '1'}                                                                       # unknown protocol flag
         New-Exo 50 50 @{TotalItemSizeGB = '1'}
         New-Exo 60 50 @{RecipientTypeDetails = 'SharedMailbox'; FullAccess = $fa}
     )
@@ -281,17 +286,19 @@ Check ($u.user10.'Cleanup State' -eq 'Review' -and $u.user10.'Decision Reason' -
     )
     Write-Csv (Join-Path $last 'M365_Email_AppUsage.csv') @(
         [pscustomobject]@{'User Principal Name' = 'user39@contoso.example'; 'Is Deleted' = 'False'; 'POP3 App' = 'Yes'; 'IMAP4 App' = ''; 'SMTP App' = ''; 'Report Refresh Date' = (Day $now.AddDays(-3))}
-        [pscustomobject]@{'User Principal Name' = 'user31@contoso.example'; 'Is Deleted' = 'False'; 'POP3 App' = ''; 'IMAP4 App' = ''; 'SMTP App' = 'Undetermined'; 'Report Refresh Date' = (Day $now.AddDays(-3))}
+        [pscustomobject]@{'User Principal Name' = 'user31@contoso.example'; 'Is Deleted' = 'False'; 'POP3 App' = 'No'; 'IMAP4 App' = 'No'; 'SMTP App' = 'No'; 'Report Refresh Date' = (Day $now.AddDays(-3))}
+        [pscustomobject]@{'User Principal Name' = 'user47@contoso.example'; 'Is Deleted' = 'False'; 'POP3 App' = 'No'; 'IMAP4 App' = 'No'; 'SMTP App' = 'Undetermined'; 'Report Refresh Date' = (Day $now.AddDays(-3))}
+        foreach ($n in 44,45,46) { [pscustomobject]@{'User Principal Name' = "user$n@contoso.example"; 'Is Deleted' = 'False'; 'POP3 App' = 'No'; 'IMAP4 App' = 'No'; 'SMTP App' = 'No'; 'Report Refresh Date' = (Day $now.AddDays(-3))} }
     )
     Write-Receipts
     $sharedRun = Invoke-Cleanup
     Test-Outputs
     $x = @{}; foreach ($r in $sharedRun.Shared) { $x[$r.'Primary SMTP Address'] = $r }
-    Check ($sharedRun.Shared.Count -eq 13 -and -not $x.ContainsKey('mbx60@contoso.example')) 'Shared conversion covers EXO user mailboxes only'
+    Check ($sharedRun.Shared.Count -eq 18 -and -not $x.ContainsKey('mbx60@contoso.example')) 'Shared conversion covers EXO user mailboxes only'
     $a = $x['mbx31@contoso.example']
     Check ($a.'Conversion State' -eq 'Strong candidate' -and $a.'Delegate Count' -eq '1' -and $a.'Active Delegate Count' -eq '1' -and $a.'Owner Account State' -eq 'Disabled') 'Disabled owner without sign-in, active delegate and small mailbox must be a strong candidate'
     Check ($a.'Secondary Reasons' -match 'Recent EXO last logon from delegates' -and $a.'EXO Last Logon Quality' -eq 'Qualified') 'A recent EXO last logon must stay informational'
-    Check ($a.'Owner Licenses' -eq 'FLOW_FREE; SPE_F1' -and $a.'Owner License Count' -eq '2' -and $a.'Direct Protocol Use' -eq 'None reported') 'Licenses must be distinct per owner; Undetermined is not protocol use'
+    Check ($a.'Owner Licenses' -eq 'FLOW_FREE; SPE_F1' -and $a.'Owner License Count' -eq '2' -and $a.'Direct Protocol Use' -eq 'None reported') 'Licenses must be distinct per owner; qualified negative protocol flags remain negative'
     Check ($x['mbx32@contoso.example'].'Conversion State' -eq 'Not candidate' -and $x['mbx32@contoso.example'].'Decision Reason' -match 'Owner signed in within 90 days') 'An owner sign-in within 90 days must make the mailbox Not candidate'
     Check ($x['mbx33@contoso.example'].'Conversion State' -eq 'Not candidate' -and $x['mbx33@contoso.example'].'Delegate Count' -eq '0') 'The owner own address is not a delegate'
     Check ($x['mbx34@contoso.example'].'Conversion State' -eq 'Review' -and $x['mbx34@contoso.example'].'Decision Reason' -eq 'Mailbox above 50 GB' -and $x['mbx34@contoso.example'].'Unresolved Delegate Count' -eq '1' -and $x['mbx34@contoso.example'].'Delegate Count' -eq '2') 'Large mailbox must be Review; display-name delegates stay unresolved'
@@ -303,8 +310,13 @@ Check ($u.user10.'Cleanup State' -eq 'Review' -and $u.user10.'Decision Reason' -
     Check ($x['mbx40@contoso.example'].'Decision Reason' -eq 'Owner account enabled' -and $x['mbx40@contoso.example'].'Owner Last Sign-In Quality' -eq 'No sign-in recorded') 'An enabled owner never makes a strong candidate'
     Check ($x['mbx41@contoso.example'].'Resolved Delegate Count' -eq '1' -and $x['mbx41@contoso.example'].'Decision Reason' -eq 'Mailbox size unknown') 'SMTP delegate must resolve through the EXO mailbox; unknown size is Review'
     Check ($x['mbx42@contoso.example'].'Conversion State' -eq 'Review' -and $x['mbx42@contoso.example'].'Decision Reason' -eq 'Owner Entra match: Not found') 'Owner without Entra object must be Review'
-    Check ([int]$a.'State Sort' -eq 1 -and $a.'Shared Conversion Key' -like "$tenant|shared-conversion|*" -and @($sharedRun.Shared.'Shared Conversion Key' | Sort-Object -Unique).Count -eq 13) 'Shared conversion keys and sort order'
-    Check (@($sharedRun.Sources | Where-Object Source -like 'Shared mailbox conversion*').Rows -eq '13' -and @($sharedRun.Sources | Where-Object File -eq 'M365_Licenses_Users.csv').Status -eq 'Observed') 'Shared conversion qualification must be published'
+    Check ($x['mbx43@contoso.example'].'Conversion State' -eq 'Review' -and $x['mbx43@contoso.example'].'Decision Reason' -eq 'Email app usage: No report row' -and $x['mbx43@contoso.example'].'Direct Protocol Use' -eq '') 'Missing usage row must remain unknown and Review'
+    Check ($x['mbx44@contoso.example'].'Conversion State' -eq 'Review' -and $x['mbx44@contoso.example'].'Decision Reason' -eq 'Mailbox hold unknown' -and $x['mbx44@contoso.example'].'Hold State' -eq 'Unknown') 'Missing hold must remain unknown and Review'
+    Check ($x['mbx45@contoso.example'].'Conversion State' -eq 'Review' -and $x['mbx45@contoso.example'].'Decision Reason' -eq 'Archive mailbox status unknown' -and $x['mbx45@contoso.example'].'Archive State' -eq 'Unknown') 'Missing archive must remain unknown and Review'
+    Check ($x['mbx46@contoso.example'].'Conversion State' -eq 'Strong candidate' -and $x['mbx46@contoso.example'].'Owner License Count' -eq '0') 'Qualified evidence and observed zero licenses remain distinct from unknown'
+    Check ($x['mbx47@contoso.example'].'Conversion State' -eq 'Review' -and $x['mbx47@contoso.example'].'Decision Reason' -eq 'Email app usage: Unknown protocol flags' -and $x['mbx47@contoso.example'].'Direct Protocol Use' -eq '') 'Undetermined protocol flags must remain unknown and Review'
+    Check ([int]$a.'State Sort' -eq 1 -and $a.'Shared Conversion Key' -like "$tenant|shared-conversion|*" -and @($sharedRun.Shared.'Shared Conversion Key' | Sort-Object -Unique).Count -eq 18) 'Shared conversion keys and sort order'
+    Check (@($sharedRun.Sources | Where-Object Source -like 'Shared mailbox conversion*').Rows -eq '18' -and @($sharedRun.Sources | Where-Object File -eq 'M365_Licenses_Users.csv').Status -eq 'Observed') 'Shared conversion qualification must be published'
 
     # 2. Leap-day boundaries: the one-year limit of 29 February is 28 February.
     $leap = [datetimeoffset]::new(2028, 2, 29, 12, 0, 0, [TimeSpan]::Zero)
@@ -348,8 +360,8 @@ Check ($u.user10.'Cleanup State' -eq 'Review' -and $u.user10.'Decision Reason' -
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD6rsG96RJF5j4f
-# eg6uPiUTpSTM1J4k7tFAHJ3jcCqKnKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB0vkJTobp6IxH1
+# GUnFVsQd9j+uoYQgRddJn+jTvVPjYaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -482,31 +494,31 @@ Check ($u.user10.'Cleanup State' -eq 'Review' -and $u.user10.'Decision Reason' -
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOEJ3yuS7YGiyNNztcB/Pdg1OpMizaE0PBz4zStPoJ42MA0GCSqG
-# SIb3DQEBAQUABIIBgCamtGigPhVUsCFcCUYg7QX+ElBM1hUI/FPr1BifjOcXSTgE
-# IFkT2XpzYAcM0D1c71t6/wQuiNFk3qbKnGUQJFHD+9NpFRGndO4f4aBA8TRQaWYJ
-# BMhBKEZgNyb+szAUBA/lq8qX+46ncTNTknPnFYZVs9NKa+PO2v4rO0GSbPPD5RIF
-# v7i3xVekhX588caZU/DJsrBQzuROsIESkfTBPn/q9MBK7754EVC7IegcU5I2qMNA
-# VON1jrWIks3TdE1CjL0t5FL3enrOyaD04DvsF1vxjx+8d59sHidm09Qv+v6kGJtn
-# P/p3yEV3XMaL2DS0Kh/209irykRH94RE/2oY/yKYxwCixOBief4XOj6tUZgP9S8n
-# Tlq+g+HzBaPOtccwC8AIUD/8YORaYLFh2oO76V9uH72WLqheBmqsFA4u1PfXT0CU
-# y/s/1NutrtS2MXq+OMC7dlKNyDQVflAcxMld+9r1KhqWeJsIWzi3gbf31FBXNyoA
-# zTNwR6KauFbH27KfZ6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIK7KuXl6ZHTMsiydlvf3jqmzl0KDSNl26EVpipnezP+kMA0GCSqG
+# SIb3DQEBAQUABIIBgDgwlIO9qfmPCpnglCFHb1rRUxI86qTuVYV56ATQDsIRhjsi
+# WCoMF80jQ1Zpc0ZH1aJLJXqEqa28i5bu9fuRTs+3M+2oXhSDMQyU/38o0zgM2Zq0
+# L9es+QHRBKmdeZhLtC9NLfxIT1aeU/1pM7owYAUTQUHmPrtiM2JpUok9LVcrcwOM
+# G8N6/xevzGQLAZnuoVYy2P21wY2oAJt0yM8pLS2/7EDNhGxG5EcDrwQPzmL0aD4k
+# N/sLjGTeIw7fH/ne65NmFb4YCcBZSaUvkLUuJOeLbnD5cBHBYxkFls+yl49rgoBU
+# aGiuW6tUsIoSi4LAI1qN+AxrSwnifBgBKjWaPBGH2YxiyPhjRUsUU4qYvBNMLAOM
+# kAleuYCVa5y0kk3C+IwPSnpY7C9RfOC56er4/nEsVfL0sTuhUoYsSzFNJRm/lGlp
+# 8p099kkCSBic/MzacpuHeqiF+kBQFRsLCKGwuJxJrYsN/LRLzBWv/oCMRWQXtcQJ
+# A700t+MDhu8zrsImCqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTAxNTI4
-# MjBaMC8GCSqGSIb3DQEJBDEiBCAtA6ArEAOjoxr2CxX2nM+CEL1V9RPtqiFr5P4w
-# HoLOxTANBgkqhkiG9w0BAQEFAASCAgAUzh3frUeRvLcG33AZ6VzYRjFTztxz5DlC
-# elennL48z4Vb1usM0PB/E6g0HALXq4Bs7XnxbZ5OdDezHVWJCJ7pZO1ZzNE1tpBF
-# YVL0YqnHPsqN/rxWnv7F7yKTv1UvQ/5bDuv0AkTod0HKkamuB+cP4o7XRG/mdRlC
-# GBWdkLMHfGt+cWpA8q1HP5nttVrzvB1NkV1XNLGwA9pIVi7FVbs9ePEknxxI8nyH
-# i7iOmze6AheQgdndHSHuZoS7lzEdM2FCVpyeGibdnxnPXO7IO2OYsBxaXLvJLL6B
-# I9sI5z+l6L7vC/JMWMyZ0aM3V7de1KCvzb6Hey8Mac9IfRBeKF0yvfkxffXnelMO
-# z6YfGQuvqj+i8ZgDjkrWv0JQXI6rz/HestBVFbtOspIUSrhjsfWLx/SPZ9udr9WI
-# ZgVnqZzOvHzEd5BOCXNAqHO65HrDwEWB2s079d9z9rCjheiluVq88selMcR1kjgl
-# eHXF1y7F5IVbkgL/+eVjJaLmXEbyIjVkU7L86RugX0V7FTj6rvjRQib0XNtKinv1
-# t7Pc18Qa5TkilNVusUV+2bfyvMFXTIl2oTjCDUNnhhUJQhpRDB59GMjuMuCeeZrg
-# Q1H/qo/3/N4gHkGnIX5EK38bH59K+/DGZkRs37SwRsNWhzINaOpfvuGiEtjFZWCC
-# +yjRpL/qRw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTExNTE3
+# MjhaMC8GCSqGSIb3DQEJBDEiBCCJQklusxdS42OJmqn2s+cTOOSWoQcSro/piTFx
+# kQ8I3jANBgkqhkiG9w0BAQEFAASCAgANF+WZLGANwx4Ty8BNuTrxWaDXkAK/Ipe/
+# 8dPR1cpof/wfqXjnAPdB7TTYjL2fTxOvdzmtHMgbWhBwdWdJmRGwt8/hvNVKhvAI
+# qmpd581KdwMOFlqci0UvvTgftJRk9SVPt0kiWZ+CQF+S0b288iHxqByX8SBlZCII
+# Xf+UPHW2ZY25ZmYnchrqBDbq7UKbjcKW72Yvk8VhYoITHl7ekL5WbDJ816qvrHBb
+# AP8q5nOgP/l1e1DNIc5hSZSRZGjZ80JN+QMSLIveWW79vAbVY46E4AarjzoVWrL6
+# EinNGff77FvvWQVe7ScuPWmjYehK/uf4ZmXFOQz66OfuTdl4W2zsdsNcasmEN3Vr
+# WpUZDbKAZm48au8EDLJY4WEktrvSSxgDtsKoNWZ+qaYc5uAM05pD6bKRQ6Hvx/EW
+# UU+OBUJn7WHrCkW2PE1OCM5gY2slTzAFnUEmZNp0yXkDUZ2J2Om1GJKskYrtgcC+
+# EAI4IMFxs2Y7+EwaXhTeDH6wN4HWnI6F8D6toJPZ3PX0pAb1Xie+nTx9K272tSC4
+# 9fx83HlpbspCrFtbuHCdBO9Y4VhFXjN+vOb51pXWh34LOQzRwTUKLQJfjPBB+PRS
+# 831Pt+x1DQ2l6B4ECZa8h16FhO/rFKBt/lvrVsOc7h345yXtBDeBVLS9dSmkwqPE
+# t9s/dTYciQ==
 # SIG # End signature block

@@ -1,4 +1,4 @@
-# Version 1.2.0: shared mailbox conversion evidence (EXO user mailboxes used only through delegates; the owner sign-in decides, never mailbox activity); 1.1.0: Persona Basis (User Inventory, else the AD inventory persona) and Account Type Source; 1.0.0: directory cleanup candidates for AD user accounts, AD workstation accounts and user mailboxes.
+# Version 1.2.1: keep missing protocol, hold and archive evidence in Review; 1.2.0: shared mailbox conversion evidence (EXO user mailboxes used only through delegates; the owner sign-in decides, never mailbox activity); 1.1.0: Persona Basis (User Inventory, else the AD inventory persona) and Account Type Source; 1.0.0: directory cleanup candidates for AD user accounts, AD workstation accounts and user mailboxes.
 # Read-only evidence: an object is a candidate only when none of its qualified activity signals
 # (AD, Entra, Exchange, Intune, Microsoft 365 usage, console) is more recent than one year and
 # every applicable source is qualified. Weak matches, missing or stale sources, unknown holds and
@@ -712,7 +712,12 @@ foreach ($guid in @($sharedGroups.Keys | Sort-Object)) {
     $sizeText = $Fast::F($exo, 'TotalItemSizeGB') -replace ',', '.'; $size = 0.0
     $sizeKnown = [double]::TryParse($sizeText, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$size)
     $archive = $Fast::F($exo, 'ArchiveStatus'); $archiveActive = $archive -ieq 'Active'
-    $hold = ($Fast::BF($exo, 'LitigationHoldEnabled')) -or ($Fast::BF($exo, 'RetentionHoldEnabled'))
+    $archiveKnown = $archive -in @('Active', 'None')
+    $litigation = $Fast::KF($exo, 'LitigationHoldEnabled'); $retention = $Fast::KF($exo, 'RetentionHoldEnabled')
+    $litigationKnown = $litigation -in @('true', 'false', '1', '0', 'yes', 'no')
+    $retentionKnown = $retention -in @('true', 'false', '1', '0', 'yes', 'no')
+    $hold = ($Fast::B($litigation)) -or ($Fast::B($retention))
+    $holdKnown = $litigationKnown -and $retentionKnown
     $accountType = if ($null -ne $ad) { $Fast::F($ad, 'AccountType') } else { '' }
     $population = if ($null -ne $ad) { Get-Population $accountType } else { 'Review required' }
     $class = Get-Classification $entraRow; $inv = $class.Row
@@ -723,7 +728,8 @@ foreach ($guid in @($sharedGroups.Keys | Sort-Object)) {
     $apps = Get-ReportMatch $emailAppsByUpn 'EmailApps' $entraRow $owner.EntraStatus
     $protocols = @(foreach ($p in @(@('POP3 App', 'POP3'), @('IMAP4 App', 'IMAP4'), @('SMTP App', 'SMTP'))) { if (($Fast::KF($apps.Row, $p[0])) -in @('yes', 'true', '1')) { $p[1] } })
     $protocolQuality = if (-not (Test-Ready 'EmailApps')) { $sources.EmailApps.Status } else { $apps.Match }
-    $protocolText = if ($protocols.Count) { $protocols -join '; ' } elseif ($protocolQuality -in @('Qualified', 'No report row')) { 'None reported' } else { '' }
+    if ($protocolQuality -eq 'Qualified' -and @(@('POP3 App', 'IMAP4 App', 'SMTP App') | Where-Object { ($Fast::KF($apps.Row, $_)) -notin @('yes', 'true', '1', 'no', 'false', '0') }).Count -gt 0) { $protocolQuality = 'Unknown protocol flags' }
+    $protocolText = if ($protocols.Count) { $protocols -join '; ' } elseif ($protocolQuality -eq 'Qualified') { 'None reported' } else { '' }
 
     $skus = @(foreach ($l in $Fast::List($licensesByUserId, $Fast::KF($entraRow, 'Object Id'))) { $Fast::F($l, 'SkuPartNumber') }) | Where-Object { $_ } | Sort-Object -Unique
     $exoLogon = $Fast::NewSignal('EXO Last Logon', $Fast::F($exo, 'LastLogonTimeIso8601'), $sources.Exo.Status, 'Qualified', $R)
@@ -740,10 +746,10 @@ foreach ($guid in @($sharedGroups.Keys | Sort-Object)) {
         elseif ($resolved -eq 0) { $unmet.Add('Delegates not resolved to an Entra account') }
         elseif ($activeDelegates -eq 0) { $unmet.Add("No delegate signed in within $OwnerActiveDays days") }
         if (-not $sizeKnown) { $unmet.Add('Mailbox size unknown') } elseif ($size -gt $SharedMailboxFreeSizeGB) { $unmet.Add("Mailbox above $SharedMailboxFreeSizeGB GB") }
-        if ($hold) { $unmet.Add('Mailbox hold') }
-        if ($archiveActive) { $unmet.Add('Archive mailbox active') }
+        if ($hold) { $unmet.Add('Mailbox hold') } elseif (-not $holdKnown) { $unmet.Add('Mailbox hold unknown') }
+        if ($archiveActive) { $unmet.Add('Archive mailbox active') } elseif (-not $archiveKnown) { $unmet.Add('Archive mailbox status unknown') }
         if ($protocols.Count) { $unmet.Add('Direct protocol use: ' + ($protocols -join ', ')) }
-        elseif ($protocolQuality -notin @('Qualified', 'No report row')) { $unmet.Add("Email app usage: $protocolQuality") }
+        elseif ($protocolQuality -ne 'Qualified') { $unmet.Add("Email app usage: $protocolQuality") }
         if ($population -eq 'Non-human') { $unmet.Add('Non-human account population') }
         if ($unmet.Count) { $state = 'Review'; $reason = $unmet[0]; for ($i = 1; $i -lt $unmet.Count; $i++) { $secondary.Add($unmet[$i]) } }
         else { $state = 'Strong candidate'; $reason = $(if ($null -eq $ownerLatest) { 'Owner disabled, no sign-in recorded, delegates active' } else { "Owner disabled, no sign-in for over $OwnerInactiveDays days, delegates active" }) }
@@ -763,7 +769,7 @@ foreach ($guid in @($sharedGroups.Keys | Sort-Object)) {
         'Country Basis' = $(if ($null -ne $inv) { 'User Inventory Evidence' } elseif ($country) { 'AD attribute' } else { 'Unknown' })
         'Account Type' = $(if ($accountType) { $accountType } elseif ($null -ne $ad) { 'Unclassified Account' } else { 'Unknown' }); 'Account Population' = $population; 'Workforce Persona' = $persona.Persona
         'Mailbox Size GB' = $(if ($sizeKnown) { $size.ToString('0.###', [Globalization.CultureInfo]::InvariantCulture) } else { '' }); 'Archive State' = $(if ($archive) { $archive } else { 'Unknown' })
-        'Litigation Hold' = $(if ($Fast::BF($exo, 'LitigationHoldEnabled')) { 'True' } else { 'False' }); 'Retention Hold' = $(if ($Fast::BF($exo, 'RetentionHoldEnabled')) { 'True' } else { 'False' }); 'Hold State' = $(if ($hold) { 'Hold' } else { 'No mailbox-level hold' })
+        'Litigation Hold' = $(if (-not $litigationKnown) { 'Unknown' } elseif ($Fast::B($litigation)) { 'True' } else { 'False' }); 'Retention Hold' = $(if (-not $retentionKnown) { 'Unknown' } elseif ($Fast::B($retention)) { 'True' } else { 'False' }); 'Hold State' = $(if ($hold) { 'Hold' } elseif (-not $holdKnown) { 'Unknown' } else { 'No mailbox-level hold' })
         'Delegate Count' = [string]$delegates.Count; 'FullAccess Delegate Count' = [string]$byRight.FullAccess; 'SendAs Delegate Count' = [string]$byRight.SendAs; 'SendOnBehalf Delegate Count' = [string]$byRight.GrantSendOnBehalfTo
         'Resolved Delegate Count' = [string]$resolved; 'Unresolved Delegate Count' = [string]$unresolved; 'Unresolved SID Delegate Count' = [string]$sidOnly; 'Active Delegate Count' = [string]$activeDelegates
         'Owner Last Sign-In' = ($Fast::Utc($(if ($null -ne $ownerLatest) { $ownerLatest.Utc } else { $null }))); 'Owner Last Sign-In Source' = $(if ($null -ne $ownerLatest) { $ownerLatest.Name } else { 'None' }); 'Owner Last Sign-In Quality' = $signIn.Quality
@@ -841,8 +847,8 @@ Write-Host ('Directory cleanup evidence: ' + ($summary -join '; ') + "; referenc
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD0GxWyydti+R13
-# HizggpioV24Sn+O/Jtmk41rs3oB3hKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDD4kIiPnOZcjvG
+# kkxejZcYu6T5f04+kFATf0jVg33xSaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -975,31 +981,31 @@ Write-Host ('Directory cleanup evidence: ' + ($summary -join '; ') + "; referenc
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIP4MTUg7PXpwRjmCCSM23hRAnSns+EypRVCIFFGb3DdjMA0GCSqG
-# SIb3DQEBAQUABIIBgF864acByE7hfo5GV67wdoATVLzPnvcopFK7BHbmykE3Ekcg
-# tSRiEP/jM/3YD889fMDDo4QK/BV+lRC/VjlSVJZo1HmjElTkfeCy7WMWPfLYPf0A
-# gFQbXX+Ya4e7AyjzaBJ78Bxt85hEd+chTZlVyiv52+VaAw/IGPRDK3wxvan1a+/H
-# KoJP8MBM7OLh/lzaQBOfOBNbIq7zdZSAhmOcZ34GZaXXNDjdVy5mnFL6gYe7am7y
-# ExGIW9wUut+T5TD26j7JujdrP230vW8WtD+6NcSzLmct0y0LggVc5rLY1HUqeLKv
-# R3IqRDRnNaLcnorGe5S0bP8BelVKOLks8hH6x3SCD0ifoFPT/+54hLTn302nU4xd
-# GfW9ncLyH7ePVJUxjk1reU1T+M9NBhpJW76a01bJNp+uqzUB9PVz0zzQoFIV5ILA
-# JFLYDAosrG9WUiuMU2wxP5ph67qbJD2JuiR8YlUl685/CniF2IrACJZcuigAg5Yv
-# WQsv47InyQDC9TzZuaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPnYfso8vQ+Y4+oYwWm4mUmUFiexp4Bkvy+gFdEPAkZHMA0GCSqG
+# SIb3DQEBAQUABIIBgFlayi5uweNjChRToldrTCaFx207rkz6gxJT7xqEN3QDFrnw
+# gv+kuq2BodrFSfq9WkW2voUI1ExQKAzRtlyl4KPu7OHvdz5CpUye18AnoMvh+d04
+# tmSCqZcPqj78XMG9IrTPlmtB3YNyMQn8W6zELExZAgx/Mlol18lIsue3o5LXSVxv
+# eJGYS4VI7wEMgukJt8fnpmANkfEN+FMt2EmTv+gJ1tzzRHljNyKx9anGDyQIbtrT
+# VG6enkeeIV70uNL+SpJHliPY89RzBhmATR2l6sayn05SnWS0uCkv38MzrFImTT6m
+# ZaUTkKGmLBvY+UFl183fmE3RKS0ReVJhHOnGzTqRDQDFT+6AJaPzy2kdIbaSA1OQ
+# x5ydi8ZajkJhdrXG0pBuSsUNjzomZqv2ZAU0lrTe6hq9skHFy3kxrpxPjS7eDghL
+# 1NSVZEs5erno2lhH/4F9DuOC2q4ABSqE1OSFk2L0AW9JzJRCXufAK/n2fhhXa/jc
+# yNr1AT6fozeJqNn4YqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTAxNTI4
-# MjBaMC8GCSqGSIb3DQEJBDEiBCDTyCd/ojufgZfO/gtwF3TT6B/UBDWc1kESm0oP
-# kKIYrTANBgkqhkiG9w0BAQEFAASCAgB/YZ/fbqoNzhhfU7UAMMalK2rfZvqvmmqz
-# 2KZz+Cqv3Je+sNivFJ1cNY+2Of8nyheFdN6Z/+p7ojnG7bG2VcXWRQuEWQbA0hBr
-# ZrnLXZ8kERg5BDSwXmoz5PgHbKZw9gs6ZDkK7Fq8/pTZrZZKVdcSyKG1DFlZ7fLe
-# Olid++FDst9Nln8pcRYRtoiTcFhqtTIikti6XvwtPnunuFCr90txL0DtAXAOKVlc
-# xTCTi/cCk60qpXvpSbIwCUCkLJmo6idKh0JgbAiwdJJ6JcP1b2s5raIz0wP/O+IC
-# 1ZMgGQbqiDZErKD56mwx2685o40fIXhdpz/AEoy4tipgly5v7N62u8vdSrDbWB5d
-# xvRw2714BykuPWKDC0bOX2v3UAqPRbIC6uYqH6l6HycZ5InDyAKYNKzhXwZ89voq
-# uXEWyMEsXMOLBHr3H2Ryf0lkhSb7Leoa0DWKbh2GpOQ6zQawB5pqOPE2UDcDo2u2
-# SmoS8B7tfNgBpEqT+9rnEEX+fU0BScBQEZ5jTaS7C8eH5gt6Lz/trNygFUIeEGBw
-# CBH+EElqKeXqRbTtf3NjvWhaGWWTgmQYg70Vkx+iLdMDR5yqgFKJW6Eb8b2qrVWD
-# oftTztyZ53j6EsNT7ngJi4L7y24Mzq63wwmhPax36QXacnIdeq+AGCRQ7/84pGev
-# dGRe65hAyQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTExNTE3
+# MjhaMC8GCSqGSIb3DQEJBDEiBCB6UyIHTQfxBwO+/QhfEIA7dwpuUdLjN7ic9QFz
+# lhT1mDANBgkqhkiG9w0BAQEFAASCAgAaDd8NvARwk516Cz/PQ7SZwBO+XfqYHCRq
+# cqMTy0MpNp3SiPsQVP4Tae++rMjkDBV13IvZpxVJWhAU1qzWiMqC+NvuITbRSmU/
+# tDJmpChb4i1urZJTo/Z8SEO2HXGkWoDkGrgYjhz0rr0DU0u790LIUr7IS3j8inpR
+# Pq4oxSOvQdyPsUGbkvXoDjRS5syrQBmg+GmKqXSLnVELwAlBkNXxuBPzNpnlqLsv
+# eSoNOFrOXg98HFvb49HZ4S9Hb+WIs+D45bxykpaCUFAz2uI05W+qDY/i8nSAGqRB
+# 5JABgFphiAj8Bs9MukJbfKol9CUhEd/HAVo8X5Kr6l8g89uWXLnzs+OouPfRYWKi
+# PE0bsmCnKpBZJr4bhpIBLe1uCA3ZwPa43+3VWZvjTaQr/jMQY0bxGQ+radxhViB2
+# 3FlGkELUPpLbwjN1dflCbAFQYsZD/7mEwk9H2ecGq8UtaSK9XabVC/dfUogWARfO
+# zo0IRiiDlEd25ZpNZvVncH/Pi43femowsiD9X1zIp7AYStgSjdQ4T4KTtx1uXPna
+# /jhGnEs8GjAgnEy+Bg+0dB+iSkAJ8czZ91/RukpEmvEUexy9wq9MYj0Bu3/rxSf3
+# 15iiWyi6DVRZ+vxRhT1DY/Ge5T2ApCN1aEyqtnNBY0e9mkiJr6oyCB/Uhhavs6Io
+# dCRcDDxz+w==
 # SIG # End signature block

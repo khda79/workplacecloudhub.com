@@ -4,7 +4,8 @@ table 'Mailbox Shared Conversion Evidence'
 
 	/// EXO user mailboxes assessed for conversion to a shared mailbox.
 	measure 'Shared Conversion Mailboxes' =
-			VAR _q = CALCULATE(COUNTROWS('Directory Cleanup Source Qualification'), REMOVEFILTERS('Directory Cleanup Source Qualification'))
+			VAR _batch = [Dataset Loaded Batch ID]
+			VAR _q = IF(NOT ISBLANK(_batch), CALCULATE(COUNTROWS('Directory Cleanup Source Qualification'), REMOVEFILTERS('Directory Cleanup Source Qualification'), 'Directory Cleanup Source Qualification'[Source] = "Shared mailbox conversion (EXO user mailboxes)", 'Directory Cleanup Source Qualification'[Status] = "Observed", 'Directory Cleanup Source Qualification'[Loaded Batch ID] = _batch))
 			RETURN IF(_q > 0, COALESCE(CALCULATE(COUNTROWS('Mailbox Shared Conversion Evidence')), 0), BLANK())
 		formatString: #,0
 		displayFolder: Shared Mailbox Conversion
@@ -12,7 +13,8 @@ table 'Mailbox Shared Conversion Evidence'
 
 	/// Owner disabled, no owner sign-in beyond the inactive threshold, an active delegate, free size, no hold, no archive, no direct protocol use.
 	measure 'Shared Conversion Strong Candidates' =
-			VAR _q = CALCULATE(COUNTROWS('Directory Cleanup Source Qualification'), REMOVEFILTERS('Directory Cleanup Source Qualification'))
+			VAR _batch = [Dataset Loaded Batch ID]
+			VAR _q = IF(NOT ISBLANK(_batch), CALCULATE(COUNTROWS('Directory Cleanup Source Qualification'), REMOVEFILTERS('Directory Cleanup Source Qualification'), 'Directory Cleanup Source Qualification'[Source] = "Shared mailbox conversion (EXO user mailboxes)", 'Directory Cleanup Source Qualification'[Status] = "Observed", 'Directory Cleanup Source Qualification'[Loaded Batch ID] = _batch))
 			RETURN IF(_q > 0, COALESCE(CALCULATE(COUNTROWS('Mailbox Shared Conversion Evidence'), KEEPFILTERS('Mailbox Shared Conversion Evidence'[Conversion State] = "Strong candidate")), 0), BLANK())
 		formatString: #,0
 		displayFolder: Shared Mailbox Conversion
@@ -20,7 +22,8 @@ table 'Mailbox Shared Conversion Evidence'
 
 	/// Delegated mailboxes whose owner has not signed in recently but at least one condition is unmet or unqualified.
 	measure 'Shared Conversion Review' =
-			VAR _q = CALCULATE(COUNTROWS('Directory Cleanup Source Qualification'), REMOVEFILTERS('Directory Cleanup Source Qualification'))
+			VAR _batch = [Dataset Loaded Batch ID]
+			VAR _q = IF(NOT ISBLANK(_batch), CALCULATE(COUNTROWS('Directory Cleanup Source Qualification'), REMOVEFILTERS('Directory Cleanup Source Qualification'), 'Directory Cleanup Source Qualification'[Source] = "Shared mailbox conversion (EXO user mailboxes)", 'Directory Cleanup Source Qualification'[Status] = "Observed", 'Directory Cleanup Source Qualification'[Loaded Batch ID] = _batch))
 			RETURN IF(_q > 0, COALESCE(CALCULATE(COUNTROWS('Mailbox Shared Conversion Evidence'), KEEPFILTERS('Mailbox Shared Conversion Evidence'[Conversion State] = "Review")), 0), BLANK())
 		formatString: #,0
 		displayFolder: Shared Mailbox Conversion
@@ -28,7 +31,8 @@ table 'Mailbox Shared Conversion Evidence'
 
 	/// No delegate, or the owner signed in within the active threshold.
 	measure 'Shared Conversion Not Candidate' =
-			VAR _q = CALCULATE(COUNTROWS('Directory Cleanup Source Qualification'), REMOVEFILTERS('Directory Cleanup Source Qualification'))
+			VAR _batch = [Dataset Loaded Batch ID]
+			VAR _q = IF(NOT ISBLANK(_batch), CALCULATE(COUNTROWS('Directory Cleanup Source Qualification'), REMOVEFILTERS('Directory Cleanup Source Qualification'), 'Directory Cleanup Source Qualification'[Source] = "Shared mailbox conversion (EXO user mailboxes)", 'Directory Cleanup Source Qualification'[Status] = "Observed", 'Directory Cleanup Source Qualification'[Loaded Batch ID] = _batch))
 			RETURN IF(_q > 0, COALESCE(CALCULATE(COUNTROWS('Mailbox Shared Conversion Evidence'), KEEPFILTERS('Mailbox Shared Conversion Evidence'[Conversion State] = "Not candidate")), 0), BLANK())
 		formatString: #,0
 		displayFolder: Shared Mailbox Conversion
@@ -36,8 +40,10 @@ table 'Mailbox Shared Conversion Evidence'
 
 	/// Strong candidates whose owner still holds at least one license; the license gain needs a human licensing review.
 	measure 'Shared Conversion Licensed Strong Candidates' =
-			VAR _q = CALCULATE(COUNTROWS('Directory Cleanup Source Qualification'), REMOVEFILTERS('Directory Cleanup Source Qualification'))
-			RETURN IF(_q > 0, COALESCE(CALCULATE(COUNTROWS('Mailbox Shared Conversion Evidence'), KEEPFILTERS('Mailbox Shared Conversion Evidence'[Conversion State] = "Strong candidate"), KEEPFILTERS('Mailbox Shared Conversion Evidence'[Owner License Count] > 0)), 0), BLANK())
+			VAR _batch = [Dataset Loaded Batch ID]
+			VAR _q = IF(NOT ISBLANK(_batch), CALCULATE(COUNTROWS('Directory Cleanup Source Qualification'), REMOVEFILTERS('Directory Cleanup Source Qualification'), 'Directory Cleanup Source Qualification'[Source] = "Shared mailbox conversion (EXO user mailboxes)", 'Directory Cleanup Source Qualification'[Status] = "Observed", 'Directory Cleanup Source Qualification'[Loaded Batch ID] = _batch))
+			VAR _licenses = IF(NOT ISBLANK(_batch), CALCULATE(COUNTROWS('Directory Cleanup Source Qualification'), REMOVEFILTERS('Directory Cleanup Source Qualification'), 'Directory Cleanup Source Qualification'[Source] = "Microsoft 365 licenses", 'Directory Cleanup Source Qualification'[Status] = "Observed", 'Directory Cleanup Source Qualification'[Loaded Batch ID] = _batch))
+			RETURN IF(_q > 0 && _licenses > 0, COALESCE(CALCULATE(COUNTROWS('Mailbox Shared Conversion Evidence'), KEEPFILTERS('Mailbox Shared Conversion Evidence'[Conversion State] = "Strong candidate"), KEEPFILTERS('Mailbox Shared Conversion Evidence'[Owner License Count] > 0)), 0), BLANK())
 		formatString: #,0
 		displayFolder: Shared Mailbox Conversion
 		lineageTag: 5039782f-81f8-5fac-bb05-42de8406f205
@@ -383,7 +389,10 @@ table 'Mailbox Shared Conversion Evidence'
 				 QualifiedCountry = Table.AddColumn(Dates, "__Qualified Country", each if [Country] = null or Text.Trim([Country]) = "" then "Unknown" else [Country], type text),
 				 CountryRemoved = Table.RemoveColumns(QualifiedCountry, {"Country"}),
 				 CountryRenamed = Table.RenameColumns(CountryRemoved, {{"__Qualified Country", "Country"}}),
-				 OwnerLicenses = Table.TransformColumns(CountryRenamed, {{"Owner Licenses", each if _ = null or Text.Trim(_) = "" then "No license" else _, type text}})
+				 LicenseLabel = Table.AddColumn(CountryRenamed, "__Owner Licenses", each if [License Source Status] = "Observed" then (if [Owner Licenses] <> null and Text.Trim([Owner Licenses]) <> "" then [Owner Licenses] else if [Owner License Count] = 0 then "No license" else "Unknown") else "Unknown", type text),
+				 WithoutOwnerLicenses = Table.RemoveColumns(LicenseLabel, {"Owner Licenses"}),
+				 RenamedOwnerLicenses = Table.RenameColumns(WithoutOwnerLicenses, {{"__Owner Licenses", "Owner Licenses"}}),
+				 OwnerLicenses = Table.ReorderColumns(RenamedOwnerLicenses, Table.ColumnNames(CountryRenamed))
 				in
 				 Readers[Finish](OwnerLicenses)
 

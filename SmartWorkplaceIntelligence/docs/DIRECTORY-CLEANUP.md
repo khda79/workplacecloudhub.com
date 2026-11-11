@@ -183,8 +183,8 @@ A delegate is active when its own qualified sign-in is within the active thresho
 | State | Rule |
 |---|---|
 | Not candidate | No delegate other than the owner, or the owner signed in within `OwnerActiveDays` (default 90). |
-| Review | Imperative first: EXO or Entra source not qualified, owner not found or ambiguous, owner Entra match not unique, future or timezone-less sign-in. Otherwise any unmet Strong candidate condition, listed in Decision Reason and Secondary Reasons. |
-| Strong candidate | Owner disabled in Entra or AD; no owner sign-in, or none within `OwnerInactiveDays` (default 180); at least one resolved delegate signed in within `OwnerActiveDays`; size known and at most `SharedMailboxFreeSizeGB` (default 50); no litigation or retention hold; archive not active; no POP3, IMAP4 or SMTP use reported by the qualified email app usage report; owner population not Non-human. |
+| Review | Imperative first: EXO or Entra source not qualified, owner not found or ambiguous, owner Entra match not unique, future or timezone-less sign-in. Otherwise any unmet Strong candidate condition, including an absent email app usage row, unknown protocol flags, an unknown mailbox hold or unknown archive status. Reasons are listed in Decision Reason and Secondary Reasons. |
+| Strong candidate | Owner disabled in Entra or AD; no owner sign-in, or none within `OwnerInactiveDays` (default 180); at least one resolved delegate signed in within `OwnerActiveDays`; size known and at most `SharedMailboxFreeSizeGB` (default 50); both mailbox hold values known and false; archive status known as None; no POP3, IMAP4 or SMTP use reported in a matched, qualified email app usage row; owner population not Non-human. |
 
 Licenses (`M365_Licenses_Users.csv`) and email app usage (`M365_Email_AppUsage.csv`) are read for
 this table only; they never change cleanup decisions. Owner Licenses lists distinct SKUs, so a
@@ -196,6 +196,13 @@ candidate is evidence for review: confirm with the delegates and the owner's man
 and keep sign-in blocked. Direct use of the owner account (SMTP AUTH devices, POP, IMAP, mobile)
 breaks after conversion. The qualification table publishes one `Shared mailbox conversion` row
 with the thresholds used.
+
+The report's conversion counts require an Observed conversion qualification for the loaded batch;
+the licensed-candidate count also requires Observed license qualification for that batch. A zero
+then means no matching rows, while missing or unqualified evidence remains blank. Empty license
+details are labelled `No license` only for an observed license source with a zero count; otherwise
+they are `Unknown`. Applying these rules to existing prepared rows requires a new prepared batch
+and a separately authorized report refresh.
 
 ## Data Trust
 
