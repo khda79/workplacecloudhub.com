@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.38
+1.6.39
 #>
 [CmdletBinding()]
 param(
@@ -69,7 +69,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 }
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.38'
+$script:AppVersion = '1.6.39'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -749,7 +749,8 @@ $xaml = @'
                                         <CheckBox x:Name="JobEnabledCheck" Content="Enabled" Margin="0,10,0,8"/>
                                         <TextBlock Text="Frequency"/>
                                         <ComboBox x:Name="ScheduleTypeCombo"><ComboBoxItem Content="Daily"/><ComboBoxItem Content="Weekly"/></ComboBox>
-                                        <TextBlock Text="Times (HH:mm, comma separated)"/>
+                                        <TextBlock Text="Times (24-hour HH:mm, comma separated, orchestrator server local time)" TextWrapping="Wrap"/>
+                                        <TextBlock Text="Examples: 06:15 = 6:15 AM, 18:15 = 6:15 PM" FontSize="11" Foreground="#5A6270" TextWrapping="Wrap"/>
                                         <TextBox x:Name="TimesBox"/>
                                         <TextBlock Text="Days"/>
                                         <UniformGrid x:Name="DaysPanel" Columns="2" Margin="0,3,0,8">
