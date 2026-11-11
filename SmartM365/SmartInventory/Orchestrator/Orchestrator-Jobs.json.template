@@ -1632,7 +1632,7 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "10:00"
+          "21:00"
         ],
         "DaysOfWeek": [],
         "MissedRunPolicy": "RunOnce"
@@ -1646,7 +1646,8 @@
         "DeviceManagementApps.Read.All",
         "DeviceManagementManagedDevices.Read.All"
       ],
-      "EstimatedDurationMinutes": 30
+      "EstimatedDurationMinutes": 30,
+      "ConcurrencyKey": "WorkplaceEvidence-Prepare"
     },
     {
       "Name": "M365-Teams-Inventory",

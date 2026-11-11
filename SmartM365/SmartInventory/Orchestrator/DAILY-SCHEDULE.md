@@ -52,7 +52,7 @@ editing the template.
 | Intune-EnrollmentFailures-Inventory | Daily 05:30 |
 | M365-SyncHealth-Inventory | Daily 00:20, 02:20, 04:20, 06:20, 08:20, 10:20, 12:20, 14:20, 16:20, 18:20, 20:20, 22:20 |
 | EXO-MigrationJobs-Inventory | Daily 06:00, 12:00, 18:00 |
-| Intune-DiscoveredApps-Inventory | Daily 10:00, after preparation |
+| Intune-DiscoveredApps-Inventory | Daily 21:00, serialized with preparation |
 
 The five central identity, device and license producers have one overnight
 collection, with no afternoon repeat. Readiness runs once at 07:00 and unified
@@ -143,9 +143,13 @@ Workplace retains the former CMDB producer dependencies. Its scheduler completio
 uses `DependencyMaxAgeHours = 48` as a floor: each dependency accepts the larger of
 48 hours and its automatic age (longest schedule gap plus 2 hours). Since DiscoveredApps
 runs daily (AppInvRawData relation source), its last success is therefore accepted for
-48 hours instead of about 170 hours for the former weekly run. It runs at 10:00, after
-preparation, so a running Apps collection (including a full Graph fallback) never holds
-the 07:45 preparation; preparation reads the previous day's 10:00 relations. The former 240-hour CMDB gate was not carried
+48 hours instead of about 170 hours for the former weekly run. It runs at 21:00 and
+shares the `WorkplaceEvidence-Prepare` concurrency key: a late or manual preparation
+still reading the relations makes Apps wait, and Apps never publishes during a
+preparation. The 07:45 preparation reads the relations of the previous evening. A full
+Graph fallback (about 18 hours) is still running at 07:45 and holds preparation until it
+ends (concurrency key and active-dependency rule), at most until its 1380-minute timeout.
+The former 240-hour CMDB gate was not carried
 over. The preparation contract independently enforces acquisition limits: core
 sources 48 hours; DiscoveredApps warning after 168 hours and maximum 240 hours.
 Preparation does not renew acquisition dates or silently fall back to unrelated
