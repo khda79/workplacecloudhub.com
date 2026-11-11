@@ -2,6 +2,23 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot '../../SmartM365/Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -Global
 
+function Get-PreparedFileSHA256 {
+    # Same SHA256 hex string as (Get-FileHash -Algorithm SHA256).Hash, same share mode as File.OpenRead.
+    # Get-FileHash reads 4 KB at a time: on a network share every read waits for a round trip, so a batch
+    # re-verification is bound by latency. Reading 1 MB blocks changes only the I/O size, never the bytes hashed.
+    # Self-contained on purpose: Get-PreparedFileHashMap copies this definition into parallel runspaces.
+    param([Parameter(Mandatory)][string]$LiteralPath)
+    $fullPath=Convert-Path -LiteralPath $LiteralPath -ErrorAction Stop
+    $stream=[IO.FileStream]::new($fullPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read,1,[IO.FileOptions]::SequentialScan)
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try {
+        $buffer=[byte[]]::new(1MB)
+        while(($read=$stream.Read($buffer,0,$buffer.Length)) -gt 0){$null=$sha.TransformBlock($buffer,0,$read,$null,0)}
+        $null=$sha.TransformFinalBlock($buffer,0,0)
+        [BitConverter]::ToString($sha.Hash).Replace('-','')
+    } finally {$sha.Dispose();$stream.Dispose()}
+}
+
 function Get-PreparedMetadataPath {
     param([string]$Folder,[ValidateSet('current','batch','validation')][string]$Name,[switch]$Optional)
     $path=Get-SmartM365JsonReadPath (Join-Path $Folder ($Name+'.json')) -Optional:$Optional
@@ -199,7 +216,7 @@ function Convert-PreparedAuditNames {
         Resolve-SmartM365OwnedJsonPath -Path $plan.Path -Owner ('WorkplaceEvidence-Prepare/'+$Family) -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Audit must be an object.'}} | Out-Null
     }
 }
-Export-ModuleMember -Function Get-PreparedMetadataPath,Convert-PreparedMetadataNames,Initialize-PreparedMetadataNames,Convert-PreparedAuditNames
+Export-ModuleMember -Function Get-PreparedFileSHA256,Get-PreparedMetadataPath,Convert-PreparedMetadataNames,Initialize-PreparedMetadataNames,Convert-PreparedAuditNames
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

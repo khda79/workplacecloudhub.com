@@ -1,5 +1,5 @@
 # Offline, single-tenant preparation and versioned local publication. No tenant APIs.
-# Version: 1.2.11
+# Version: 1.2.12
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:ProductRoot = Split-Path -Parent $PSScriptRoot
@@ -652,7 +652,8 @@ function Publish-PreparedEvidenceBatch {
             $destination=Get-PreparedChildPath $batch $entry.File
             Copy-Item -LiteralPath $source -Destination $destination
             $copySeconds=$copyTimer.Elapsed.TotalSeconds
-            if ((Get-FileHash -LiteralPath $destination).Hash -ne $entry.SHA256 -or (Get-FileHash -LiteralPath $source).Hash -ne $entry.SHA256) { throw "Validated file changed during publication: $($entry.File)" }
+            # 1 MB reads: the destination sits on the data share, where 4 KB Get-FileHash reads are latency-bound.
+            if ((Get-PreparedFileSHA256 -LiteralPath $destination) -ne $entry.SHA256 -or (Get-PreparedFileSHA256 -LiteralPath $source) -ne $entry.SHA256) { throw "Validated file changed during publication: $($entry.File)" }
             Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Publish copy {1}: copy={2:F2}s; hash verification={3:F2}s' -f (Get-Date),$entry.File,$copySeconds,($copyTimer.Elapsed.TotalSeconds-$copySeconds))
         }
         $historyTables = @($contract.tables | Where-Object { $_.table -match 'History|Trend' })

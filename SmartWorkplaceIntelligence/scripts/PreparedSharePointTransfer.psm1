@@ -1,4 +1,4 @@
-# Version: 1.1.3
+# Version: 1.1.4
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot 'PreparedMetadata.psm1') -Force
@@ -203,9 +203,12 @@ function Resolve-PreparedTransferContract {
 function Get-PreparedFileHashMap([string[]]$Paths){
     # Parallel reads only (the batch usually sits on a network share); callers still compare
     # every hash individually and in their own order. The first read error is rethrown.
+    # Parallel runspaces do not see module functions: the same 1 MB-block SHA256 helper is copied in.
+    $hashDefinition=${function:Get-PreparedFileSHA256}.ToString()
     $results=@($Paths | Select-Object -Unique | ForEach-Object -ThrottleLimit 4 -Parallel {
         $path=$_
-        try{[pscustomobject]@{Path=$path;Hash=(Get-FileHash -LiteralPath $path -Algorithm SHA256 -ErrorAction Stop).Hash;Error=$null}}
+        ${function:Get-PreparedFileSHA256}=[scriptblock]::Create($using:hashDefinition)
+        try{[pscustomobject]@{Path=$path;Hash=(Get-PreparedFileSHA256 -LiteralPath $path);Error=$null}}
         catch{[pscustomobject]@{Path=$path;Hash=$null;Error=$_.Exception.Message}}
     })
     $hashes=@{}
@@ -298,7 +301,7 @@ function Send-PreparedEvidenceBatch {
             if($file.Relative -eq 'current.json.txt'){
                 # Verify local inputs again before activating the cloud batch.
                 $clock=[Diagnostics.Stopwatch]::StartNew()
-                if((Get-FileHash -LiteralPath $plan.PointerPath).Hash -ne $plan.PointerHash){throw 'Local current pointer changed during transfer.'}
+                if((Get-PreparedFileSHA256 -LiteralPath $plan.PointerPath) -ne $plan.PointerHash){throw 'Local current pointer changed during transfer.'}
                 $currentHashes=Get-PreparedFileHashMap @($plan.Files.Path)
                 foreach($source in $plan.Files){if($currentHashes[$source.Path] -ne $source.SHA256){throw 'Local batch changed during transfer; cloud pointer not advanced.'}}
                 Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Local batch re-verified before the root pointer: {1} files; {2:F1}s' -f (Get-Date),$plan.Files.Count,$clock.Elapsed.TotalSeconds)
