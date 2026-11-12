@@ -80,6 +80,7 @@ SmartFinOps/**
 !/SmartM365/Devices/DeviceRebootManager/WorkplaceCloudHub-lockup-WPF.png
 !/SmartM365/Devices/DeviceRegistrationTool/WorkplaceCloudHub.ico
 !/SmartM365/Devices/DeviceRegistrationTool/WorkplaceCloudHub-lockup-WPF.png
+!/SmartM365/Devices/DeviceRegistrationTool/SmartM365-DeviceRegistration.LicenseCatalog.json
 !/SmartM365/Devices/EndpointDiagnosticsAnalyzer/WorkplaceCloudHub.ico
 !/SmartM365/Devices/EndpointDiagnosticsAnalyzer/WorkplaceCloudHub-lockup-WPF.png
 !/SmartM365/Devices/IntuneHybridJoinToolkit/WorkplaceCloudHub.ico

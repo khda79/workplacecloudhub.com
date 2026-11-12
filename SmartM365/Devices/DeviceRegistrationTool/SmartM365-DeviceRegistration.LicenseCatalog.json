@@ -1,0 +1,5582 @@
+{
+  "SchemaVersion": 1,
+  "Source": "https://learn.microsoft.com/en-us/entra/identity/users/licensing-service-plan-reference",
+  "ReferenceDate": "2026-08-19",
+  "RetrievedUtc": "2026-11-12T21:19:55.9769662Z",
+  "Products": [
+    {
+      "SkuId": "00b861da-8087-4e30-beb8-8db3c6d9581e",
+      "Names": [
+        "Dynamics 365 Marketing App"
+      ],
+      "PartNumbers": [
+        "DYN365_MARKETING_APP"
+      ]
+    },
+    {
+      "SkuId": "00e1ec7b-e4a3-40d1-9441-b69b597ab222",
+      "Names": [
+        "Microsoft 365 Business Premium (no Teams)"
+      ],
+      "PartNumbers": [
+        "Microsoft_365_ Business_ Premium_(no Teams)"
+      ]
+    },
+    {
+      "SkuId": "017fb6f8-00dd-4025-be2b-4eff067cae72",
+      "Names": [
+        "Privacy Management - subject rights request (1) GCC"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_SUB_RIGHTS_REQ_1_V2_GCC"
+      ]
+    },
+    {
+      "SkuId": "01c8007a-57d2-41e0-a3c3-0b46ead16cc4",
+      "Names": [
+        "Career Coach for students"
+      ],
+      "PartNumbers": [
+        "CAREERCOACH_STUDENTS"
+      ]
+    },
+    {
+      "SkuId": "01d46c34-3525-47d5-bd1a-5f19979938a0",
+      "Names": [
+        "Power Pages authenticated users T3 min 1,000 units - 100 users/per site/month capacity pack_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "Power_Pages_authenticated_users_T3_min_1,000_units_100_users/per_site/month_capacity_pack_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "036c2481-aa8a-47cd-ab43-324f0c157c2d",
+      "Names": [
+        "Dynamics 365 Customer Insights vTrial"
+      ],
+      "PartNumbers": [
+        "DYN365_CUSTOMER_INSIGHTS_VIRAL"
+      ]
+    },
+    {
+      "SkuId": "046f7d3b-9595-4685-a2e8-a2832d2b26aa",
+      "Names": [
+        "Privacy Management - risk GCC"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_RISK_GCC"
+      ]
+    },
+    {
+      "SkuId": "04a7fb0d-32e0-4241-b4f5-3f7618cd1162",
+      "Names": [
+        "Office 365 Midsize Business"
+      ],
+      "PartNumbers": [
+        "MIDSIZEPACK"
+      ]
+    },
+    {
+      "SkuId": "05735051-46c0-4c84-9107-bb13d77d0b88",
+      "Names": [
+        "Dynamics 365 Customer Insights Journeys T3 Interacted People"
+      ],
+      "PartNumbers": [
+        "Dynamics_365_Customer_Insights_Journeys_T3_Interacted_People"
+      ]
+    },
+    {
+      "SkuId": "05e9a617-0261-4cee-bb44-138d3ef5d965",
+      "Names": [
+        "Microsoft 365 E3"
+      ],
+      "PartNumbers": [
+        "SPE_E3"
+      ]
+    },
+    {
+      "SkuId": "060d8061-f606-4e69-a4e7-e8fff75ea1f5",
+      "Names": [
+        "Power BI Premium Per User for Faculty"
+      ],
+      "PartNumbers": [
+        "PBI_PREMIUM_PER_USER_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "061f9ace-7d42-4136-88ac-31dc755f143f",
+      "Names": [
+        "Intune"
+      ],
+      "PartNumbers": [
+        "INTUNE_A"
+      ]
+    },
+    {
+      "SkuId": "064a9707-9dba-4cc1-9902-38bfcfda6328",
+      "Names": [
+        "Digital Messaging for GCC Test SKU"
+      ],
+      "PartNumbers": [
+        "MESSAGING_GCC_TEST"
+      ]
+    },
+    {
+      "SkuId": "0666269f-b167-4c5b-a76f-fc574f2b1118",
+      "Names": [
+        "Microsoft 365 F1 EEA (no Teams)"
+      ],
+      "PartNumbers": [
+        "Microsoft_365_F1_EEA_(no_Teams)"
+      ]
+    },
+    {
+      "SkuId": "06b48c5f-01d9-4b18-9015-03b52040f51a",
+      "Names": [
+        "Skype for Business PSTN Usage Calling Plan"
+      ],
+      "PartNumbers": [
+        "MCOPSTNPP"
+      ]
+    },
+    {
+      "SkuId": "06ebc4ee-1bb5-47dd-8120-11324bc54e06",
+      "Names": [
+        "Microsoft 365 E5"
+      ],
+      "PartNumbers": [
+        "SPE_E5"
+      ]
+    },
+    {
+      "SkuId": "074c6829-b3a0-430a-ba3d-aca365e57065",
+      "Names": [
+        "Project Plan 3 for GCC"
+      ],
+      "PartNumbers": [
+        "PROJECTPROFESSIONAL_GOV"
+      ]
+    },
+    {
+      "SkuId": "078d2b04-f1bd-4111-bbd4-b4b1b354cef4",
+      "Names": [
+        "Microsoft Entra ID P1"
+      ],
+      "PartNumbers": [
+        "AAD_PREMIUM"
+      ]
+    },
+    {
+      "SkuId": "086e9b70-4720-4442-ab6d-3ef32bfb4721",
+      "Names": [
+        "Power Automate unattended RPA add-on for Government"
+      ],
+      "PartNumbers": [
+        "POWERAUTOMATE_UNATTENDED_RPA_GCC"
+      ]
+    },
+    {
+      "SkuId": "08d7bce8-6e16-490e-89db-1d508e5e9609",
+      "Names": [
+        "Microsoft 365 Business Voice (US)"
+      ],
+      "PartNumbers": [
+        "BUSINESS_VOICE_MED2_TELCO"
+      ]
+    },
+    {
+      "SkuId": "08e18479-4483-4f70-8f17-6f92156d8ea9",
+      "Names": [
+        "Sensor Data Intelligence Additional Machines Add-in for Dynamics 365 Supply Chain Management"
+      ],
+      "PartNumbers": [
+        "DYN365_IOT_INTELLIGENCE_ADDL_MACHINES"
+      ]
+    },
+    {
+      "SkuId": "09015f9f-377f-4538-bbb5-f75ceb09358a",
+      "Names": [
+        "Project Online Premium"
+      ],
+      "PartNumbers": [
+        "PROJECTPREMIUM"
+      ]
+    },
+    {
+      "SkuId": "090b4a96-8114-4c95-9c91-60e81ef53302",
+      "Names": [
+        "Dynamics 365 for Supply Chain Management Attach to Qualifying Dynamics 365 Base Offer"
+      ],
+      "PartNumbers": [
+        "DYN365_SCM_ATTACH"
+      ]
+    },
+    {
+      "SkuId": "093e8d14-a334-43d9-93e3-30589a8b47d0",
+      "Names": [
+        "Rights Management Service Basic Content Protection"
+      ],
+      "PartNumbers": [
+        "RMSBASIC"
+      ]
+    },
+    {
+      "SkuId": "0a389a77-9850-4dc4-b600-bc66fdfefc60",
+      "Names": [
+        "Dynamics 365 Guides"
+      ],
+      "PartNumbers": [
+        "GUIDES_USER"
+      ]
+    },
+    {
+      "SkuId": "0b7b15a8-7fd2-4964-bb96-5a566d4e3c15",
+      "Names": [
+        "Exchange Online (Plan 2) for Faculty"
+      ],
+      "PartNumbers": [
+        "EXCHANGEENTERPRISE_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "0c21030a-7e60-4ec7-9a0f-0042e0e0211a",
+      "Names": [
+        "Microsoft 365 E3 (500 seats min)_HUB"
+      ],
+      "PartNumbers": [
+        "Microsoft_365_E3"
+      ]
+    },
+    {
+      "SkuId": "0c250654-c7f7-461f-871a-7222f6592cf2",
+      "Names": [
+        "Dynamics 365 Customer Insights Standalone"
+      ],
+      "PartNumbers": [
+        "DYN365_CUSTOMER_INSIGHTS_BASE"
+      ]
+    },
+    {
+      "SkuId": "0c266dff-15dd-4b49-8397-2bb16070ed52",
+      "Names": [
+        "Microsoft 365 Audio Conferencing"
+      ],
+      "PartNumbers": [
+        "MCOMEETADV"
+      ]
+    },
+    {
+      "SkuId": "0c278af4-c9c1-45de-9f4b-cd929e747a2c",
+      "Names": [
+        "Windows 365 Enterprise 1 vCPU 2 GB 64 GB"
+      ],
+      "PartNumbers": [
+        "CPC_E_1C_2GB_64GB"
+      ]
+    },
+    {
+      "SkuId": "0da63026-e422-4390-89e8-b14520d7e699",
+      "Names": [
+        "Windows 365 Enterprise 4 vCPU 16 GB 512 GB"
+      ],
+      "PartNumbers": [
+        "CPC_E_4C_16GB_512GB"
+      ]
+    },
+    {
+      "SkuId": "0dab259f-bf13-4952-b7f8-7db8f131b28d",
+      "Names": [
+        "Skype for Business PSTN Domestic Calling"
+      ],
+      "PartNumbers": [
+        "MCOPSTN1"
+      ]
+    },
+    {
+      "SkuId": "0e142028-345e-45da-8d92-8bfd4093bbb9",
+      "Names": [
+        "Microsoft Teams Phone Resource Account for Faculty"
+      ],
+      "PartNumbers": [
+        "PHONESYSTEM_VIRTUALUSER_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "0f13a262-dc6f-4800-8dc6-a62f72c95fad",
+      "Names": [
+        "PowerApps & Flow GCC Test - O365 & Dyn365 Plans"
+      ],
+      "PartNumbers": [
+        "POWERFLOWGCC_TEST"
+      ]
+    },
+    {
+      "SkuId": "0fe440c5-f2bf-442b-a4f4-9a7af77a200b",
+      "Names": [
+        "Clipchamp Premium"
+      ],
+      "PartNumbers": [
+        "Clipchamp_Premium"
+      ]
+    },
+    {
+      "SkuId": "10dd46b2-c5ad-4de3-865c-a6fa1363fb51",
+      "Names": [
+        "Compliance Program for Microsoft Cloud"
+      ],
+      "PartNumbers": [
+        "Compliance_Program_for_Microsoft_Cloud"
+      ]
+    },
+    {
+      "SkuId": "111046dd-295b-4d6d-9724-d52ac90bd1f2",
+      "Names": [
+        "Microsoft Defender for Endpoint"
+      ],
+      "PartNumbers": [
+        "WIN_DEF_ATP"
+      ]
+    },
+    {
+      "SkuId": "11dee6af-eca8-419f-8061-6864517c1875",
+      "Names": [
+        "Microsoft 365 Domestic Calling Plan (120 min)"
+      ],
+      "PartNumbers": [
+        "MCOPSTN_5"
+      ]
+    },
+    {
+      "SkuId": "12b5a442-a6f2-49e4-868b-2d7408c2356f",
+      "Names": [
+        "Dynamics 365 Customer Insights User License"
+      ],
+      "PartNumbers": [
+        "Dynamics_365_Customer_Insights_User_License"
+      ]
+    },
+    {
+      "SkuId": "12b8c807-2e20-48fc-b453-542b6ee9d171",
+      "Names": [
+        "Microsoft 365 Apps for Faculty"
+      ],
+      "PartNumbers": [
+        "OFFICESUBSCRIPTION_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "1341559b-49df-443c-8e79-fa604fed2d82",
+      "Names": [
+        "Office 365 GCC G5 without Audio Conferencing"
+      ],
+      "PartNumbers": [
+        "ENTERPRISEPREMIUM_NOPSTNCONF_NOPBI_GOV"
+      ]
+    },
+    {
+      "SkuId": "135bee78-485b-4181-ad6e-40286e311850",
+      "Names": [
+        "Windows 365 Business 2 vCPU 4 GB 128 GB"
+      ],
+      "PartNumbers": [
+        "CPC_B_2C_4RAM_128GB"
+      ]
+    },
+    {
+      "SkuId": "1392051d-0cb9-4b7a-88d5-621fee5e8711",
+      "Names": [
+        "Office 365 E4"
+      ],
+      "PartNumbers": [
+        "ENTERPRISEWITHSCAL"
+      ]
+    },
+    {
+      "SkuId": "1439b6e2-5d59-4873-8c59-d60e2a196e92",
+      "Names": [
+        "Dynamics 365 Customer Service Professional"
+      ],
+      "PartNumbers": [
+        "DYN365_CUSTOMER_SERVICE_PRO"
+      ]
+    },
+    {
+      "SkuId": "1508ad2d-5802-44e6-bfe8-6fb65de63d28",
+      "Names": [
+        "Dynamics 365 Commerce Trial"
+      ],
+      "PartNumbers": [
+        "DYN365_RETAIL_TRIAL"
+      ]
+    },
+    {
+      "SkuId": "15a64d3e-5b99-4c4b-ae8f-aa6da264bfe7",
+      "Names": [
+        "Power Apps Portals page view capacity add-on for Government"
+      ],
+      "PartNumbers": [
+        "POWERAPPS_PORTALS_PAGEVIEW_GCC"
+      ]
+    },
+    {
+      "SkuId": "15f2e9fc-b782-4f73-bf51-81d8b7fff6f4",
+      "Names": [
+        "Microsoft 365 Copilot for Sales"
+      ],
+      "PartNumbers": [
+        "Microsoft_Copilot_for_Sales"
+      ]
+    },
+    {
+      "SkuId": "16a55f2f-ff35-4cd5-9146-fb784e3761a5",
+      "Names": [
+        "Microsoft Defender for Endpoint P1"
+      ],
+      "PartNumbers": [
+        "DEFENDER_ENDPOINT_P1"
+      ]
+    },
+    {
+      "SkuId": "16ddbbfc-09ea-4de2-b1d7-312db6112d70",
+      "Names": [
+        "Microsoft Teams (Free)"
+      ],
+      "PartNumbers": [
+        "TEAMS_FREE"
+      ]
+    },
+    {
+      "SkuId": "170ba00c-38b2-468c-a756-24c05037160a",
+      "Names": [
+        "Microsoft 365 Audio Conferencing - GCCHigh Tenant (AR)_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "MCOACBYOT_AR_GCCHIGH_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "18181a46-0d4e-45cd-891e-60aabd171b4e",
+      "Names": [
+        "Office 365 E1"
+      ],
+      "PartNumbers": [
+        "STANDARDPACK"
+      ]
+    },
+    {
+      "SkuId": "18250162-5d87-4436-a834-d795c15c80f3",
+      "Names": [
+        "Microsoft 365 A3 for students use benefit"
+      ],
+      "PartNumbers": [
+        "M365EDU_A3_STUUSEBNFT"
+      ]
+    },
+    {
+      "SkuId": "184efa21-98c3-4e5d-95ab-d07053a96e67",
+      "Names": [
+        "Microsoft 365 E5 Compliance"
+      ],
+      "PartNumbers": [
+        "INFORMATION_PROTECTION_COMPLIANCE"
+      ]
+    },
+    {
+      "SkuId": "189a915c-fe4f-4ffa-bde4-85b9628d07a0",
+      "Names": [
+        "Office 365 E3 Developer"
+      ],
+      "PartNumbers": [
+        "DEVELOPERPACK"
+      ]
+    },
+    {
+      "SkuId": "18a4bd3f-0b5b-4887-b04f-61dd0ee15f5e",
+      "Names": [
+        "Microsoft 365 E5 (no Teams)"
+      ],
+      "PartNumbers": [
+        "Microsoft_365_E5_(no_Teams)"
+      ]
+    },
+    {
+      "SkuId": "1925967e-8013-495f-9644-c99f8b463748",
+      "Names": [
+        "Microsoft Defender Vulnerability Management"
+      ],
+      "PartNumbers": [
+        "TVM_Premium_Standalone"
+      ]
+    },
+    {
+      "SkuId": "19dec69d-d9f3-4792-8a39-d8ecdf51937b",
+      "Names": [
+        "Dynamics 365 for Customer Service Professional Attach to Qualifying Dynamics 365 Base Offer"
+      ],
+      "PartNumbers": [
+        "D365_CUSTOMER_SERVICE_PRO_ATTACH"
+      ]
+    },
+    {
+      "SkuId": "19ec0d23-8335-4cbd-94ac-6050e30712fa",
+      "Names": [
+        "Exchange Online (Plan 2)"
+      ],
+      "PartNumbers": [
+        "EXCHANGEENTERPRISE"
+      ]
+    },
+    {
+      "SkuId": "1a585bba-1ce3-416e-b1d6-9c482b52fcf6",
+      "Names": [
+        "Office 365 Advanced Compliance for GCC"
+      ],
+      "PartNumbers": [
+        "EQUIVIO_ANALYTICS_GOV"
+      ]
+    },
+    {
+      "SkuId": "1aa94593-ca12-4254-a738-81a5972958e8",
+      "Names": [
+        "Microsoft 365 A3 - Unattended License for students use benefit"
+      ],
+      "PartNumbers": [
+        "M365EDU_A3_STUUSEBNFT_RPA1"
+      ]
+    },
+    {
+      "SkuId": "1b1b1f7a-8355-43b6-829f-336cfccb744c",
+      "Names": [
+        "Office 365 Advanced Compliance"
+      ],
+      "PartNumbers": [
+        "EQUIVIO_ANALYTICS"
+      ]
+    },
+    {
+      "SkuId": "1b3043ad-dfc6-427e-a2c0-5ca7a6c94a2b",
+      "Names": [
+        "Windows 365 Business 4 vCPU 16 GB 512 GB"
+      ],
+      "PartNumbers": [
+        "CPC_B_4C_16RAM_512GB"
+      ]
+    },
+    {
+      "SkuId": "1b399f66-be2a-479c-a79d-84a43a46f79e",
+      "Names": [
+        "Dynamics 365 for Customer Service Chat for Government"
+      ],
+      "PartNumbers": [
+        "DYN365_CS_CHAT_GOV"
+      ]
+    },
+    {
+      "SkuId": "1b572d5e-1bf8-4b19-9259-f9eda31a6972",
+      "Names": [
+        "Power BI Premium Per User Add-On for GCC"
+      ],
+      "PartNumbers": [
+        "PBI_PREMIUM_PER_USER_ADDON_GCC"
+      ]
+    },
+    {
+      "SkuId": "1bf40e76-4065-4530-ac37-f1513f362f50",
+      "Names": [
+        "Windows 365 Shared Use 4 vCPU 16 GB 128 GB"
+      ],
+      "PartNumbers": [
+        "Windows_365_S_4vCPU_16GB_128GB"
+      ]
+    },
+    {
+      "SkuId": "1c27243e-fb4d-42b1-ae8c-fe25c9616588",
+      "Names": [
+        "Microsoft Teams Audio Conferencing with dial-out to USA/CAN"
+      ],
+      "PartNumbers": [
+        "Microsoft_Teams_Audio_Conferencing_select_dial_out"
+      ]
+    },
+    {
+      "SkuId": "1c79494f-e170-431f-a409-428f6053fa35",
+      "Names": [
+        "Windows 365 Enterprise 2 vCPU 8 GB 256 GB"
+      ],
+      "PartNumbers": [
+        "CPC_E_2C_8GB_256GB"
+      ]
+    },
+    {
+      "SkuId": "1d2756cb-2147-4b05-b4d5-f013c022dcb9",
+      "Names": [
+        "Dynamics 365 Enterprise Edition - Additional Non-Production Instance for Government"
+      ],
+      "PartNumbers": [
+        "CRMTESTINSTANCE_GCC"
+      ]
+    },
+    {
+      "SkuId": "1d506c23-1702-46f1-b940-160c55f98d05",
+      "Names": [
+        "Dynamics 365 Business Central Essentials Attach"
+      ],
+      "PartNumbers": [
+        "Dynamics_365_Business_Central_Essentials_Attach"
+      ]
+    },
+    {
+      "SkuId": "1e1a282c-9c54-43a2-9310-98ef728faace",
+      "Names": [
+        "Dynamics 365 for Sales Enterprise Edition"
+      ],
+      "PartNumbers": [
+        "DYN365_ENTERPRISE_SALES"
+      ]
+    },
+    {
+      "SkuId": "1e615a51-59db-4807-9957-aa83c3657351",
+      "Names": [
+        "Dynamics 365 Customer Service Enterprise Viral Trial"
+      ],
+      "PartNumbers": [
+        "Dynamics_365_Customer_Service_Enterprise_viral_trial"
+      ]
+    },
+    {
+      "SkuId": "1e7e1070-8ccb-4aca-b470-d7cb538cb07e",
+      "Names": [
+        "Windows 10/11 Enterprise E5 (Original)"
+      ],
+      "PartNumbers": [
+        "WIN_ENT_E5"
+      ]
+    },
+    {
+      "SkuId": "1e988bf3-8b7c-4731-bec0-4e2a2946600c",
+      "Names": [
+        "Microsoft 365 E5 EEA (no Teams) (500 seats min)_HUB"
+      ],
+      "PartNumbers": [
+        "O365_w/o_Teams_Bundle_M5_(500_seats_min)_HUB"
+      ]
+    },
+    {
+      "SkuId": "1ec19b5f-7542-4b20-b01f-fb5d3f040e2d",
+      "Names": [
+        "Dynamics 365 for Project Service Automation Enterprise Edition for Government"
+      ],
+      "PartNumbers": [
+        "DYN365_ENTERPRISE_PROJECT_SERVICE_AUTOMATION_GOV"
+      ]
+    },
+    {
+      "SkuId": "1f2f344a-700d-42c9-9427-5cea1d5d7ba6",
+      "Names": [
+        "Microsoft Stream"
+      ],
+      "PartNumbers": [
+        "STREAM"
+      ]
+    },
+    {
+      "SkuId": "1f338bbc-767e-4a1e-a2d4-b73207cc5b93",
+      "Names": [
+        "Microsoft Teams Phone Standard for Students"
+      ],
+      "PartNumbers": [
+        "MCOEV_STUDENT"
+      ]
+    },
+    {
+      "SkuId": "1f9990ca-45d9-4c8d-8d04-a79241924ce1",
+      "Names": [
+        "Windows 365 Shared Use 2 vCPU 4 GB 64 GB"
+      ],
+      "PartNumbers": [
+        "Windows_365_S_2vCPU_4GB_64GB"
+      ]
+    },
+    {
+      "SkuId": "1fc08a02-8b3d-43b9-831e-f76859e04e1a",
+      "Names": [
+        "SharePoint Online (Plan 1)"
+      ],
+      "PartNumbers": [
+        "SHAREPOINTSTANDARD"
+      ]
+    },
+    {
+      "SkuId": "2113661c-6509-4034-98bb-9c47bd28d63c",
+      "Names": [
+        "Microsoft 365 E5 without Audio Conferencing (500 seats min)_HUB"
+      ],
+      "PartNumbers": [
+        "Microsoft_365_E5_without_Audio_Conferencing"
+      ]
+    },
+    {
+      "SkuId": "21502a13-c8dc-4744-be9c-177fd9d2eafc",
+      "Names": [
+        "Microsoft 365 Business Basic (no Teams)"
+      ],
+      "PartNumbers": [
+        "Microsoft_365_Business_Basic_(no Teams)"
+      ]
+    },
+    {
+      "SkuId": "21943e3a-2429-4f83-84c1-02735cd49e78",
+      "Names": [
+        "Microsoft Teams Rooms Pro without Audio Conferencing"
+      ],
+      "PartNumbers": [
+        "Microsoft_Teams_Rooms_Pro_without_Audio_Conferencing"
+      ]
+    },
+    {
+      "SkuId": "226ca751-f0a4-4232-9be5-73c02a92555e",
+      "Names": [
+        "Windows 365 Enterprise 2 vCPU 4 GB 128 GB"
+      ],
+      "PartNumbers": [
+        "CPC_E_2C_4GB_128GB"
+      ]
+    },
+    {
+      "SkuId": "229fa362-9d30-4dbc-8110-21b77a7f9b26",
+      "Names": [
+        "Dynamics 365 for Sales Professional for Government"
+      ],
+      "PartNumbers": [
+        "D365_SALES_PRO_GOV"
+      ]
+    },
+    {
+      "SkuId": "23053933-0fda-431f-9a5b-a00fd78444c1",
+      "Names": [
+        "Dynamics 365 for Marketing Addnl Contacts Tier 3"
+      ],
+      "PartNumbers": [
+        "DYN365_MARKETING_CONTACT_ADDON_T3"
+      ]
+    },
+    {
+      "SkuId": "2347355b-4e81-41a4-9c22-55057a399791",
+      "Names": [
+        "Microsoft 365 Security and Compliance for Firstline Workers"
+      ],
+      "PartNumbers": [
+        "M365_SECURITY_COMPLIANCE_FOR_FLW"
+      ]
+    },
+    {
+      "SkuId": "238e2f8d-e429-4035-94db-6926be4ffe7b",
+      "Names": [
+        "Dynamics 365 for Marketing Business Edition"
+      ],
+      "PartNumbers": [
+        "DYN365_BUSINESS_MARKETING"
+      ]
+    },
+    {
+      "SkuId": "23e6e135-e869-4ce4-9ae4-5710cd69ac13",
+      "Names": [
+        "Dynamics 365 Field Service Contractor"
+      ],
+      "PartNumbers": [
+        "D365_FIELD_SERVICE_CONTRACTOR"
+      ]
+    },
+    {
+      "SkuId": "245e6bf9-411e-481e-8611-5c08595e2988",
+      "Names": [
+        "Dynamics 365 Sales Professional Attach to Qualifying Dynamics 365 Base Offer"
+      ],
+      "PartNumbers": [
+        "D365_SALES_PRO_ATTACH"
+      ]
+    },
+    {
+      "SkuId": "24aebea8-7fac-48d0-8750-de4ee1fde205",
+      "Names": [
+        "Office 365 G3 without Microsoft 365 Apps GCC"
+      ],
+      "PartNumbers": [
+        "ENTERPRISEPACKWITHOUTPROPLUS_GOV"
+      ]
+    },
+    {
+      "SkuId": "24be3cd7-82ca-41a5-94a7-4903373cdcae",
+      "Names": [
+        "Windows 365 Business 16 vCPU, 64 GB, 1 TB"
+      ],
+      "PartNumbers": [
+        "Windows_365_Business_16_vCPU,_64_GB,_1_TB"
+      ]
+    },
+    {
+      "SkuId": "24c35284-d768-4e53-84d9-b7ae73dddf69",
+      "Names": [
+        "Microsoft 365 Business Premium Donation"
+      ],
+      "PartNumbers": [
+        "Microsoft_365_Business_Premium_Donation_(Non_Profit_Pricing)"
+      ]
+    },
+    {
+      "SkuId": "253ce8d3-6122-4240-8b04-f434a8fa831f",
+      "Names": [
+        "Power Automate Process"
+      ],
+      "PartNumbers": [
+        "Power_Automate_per_process"
+      ]
+    },
+    {
+      "SkuId": "26124093-3d78-432b-b5dc-48bf992543d5",
+      "Names": [
+        "Microsoft 365 E5 Security"
+      ],
+      "PartNumbers": [
+        "IDENTITY_THREAT_PROTECTION"
+      ]
+    },
+    {
+      "SkuId": "26ad4b5c-b686-462e-84b9-d7c22b46837f",
+      "Names": [
+        "Microsoft Defender for Office 365 (Plan 1) Faculty"
+      ],
+      "PartNumbers": [
+        "ATP_ENTERPRISE_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "26c903d5-d385-4cb1-b650-8d81a643b3c4",
+      "Names": [
+        "Power Apps Portals login capacity add-on Tier 2 (10 unit min) for Government"
+      ],
+      "PartNumbers": [
+        "POWERAPPS_PORTALS_LOGIN_T2_GCC"
+      ]
+    },
+    {
+      "SkuId": "26d45bd9-adf1-46cd-a9e1-51e9a5524128",
+      "Names": [
+        "Office 365 E5 Without Audio Conferencing"
+      ],
+      "PartNumbers": [
+        "ENTERPRISEPREMIUM_NOPSTNCONF"
+      ]
+    },
+    {
+      "SkuId": "27cb5f12-2e3f-4997-a649-45298673e6a1",
+      "Names": [
+        "Power Pages authenticated users T1 100 users/per site/month capacity pack_GCC"
+      ],
+      "PartNumbers": [
+        "Power_Pages_authenticated_users_T1_100_users/per_site/month_capacity_pack_GCC"
+      ]
+    },
+    {
+      "SkuId": "2880026b-2b0c-4251-8656-5d41ff11e3aa",
+      "Names": [
+        "Dynamics 365 Business Central Essentials"
+      ],
+      "PartNumbers": [
+        "DYN365_BUSCENTRAL_ESSENTIAL"
+      ]
+    },
+    {
+      "SkuId": "28b275ce-aec7-4c26-82e2-1ffbc2746ad4",
+      "Names": [
+        "Dynamics 365 for Sales, Enterprise Edition for Government"
+      ],
+      "PartNumbers": [
+        "DYN365_ENTERPRISE_SALES_GOV"
+      ]
+    },
+    {
+      "SkuId": "295a8eb0-f78d-45c7-8b5b-1eed5ed02dff",
+      "Names": [
+        "Microsoft Teams Shared Devices"
+      ],
+      "PartNumbers": [
+        "MCOCAP"
+      ]
+    },
+    {
+      "SkuId": "29a2f828-8f39-4837-b8ff-c957e86abe3c",
+      "Names": [
+        "Microsoft Teams Commercial Cloud"
+      ],
+      "PartNumbers": [
+        "TEAMS_COMMERCIAL_TRIAL"
+      ]
+    },
+    {
+      "SkuId": "29fcd665-d8d1-4f34-8eed-3811e3fca7b3",
+      "Names": [
+        "Dynamics 365 Field Service Viral Trial"
+      ],
+      "PartNumbers": [
+        "Dynamics_365_Field_Service_Enterprise_viral_trial"
+      ]
+    },
+    {
+      "SkuId": "2a6fb3c6-30cc-4558-a69d-032425c1a3ba",
+      "Names": [
+        "Power Apps Premium embedded"
+      ],
+      "PartNumbers": [
+        "POWERAPPS_PER_USER_ISVEMB"
+      ]
+    },
+    {
+      "SkuId": "2a914830-d700-444a-b73c-e3f31980d833",
+      "Names": [
+        "Microsoft 365 F3 GCC"
+      ],
+      "PartNumbers": [
+        "M365_F1_GOV"
+      ]
+    },
+    {
+      "SkuId": "2b26f637-35a0-4dbc-b69e-ff674782be9d",
+      "Names": [
+        "Microsoft Intune Government"
+      ],
+      "PartNumbers": [
+        "INTUNE_A_GOV"
+      ]
+    },
+    {
+      "SkuId": "2b317a4a-77a6-4188-9437-b68a77b4e2c6",
+      "Names": [
+        "Microsoft Intune Device"
+      ],
+      "PartNumbers": [
+        "INTUNE_A_D"
+      ]
+    },
+    {
+      "SkuId": "2b3b0c87-36af-4d15-8124-04a691cc2546",
+      "Names": [
+        "Flow Plan 1 for Government"
+      ],
+      "PartNumbers": [
+        "FLOW_P1_GOV"
+      ]
+    },
+    {
+      "SkuId": "2b9c8e7c-319c-43a2-a2a0-48c5c6161de7",
+      "Names": [
+        "Microsoft Entra ID Basic"
+      ],
+      "PartNumbers": [
+        "AAD_BASIC"
+      ]
+    },
+    {
+      "SkuId": "2bd3cb20-1bb6-446b-b4d0-089af3a05c52",
+      "Names": [
+        "Dynamics 365 Enterprise Edition - Additional Production Instance for Government"
+      ],
+      "PartNumbers": [
+        "CRMINSTANCE_GCC"
+      ]
+    },
+    {
+      "SkuId": "2c21e77a-e0d6-4570-b38a-7ff2dc17d2ca",
+      "Names": [
+        "Microsoft Intune Device for Government"
+      ],
+      "PartNumbers": [
+        "INTUNE_A_D_GOV"
+      ]
+    },
+    {
+      "SkuId": "2ced8a00-3ed1-4295-ab7c-57170ff28e58",
+      "Names": [
+        "Power Apps Per User BD Only"
+      ],
+      "PartNumbers": [
+        "POWERAPPS_PER_USER_BD_ONLY"
+      ]
+    },
+    {
+      "SkuId": "2cf22bcb-0c9e-4bc6-8daf-7e7654c0f285",
+      "Names": [
+        "Microsoft Teams Phone Resource Account for GCC"
+      ],
+      "PartNumbers": [
+        "PHONESYSTEM_VIRTUALUSER_GOV"
+      ]
+    },
+    {
+      "SkuId": "2cf302fe-62db-4e20-b573-e0998b1208b5",
+      "Names": [
+        "Dynamics 365 - Additional Non-Production Instance for Government"
+      ],
+      "PartNumbers": [
+        "CRMTESTINSTANCE_NOPREREQ"
+      ]
+    },
+    {
+      "SkuId": "2cfd692f-a352-4fa8-b960-e3ad0c9b1178",
+      "Names": [
+        "Power Pages authenticated users T3 min 1,000 units - 100 users/per site/month capacity pack CN_CN"
+      ],
+      "PartNumbers": [
+        "Power Pages authenticated users T3_CN_CN"
+      ]
+    },
+    {
+      "SkuId": "2d21fc84-b918-491e-ad84-e24d61ccec94",
+      "Names": [
+        "Windows 365 Shared Use 2 vCPU 8 GB 128 GB"
+      ],
+      "PartNumbers": [
+        "Windows_365_S_2vCPU_8GB_128GB"
+      ]
+    },
+    {
+      "SkuId": "2d3091c7-0712-488b-b3d8-6b97bde6a1f5",
+      "Names": [
+        "Microsoft 365 Audio Conferencing for GCC"
+      ],
+      "PartNumbers": [
+        "MCOMEETADV_GOV"
+      ]
+    },
+    {
+      "SkuId": "2db84718-652c-47a7-860c-f10d8abbdae3",
+      "Names": [
+        "Project Online Premium Without Project Client"
+      ],
+      "PartNumbers": [
+        "PROJECTONLINE_PLAN_1"
+      ]
+    },
+    {
+      "SkuId": "2e3c4023-80f6-4711-aa5d-29e0ecb46835",
+      "Names": [
+        "Dynamics 365 Business Central Team Members"
+      ],
+      "PartNumbers": [
+        "DYN365_BUSCENTRAL_TEAM_MEMBER"
+      ]
+    },
+    {
+      "SkuId": "2eaa4058-403e-4434-9da9-ea693f5d96dc",
+      "Names": [
+        "Windows 365 Shared Use 2 vCPU 8 GB 256 GB"
+      ],
+      "PartNumbers": [
+        "Windows_365_S_2vCPU_8GB_256GB"
+      ]
+    },
+    {
+      "SkuId": "2edaa1dc-966d-4475-93d6-8ee8dfd96877",
+      "Names": [
+        "Dynamics 365 Sales Premium"
+      ],
+      "PartNumbers": [
+        "DYN365_SALES_PREMIUM"
+      ]
+    },
+    {
+      "SkuId": "2ef3064c-c95c-426c-96dd-9ffeaa2f2c37",
+      "Names": [
+        "Microsoft Entra Suite Add-on for Microsoft Entra ID P2"
+      ],
+      "PartNumbers": [
+        "Microsoft_Entra_Suite_Step_Up_for_Microsoft_Entra_ID_P2"
+      ]
+    },
+    {
+      "SkuId": "2f105cc2-c2c1-435b-a955-c5e82156c05d",
+      "Names": [
+        "Office 365 GCC G5 without Power BI and Phone System"
+      ],
+      "PartNumbers": [
+        "ENTERPRISEPREMIUM_NOPBIPBX_GOV"
+      ]
+    },
+    {
+      "SkuId": "30fc3c36-5a95-4956-ba57-c09c2a600bb9",
+      "Names": [
+        "Microsoft Entra ID P1 for Faculty"
+      ],
+      "PartNumbers": [
+        "AAD_PREMIUM_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "314c4481-f395-4525-be8b-2ec4bb1e9d91",
+      "Names": [
+        "Office 365 A1 for students"
+      ],
+      "PartNumbers": [
+        "STANDARDWOFFPACK_STUDENT"
+      ]
+    },
+    {
+      "SkuId": "31d57bc7-3a05-4867-ab53-97a17835a411",
+      "Names": [
+        "Microsoft 365 A5 for students use benefit"
+      ],
+      "PartNumbers": [
+        "M365EDU_A5_STUUSEBNFT"
+      ]
+    },
+    {
+      "SkuId": "31ecb341-2a17-483e-9140-c473006d1e1a",
+      "Names": [
+        "Microsoft Teams Rooms Pro for GCC"
+      ],
+      "PartNumbers": [
+        "Microsoft_Teams_Rooms_Pro_GCC"
+      ]
+    },
+    {
+      "SkuId": "3227bcb2-8448-4f81-b3c2-8c2074e15a2a",
+      "Names": [
+        "Microsoft Sales Copilot"
+      ],
+      "PartNumbers": [
+        "Microsoft_Viva_Sales"
+      ]
+    },
+    {
+      "SkuId": "3271cf8e-2be5-4a09-a549-70fd05baaa17",
+      "Names": [
+        "Microsoft 365 E5 EEA (no Teams)"
+      ],
+      "PartNumbers": [
+        "O365_w/o_Teams_Bundle_M5"
+      ]
+    },
+    {
+      "SkuId": "328dc228-00bc-48c6-8b09-1fbc8bc3435d",
+      "Names": [
+        "Dynamics 365 - Additional Database Storage (Qualified Offer)"
+      ],
+      "PartNumbers": [
+        "CRMSTORAGE"
+      ]
+    },
+    {
+      "SkuId": "32a0e471-8a27-4167-b24f-941559912425",
+      "Names": [
+        "Microsoft 365 A3 Suite features for faculty"
+      ],
+      "PartNumbers": [
+        "Microsoft 365 A3 Suite features for faculty"
+      ]
+    },
+    {
+      "SkuId": "32b47245-eb31-44fc-b945-a8b1576c439f",
+      "Names": [
+        "Microsoft 365 F5 Security + Compliance Add-on"
+      ],
+      "PartNumbers": [
+        "SPE_F5_SECCOMP"
+      ]
+    },
+    {
+      "SkuId": "336dfe1f-3b33-4ab4-b395-cba8f614976d",
+      "Names": [
+        "Dynamics 365 for Customer Service Digital Messaging add-on for Government"
+      ],
+      "PartNumbers": [
+        "DYN365_CS_MESSAGING_GOV"
+      ]
+    },
+    {
+      "SkuId": "338148b6-1b11-4102-afb9-f92b6cdc0f8d",
+      "Names": [
+        "Dynamics 365 P1 Tria for Information Workers"
+      ],
+      "PartNumbers": [
+        "DYN365_ENTERPRISE_P1_IW"
+      ]
+    },
+    {
+      "SkuId": "3539d28c-6e35-4a30-b3a9-cd43d5d3e0e2",
+      "Names": [
+        "Power Automate unattended RPA add-on"
+      ],
+      "PartNumbers": [
+        "POWERAUTOMATE_UNATTENDED_RPA"
+      ]
+    },
+    {
+      "SkuId": "359ea3e6-8130-4a57-9f8f-ad897a0342f1",
+      "Names": [
+        "Dynamics 365 Customer Voice"
+      ],
+      "PartNumbers": [
+        "DYN365_CUSTOMER_VOICE_BASE"
+      ]
+    },
+    {
+      "SkuId": "36a0f3b3-adb5-49ea-bf66-762134cf063a",
+      "Names": [
+        "Microsoft Teams Premium Introductory Pricing"
+      ],
+      "PartNumbers": [
+        "Microsoft_Teams_Premium"
+      ]
+    },
+    {
+      "SkuId": "3856cd1b-8033-458e-8d0f-9909ec6e6e6d",
+      "Names": [
+        "Microsoft Dynamics CRM Online Basic for Government"
+      ],
+      "PartNumbers": [
+        "CRMPLAN2_GCC"
+      ]
+    },
+    {
+      "SkuId": "38b434d2-a15e-4cde-9a98-e737c75623e1",
+      "Names": [
+        "Visio Plan 2"
+      ],
+      "PartNumbers": [
+        "VISIO_PLAN2_DEPT"
+      ]
+    },
+    {
+      "SkuId": "398d37b5-8deb-48db-8f7f-703eb2fb7c72",
+      "Names": [
+        "Power Pages authenticated users T3 min 1,000 units - 100 users/per site/month capacity pack_USGOV_DOD"
+      ],
+      "PartNumbers": [
+        "Power_Pages_authenticated_users_T3_min_1,000_units_100_users/per_site/month_capacity_pack_USGOV_DOD"
+      ]
+    },
+    {
+      "SkuId": "39a78eb6-3a8a-4e1e-878a-575a5c8984e7",
+      "Names": [
+        "Dynamics 365 Contact Center Add-on for Customer Service Enterprise"
+      ],
+      "PartNumbers": [
+        "DYNAMICS_365_CONTACT_CENTER_ADD_ON_FOR_CUSTOMER_SERVICE_ENTERPRISE"
+      ]
+    },
+    {
+      "SkuId": "3a256e9a-15b6-4092-b0dc-82993f4debc6",
+      "Names": [
+        "Dynamics 365 for Talent"
+      ],
+      "PartNumbers": [
+        "SKU_Dynamics_365_for_HCM_Trial"
+      ]
+    },
+    {
+      "SkuId": "3a349c99-ffec-43d2-a2e8-6b97fcb71103",
+      "Names": [
+        "Viva Goals User-led"
+      ],
+      "PartNumbers": [
+        "Viva_Goals_User_led"
+      ]
+    },
+    {
+      "SkuId": "3a6a908c-09c5-406a-8170-8ebb63c42882",
+      "Names": [
+        "Power BI Pro Dept"
+      ],
+      "PartNumbers": [
+        "POWER_BI_PRO_DEPT"
+      ]
+    },
+    {
+      "SkuId": "3ab6abff-666f-4424-bfb7-f0bc274ec7bc",
+      "Names": [
+        "Microsoft Teams Essentials (AAD Identity)"
+      ],
+      "PartNumbers": [
+        "TEAMS_ESSENTIALS_AAD"
+      ]
+    },
+    {
+      "SkuId": "3b555118-da6a-4418-894f-7df1e2096870",
+      "Names": [
+        "Microsoft 365 Business Basic"
+      ],
+      "PartNumbers": [
+        "O365_BUSINESS_ESSENTIALS"
+      ]
+    },
+    {
+      "SkuId": "3bbd44ed-8a70-4c07-9088-6232ddbd5ddd",
+      "Names": [
+        "Dynamics 365 Operations - Device"
+      ],
+      "PartNumbers": [
+        "Dynamics_365_for_Operations_Devices"
+      ]
+    },
+    {
+      "SkuId": "3c74d823-8f01-4fe8-82d5-f089a5504cec",
+      "Names": [
+        "Dynamics 365 for Customer Service, Enterprise Edition for Government"
+      ],
+      "PartNumbers": [
+        "DYN365_ENTERPRISE_CUSTOMER_SERVICE_GOV"
+      ]
+    },
+    {
+      "SkuId": "3cb45fab-ae53-4ff6-af40-24c1915ca07b",
+      "Names": [
+        "Windows 365 Business 8 vCPU 32 GB 128 GB"
+      ],
+      "PartNumbers": [
+        "CPC_B_8C_32RAM_128GB"
+      ]
+    },
+    {
+      "SkuId": "3d957427-ecdc-4df2-aacd-01cc9d519da8",
+      "Names": [
+        "Microsoft Workplace Analytics"
+      ],
+      "PartNumbers": [
+        "WORKPLACE_ANALYTICS"
+      ]
+    },
+    {
+      "SkuId": "3dc7332d-f0fa-40a3-81d3-dd6b84469b78",
+      "Names": [
+        "Microsoft Viva Glint"
+      ],
+      "PartNumbers": [
+        "Viva_Glint_Standalone"
+      ]
+    },
+    {
+      "SkuId": "3dd6cf57-d688-4eed-ba52-9e40b5468c3e",
+      "Names": [
+        "Microsoft Defender for Office 365 (Plan 2)"
+      ],
+      "PartNumbers": [
+        "THREAT_INTELLIGENCE"
+      ]
+    },
+    {
+      "SkuId": "3f17cf90-67a2-4fdb-8587-37c1539507e1",
+      "Names": [
+        "Microsoft 365 F5 Compliance Add-on GCC"
+      ],
+      "PartNumbers": [
+        "SPE_F5_COMP_GCC"
+      ]
+    },
+    {
+      "SkuId": "3f4babde-90ec-47c6-995d-d223749065d1",
+      "Names": [
+        "Office 365 G1 GCC"
+      ],
+      "PartNumbers": [
+        "STANDARDPACK_GOV"
+      ]
+    },
+    {
+      "SkuId": "3f9f06f5-3c31-472c-985f-62d9c10ec167",
+      "Names": [
+        "Power Pages vTrial for Makers"
+      ],
+      "PartNumbers": [
+        "Power_Pages_vTrial_for_Makers"
+      ]
+    },
+    {
+      "SkuId": "4016f256-b063-4864-816e-d818aad600c9",
+      "Names": [
+        "Viva Topics"
+      ],
+      "PartNumbers": [
+        "TOPIC_EXPERIENCES"
+      ]
+    },
+    {
+      "SkuId": "420af87e-8177-4146-a780-3786adaffbca",
+      "Names": [
+        "Power BI Pro CE"
+      ],
+      "PartNumbers": [
+        "POWER_BI_PRO_CE"
+      ]
+    },
+    {
+      "SkuId": "42e6818f-8966-444b-b7ac-0027c83fa8b5",
+      "Names": [
+        "Windows 365 Business 2 vCPU 4 GB 64 GB"
+      ],
+      "PartNumbers": [
+        "CPC_B_2C_4RAM_64GB"
+      ]
+    },
+    {
+      "SkuId": "439ac253-bfbc-49c7-acc0-6b951407b5ef",
+      "Names": [
+        "Windows 365 Business 4 vCPU 16 GB 128 GB (with Windows Hybrid Benefit)"
+      ],
+      "PartNumbers": [
+        "CPC_B_4C_16RAM_128GB_WHB"
+      ]
+    },
+    {
+      "SkuId": "440eaaa8-b3e0-484b-a8be-62870b9ba70a",
+      "Names": [
+        "Microsoft Teams Phone Resource Account"
+      ],
+      "PartNumbers": [
+        "PHONESYSTEM_VIRTUALUSER"
+      ]
+    },
+    {
+      "SkuId": "44575883-256e-4a79-9da4-ebe9acabe2b2",
+      "Names": [
+        "Microsoft 365 F1"
+      ],
+      "PartNumbers": [
+        "M365_F1"
+      ]
+    },
+    {
+      "SkuId": "4468c39a-28b2-42fb-9094-840bcf28771f",
+      "Names": [
+        "Basic Collaboration"
+      ],
+      "PartNumbers": [
+        "OFFICEBASIC"
+      ]
+    },
+    {
+      "SkuId": "446a86f8-a0cb-4095-83b3-d100eb050e3d",
+      "Names": [
+        "Dynamics 365 Customer Voice Additional Responses"
+      ],
+      "PartNumbers": [
+        "Forms_Pro_AddOn"
+      ]
+    },
+    {
+      "SkuId": "448b063f-9cc6-42fc-a0e6-40e08724a395",
+      "Names": [
+        "Common Data Service Log Capacity"
+      ],
+      "PartNumbers": [
+        "CDS_LOG_CAPACITY"
+      ]
+    },
+    {
+      "SkuId": "44ac31e7-2999-4304-ad94-c948886741d4",
+      "Names": [
+        "Microsoft 365 E5 Security for EMS E5"
+      ],
+      "PartNumbers": [
+        "IDENTITY_THREAT_PROTECTION_FOR_EMS_E5"
+      ]
+    },
+    {
+      "SkuId": "45a2423b-e884-448d-a831-d9e139c52d2f",
+      "Names": [
+        "Exchange Online Protection"
+      ],
+      "PartNumbers": [
+        "EOP_ENTERPRISE"
+      ]
+    },
+    {
+      "SkuId": "45bc2c81-6072-436a-9b0b-3b12eefbc402",
+      "Names": [
+        "Power BI for Office 365 Add-On"
+      ],
+      "PartNumbers": [
+        "POWER_BI_ADDON"
+      ]
+    },
+    {
+      "SkuId": "46102f44-d912-47e7-b0ca-1bd7b70ada3b",
+      "Names": [
+        "Project Plan 3 (for Department)"
+      ],
+      "PartNumbers": [
+        "PROJECT_PLAN3_DEPT"
+      ]
+    },
+    {
+      "SkuId": "461cb62c-6db7-41aa-bf3c-ce78236cdb9e",
+      "Names": [
+        "Windows 365 Enterprise 2 vCPU 8 GB 128 GB (Preview)"
+      ],
+      "PartNumbers": [
+        "CPC_LVL_2"
+      ]
+    },
+    {
+      "SkuId": "46974aed-363e-423c-9e6a-951037cec495",
+      "Names": [
+        "Project Plan 3 for Faculty"
+      ],
+      "PartNumbers": [
+        "PROJECTPROFESSIONAL_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "469af4da-121c-4529-8c85-9467bbebaa4b",
+      "Names": [
+        "Windows 365 Shared Use 4 vCPU 16 GB 512 GB"
+      ],
+      "PartNumbers": [
+        "Windows_365_S_4vCPU_16GB_512GB"
+      ]
+    },
+    {
+      "SkuId": "46c119d4-0379-4a9d-85e4-97c66d3f909e",
+      "Names": [
+        "Microsoft 365 A5 for Students"
+      ],
+      "PartNumbers": [
+        "M365EDU_A5_STUDENT"
+      ]
+    },
+    {
+      "SkuId": "46c3a859-c90d-40b3-9551-6178a48d5c18",
+      "Names": [
+        "Office 365 E3 (no Teams)"
+      ],
+      "PartNumbers": [
+        "Office_365_E3_(no_Teams)"
+      ]
+    },
+    {
+      "SkuId": "470845c0-6884-47e1-89d0-9d6244a77b44",
+      "Names": [
+        "Microsoft Copilot Studio User License for GCC High_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "VIRTUAL_AGENT_USL_AR_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "4755df59-3f73-41ab-a249-596ad72b5504",
+      "Names": [
+        "Microsoft Power Automate Plan 2"
+      ],
+      "PartNumbers": [
+        "FLOW_P2"
+      ]
+    },
+    {
+      "SkuId": "475e3e81-3c75-4e07-95b6-2fed374536c8",
+      "Names": [
+        "Privacy Management - subject rights request (1) for EDU"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_SUB_RIGHTS_REQ_1_EDU_V2"
+      ]
+    },
+    {
+      "SkuId": "47794cd0-f0e5-45c5-9033-2eb6b5fc84e0",
+      "Names": [
+        "Communications Credits"
+      ],
+      "PartNumbers": [
+        "MCOPSTNC"
+      ]
+    },
+    {
+      "SkuId": "481f3bc2-5756-4b28-9375-5c8c86b99e6b",
+      "Names": [
+        "Clipchamp Standard"
+      ],
+      "PartNumbers": [
+        "Clipchamp_Standard"
+      ]
+    },
+    {
+      "SkuId": "488ba24a-39a9-4473-8ee5-19291e71b002",
+      "Names": [
+        "Windows 10/11 Enterprise E5"
+      ],
+      "PartNumbers": [
+        "WIN10_VDA_E5"
+      ]
+    },
+    {
+      "SkuId": "494721b8-1f30-4315-aba6-70ca169358d9",
+      "Names": [
+        "Dynamics 365 Sales, Field Service and Customer Service Partner Sandbox"
+      ],
+      "PartNumbers": [
+        "Dynamics_365_Sales_Field_Service_and_Customer_Service_Partner_Sandbox"
+      ]
+    },
+    {
+      "SkuId": "4a51bf65-409c-4a91-b845-1121b571cc9d",
+      "Names": [
+        "Power Automate per user plan"
+      ],
+      "PartNumbers": [
+        "FLOW_PER_USER"
+      ]
+    },
+    {
+      "SkuId": "4ae99959-6b0f-43b0-b1ce-68146001bdba",
+      "Names": [
+        "Visio Plan 2 for GCC"
+      ],
+      "PartNumbers": [
+        "VISIOCLIENT_GOV"
+      ]
+    },
+    {
+      "SkuId": "4aed5dd6-eb9c-4143-8f14-368d70287121",
+      "Names": [
+        "Dynamics 365 Enterprise Edition - Additional Database Storage for Government"
+      ],
+      "PartNumbers": [
+        "CRMSTORAGE_GCC"
+      ]
+    },
+    {
+      "SkuId": "4b244418-9658-4451-a2b8-b5e2b364e9bd",
+      "Names": [
+        "Visio Plan 1"
+      ],
+      "PartNumbers": [
+        "VISIOONLINE_PLAN1"
+      ]
+    },
+    {
+      "SkuId": "4b2c20e4-939d-4bf4-9dd8-6870240cfe19",
+      "Names": [
+        "Clipchamp Premium Add-on"
+      ],
+      "PartNumbers": [
+        "Clipchamp_Premium_Add_on"
+      ]
+    },
+    {
+      "SkuId": "4b32a493-9a67-4649-8eb9-9fc5a5f75c12",
+      "Names": [
+        "Dynamics 365 for Marketing USL"
+      ],
+      "PartNumbers": [
+        "D365_MARKETING_USER"
+      ]
+    },
+    {
+      "SkuId": "4b585984-651b-448a-9e53-3b10f069cf7f",
+      "Names": [
+        "Office 365 F3"
+      ],
+      "PartNumbers": [
+        "DESKLESSPACK"
+      ]
+    },
+    {
+      "SkuId": "4b590615-0888-425a-a965-b3bf7789848d",
+      "Names": [
+        "Microsoft 365 A3 for Faculty"
+      ],
+      "PartNumbers": [
+        "M365EDU_A3_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "4b74a65c-8b4a-4fc8-9f6b-5177ed11ddfa",
+      "Names": [
+        "Microsoft Copilot Studio User License",
+        "Power Virtual Agent User License"
+      ],
+      "PartNumbers": [
+        "VIRTUAL_AGENT_USL"
+      ]
+    },
+    {
+      "SkuId": "4b9405b0-7788-4568-add1-99614e613b69",
+      "Names": [
+        "Exchange Online (Plan 1)"
+      ],
+      "PartNumbers": [
+        "EXCHANGESTANDARD"
+      ]
+    },
+    {
+      "SkuId": "4cde982a-ede4-4409-9ae6-b003453c8ea6",
+      "Names": [
+        "Microsoft Teams Rooms Pro"
+      ],
+      "PartNumbers": [
+        "Microsoft_Teams_Rooms_Pro"
+      ]
+    },
+    {
+      "SkuId": "4dee1f32-0808-4fd2-a2ed-fdd575e3a45f",
+      "Names": [
+        "Microsoft 365 Audio Conferencing_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "MCOMEETADV_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "4eb45c5b-0d19-4e33-b87c-adfc25268f20",
+      "Names": [
+        "Microsoft 365 E5_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "SPE_E5_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "4ef96642-f096-40de-a3e9-d83fb2f90211",
+      "Names": [
+        "Microsoft Defender for Office 365 (Plan 1)"
+      ],
+      "PartNumbers": [
+        "ATP_ENTERPRISE"
+      ]
+    },
+    {
+      "SkuId": "4f05b1a3-a978-462c-b93f-781c6bee998f",
+      "Names": [
+        "Microsoft Relationship Sales solution"
+      ],
+      "PartNumbers": [
+        "DYN365_ ENTERPRISE _RELATIONSHIP_SALES"
+      ]
+    },
+    {
+      "SkuId": "4fb214cb-a430-4a91-9c91-4976763aa78f",
+      "Names": [
+        "Teams Rooms Premium"
+      ],
+      "PartNumbers": [
+        "MTR_PREM"
+      ]
+    },
+    {
+      "SkuId": "50509a35-f0bd-4c5e-89ac-22f0e16a00f8",
+      "Names": [
+        "Microsoft Teams Rooms Basic without Audio Conferencing"
+      ],
+      "PartNumbers": [
+        "Microsoft_Teams_Rooms_Basic_without_Audio_Conferencing"
+      ]
+    },
+    {
+      "SkuId": "509e8ab6-0274-4cda-bcbd-bd164fd562c4",
+      "Names": [
+        "Microsoft Defender for Endpoint Server"
+      ],
+      "PartNumbers": [
+        "MDATP_Server"
+      ]
+    },
+    {
+      "SkuId": "50f60901-3181-4b75-8a2c-4c8e4c1d5a72",
+      "Names": [
+        "Microsoft 365 F1"
+      ],
+      "PartNumbers": [
+        "M365_F1_COMM"
+      ]
+    },
+    {
+      "SkuId": "5265a84e-8def-4fa2-ab4b-5dc278df5025",
+      "Names": [
+        "Windows 365 Enterprise 2 vCPU 4 GB 256 GB"
+      ],
+      "PartNumbers": [
+        "CPC_E_2C_4GB_256GB"
+      ]
+    },
+    {
+      "SkuId": "52cdf00e-8303-4223-a749-ff69a13e2dd0",
+      "Names": [
+        "Microsoft Entra Workload ID"
+      ],
+      "PartNumbers": [
+        "Workload_Identities_P2"
+      ]
+    },
+    {
+      "SkuId": "52ea0e27-ae73-4983-a08f-13561ebdb823",
+      "Names": [
+        "Teams Premium (for Departments)"
+      ],
+      "PartNumbers": [
+        "Teams_Premium_(for_Departments)"
+      ]
+    },
+    {
+      "SkuId": "53265c61-c78c-4223-ab30-422da0c97fbb",
+      "Names": [
+        "Power Pages authenticated users T3 min 1,000 units - 100 users/per site/month capacity pack_GCC"
+      ],
+      "PartNumbers": [
+        "Power_Pages_authenticated_users_T3_min_1,000_units_100_users/per_site/month_capacity_pack_GCC"
+      ]
+    },
+    {
+      "SkuId": "533b8f26-f74b-4e9c-9c59-50fc4b393b63",
+      "Names": [
+        "Minecraft Education Student"
+      ],
+      "PartNumbers": [
+        "MEE_STUDENT"
+      ]
+    },
+    {
+      "SkuId": "535a3a29-c5f0-42fe-8215-d3b9e1f38c4a",
+      "Names": [
+        "Office 365 G3 GCC"
+      ],
+      "PartNumbers": [
+        "ENTERPRISEPACK_GOV"
+      ]
+    },
+    {
+      "SkuId": "53818b1b-4a27-454b-8896-0dba576410e6",
+      "Names": [
+        "Planner and Project Plan 3"
+      ],
+      "PartNumbers": [
+        "PROJECTPROFESSIONAL"
+      ]
+    },
+    {
+      "SkuId": "54a152dc-90de-4996-93d2-bc47e670fc06",
+      "Names": [
+        "Skype for Business PSTN Domestic Calling (120 Minutes)"
+      ],
+      "PartNumbers": [
+        "MCOPSTN5"
+      ]
+    },
+    {
+      "SkuId": "550f19ba-f323-4a7d-a8d2-8971b0d9ea85",
+      "Names": [
+        "Microsoft Defender for Office 365 (Plan 1)_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "ATP_ENTERPRISE_USGOV_GCCHIGH "
+      ]
+    },
+    {
+      "SkuId": "556640c0-53ea-4773-907d-29c55332983f",
+      "Names": [
+        "Microsoft Cloud for Sustainability vTrial"
+      ],
+      "PartNumbers": [
+        "Microsoft_Cloud_for_Sustainability_vTrial"
+      ]
+    },
+    {
+      "SkuId": "55c9eb4e-c746-45b4-b255-9ab6b19d5c62",
+      "Names": [
+        "Dynamics 365 Finance"
+      ],
+      "PartNumbers": [
+        "DYN365_FINANCE"
+      ]
+    },
+    {
+      "SkuId": "56a59ffb-9df1-421b-9e61-8b568583474d",
+      "Names": [
+        "Microsoft Defender for Office 365 (Plan 2) GCC"
+      ],
+      "PartNumbers": [
+        "THREAT_INTELLIGENCE_GOV"
+      ]
+    },
+    {
+      "SkuId": "57f3babd-73ce-40de-bcb2-dadbfbfff9f7",
+      "Names": [
+        "Power Apps Portals login capacity add-on Tier 2 (10 unit min)"
+      ],
+      "PartNumbers": [
+        "POWERAPPS_PORTALS_LOGIN_T2"
+      ]
+    },
+    {
+      "SkuId": "59d3d0bf-df39-4b8b-8601-ea6c09a7fd66",
+      "Names": [
+        "Dynamics 365 Contact Center Digital"
+      ],
+      "PartNumbers": [
+        "DYNAMICS_365_CONTACT_CENTER_DIGITAL"
+      ]
+    },
+    {
+      "SkuId": "5a1c7b8d-0739-4ca8-bf69-ec87e69133ac",
+      "Names": [
+        "Microsoft 365 Business Standard (no Teams)"
+      ],
+      "PartNumbers": [
+        "MICROSOFT_365_BUSINESS_STANDARD_NO_TEAMS"
+      ]
+    },
+    {
+      "SkuId": "5b22585d-1b71-4c6b-b6ec-160b1a9c2323",
+      "Names": [
+        "Dynamics 365 Sales Enterprise Attach to Qualifying Dynamics 365 Base Offer"
+      ],
+      "PartNumbers": [
+        "D365_SALES_ENT_ATTACH"
+      ]
+    },
+    {
+      "SkuId": "5b631642-bd26-49fe-bd20-1daaa972ef80",
+      "Names": [
+        "Microsoft Power Apps for Developer"
+      ],
+      "PartNumbers": [
+        "POWERAPPS_DEV"
+      ]
+    },
+    {
+      "SkuId": "5c739a73-651d-4c2c-8a4e-fe4ba12253b0",
+      "Names": [
+        "Microsoft 365 G3 - Unattended License for GCC"
+      ],
+      "PartNumbers": [
+        "M365_G3_RPA1_GOV"
+      ]
+    },
+    {
+      "SkuId": "5cd0b796-9ac8-4792-9f0b-796ca9044e4a",
+      "Names": [
+        "Dynamics 365 for Case Management, Enterprise Edition for Government"
+      ],
+      "PartNumbers": [
+        "D365_ENTERPRISE_CASE_MANAGEMENT_GOV"
+      ]
+    },
+    {
+      "SkuId": "5d505572-203c-4b83-aa9b-dab50fb46277",
+      "Names": [
+        "Project Plan 3 for GCC TEST"
+      ],
+      "PartNumbers": [
+        "Project_Professional_TEST_GCC"
+      ]
+    },
+    {
+      "SkuId": "5e1e7702-a2b7-4360-8d07-2f515792896f",
+      "Names": [
+        "Microsoft Defender for Business"
+      ],
+      "PartNumbers": [
+        "MDE_SMB"
+      ]
+    },
+    {
+      "SkuId": "5e36d0d4-e9e5-4052-aba0-0257465c9b86",
+      "Names": [
+        "Microsoft Intune Advanced Analytics"
+      ],
+      "PartNumbers": [
+        "Microsoft_Intune_Advanced_Analytics"
+      ]
+    },
+    {
+      "SkuId": "5f43d48c-dd3d-4dd8-a059-70c2f040f979",
+      "Names": [
+        "Power Pages authenticated users T2 min 100 units - 100 users/per site/month capacity pack_GCC"
+      ],
+      "PartNumbers": [
+        "Power_Pages_authenticated_users_T2_min_100_units_100_users/per_site/month_capacity_pack_GCC"
+      ]
+    },
+    {
+      "SkuId": "602e6573-55a3-46b1-a1a0-cc267991501a",
+      "Names": [
+        "Microsoft 365 E3 EEA (no Teams) (500 seats min)_HUB"
+      ],
+      "PartNumbers": [
+        "O365_w/o Teams Bundle_M3_(500_seats_min)_HUB"
+      ]
+    },
+    {
+      "SkuId": "606b54a9-78d8-4298-ad8b-df6ef4481c80",
+      "Names": [
+        "Microsoft Copilot Studio Viral Trial",
+        "Power Virtual Agents Viral Trial"
+      ],
+      "PartNumbers": [
+        "CCIBOTS_PRIVPREV_VIRAL"
+      ]
+    },
+    {
+      "SkuId": "6070a4c8-34c6-4937-8dfb-39bbc6397a60",
+      "Names": [
+        "Microsoft Teams Rooms Standard"
+      ],
+      "PartNumbers": [
+        "MEETING_ROOM"
+      ]
+    },
+    {
+      "SkuId": "610b16c2-bc9b-4b6b-b59f-0168123049ad",
+      "Names": [
+        "Skype Meeting Video Interop for Skype for Business"
+      ],
+      "PartNumbers": [
+        "VIDEO_INTEROP"
+      ]
+    },
+    {
+      "SkuId": "61902246-d7cb-453e-85cd-53ee28eec138",
+      "Names": [
+        "Microsoft Viva Suite"
+      ],
+      "PartNumbers": [
+        "VIVA"
+      ]
+    },
+    {
+      "SkuId": "61bec411-e46a-4dab-8f46-8b58ec845ffe",
+      "Names": [
+        "Microsoft Teams Rooms Standard without Audio Conferencing"
+      ],
+      "PartNumbers": [
+        "MEETING_ROOM_NOAUDIOCONF"
+      ]
+    },
+    {
+      "SkuId": "61e6bd70-fbdb-4deb-82ea-912842f39431",
+      "Names": [
+        "Dynamics 365 Customer Service Insights Trial"
+      ],
+      "PartNumbers": [
+        "DYN365_AI_SERVICE_INSIGHTS"
+      ]
+    },
+    {
+      "SkuId": "631d5fb1-a668-4c2a-9427-8830665a742e",
+      "Names": [
+        "Common Data Service for Apps File Capacity"
+      ],
+      "PartNumbers": [
+        "CDS_FILE_CAPACITY"
+      ]
+    },
+    {
+      "SkuId": "639dec6b-bb19-468b-871c-c5c441c4b0cb",
+      "Names": [
+        "Microsoft Copilot for Microsoft 365"
+      ],
+      "PartNumbers": [
+        "Microsoft_365_Copilot"
+      ]
+    },
+    {
+      "SkuId": "6432c818-bcef-43b6-9290-aec052964950",
+      "Names": [
+        "Microsoft Teams Premium"
+      ],
+      "PartNumbers": [
+        "M365_TEAMS_PREMIUM"
+      ]
+    },
+    {
+      "SkuId": "6470687e-a428-4b7a-bef2-8a291ad947c9",
+      "Names": [
+        "Windows Store for Business"
+      ],
+      "PartNumbers": [
+        "WINDOWS_STORE"
+      ]
+    },
+    {
+      "SkuId": "64758d81-92b7-4855-bcac-06617becb3e8",
+      "Names": [
+        "Project Plan 3_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "PROJECTPROFESSIONAL_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "64fca79f-c471-4e13-a335-9069cddf8aeb",
+      "Names": [
+        "Office Mobile Apps for Office 365 for GCC"
+      ],
+      "PartNumbers": [
+        "OFFICEMOBILE_SUBSCRIPTION_GOV_TEST"
+      ]
+    },
+    {
+      "SkuId": "65758a5f-2e16-43b3-a8cb-296cd8f69e09",
+      "Names": [
+        "Dynamics 365 for Customer Service Enterprise for Government"
+      ],
+      "PartNumbers": [
+        "D365_ENTERPRISE_CUSTOMER_SERVICE_GOV"
+      ]
+    },
+    {
+      "SkuId": "65f71586-ade3-4ce1-afc0-1b452eaf3782",
+      "Names": [
+        "Dynamics 365 Customer Voice Additional Responses"
+      ],
+      "PartNumbers": [
+        "DYN365_CUSTOMER_VOICE_ADDON"
+      ]
+    },
+    {
+      "SkuId": "66024bbf-4cd4-4329-95c8-c932e2ae01a8",
+      "Names": [
+        "Power BI Premium Per User Add-On for GCC"
+      ],
+      "PartNumbers": [
+        "PBI_PREMIUM_PER_USER_ADDON_CE_GCC"
+      ]
+    },
+    {
+      "SkuId": "6634e0ce-1a9f-428c-a498-f84ec7b8aa2e",
+      "Names": [
+        "Office 365 E2"
+      ],
+      "PartNumbers": [
+        "STANDARDWOFFPACK"
+      ]
+    },
+    {
+      "SkuId": "66b55226-6b4f-492c-910c-a3b7a3c9d993",
+      "Names": [
+        "Microsoft 365 F3"
+      ],
+      "PartNumbers": [
+        "SPE_F1"
+      ]
+    },
+    {
+      "SkuId": "673afb9d-d85b-40c2-914e-7bf46cd5cd75",
+      "Names": [
+        "Dynamics 365 Asset Management Addl Assets"
+      ],
+      "PartNumbers": [
+        "DYN365_ASSETMANAGEMENT"
+      ]
+    },
+    {
+      "SkuId": "67f58b51-af53-4344-9663-9a2beb1d8a8e",
+      "Names": [
+        "Dynamics 365 Enterprise Edition - Additional Portal for Government"
+      ],
+      "PartNumbers": [
+        "CRM_ONLINE_PORTAL_NOPREREQ"
+      ]
+    },
+    {
+      "SkuId": "67ffe999-d9ca-49e1-9d2c-03fb28aa7a48",
+      "Names": [
+        "Microsoft 365 F5 Security Add-on"
+      ],
+      "PartNumbers": [
+        "SPE_F5_SEC"
+      ]
+    },
+    {
+      "SkuId": "6a0f6da5-0b87-4190-a6ae-9bb5a2b9546a",
+      "Names": [
+        "Windows 10/11 Enterprise E3"
+      ],
+      "PartNumbers": [
+        "WIN10_VDA_E3"
+      ]
+    },
+    {
+      "SkuId": "6a4a1628-9b9a-424d-bed5-4118f0ede3fd",
+      "Names": [
+        "Dynamics 365 Business Central for IWs"
+      ],
+      "PartNumbers": [
+        "PROJECT_MADEIRA_PREVIEW_IW_SKU"
+      ]
+    },
+    {
+      "SkuId": "6af4b3d6-14bb-4a2a-960c-6c902aad34f3",
+      "Names": [
+        "Microsoft Teams Rooms Basic"
+      ],
+      "PartNumbers": [
+        "Microsoft_Teams_Rooms_Basic"
+      ]
+    },
+    {
+      "SkuId": "6c75fb1b-61f2-42d0-b1b8-6492ca9ae159",
+      "Names": [
+        "Dynamics 365 Multi-app"
+      ],
+      "PartNumbers": [
+        "Dynamics_365_Multi_app_"
+      ]
+    },
+    {
+      "SkuId": "6c827f0a-42cb-4cff-b1cd-f4104c16ede3",
+      "Names": [
+        "Dynamics 365 for Project Service Automation for Government"
+      ],
+      "PartNumbers": [
+        "D365_ENTERPRISE_PROJECT_SERVICE_AUTOMATION_GOV"
+      ]
+    },
+    {
+      "SkuId": "6ec542c9-2a86-4d4a-8a52-d233eb58ef0a",
+      "Names": [
+        "Dynamics 365 Customer Service Digital Messaging and Voice Add-in for Government"
+      ],
+      "PartNumbers": [
+        "DYN365_CS_OC_MESSAGING_VOICE_GOV"
+      ]
+    },
+    {
+      "SkuId": "6ec92958-3cc1-49db-95bd-bc6b3798df71",
+      "Names": [
+        "Dynamics 365 Sales Premium Viral Trial"
+      ],
+      "PartNumbers": [
+        "Dynamics_365_Sales_Premium_Viral_Trial"
+      ]
+    },
+    {
+      "SkuId": "6ee4114a-9b2d-4577-9e7a-49fa43d222d3",
+      "Names": [
+        "Microsoft 365 E5 EEA (no Teams) with Calling Minutes"
+      ],
+      "PartNumbers": [
+        "Microsoft_365_E5_EEA_(no_Teams)_with_Calling_Minutes"
+      ]
+    },
+    {
+      "SkuId": "6fd2c87f-b296-42f0-b197-1e91e994b900",
+      "Names": [
+        "Office 365 E3"
+      ],
+      "PartNumbers": [
+        "ENTERPRISEPACK"
+      ]
+    },
+    {
+      "SkuId": "6fe1e61a-91e5-40d7-a547-0d2dcc81bce8",
+      "Names": [
+        "Power Pages authenticated users T2 min 100 units - 100 users/per site/month capacity pack"
+      ],
+      "PartNumbers": [
+        "Power_Pages_authenticated_users_T2_min_100_units_100_users/per_site/month_capacity_pack"
+      ]
+    },
+    {
+      "SkuId": "7035277a-5e49-4abc-a24f-0ec49c501bb5",
+      "Names": [
+        "Microsoft Teams Phone Standard for GCCHIGH"
+      ],
+      "PartNumbers": [
+        "MCOEV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "706d2425-6170-4818-ba08-2ad8f1d2d078",
+      "Names": [
+        "Privacy Management - subject rights request (1) USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_SUB_RIGHTS_REQ_1_V2_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "710779e8-3d4a-4c88-adb9-386c958d1fdf",
+      "Names": [
+        "Microsoft Teams Exploratory"
+      ],
+      "PartNumbers": [
+        "TEAMS_EXPLORATORY"
+      ]
+    },
+    {
+      "SkuId": "71772aeb-4bb8-4f74-9dd4-36c7a9b5ca74",
+      "Names": [
+        "Office 365 E5 EEA (no Teams) without Audio Conferencing"
+      ],
+      "PartNumbers": [
+        "Office_365_E5_EEA_(no_Teams)_without_Audio_Conferencing"
+      ]
+    },
+    {
+      "SkuId": "71f21848-f89b-4aaa-a2dc-780c8e8aac5b",
+      "Names": [
+        "Windows 365 Business 2 vCPU 8 GB 128 GB"
+      ],
+      "PartNumbers": [
+        "CPC_B_2C_8RAM_128GB"
+      ]
+    },
+    {
+      "SkuId": "726a0894-2c77-4d65-99da-9775ef05aad1",
+      "Names": [
+        "Microsoft Business Center"
+      ],
+      "PartNumbers": [
+        "MICROSOFT_BUSINESS_CENTER"
+      ]
+    },
+    {
+      "SkuId": "729dbb8f-8d56-4994-8e33-2f218f549544",
+      "Names": [
+        "Microsoft Teams Domestic Calling Plan (240 min)"
+      ],
+      "PartNumbers": [
+        "MCOPSTN_6"
+      ]
+    },
+    {
+      "SkuId": "73e8b747-20bf-463d-8ffd-274a7d65d0bc",
+      "Names": [
+        "Dynamics 365 Contact Center Voice Add-on for Customer Service Enterprise"
+      ],
+      "PartNumbers": [
+        "DYNAMICS_365_CONTACT_CENTER_VOICE_ADD_ON_FOR_CUSTOMER_SERVICE_ENTERPRISE"
+      ]
+    },
+    {
+      "SkuId": "73fa80b5-689f-4db9-bbe4-bd414bc41e44",
+      "Names": [
+        "Workload Identities Premium"
+      ],
+      "PartNumbers": [
+        "Workload_Identities_Premium_CN"
+      ]
+    },
+    {
+      "SkuId": "74039b88-bd62-4b5c-9d9c-7a92bbc0bfdf",
+      "Names": [
+        "Office 365 F3_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "DESKLESSPACK_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "749742bf-0d37-4158-a120-33567104deeb",
+      "Names": [
+        "Dynamics 365 for Customer Service Enterprise Edition"
+      ],
+      "PartNumbers": [
+        "DYN365_ENTERPRISE_CUSTOMER_SERVICE"
+      ]
+    },
+    {
+      "SkuId": "74fbf1bb-47c6-4796-9623-77dc7371723b",
+      "Names": [
+        "Microsoft Teams Trial"
+      ],
+      "PartNumbers": [
+        "MS_TEAMS_IW"
+      ]
+    },
+    {
+      "SkuId": "750d9542-a2f8-41c7-8c81-311352173432",
+      "Names": [
+        "Windows 365 Business 2 vCPU 8 GB 256 GB"
+      ],
+      "PartNumbers": [
+        "CPC_B_2C_8RAM_256GB"
+      ]
+    },
+    {
+      "SkuId": "75564b9c-51e8-431c-b8fe-d472d5a545c8",
+      "Names": [
+        "Microsoft Copilot Studio"
+      ],
+      "PartNumbers": [
+        "Power_Virtual_Agents"
+      ]
+    },
+    {
+      "SkuId": "776df282-9fc0-4862-99e2-70e561b9909e",
+      "Names": [
+        "Project Online Essentials"
+      ],
+      "PartNumbers": [
+        "PROJECTESSENTIALS"
+      ]
+    },
+    {
+      "SkuId": "7792674b-fa0c-4af5-b2a1-a15239f933b6",
+      "Names": [
+        "Microsoft 365 Copilot for Finance (Preview)"
+      ],
+      "PartNumbers": [
+        "Microsoft_Copilot_for_Finance_trial"
+      ]
+    },
+    {
+      "SkuId": "7818ca3e-73c8-4e49-bc34-1276a2d27918",
+      "Names": [
+        "Windows 365 Enterprise 8 vCPU 32 GB 256 GB"
+      ],
+      "PartNumbers": [
+        "CPC_E_8C_32GB_256GB"
+      ]
+    },
+    {
+      "SkuId": "78362de1-6942-4bb8-83a1-a32aa67e6e2c",
+      "Names": [
+        "Azure Information Protection Premium P1 for Government"
+      ],
+      "PartNumbers": [
+        "RIGHTSMANAGEMENT_CE_GOV\t"
+      ]
+    },
+    {
+      "SkuId": "787d7e75-29ca-4b90-a3a9-0b780b35367c",
+      "Names": [
+        "Privacy Management - risk_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_RISK_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "78e66a63-337a-4a9a-8959-41c6654dfb56",
+      "Names": [
+        "Office 365 A1 Plus for faculty"
+      ],
+      "PartNumbers": [
+        "STANDARDWOFFPACK_IW_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "78ea43ac-9e5d-474f-8537-4abb82dafe27",
+      "Names": [
+        "Privacy Management - subject rights request (10)"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_SUB_RIGHTS_REQ_10_V2"
+      ]
+    },
+    {
+      "SkuId": "796a6fb4-740b-4d36-bf56-9c12ca7fa069",
+      "Names": [
+        "Agent 365"
+      ],
+      "PartNumbers": [
+        "AGENT_365"
+      ]
+    },
+    {
+      "SkuId": "79909bd8-4c69-4202-939e-11bc4385b134",
+      "Names": [
+        "Dynamics 365 Commerce"
+      ],
+      "PartNumbers": [
+        "DYN365_RETAIL"
+      ]
+    },
+    {
+      "SkuId": "79e2368c-4568-48d5-a352-b0344afabcf8",
+      "Names": [
+        "Dynamics 365 Contact Center Voice"
+      ],
+      "PartNumbers": [
+        "DYNAMICS_365_CONTACT_CENTER_VOICE"
+      ]
+    },
+    {
+      "SkuId": "7a551360-26c4-4f61-84e6-ef715673e083",
+      "Names": [
+        "Dynamics 365 Remote Assist"
+      ],
+      "PartNumbers": [
+        "MICROSOFT_REMOTE_ASSIST"
+      ]
+    },
+    {
+      "SkuId": "7ac9fe77-66b7-4e5e-9e46-10eed1cff547",
+      "Names": [
+        "Dynamics 365 Team Members"
+      ],
+      "PartNumbers": [
+        "DYN365_TEAM_MEMBERS"
+      ]
+    },
+    {
+      "SkuId": "7b1a89a9-5eb9-4cf8-9467-20c943f1122c",
+      "Names": [
+        "Windows 10/11 Enterprise A5 for faculty"
+      ],
+      "PartNumbers": [
+        "WIN10_ENT_A5_FAC"
+      ]
+    },
+    {
+      "SkuId": "7b26f5ab-a763-4c00-a1ac-f6c4b5506945",
+      "Names": [
+        "Power BI Premium P1"
+      ],
+      "PartNumbers": [
+        "PBI_PREMIUM_P1_ADDON"
+      ]
+    },
+    {
+      "SkuId": "7bb14422-3b90-4389-a7be-f1b745fc037f",
+      "Names": [
+        "Windows 365 Enterprise 2 vCPU 4 GB 64 GB"
+      ],
+      "PartNumbers": [
+        "CPC_E_2C_4GB_64GB"
+      ]
+    },
+    {
+      "SkuId": "7be8dc28-4da4-4e6d-b9b9-c60f2806df8a",
+      "Names": [
+        "Exchange Online (Plan 2) for GCC"
+      ],
+      "PartNumbers": [
+        "EXCHANGEENTERPRISE_GOV"
+      ]
+    },
+    {
+      "SkuId": "7cae5432-61bb-48c3-b75c-831394ec13a0",
+      "Names": [
+        "Power Pages authenticated users T2 min 100 units - 100 users/per site/month capacity pack_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "Power_Pages_authenticated_users_T2_min_100_units_100_users/per_site/month_capacity_pack_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "7cfd9a2b-e110-4c39-bf20-c6a3f36a3121",
+      "Names": [
+        "Microsoft 365 A3 for Students"
+      ],
+      "PartNumbers": [
+        "M365EDU_A3_STUDENT"
+      ]
+    },
+    {
+      "SkuId": "7d0d4f9a-2686-4cb8-814c-eff3fdab6d74",
+      "Names": [
+        "Dynamics 365 Business Central Database Capacity"
+      ],
+      "PartNumbers": [
+        "DYN365_BUSCENTRAL_DB_CAPACITY"
+      ]
+    },
+    {
+      "SkuId": "7d2bb54a-a870-41c2-98d1-1f3b5b523275",
+      "Names": [
+        "Power Pages authenticated users T2 min 100 units - 100 users/per site/month capacity pack CN_CN"
+      ],
+      "PartNumbers": [
+        "Power Pages authenticated users T2_CN_CN"
+      ]
+    },
+    {
+      "SkuId": "7d7af6c2-0be6-46df-84d1-c181b0272909",
+      "Names": [
+        "Dynamics 365 for Customer Service Chat"
+      ],
+      "PartNumbers": [
+        "DYN365_CS_CHAT"
+      ]
+    },
+    {
+      "SkuId": "7e31c0d9-9551-471d-836f-32ee72be4a01",
+      "Names": [
+        "Microsoft Teams Enterprise"
+      ],
+      "PartNumbers": [
+        "Microsoft_Teams_Enterprise_New"
+      ]
+    },
+    {
+      "SkuId": "7e6e6091-1680-4532-9370-6cd4598483ac",
+      "Names": [
+        "Dynamics 365 Contact Center Digital Add-on for Customer Service Enterprise"
+      ],
+      "PartNumbers": [
+        "DYNAMICS_365_CONTACT_CENTER_DIGITAL_ADD_ON_FOR_CUSTOMER_SERVICE_ENTERPRISE"
+      ]
+    },
+    {
+      "SkuId": "7e74bd05-2c47-404e-829a-ba95c66fe8e5",
+      "Names": [
+        "Microsoft Teams EEA"
+      ],
+      "PartNumbers": [
+        "Microsoft_Teams_EEA_New"
+      ]
+    },
+    {
+      "SkuId": "7ed4877c-0863-4f69-9187-245487128d4f",
+      "Names": [
+        "Dynamics 365 Regulatory Service - Enterprise Edition Trial"
+      ],
+      "PartNumbers": [
+        "DYN365_REGULATORY_SERVICE"
+      ]
+    },
+    {
+      "SkuId": "7fc0182e-d107-4556-8329-7caaa511197b",
+      "Names": [
+        "Exchange Online Essentials (ExO P1 Based)"
+      ],
+      "PartNumbers": [
+        "EXCHANGEESSENTIALS"
+      ]
+    },
+    {
+      "SkuId": "805d57c3-a97d-4c12-a1d0-858ffe5015d0",
+      "Names": [
+        "Windows 365 Business 2 vCPU 4 GB 256 GB"
+      ],
+      "PartNumbers": [
+        "CPC_B_2C_4RAM_256GB"
+      ]
+    },
+    {
+      "SkuId": "80b2d799-d2ba-4d2a-8842-fb0d0f3a4b82",
+      "Names": [
+        "Exchange Online Kiosk"
+      ],
+      "PartNumbers": [
+        "EXCHANGEDESKLESS"
+      ]
+    },
+    {
+      "SkuId": "80e52531-ad7f-44ea-abc3-28e389462f1b",
+      "Names": [
+        "Visio Plan 2_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "VISIOCLIENT_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "81441ae1-0b31-4185-a6c0-32b6b84d419f",
+      "Names": [
+        "Microsoft 365 A5 without Audio Conferencing for students use benefit"
+      ],
+      "PartNumbers": [
+        "M365EDU_A5_NOPSTNCONF_STUUSEBNFT"
+      ]
+    },
+    {
+      "SkuId": "816eacd3-e1e3-46b3-83c8-1ffd37e053d9",
+      "Names": [
+        "Windows 365 Business 1 vCPU 2 GB 64 GB"
+      ],
+      "PartNumbers": [
+        "CPC_B_1C_2RAM_64GB"
+      ]
+    },
+    {
+      "SkuId": "816ee058-f70c-42ad-b433-d6171984ea20",
+      "Names": [
+        "Power Apps per app plan (1 app or website) BD Only - GCC"
+      ],
+      "PartNumbers": [
+        "Power_Apps_per_app_plan_(1_app_or_portal)_BD_Only_GCC"
+      ]
+    },
+    {
+      "SkuId": "8330dae3-d349-44f7-9cad-1b23c64baabe",
+      "Names": [
+        "Microsoft 365 Business Voice (without Calling Plan) for US"
+      ],
+      "PartNumbers": [
+        "BUSINESS_VOICE_DIRECTROUTING_MED"
+      ]
+    },
+    {
+      "SkuId": "83b30692-0d09-435c-a455-2ab220d504b9",
+      "Names": [
+        "Privacy Management - risk_USGOV_DOD"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_RISK_USGOV_DOD"
+      ]
+    },
+    {
+      "SkuId": "83c489a4-94b6-4dcc-9fdc-ff9b107a4621",
+      "Names": [
+        "Dynamics 365 Human Resources Attach to Qualifying Dynamics 365 Base Offer"
+      ],
+      "PartNumbers": [
+        "DYN365_HUMAN_RESOURCES_ATTACH"
+      ]
+    },
+    {
+      "SkuId": "84951599-62b7-46f3-9c9d-30551b2ad607",
+      "Names": [
+        "Office 365 Multi-Geo Capabilities"
+      ],
+      "PartNumbers": [
+        "OFFICE365_MULTIGEO"
+      ]
+    },
+    {
+      "SkuId": "84a661c4-e949-4bd2-a560-ed7766fcaf2b",
+      "Names": [
+        "Microsoft Entra ID P2"
+      ],
+      "PartNumbers": [
+        "AAD_PREMIUM_P2"
+      ]
+    },
+    {
+      "SkuId": "84cd610f-a3f8-4beb-84ab-d9d2c902c6c9",
+      "Names": [
+        "Project Plan 1 (for Department)"
+      ],
+      "PartNumbers": [
+        "PROJECT_PLAN1_DEPT"
+      ]
+    },
+    {
+      "SkuId": "84d5f90f-cd0d-4864-b90b-1c7ba63b4808",
+      "Names": [
+        "Office 365 Cloud App Security"
+      ],
+      "PartNumbers": [
+        "ADALLOM_O365"
+      ]
+    },
+    {
+      "SkuId": "84ed7c30-3738-43a0-aa03-cf6c577d8dbb",
+      "Names": [
+        "Microsoft Copilot Studio_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "Power_Virtual_Agents_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "85430fb9-02e8-48be-9d7e-328beb41fa29",
+      "Names": [
+        "Dynamics 365 for Marketing Attach"
+      ],
+      "PartNumbers": [
+        "DYN365_MARKETING_APP_ATTACH"
+      ]
+    },
+    {
+      "SkuId": "8623b2d7-5e24-4281-b6b7-086a5f3b0b1c",
+      "Names": [
+        "Power Apps per app plan for Government"
+      ],
+      "PartNumbers": [
+        "POWERAPPS_PER_APP_GCC"
+      ]
+    },
+    {
+      "SkuId": "878b8bbd-3cd0-4b44-9a56-3406741e65e0",
+      "Names": [
+        "Power Pages authenticated users T3 min 1,000 units - 100 users/per site/month capacity pack"
+      ],
+      "PartNumbers": [
+        "Power_Pages_authenticated_users_T3_min_1,000_units_100_users/per_site/month_capacity_pack"
+      ]
+    },
+    {
+      "SkuId": "87bbbc60-4754-4998-8c88-227dca264858",
+      "Names": [
+        "Power Apps and Logic Flows"
+      ],
+      "PartNumbers": [
+        "POWERAPPS_INDIVIDUAL_USER"
+      ]
+    },
+    {
+      "SkuId": "8900a2c0-edba-4079-bdf3-b276e293b6a8",
+      "Names": [
+        "Office 365 G5 GCC"
+      ],
+      "PartNumbers": [
+        "ENTERPRISEPREMIUM_GOV"
+      ]
+    },
+    {
+      "SkuId": "8a180c2b-f4cf-4d44-897c-3d32acc4a60b",
+      "Names": [
+        "Enterprise Mobility + Security G5 GCC"
+      ],
+      "PartNumbers": [
+        "EMSPREMIUM_GOV"
+      ]
+    },
+    {
+      "SkuId": "8a5fbbed-8b8c-41e5-907e-c50c471340fd",
+      "Names": [
+        "Compliance Manager Premium Assessment Add-On"
+      ],
+      "PartNumbers": [
+        "CMPA_addon"
+      ]
+    },
+    {
+      "SkuId": "8c4ce438-32a7-4ac5-91a6-e22ae08d9c8b",
+      "Names": [
+        "Rights Management Adhoc"
+      ],
+      "PartNumbers": [
+        "RIGHTSMANAGEMENT_ADHOC"
+      ]
+    },
+    {
+      "SkuId": "8e4c6baa-f2ff-4884-9c38-93785d0d7ba1",
+      "Names": [
+        "Power Apps Premium for Government"
+      ],
+      "PartNumbers": [
+        "POWERAPPS_PER_USER_GCC"
+      ]
+    },
+    {
+      "SkuId": "8e7a3d30-d97d-43ab-837c-d7701cef83dc",
+      "Names": [
+        "Dynamics 365 for Team Members Enterprise Edition"
+      ],
+      "PartNumbers": [
+        "DYN365_ENTERPRISE_TEAM_MEMBERS"
+      ]
+    },
+    {
+      "SkuId": "8eac9119-7e6b-4278-9dc4-e3458993b08a",
+      "Names": [
+        "Dynamics 365 for Field Service for Government"
+      ],
+      "PartNumbers": [
+        "D365_ENTERPRISE_FIELD_SERVICE_GOV"
+      ]
+    },
+    {
+      "SkuId": "8ecbd3c1-b108-437c-a859-e3c125e3f83f",
+      "Names": [
+        "Power BI Premium EM2"
+      ],
+      "PartNumbers": [
+        "PBI_PREMIUM_EM2_ADDON"
+      ]
+    },
+    {
+      "SkuId": "8edc2cf8-6438-4fa9-b6e3-aa1660c640cc",
+      "Names": [
+        "Dynamics 365 for Sales and Customer Service Enterprise Edition"
+      ],
+      "PartNumbers": [
+        "DYN365_ENTERPRISE_SALES_CUSTOMERSERVICE"
+      ]
+    },
+    {
+      "SkuId": "8ee402cd-e6a8-4b67-a411-54d1f37a2049",
+      "Names": [
+        "Windows 365 Business 8 vCPU 32 GB 512 GB"
+      ],
+      "PartNumbers": [
+        "CPC_B_8C_32RAM_512GB"
+      ]
+    },
+    {
+      "SkuId": "8efbe2f6-106e-442f-97d4-a59aa6037e06",
+      "Names": [
+        "Windows 10/11 Enterprise A3 for faculty"
+      ],
+      "PartNumbers": [
+        "WIN10_ENT_A3_FAC"
+      ]
+    },
+    {
+      "SkuId": "8f0c5670-4e56-4892-b06d-91c085d7004f",
+      "Names": [
+        "App Connect IW"
+      ],
+      "PartNumbers": [
+        "SPZA_IW"
+      ]
+    },
+    {
+      "SkuId": "8fe96593-34d3-49bb-aeee-fb794fed0800",
+      "Names": [
+        "Windows 365 Shared Use 2 vCPU 4 GB 256 GB"
+      ],
+      "PartNumbers": [
+        "Windows_365_S_2vCPU_4GB_256GB"
+      ]
+    },
+    {
+      "SkuId": "90277bc7-a6fe-4181-99d8-712b08b8d32b",
+      "Names": [
+        "Microsoft 365 E5 EEA (no Teams) without Audio Conferencing"
+      ],
+      "PartNumbers": [
+        "Microsoft_365_E5_EEA_(no_Teams)_without_Audio_Conferencing"
+      ]
+    },
+    {
+      "SkuId": "90369797-7141-4e75-8f5e-d13f4b6092c1",
+      "Names": [
+        "Windows 365 Shared Use 2 vCPU 4 GB 128 GB"
+      ],
+      "PartNumbers": [
+        "Windows_365_S_2vCPU_4GB_128GB"
+      ]
+    },
+    {
+      "SkuId": "906af65a-2970-46d5-9b58-4e9aa50f0657",
+      "Names": [
+        "Microsoft Dynamics CRM Online Basic"
+      ],
+      "PartNumbers": [
+        "CRMPLAN2"
+      ]
+    },
+    {
+      "SkuId": "90b5e015-709a-4b8b-b08e-3200f994494c",
+      "Names": [
+        "Exchange Online Archiving for Exchange Server"
+      ],
+      "PartNumbers": [
+        "EXCHANGEARCHIVE"
+      ]
+    },
+    {
+      "SkuId": "90d8b3f8-712e-4f7b-aa1e-62e7ae6cbe96",
+      "Names": [
+        "Business Apps (free)"
+      ],
+      "PartNumbers": [
+        "SMB_APPS"
+      ]
+    },
+    {
+      "SkuId": "917fb2b4-f71c-43a1-8edc-75532b554bb5",
+      "Names": [
+        "Microsoft Defender for Office 365 (Plan 1) Student"
+      ],
+      "PartNumbers": [
+        "ATP_ENTERPRISE_STUDENT"
+      ]
+    },
+    {
+      "SkuId": "91bbc479-4c2c-4210-9c88-e5b468c35b83",
+      "Names": [
+        "Privacy Management - subject rights request (100) GCC"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_SUB_RIGHTS_REQ_100_V2_GCC"
+      ]
+    },
+    {
+      "SkuId": "91de26be-adfa-4a3d-989e-9131cc23dda7",
+      "Names": [
+        "Microsoft 365 F5 Compliance Add-on"
+      ],
+      "PartNumbers": [
+        "SPE_F5_COMP"
+      ]
+    },
+    {
+      "SkuId": "923f58ab-fca1-46a1-92f9-89fda21238a8",
+      "Names": [
+        "Microsoft Teams Domestic Calling Plan for GCC"
+      ],
+      "PartNumbers": [
+        "MCOPSTN_1_GOV"
+      ]
+    },
+    {
+      "SkuId": "927d8402-8d3b-40e8-b779-34e859f7b497",
+      "Names": [
+        "Power Apps Portals login capacity add-on Tier 3 (50 unit min)"
+      ],
+      "PartNumbers": [
+        "POWERAPPS_PORTALS_LOGIN_T3"
+      ]
+    },
+    {
+      "SkuId": "930cc132-4d6b-4d8c-8818-587d17c50d56",
+      "Names": [
+        "Project Plan 5 for faculty"
+      ],
+      "PartNumbers": [
+        "PROJECTPREMIUM_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "938fd547-d794-42a4-996c-1cc206619580",
+      "Names": [
+        "Windows 10/11 Enterprise E5 Commercial (GCC Compatible)"
+      ],
+      "PartNumbers": [
+        "WINE5_GCC_COMPAT"
+      ]
+    },
+    {
+      "SkuId": "93d9955a-ec70-44d5-8faa-a194492390f7",
+      "Names": [
+        "Windows 365 Business 16 vCPU, 64 GB, 512 GB"
+      ],
+      "PartNumbers": [
+        "Windows_365_Business_16_vCPU,_64_GB,_512_GB"
+      ]
+    },
+    {
+      "SkuId": "9467fd84-2758-4287-b1fa-6a908c441b8a",
+      "Names": [
+        "Dynamics 365 Supply Chain Management Premium"
+      ],
+      "PartNumbers": [
+        "Dynamics_365_Supply_Chain_Management_Premium"
+      ]
+    },
+    {
+      "SkuId": "94763226-9b3c-4e75-a931-5c89701abe66",
+      "Names": [
+        "Office 365 A1 for faculty"
+      ],
+      "PartNumbers": [
+        "STANDARDWOFFPACK_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "94a6fbd4-6a2f-4990-b356-dc7dd8bed08a",
+      "Names": [
+        "Dynamics 365 Customer Service Enterprise Admin"
+      ],
+      "PartNumbers": [
+        "Dynamics_365_Customer_Service_Enterprise_admin_trial"
+      ]
+    },
+    {
+      "SkuId": "9571e9ac-2741-4b63-95fd-a79696f0d0ac",
+      "Names": [
+        "Microsoft Teams Rooms Standard for GCC"
+      ],
+      "PartNumbers": [
+        "MEETING_ROOM_GOV"
+      ]
+    },
+    {
+      "SkuId": "95de1760-7682-406d-98c9-52ef14e51e2b",
+      "Names": [
+        "Career Coach for faculty"
+      ],
+      "PartNumbers": [
+        "CAREERCOACH_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "960a972f-d017-4a17-8f64-b42c8035bc7d",
+      "Names": [
+        "Teams Premium for Faculty"
+      ],
+      "PartNumbers": [
+        "Teams_Premium_for_Faculty"
+      ]
+    },
+    {
+      "SkuId": "96d2951e-cb42-4481-9d6d-cad3baac177e",
+      "Names": [
+        "Windows 365 Enterprise 4 vCPU 16 GB 256 GB"
+      ],
+      "PartNumbers": [
+        "CPC_E_4C_16GB_256GB"
+      ]
+    },
+    {
+      "SkuId": "9706eed9-966f-4f1b-94f6-bb2b4af99a5b",
+      "Names": [
+        "App governance add-on to Microsoft Defender for Cloud Apps"
+      ],
+      "PartNumbers": [
+        "Microsoft_Cloud_App_Security_App_Governance_Add_On"
+      ]
+    },
+    {
+      "SkuId": "977464c4-bfaf-4b67-b761-a9bb735a2196",
+      "Names": [
+        "Dynamics 365 Field Service, Enterprise Edition - Resource Scheduling Optimization"
+      ],
+      "PartNumbers": [
+        "CRM_AUTO_ROUTING_ADDON"
+      ]
+    },
+    {
+      "SkuId": "978ec396-f930-4ee1-85f3-e1d82e8f73a4",
+      "Names": [
+        "Power Pages authenticated users T1 100 users/per site/month capacity pack_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "Power_Pages_authenticated_users_T1_100_users/per_site/month_capacity_pack_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "984df360-9a74-4647-8cf8-696749f6247a",
+      "Names": [
+        "Minecraft Education Faculty"
+      ],
+      "PartNumbers": [
+        "MEE_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "985fcb26-7b94-475b-b512-89356697be71",
+      "Names": [
+        "Microsoft Teams Phone Standard_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "MCOEV_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "98619618-9dc8-48c6-8f0c-741890ba5f93",
+      "Names": [
+        "Dynamics 365 Project Operations"
+      ],
+      "PartNumbers": [
+        "DYN365_PROJECT_OPERATIONS"
+      ]
+    },
+    {
+      "SkuId": "98b6e773-24d4-4c0d-a968-6e787a1f8204",
+      "Names": [
+        "Office 365 A3 for students"
+      ],
+      "PartNumbers": [
+        "ENTERPRISEPACKPLUS_STUDENT"
+      ]
+    },
+    {
+      "SkuId": "98defdf7-f6c1-44f5-a1f6-943b6764e7a5",
+      "Names": [
+        "Microsoft Defender for Identity"
+      ],
+      "PartNumbers": [
+        "ATA"
+      ]
+    },
+    {
+      "SkuId": "9900a3e2-6660-4c52-9074-60c949991389",
+      "Names": [
+        "Power Virtual Agent for GCC"
+      ],
+      "PartNumbers": [
+        "VIRTUAL_AGENT_BASE_GCC"
+      ]
+    },
+    {
+      "SkuId": "99049c9c-6011-4908-bf17-15f496e6519d",
+      "Names": [
+        "Office 365 Extra File Storage"
+      ],
+      "PartNumbers": [
+        "SHAREPOINTSTORAGE"
+      ]
+    },
+    {
+      "SkuId": "99c5688b-6c75-4496-876f-07f0fbd69add",
+      "Names": [
+        "Dynamics 365 for Marketing Additional Application"
+      ],
+      "PartNumbers": [
+        "DYN365_MARKETING_APPLICATION_ADDON"
+      ]
+    },
+    {
+      "SkuId": "99cb3f83-fbec-4aa1-8262-9679e6df7c53",
+      "Names": [
+        "Dynamics 365 Guides vTrial"
+      ],
+      "PartNumbers": [
+        "Dynamics_365_Guides_vTrial"
+      ]
+    },
+    {
+      "SkuId": "99cc8282-2f74-4954-83b7-c6a9a1999067",
+      "Names": [
+        "Microsoft 365 E5 Suite features"
+      ],
+      "PartNumbers": [
+        "M365_E5_SUITE_COMPONENTS"
+      ]
+    },
+    {
+      "SkuId": "99fc2803-fa72-42d3-ae78-b055e177d275",
+      "Names": [
+        "Microsoft Intune Plan 1 A VL"
+      ],
+      "PartNumbers": [
+        "INTUNE_A_VL"
+      ]
+    },
+    {
+      "SkuId": "9a18296a-025f-4e37-9ffa-30bf8d1ce775",
+      "Names": [
+        "Microsoft 365 E7"
+      ],
+      "PartNumbers": [
+        "MICROSOFT_365_E7"
+      ]
+    },
+    {
+      "SkuId": "9a1e33ed-9697-43f3-b84c-1b0959dbb1d4",
+      "Names": [
+        "Dynamics 365 Business Central External Accountant"
+      ],
+      "PartNumbers": [
+        "DYN365_FINANCIALS_ACCOUNTANT_SKU"
+      ]
+    },
+    {
+      "SkuId": "9a3c2a19-06c0-41b1-b2ea-13528d7b2e17",
+      "Names": [
+        "Power Pages authenticated users T1 100 users/per site/month capacity pack CN_CN"
+      ],
+      "PartNumbers": [
+        "Power Pages authenticated users T1_CN_CN"
+      ]
+    },
+    {
+      "SkuId": "9b196e97-5830-4c2e-adc2-1e10ebf5dee5",
+      "Names": [
+        "Microsoft Teams Calling Plan pay-as-you-go (country zone 1 - US)"
+      ],
+      "PartNumbers": [
+        "Microsoft_Teams_Calling_Plan_pay_as_you_go_(country_zone_1_US)"
+      ]
+    },
+    {
+      "SkuId": "9b85b4f0-92d9-4c3d-b230-041520cb1046",
+      "Names": [
+        "Privacy Management - subject rights request (100) for EDU"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_SUB_RIGHTS_REQ_100_EDU_V2"
+      ]
+    },
+    {
+      "SkuId": "9b8fe788-6174-4c4e-983b-3330c93ec278",
+      "Names": [
+        "Microsoft 365 A5 Suite features for faculty"
+      ],
+      "PartNumbers": [
+        "M365_A5_SUITE_COMPONENTS_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "9bd7c846-9556-4453-a542-191d527209e8",
+      "Names": [
+        "Microsoft Stream Storage Add-On (500 GB)"
+      ],
+      "PartNumbers": [
+        "STREAM_STORAGE"
+      ]
+    },
+    {
+      "SkuId": "9c0587f3-8665-4252-a8ad-b7a5ade57312",
+      "Names": [
+        "Microsoft 365 Lighthouse"
+      ],
+      "PartNumbers": [
+        "Microsoft365_Lighthouse"
+      ]
+    },
+    {
+      "SkuId": "9c7bff7a-3715-4da7-88d3-07f57f8d0fb6",
+      "Names": [
+        "Dynamics 365 For Sales Professional Trial"
+      ],
+      "PartNumbers": [
+        "D365_SALES_PRO_IW"
+      ]
+    },
+    {
+      "SkuId": "9cfd6bc3-84cd-4274-8a21-8c7c41d6c350",
+      "Names": [
+        "Microsoft 365 F5 Compliance Add-on AR (DOD)_USGOV_DOD"
+      ],
+      "PartNumbers": [
+        "SPE_F5_COMP_AR_D_USGOV_DOD"
+      ]
+    },
+    {
+      "SkuId": "9d576ffb-dd32-4c33-91ee-91625b61424a",
+      "Names": [
+        "Microsoft Sustainability Manager Premium USL Plus"
+      ],
+      "PartNumbers": [
+        "MICROSOFT_SUSTAINABILITY_MANAGER_PREMIUM_USL_ADDON"
+      ]
+    },
+    {
+      "SkuId": "9d776713-14cb-4697-a21d-9a52455c738a",
+      "Names": [
+        "Dynamics 365 - Additional Production Instance (Qualified Offer)"
+      ],
+      "PartNumbers": [
+        "CRMINSTANCE"
+      ]
+    },
+    {
+      "SkuId": "9ea4bdef-a20b-4668-b4a7-73e1f7696e0a",
+      "Names": [
+        "Sensor Data Intelligence Scenario Add-in for Dynamics 365 Supply Chain Management"
+      ],
+      "PartNumbers": [
+        "DYN365_IOT_INTELLIGENCE_SCENARIO"
+      ]
+    },
+    {
+      "SkuId": "9f3d9c1d-25a5-4aaa-8e59-23a1e6450a67",
+      "Names": [
+        "Universal Print"
+      ],
+      "PartNumbers": [
+        "UNIVERSAL_PRINT"
+      ]
+    },
+    {
+      "SkuId": "9f436c0e-fb32-424b-90be-6a9f2919d506",
+      "Names": [
+        "Microsoft 365 F5 Compliance Add-on AR_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "SPE_F5_COMP_AR_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "9fa2f157-c8e4-4351-a3f2-ffa506da1406",
+      "Names": [
+        "Microsoft Threat Experts - Experts on Demand"
+      ],
+      "PartNumbers": [
+        "EXPERTS_ON_DEMAND"
+      ]
+    },
+    {
+      "SkuId": "9fb0ba5f-4825-4e84-b239-5167a3a5d4dc",
+      "Names": [
+        "Windows 365 Enterprise 8 vCPU 32 GB 512 GB"
+      ],
+      "PartNumbers": [
+        "CPC_E_8C_32GB_512GB"
+      ]
+    },
+    {
+      "SkuId": "a056b037-1fa0-4133-a583-d05cff47d551",
+      "Names": [
+        "Privacy Management - subject rights request (10) GCC"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_SUB_RIGHTS_REQ_10_V2_GCC"
+      ]
+    },
+    {
+      "SkuId": "a0de5e3a-2500-4a19-b8f4-ec1c64692d22",
+      "Names": [
+        "Power Apps Portals page view capacity add-on"
+      ],
+      "PartNumbers": [
+        "POWERAPPS_PORTALS_PAGEVIEW"
+      ]
+    },
+    {
+      "SkuId": "a0e6a48f-b056-4037-af70-b9ac53504551",
+      "Names": [
+        "Azure Information Protection Plan 1"
+      ],
+      "PartNumbers": [
+        "RIGHTSMANAGEMENT_CE"
+      ]
+    },
+    {
+      "SkuId": "a10d5e58-74da-4312-95c8-76be4e5b75a0",
+      "Names": [
+        "Project for Office 365"
+      ],
+      "PartNumbers": [
+        "PROJECTCLIENT"
+      ]
+    },
+    {
+      "SkuId": "a237b6d8-572e-4839-bffd-7786d32a5d0e",
+      "Names": [
+        "Microsoft Defender for Office 365 (Plan 1) Student use benefit"
+      ],
+      "PartNumbers": [
+        "ATP_ENTERPRISE_STUDENTS_USE_BENEFIT"
+      ]
+    },
+    {
+      "SkuId": "a23dbafb-3396-48b3-ad9c-a304fe206043",
+      "Names": [
+        "Microsoft 365 E3 EEA (no Teams) - Unattended License"
+      ],
+      "PartNumbers": [
+        "Microsoft_365_E3_EEA_(no_Teams)_Unattended_License"
+      ]
+    },
+    {
+      "SkuId": "a36cdaa2-a806-4b6e-9ae0-28dbd993c20e",
+      "Names": [
+        "Dynamics 365 for Field Service Attach to Qualifying Dynamics 365 Base Offer"
+      ],
+      "PartNumbers": [
+        "D365_FIELD_SERVICE_ATTACH"
+      ]
+    },
+    {
+      "SkuId": "a3d0cd86-8068-4071-ad40-4dc5b5908c4b",
+      "Names": [
+        "Dynamics 365 Customer Insights Attach"
+      ],
+      "PartNumbers": [
+        "DYN365_CUSTOMER_INSIGHTS_ATTACH"
+      ]
+    },
+    {
+      "SkuId": "a3f586b6-8cce-4d9b-99d6-55238397f77a",
+      "Names": [
+        "Microsoft 365 Business Premium EEA (no Teams)"
+      ],
+      "PartNumbers": [
+        "Office_365_w/o_Teams_Bundle_Business_Premium"
+      ]
+    },
+    {
+      "SkuId": "a403ebcc-fae0-4ca2-8c8c-7a907fd6c235",
+      "Names": [
+        "Microsoft Fabric (Free)"
+      ],
+      "PartNumbers": [
+        "POWER_BI_STANDARD"
+      ]
+    },
+    {
+      "SkuId": "a4585165-0533-458a-97e3-c400570268c4",
+      "Names": [
+        "Office 365 A5 for faculty"
+      ],
+      "PartNumbers": [
+        "ENTERPRISEPREMIUM_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "a460366a-ade7-4791-b581-9fbff1bdaa85",
+      "Names": [
+        "Microsoft Teams Phone Standard for GCC"
+      ],
+      "PartNumbers": [
+        "MCOEV_GOV"
+      ]
+    },
+    {
+      "SkuId": "a461b89c-10e3-471c-82b8-aae4d820fccb",
+      "Names": [
+        "Enterprise Mobility + Security E5_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "EMSPREMIUM_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "a4bfb28e-becc-41b0-a454-ac680dc258d3",
+      "Names": [
+        "Dynamics 365 Enterprise Edition - Additional Portal (Qualified Offer)"
+      ],
+      "PartNumbers": [
+        "CRM_ONLINE_PORTAL"
+      ]
+    },
+    {
+      "SkuId": "a4e376bd-c61e-4618-9901-3fc0cb1b88bb",
+      "Names": [
+        "Microsoft Teams Rooms Basic for EDU"
+      ],
+      "PartNumbers": [
+        "Microsoft_Teams_Rooms_Basic_FAC"
+      ]
+    },
+    {
+      "SkuId": "a58f5506-b382-44d4-bfab-225b2fbf8390",
+      "Names": [
+        "Dynamics 365 Business Central Additional Environment Addon"
+      ],
+      "PartNumbers": [
+        "DYN365_BUSCENTRAL_ADD_ENV_ADDON"
+      ]
+    },
+    {
+      "SkuId": "a6051f20-9cbc-47d2-930d-419183bf6cf1",
+      "Names": [
+        "Microsoft 365 Business Voice"
+      ],
+      "PartNumbers": [
+        "BUSINESS_VOICE_MED2"
+      ]
+    },
+    {
+      "SkuId": "a640eead-25f6-4bec-97e3-23cfd382d7c2",
+      "Names": [
+        "Microsoft 365 E5 EEA (no Teams) without Audio Conferencing (500 seats min)_HUB"
+      ],
+      "PartNumbers": [
+        "Microsoft_365_E5_EEA_(no_Teams)_without_Audio_Conferencing_(500_seats_min)_HUB"
+      ]
+    },
+    {
+      "SkuId": "a809996b-059e-42e2-9866-db24b99a9782",
+      "Names": [
+        "Microsoft Copilot for Microsoft 365"
+      ],
+      "PartNumbers": [
+        "M365_Copilot"
+      ]
+    },
+    {
+      "SkuId": "a8ad7d2b-b8cf-49d6-b25a-69094a0be206",
+      "Names": [
+        "Power Apps per app plan"
+      ],
+      "PartNumbers": [
+        "POWERAPPS_PER_APP"
+      ]
+    },
+    {
+      "SkuId": "a91fc4e0-65e5-4266-aa76-4037509c1626",
+      "Names": [
+        "Microsoft 365 E5 with Calling Minutes"
+      ],
+      "PartNumbers": [
+        "SPE_E5_CALLINGMINUTES"
+      ]
+    },
+    {
+      "SkuId": "a929cd4d-8672-47c9-8664-159c1f322ba8",
+      "Names": [
+        "Microsoft Intune Suite"
+      ],
+      "PartNumbers": [
+        "Microsoft_Intune_Suite"
+      ]
+    },
+    {
+      "SkuId": "a9732ec9-17d9-494c-a51c-d6b45b384dcb",
+      "Names": [
+        "SharePoint Online (Plan 2)"
+      ],
+      "PartNumbers": [
+        "SHAREPOINTENTERPRISE"
+      ]
+    },
+    {
+      "SkuId": "a9c51c15-ffad-4c66-88c0-8771455c832d",
+      "Names": [
+        "Defender Threat Intelligence"
+      ],
+      "PartNumbers": [
+        "Defender_Threat_Intelligence"
+      ]
+    },
+    {
+      "SkuId": "a9d1e0df-df6f-48df-9386-76a832119cca",
+      "Names": [
+        "Windows 365 Shared Use 4 vCPU 16 GB 256 GB"
+      ],
+      "PartNumbers": [
+        "Windows_365_S_4vCPU_16GB_256GB"
+      ]
+    },
+    {
+      "SkuId": "a9d7ef53-9bea-4a2a-9650-fa7df58fe094",
+      "Names": [
+        "Compliance Manager Premium Assessment Add-On for GCC"
+      ],
+      "PartNumbers": [
+        "CMPA_addon_GCC"
+      ]
+    },
+    {
+      "SkuId": "aa0f9eb7-eff2-4943-8424-226fb137fcad",
+      "Names": [
+        "Exchange Online (Plan 1) for Alumni with Yammer"
+      ],
+      "PartNumbers": [
+        "EXCHANGESTANDARD_ALUMNI"
+      ]
+    },
+    {
+      "SkuId": "aa2695c9-8d59-4800-9dc8-12e01f1735af",
+      "Names": [
+        "Nonprofit Portal"
+      ],
+      "PartNumbers": [
+        "NONPROFIT_PORTAL"
+      ]
+    },
+    {
+      "SkuId": "aa6791d3-bb09-4bc2-afed-c30c3fe26032",
+      "Names": [
+        "Microsoft Teams Phone Standard for Small and Medium Business"
+      ],
+      "PartNumbers": [
+        "MCOEVSMB_1"
+      ]
+    },
+    {
+      "SkuId": "ab28dfa1-853a-4f54-9315-f5146975ac9a",
+      "Names": [
+        "Privacy Management - subject rights request (10) USGOV_DOD"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_SUB_RIGHTS_REQ_10_V2_USGOV_DOD"
+      ]
+    },
+    {
+      "SkuId": "ac5cef5d-921b-4f97-9ef3-c99076e5470f",
+      "Names": [
+        "Microsoft 365 Business Standard - Prepaid Legacy"
+      ],
+      "PartNumbers": [
+        "SMB_BUSINESS_PREMIUM"
+      ]
+    },
+    {
+      "SkuId": "ad2fe44a-915d-4e2b-ade1-6766d50a9d9c",
+      "Names": [
+        "Exchange Online (Plan 1) for Students"
+      ],
+      "PartNumbers": [
+        "EXCHANGESTANDARD_STUDENT"
+      ]
+    },
+    {
+      "SkuId": "ad7a56e0-6903-4d13-94f3-5ad491e78960",
+      "Names": [
+        "Microsoft Defender Vulnerability Management Add-on"
+      ],
+      "PartNumbers": [
+        "TVM_Premium_Add_on"
+      ]
+    },
+    {
+      "SkuId": "ad83ac17-4a5a-4ebb-adb2-079fb277e8b9",
+      "Names": [
+        "Windows 365 Business 4 vCPU 16 GB 128 GB"
+      ],
+      "PartNumbers": [
+        "CPC_B_4C_16RAM_128GB"
+      ]
+    },
+    {
+      "SkuId": "ad9c22b3-52d7-4e7e-973c-88121ea96436",
+      "Names": [
+        "Microsoft 365 Copilot (Education Faculty)"
+      ],
+      "PartNumbers": [
+        "Microsoft_365_Copilot_EDU"
+      ]
+    },
+    {
+      "SkuId": "ade29b5f-397e-4eb9-a287-0344bd46c68d",
+      "Names": [
+        "Microsoft Fabric (Free) for faculty"
+      ],
+      "PartNumbers": [
+        "POWER_BI_STANDARD_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "ae2343d1-0999-43f6-ae18-d816516f6e78",
+      "Names": [
+        "Teams Phone with Calling Plan"
+      ],
+      "PartNumbers": [
+        "MCOTEAMS_ESSENTIALS"
+      ]
+    },
+    {
+      "SkuId": "aea38a85-9bd5-4981-aa00-616b411205bf",
+      "Names": [
+        "Office 365 E3_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "ENTERPRISEPACK_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "aeb8c883-d700-4aa1-8719-402b5adf2949",
+      "Names": [
+        "Dynamics 365 Customer Service Digital Messaging Partner Sandbox"
+      ],
+      "PartNumbers": [
+        "Dynamics_365_Customer_Service_Digital_Messaging_Partner_Sandbox"
+      ]
+    },
+    {
+      "SkuId": "aecb477b-2f56-4e38-b711-b752c24fc19b",
+      "Names": [
+        "Microsoft Sustainability Manager Premium"
+      ],
+      "PartNumbers": [
+        "Microsoft_Sustainability_Manager_Premium"
+      ]
+    },
+    {
+      "SkuId": "aedfac18-56b8-45e3-969b-53edb4ba4952",
+      "Names": [
+        "Enterprise Mobility + Security A3 for Faculty"
+      ],
+      "PartNumbers": [
+        "EMS_EDU_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "af739e8e-dd11-4eb5-a986-5908f595c603",
+      "Names": [
+        "Dynamics 365 Project Operations Attach"
+      ],
+      "PartNumbers": [
+        "DYN365_PROJECT_OPERATIONS_ATTACH"
+      ]
+    },
+    {
+      "SkuId": "b05e124f-c7cc-45a0-a6aa-8cf78c946968",
+      "Names": [
+        "Enterprise Mobility + Security E5"
+      ],
+      "PartNumbers": [
+        "EMSPREMIUM"
+      ]
+    },
+    {
+      "SkuId": "b0e7de67-e503-4934-b729-53d595ba5cd1",
+      "Names": [
+        "Microsoft Teams Phone Standard_USGOV_DOD"
+      ],
+      "PartNumbers": [
+        "MCOEV_USGOV_DOD"
+      ]
+    },
+    {
+      "SkuId": "b0f809d5-a662-4391-a5aa-136e9c565b9d",
+      "Names": [
+        "Microsoft 365 GCC G5 w/o WDATP/CAS Unified"
+      ],
+      "PartNumbers": [
+        "M365_G5_GOV"
+      ]
+    },
+    {
+      "SkuId": "b107e5a3-3e60-4c0d-a184-a7e4395eb44c",
+      "Names": [
+        "Office 365 E3_USGOV_DOD"
+      ],
+      "PartNumbers": [
+        "ENTERPRISEPACK_USGOV_DOD"
+      ]
+    },
+    {
+      "SkuId": "b126b073-72db-4a9d-87a4-b17afe41d4ab",
+      "Names": [
+        "Microsoft Defender for Endpoint P2_XPLAT"
+      ],
+      "PartNumbers": [
+        "MDATP_XPLAT"
+      ]
+    },
+    {
+      "SkuId": "b1511558-69bd-4e1b-8270-59ca96dba0f3",
+      "Names": [
+        "Microsoft Teams Shared Devices for GCC"
+      ],
+      "PartNumbers": [
+        "MCOCAP_GOV"
+      ]
+    },
+    {
+      "SkuId": "b17653a4-2443-4e8c-a550-18249dda78bb",
+      "Names": [
+        "Microsoft 365 A1"
+      ],
+      "PartNumbers": [
+        "M365EDU_A1"
+      ]
+    },
+    {
+      "SkuId": "b1f3042b-a390-4b56-ab61-b88e7e767a97",
+      "Names": [
+        "Microsoft 365 Business Basic EEA (no Teams)"
+      ],
+      "PartNumbers": [
+        "Microsoft_365_Business_Basic_EEA_(no_Teams)"
+      ]
+    },
+    {
+      "SkuId": "b214fe43-f5a3-4703-beeb-fa97188220fc",
+      "Names": [
+        "Microsoft 365 Apps for Business"
+      ],
+      "PartNumbers": [
+        "SMB_BUSINESS"
+      ]
+    },
+    {
+      "SkuId": "b30411f5-fea1-4a59-9ad9-3db7c7ead579",
+      "Names": [
+        "Power Apps Premium"
+      ],
+      "PartNumbers": [
+        "POWERAPPS_PER_USER"
+      ]
+    },
+    {
+      "SkuId": "b3891a9f-c7d9-463c-a2ec-0b2321bda6f9",
+      "Names": [
+        "Windows 365 Business 4 vCPU 16 GB 256 GB"
+      ],
+      "PartNumbers": [
+        "CPC_B_4C_16RAM_256GB"
+      ]
+    },
+    {
+      "SkuId": "b3a42176-0a8c-4c3f-ba4e-f2b37fe5be6b",
+      "Names": [
+        "Power Automate per flow plan"
+      ],
+      "PartNumbers": [
+        "FLOW_BUSINESS_PROCESS"
+      ]
+    },
+    {
+      "SkuId": "b4288abe-01be-47d9-ad20-311d6e83fc24",
+      "Names": [
+        "Microsoft Intune Plan 1 A VL_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "INTUNE_A_VL_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "b4348f75-a776-4061-ac6c-36b9016b01d1",
+      "Names": [
+        "Microsoft Teams Rooms Standard for GCC without Audio Conferencing"
+      ],
+      "PartNumbers": [
+        "MEETING_ROOM_GOV_NOAUDIOCONF"
+      ]
+    },
+    {
+      "SkuId": "b4d7b828-e8dc-4518-91f9-e123ae48440d",
+      "Names": [
+        "Power Apps per app plan (1 app or portal)"
+      ],
+      "PartNumbers": [
+        "POWERAPPS_PER_APP_NEW"
+      ]
+    },
+    {
+      "SkuId": "b54f012e-69e1-43b1-87d0-666def064940",
+      "Names": [
+        "Power Pages authenticated users T1 100 users/per site/month capacity pack_USGOV_DOD"
+      ],
+      "PartNumbers": [
+        "Power_Pages_authenticated_users_T1_100_users/per_site/month_capacity_pack_USGOV_DOD"
+      ]
+    },
+    {
+      "SkuId": "b56e7ccc-d5c7-421f-a23b-5c18bdbad7c0",
+      "Names": [
+        "Dynamics 365 Talent: Onboard"
+      ],
+      "PartNumbers": [
+        "DYNAMICS_365_ONBOARDING_SKU"
+      ]
+    },
+    {
+      "SkuId": "b57282e3-65bd-4252-9502-c0eae1e5ab7f",
+      "Names": [
+        "Office 365 E1 EEA (no Teams)"
+      ],
+      "PartNumbers": [
+        "Office_365_w/o_Teams_Bundle_E1"
+      ]
+    },
+    {
+      "SkuId": "b732e2a7-5694-4dff-a0f2-9d9204c794ac",
+      "Names": [
+        "Project Plan 5 without Project Client for Faculty"
+      ],
+      "PartNumbers": [
+        "PROJECTONLINE_PLAN_1_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "b75074f1-4c54-41bf-970f-c9ac871567f5",
+      "Names": [
+        "Dynamics 365 Operations – Activity"
+      ],
+      "PartNumbers": [
+        "Dyn365_Operations_Activity"
+      ]
+    },
+    {
+      "SkuId": "b84d58c9-0a0d-46cf-8a4b-d9f23c1674d5",
+      "Names": [
+        "Teams Phone Mobile"
+      ],
+      "PartNumbers": [
+        "Operator_Connect_Mobile"
+      ]
+    },
+    {
+      "SkuId": "b8b749f8-a4ef-4887-9539-c95b1eaa5db7",
+      "Names": [
+        "Skype for Business Online (Plan 1)"
+      ],
+      "PartNumbers": [
+        "MCOIMP"
+      ]
+    },
+    {
+      "SkuId": "ba051a1a-4c3d-4ccd-9890-6fa6a4e696e7",
+      "Names": [
+        "Microsoft Dynamics CRM Online for Government"
+      ],
+      "PartNumbers": [
+        "CRMSTANDARD_GCC"
+      ]
+    },
+    {
+      "SkuId": "ba05762f-32ff-4fac-a096-55309b3700a3",
+      "Names": [
+        "Dynamics 365 for Team Members Enterprise Edition for Government"
+      ],
+      "PartNumbers": [
+        "DYN365_ENTERPRISE_TEAM_MEMBERS_GOV"
+      ]
+    },
+    {
+      "SkuId": "ba6e69d5-ba2e-47a7-b081-66c1b8e7e7d4",
+      "Names": [
+        "Privacy Management - subject rights request (100) USGOV_DOD"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_SUB_RIGHTS_REQ_100_V2_USGOV_DOD"
+      ]
+    },
+    {
+      "SkuId": "ba929637-f158-4dee-927c-eb7cdefcd955",
+      "Names": [
+        "Microsoft Viva Goals"
+      ],
+      "PartNumbers": [
+        "Microsoft_Viva_Goals"
+      ]
+    },
+    {
+      "SkuId": "ba9a34de-4489-469d-879c-0f0f145321cd",
+      "Names": [
+        "Microsoft Imagine Academy"
+      ],
+      "PartNumbers": [
+        "IT_ACADEMY_AD"
+      ]
+    },
+    {
+      "SkuId": "bba890d4-7881-4584-8102-0c3fdfb739a7",
+      "Names": [
+        "Microsoft Defender for Endpoint P1 for EDU"
+      ],
+      "PartNumbers": [
+        "DEFENDER_ENDPOINT_P1_EDU"
+      ]
+    },
+    {
+      "SkuId": "bbb4bf6e-3e12-4343-84a1-54d160c00f40",
+      "Names": [
+        "Windows 365 Enterprise 4 vCPU 16 GB 256 GB (Preview)"
+      ],
+      "PartNumbers": [
+        "CPC_LVL_3"
+      ]
+    },
+    {
+      "SkuId": "bc757c42-5622-4583-a483-a9e537fcb71c",
+      "Names": [
+        "Power BI Premium EM1"
+      ],
+      "PartNumbers": [
+        "PBI_PREMIUM_EM1_ADDON"
+      ]
+    },
+    {
+      "SkuId": "bc946dac-7877-4271-b2f7-99d2db13cd2c",
+      "Names": [
+        "Dynamics 365 Customer Voice Trial"
+      ],
+      "PartNumbers": [
+        "FORMS_PRO"
+      ]
+    },
+    {
+      "SkuId": "bce09f38-1800-4a51-8d50-5486380ba84a",
+      "Names": [
+        "Windows 365 Enterprise 2 vCPU 4 GB 128 GB (Preview)"
+      ],
+      "PartNumbers": [
+        "CPC_LVL_1"
+      ]
+    },
+    {
+      "SkuId": "bd09678e-b83c-4d3f-aaba-3dad4abd128b",
+      "Names": [
+        "Office 365 Small Business"
+      ],
+      "PartNumbers": [
+        "LITEPACK"
+      ]
+    },
+    {
+      "SkuId": "bdcaf6aa-04c1-4b8f-b64e-6e3bd505ac64",
+      "Names": [
+        "Microsoft Fabric (Free) for student"
+      ],
+      "PartNumbers": [
+        "POWER_BI_STANDARD_STUDENT"
+      ]
+    },
+    {
+      "SkuId": "be9f9771-1c64-4618-9907-244325141096",
+      "Names": [
+        "Dynamics 365 For Sales Professional"
+      ],
+      "PartNumbers": [
+        "D365_SALES_PRO"
+      ]
+    },
+    {
+      "SkuId": "beb6439c-caad-48d3-bf46-0c82871e12be",
+      "Names": [
+        "Planner Plan 1"
+      ],
+      "PartNumbers": [
+        "PROJECT_P1"
+      ]
+    },
+    {
+      "SkuId": "bf666882-9c9b-4b2e-aa2f-4789b0a52ba2",
+      "Names": [
+        "PowerApps per app baseline access"
+      ],
+      "PartNumbers": [
+        "POWERAPPS_PER_APP_IW"
+      ]
+    },
+    {
+      "SkuId": "bf95fd32-576a-4742-8d7a-6dc4940b9532",
+      "Names": [
+        "Visio Plan 2 for Faculty"
+      ],
+      "PartNumbers": [
+        "VISIOCLIENT_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "c05b235f-be75-4029-8851-6a4170758eef",
+      "Names": [
+        "Power BI Premium Per User Add-On for Faculty"
+      ],
+      "PartNumbers": [
+        "PBI_PREMIUM_PER_USER_ADDON_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "c14d7f00-457c-4e3e-8960-48f35459b3c9",
+      "Names": [
+        "Power Apps per app plan (1 app or website) for Government"
+      ],
+      "PartNumbers": [
+        "POWERAPPS_PER_APP_GCC_NEW"
+      ]
+    },
+    {
+      "SkuId": "c1d032e0-5619-4761-9b5c-75b6831e1711",
+      "Names": [
+        "Power BI Premium Per User"
+      ],
+      "PartNumbers": [
+        "PBI_PREMIUM_PER_USER"
+      ]
+    },
+    {
+      "SkuId": "c1f79c29-5d7a-4bec-a2c1-1a76774864c0",
+      "Names": [
+        "Microsoft 365 Business Standard EEA (no Teams)"
+      ],
+      "PartNumbers": [
+        "Office_365_w/o_Teams_Bundle_Business_Standard"
+      ]
+    },
+    {
+      "SkuId": "c2273bd0-dff7-4215-9ef5-2c7bcfb06425",
+      "Names": [
+        "Microsoft 365 Apps for Enterprise"
+      ],
+      "PartNumbers": [
+        "OFFICESUBSCRIPTION"
+      ]
+    },
+    {
+      "SkuId": "c25e2b36-e161-4946-bef2-69239729f690",
+      "Names": [
+        "Microsoft Teams Rooms Pro for EDU"
+      ],
+      "PartNumbers": [
+        "Microsoft_Teams_Rooms_Pro_FAC"
+      ]
+    },
+    {
+      "SkuId": "c2ac2ee4-9bb1-47e4-8541-d689c7e83371",
+      "Names": [
+        "Microsoft 365 E3 - Unattended License"
+      ],
+      "PartNumbers": [
+        "SPE_E3_RPA1"
+      ]
+    },
+    {
+      "SkuId": "c2cda955-3359-44e5-989f-852ca0cfa02f",
+      "Names": [
+        "Microsoft 365 Audio Conferencing for faculty"
+      ],
+      "PartNumbers": [
+        "MCOMEETADV_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "c2e41e49-e2a2-4c55-832a-cf13ffba1d6a",
+      "Names": [
+        "10-Year Audit Log Retention Add On"
+      ],
+      "PartNumbers": [
+        "10_ALR_ADDON"
+      ]
+    },
+    {
+      "SkuId": "c2fe850d-fbbb-4858-b67d-bd0c6e746da3",
+      "Names": [
+        "Microsoft 365 E3 EEA (no Teams)"
+      ],
+      "PartNumbers": [
+        "O365_w/o Teams Bundle_M3"
+      ]
+    },
+    {
+      "SkuId": "c32f9321-a627-406d-a114-1f9c81aaafac",
+      "Names": [
+        "Microsoft 365 Apps for Students"
+      ],
+      "PartNumbers": [
+        "OFFICESUBSCRIPTION_STUDENT"
+      ]
+    },
+    {
+      "SkuId": "c393e9bd-2335-4b46-8b88-9e2a86a85ec1",
+      "Names": [
+        "Dynamics 365 for Marketing Additional Non-Prod Application"
+      ],
+      "PartNumbers": [
+        "DYN365_MARKETING_SANDBOX_APPLICATION_ADDON"
+      ]
+    },
+    {
+      "SkuId": "c3d74ead-70b7-4513-8dce-797be3fbe07a",
+      "Names": [
+        "Dynamics 365 for Field Service Enterprise Edition for Government"
+      ],
+      "PartNumbers": [
+        "DYN365_ENTERPRISE_FIELD_SERVICE_GOV"
+      ]
+    },
+    {
+      "SkuId": "c416b349-a83c-48cb-9529-c420841dedd6",
+      "Names": [
+        "Privacy Management - subject rights request (50)"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_SUB_RIGHTS_REQ_50"
+      ]
+    },
+    {
+      "SkuId": "c42b9cae-ea4f-4ab7-9717-81576235ccac",
+      "Names": [
+        "Microsoft 365 E5 Developer (without Windows and Audio Conferencing)"
+      ],
+      "PartNumbers": [
+        "DEVELOPERPACK_E5"
+      ]
+    },
+    {
+      "SkuId": "c52ea49f-fe5d-4e95-93ba-1de91d380f89",
+      "Names": [
+        "Azure Information Protection Plan 1"
+      ],
+      "PartNumbers": [
+        "RIGHTSMANAGEMENT"
+      ]
+    },
+    {
+      "SkuId": "c57afa2a-d468-46c4-9a90-f86cb1b3c54a",
+      "Names": [
+        "Azure Information Protection Premium P1_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "RIGHTSMANAGEMENT_CE_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "c5928f49-12ba-48f7-ada3-0d743a3601d5",
+      "Names": [
+        "Visio Plan 2"
+      ],
+      "PartNumbers": [
+        "VISIOCLIENT"
+      ]
+    },
+    {
+      "SkuId": "c6df1e30-1c9f-427f-907c-3d913474a1c7",
+      "Names": [
+        "Dynamics 365 AI for Market Insights (Preview)"
+      ],
+      "PartNumbers": [
+        "SOCIAL_ENGAGEMENT_APP_USER"
+      ]
+    },
+    {
+      "SkuId": "c793db86-5237-494e-9b11-dcd4877c2c8c",
+      "Names": [
+        "Enterprise Mobility + Security G3 GCC"
+      ],
+      "PartNumbers": [
+        "EMS_GOV"
+      ]
+    },
+    {
+      "SkuId": "c7d15985-e746-4f01-b113-20b575898250",
+      "Names": [
+        "Dynamics 365 for Field Service Enterprise Edition"
+      ],
+      "PartNumbers": [
+        "DYN365_ENTERPRISE_FIELD_SERVICE"
+      ]
+    },
+    {
+      "SkuId": "c7df2760-2c81-4ef7-b578-5b5392b571df",
+      "Names": [
+        "Office 365 E5"
+      ],
+      "PartNumbers": [
+        "ENTERPRISEPREMIUM"
+      ]
+    },
+    {
+      "SkuId": "c7e9d9e6-1981-4bf3-bb50-a5bdfaa06fb2",
+      "Names": [
+        "Windows Store for Business EDU Faculty"
+      ],
+      "PartNumbers": [
+        "WSFB_EDU_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "c8803586-c136-479a-8ff3-f5f32d23a68e",
+      "Names": [
+        "Power Automate per user plan for Government"
+      ],
+      "PartNumbers": [
+        "FLOW_PER_USER_GCC"
+      ]
+    },
+    {
+      "SkuId": "c97d00e4-0c4c-4ec2-a016-9448c65de986",
+      "Names": [
+        "Windows 365 Enterprise 8 vCPU 32 GB 128 GB"
+      ],
+      "PartNumbers": [
+        "CPC_E_8C_32GB_128GB"
+      ]
+    },
+    {
+      "SkuId": "c9d442fc-21fb-4bd7-89e0-a710d74987f6",
+      "Names": [
+        "Viva Learning"
+      ],
+      "PartNumbers": [
+        "VIVA_LEARNING"
+      ]
+    },
+    {
+      "SkuId": "ca1a159a-f09e-42b8-bb82-cb6420f54c8e",
+      "Names": [
+        "Project Online Essentials for GCC"
+      ],
+      "PartNumbers": [
+        "PROJECTESSENTIALS_GOV"
+      ]
+    },
+    {
+      "SkuId": "ca7f3140-d88c-455b-9a1c-7f0679e31a76",
+      "Names": [
+        "Visio Plan 1"
+      ],
+      "PartNumbers": [
+        "VISIO_PLAN1_DEPT"
+      ]
+    },
+    {
+      "SkuId": "ca9d1dd9-dfe9-4fef-b97c-9bc1ea3c3658",
+      "Names": [
+        "Microsoft 365 E3_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "SPE_E3_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "cb0a98a8-11bc-494c-83d9-c1b1ac65327e",
+      "Names": [
+        "Exchange Online POP"
+      ],
+      "PartNumbers": [
+        "EXCHANGETELCO"
+      ]
+    },
+    {
+      "SkuId": "cb10e6cd-9da4-4992-867b-67546b1db821",
+      "Names": [
+        "Windows 10/11 Enterprise E3"
+      ],
+      "PartNumbers": [
+        "WIN10_PRO_ENT_SUB"
+      ]
+    },
+    {
+      "SkuId": "cb2020b1-d8f6-41c0-9acd-8ff3d6d7831b",
+      "Names": [
+        "Microsoft Azure Multi-Factor Authentication"
+      ],
+      "PartNumbers": [
+        "MFA_STANDALONE"
+      ]
+    },
+    {
+      "SkuId": "cb9bc974-a47b-4123-998d-a383390168cc",
+      "Names": [
+        "Dynamics 365 Enterprise Edition - Additional Portal for Government"
+      ],
+      "PartNumbers": [
+        "CRM_ONLINE_PORTAL_GCC"
+      ]
+    },
+    {
+      "SkuId": "cbdc14ab-d96c-4c30-b9f4-6ada7cdc1d46",
+      "Names": [
+        "Microsoft 365 Business Premium"
+      ],
+      "PartNumbers": [
+        "SPB"
+      ]
+    },
+    {
+      "SkuId": "cc13a803-544e-4464-b4e4-6d6169a138fa",
+      "Names": [
+        "Dynamics 365 for Financials Business Edition"
+      ],
+      "PartNumbers": [
+        "DYN365_FINANCIALS_BUSINESS_SKU"
+      ]
+    },
+    {
+      "SkuId": "ccba3cfe-71ef-423a-bd87-b6df3dce59a9",
+      "Names": [
+        "Dynamics 365 UNF OPS Plan ENT Edition"
+      ],
+      "PartNumbers": [
+        "Dynamics_365_for_Operations"
+      ]
+    },
+    {
+      "SkuId": "cd2925a3-5076-4233-8931-638a8c94f773",
+      "Names": [
+        "Microsoft 365 E5 without Audio Conferencing"
+      ],
+      "PartNumbers": [
+        "SPE_E5_NOPSTNCONF"
+      ]
+    },
+    {
+      "SkuId": "cdc8d0fc-fd16-4954-aae6-ed89a99f5620",
+      "Names": [
+        "Power Apps Per App BD Only for GCC"
+      ],
+      "PartNumbers": [
+        "POWERAPPS_PER_APP_BD_ONLY_GCC"
+      ]
+    },
+    {
+      "SkuId": "cdd28e44-67e3-425e-be4c-737fab2899d3",
+      "Names": [
+        "Microsoft 365 Apps for Business"
+      ],
+      "PartNumbers": [
+        "O365_BUSINESS"
+      ]
+    },
+    {
+      "SkuId": "cee36ce4-cc31-481f-8cab-02765d3e441f",
+      "Names": [
+        "Privacy Management - subject rights request (100) USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_SUB_RIGHTS_REQ_100_V2_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "cf4c6c3b-f863-4940-97e8-1d25e912f4c4",
+      "Names": [
+        "Privacy Management - subject rights request (100)"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_SUB_RIGHTS_REQ_100_V2"
+      ]
+    },
+    {
+      "SkuId": "cf50bae9-29e8-4775-b07c-56ee10e3776d",
+      "Names": [
+        "Office 365 E5 EEA (no Teams)"
+      ],
+      "PartNumbers": [
+        "Office_365_w/o_Teams_Bundle_E5"
+      ]
+    },
+    {
+      "SkuId": "cf6b0d46-4093-4546-a0ab-0b1546dcc10e",
+      "Names": [
+        "Microsoft Entra ID Governance"
+      ],
+      "PartNumbers": [
+        "Microsoft_Entra_ID_Governance"
+      ]
+    },
+    {
+      "SkuId": "d01d9287-694b-44f3-bcc5-ada78c8d953e",
+      "Names": [
+        "Microsoft Teams Phone Standard for DOD"
+      ],
+      "PartNumbers": [
+        "MCOEV_DOD"
+      ]
+    },
+    {
+      "SkuId": "d0d1ca43-b81a-4f51-81e5-a5b1ad7bb005",
+      "Names": [
+        "Microsoft Defender for Office 365 (Plan 1) GCC"
+      ],
+      "PartNumbers": [
+        "ATP_ENTERPRISE_GOV"
+      ]
+    },
+    {
+      "SkuId": "d13e9d1b-316a-4946-98c6-362c97a4fdfe",
+      "Names": [
+        "Microsoft 365 Domestic Calling Plan (120 minutes) - US"
+      ],
+      "PartNumbers": [
+        "MCOPSTN5_US"
+      ]
+    },
+    {
+      "SkuId": "d13ef257-988a-46f3-8fce-f47484dd4550",
+      "Names": [
+        "Windows 10/11 Enterprise E3 VDA"
+      ],
+      "PartNumbers": [
+        "E3_VDA_only"
+      ]
+    },
+    {
+      "SkuId": "d17b27af-3f49-4822-99f9-56a661538792",
+      "Names": [
+        "Microsoft Dynamics CRM Online"
+      ],
+      "PartNumbers": [
+        "CRMSTANDARD"
+      ]
+    },
+    {
+      "SkuId": "d1f0495b-cb7b-4e11-8b85-daee7e7e5664",
+      "Names": [
+        "Office 365 F3 EEA (no Teams)"
+      ],
+      "PartNumbers": [
+        "Office_365_F3_EEA_(no_Teams)"
+      ]
+    },
+    {
+      "SkuId": "d201f153-d3b2-4057-be2f-fe25c8983e6f",
+      "Names": [
+        "Windows 365 Enterprise 4 vCPU 16 GB 128 GB"
+      ],
+      "PartNumbers": [
+        "CPC_E_4C_16GB_128GB"
+      ]
+    },
+    {
+      "SkuId": "d2dea78b-507c-4e56-b400-39447f4738f8",
+      "Names": [
+        "AI Builder Capacity add-on"
+      ],
+      "PartNumbers": [
+        "CDSAICAPACITY"
+      ]
+    },
+    {
+      "SkuId": "d3987516-4b53-4dc0-8335-411260bf5626",
+      "Names": [
+        "Power Automate Premium for Government"
+      ],
+      "PartNumbers": [
+        "POWERAUTOMATE_ATTENDED_RPA_GCC"
+      ]
+    },
+    {
+      "SkuId": "d39fb075-21ae-42d0-af80-22a2599749e0",
+      "Names": [
+        "Dynamics 365 for Case Management Enterprise Edition"
+      ],
+      "PartNumbers": [
+        "DYN365_ENTERPRISE_CASE_MANAGEMENT"
+      ]
+    },
+    {
+      "SkuId": "d3b4fe1f-9992-4930-8acb-ca6ec609365e",
+      "Names": [
+        "Skype for Business PSTN Domestic and International Calling"
+      ],
+      "PartNumbers": [
+        "MCOPSTN2"
+      ]
+    },
+    {
+      "SkuId": "d3c841f3-ea93-4da2-8040-6f2348d20954",
+      "Names": [
+        "Privacy Management - subject rights request (1) USGOV_DOD"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_SUB_RIGHTS_REQ_1_V2_USGOV_DOD"
+      ]
+    },
+    {
+      "SkuId": "d42c793f-6c78-4f43-92ca-e8f6a02b035f",
+      "Names": [
+        "Skype for Business Online (Plan 2)"
+      ],
+      "PartNumbers": [
+        "MCOSTANDARD"
+      ]
+    },
+    {
+      "SkuId": "d43177b5-475b-4880-92d4-d54c27b5efbd",
+      "Names": [
+        "Skype for Business PSTN Calling Domestic Small"
+      ],
+      "PartNumbers": [
+        "MCOPSTN5"
+      ]
+    },
+    {
+      "SkuId": "d4ef921e-840b-4b48-9a90-ab6698bc7b31",
+      "Names": [
+        "Windows 10/11 Enterprise A3 for students"
+      ],
+      "PartNumbers": [
+        "WIN10_ENT_A3_STU"
+      ]
+    },
+    {
+      "SkuId": "d52db95a-5ecb-46b6-beb0-190ab5cda4a8",
+      "Names": [
+        "Microsoft 365 Business Voice (without Calling Plan)"
+      ],
+      "PartNumbers": [
+        "BUSINESS_VOICE_DIRECTROUTING"
+      ]
+    },
+    {
+      "SkuId": "d61d61cc-f992-433f-a577-5bd016037eeb",
+      "Names": [
+        "Microsoft 365 E3_USGOV_DOD"
+      ],
+      "PartNumbers": [
+        "SPE_E3_USGOV_DOD"
+      ]
+    },
+    {
+      "SkuId": "d711d25a-a21c-492f-bd19-aae1e8ebaf30",
+      "Names": [
+        "Office 365 E3 EEA (no Teams)"
+      ],
+      "PartNumbers": [
+        "O365_w/o_Teams_Bundle_E3"
+      ]
+    },
+    {
+      "SkuId": "d721f2e4-099b-4105-b40e-872e46cad402",
+      "Names": [
+        "Dynamics 365 for Finance Attach to Qualifying Dynamics 365 Base Offer"
+      ],
+      "PartNumbers": [
+        "DYN365_FINANCE_ATTACH"
+      ]
+    },
+    {
+      "SkuId": "d7974fa0-ddd7-4899-9589-1ea04273aa26",
+      "Names": [
+        "Microsoft Copilot Studio for GCC"
+      ],
+      "PartNumbers": [
+        "Power_Virtual_Agents_for_GCC_GCC"
+      ]
+    },
+    {
+      "SkuId": "d80a4c5d-8f05-4b64-9926-6574b9e6aee4",
+      "Names": [
+        "Power Automate per user plan dept"
+      ],
+      "PartNumbers": [
+        "FLOW_PER_USER_DEPT"
+      ]
+    },
+    {
+      "SkuId": "d8eec316-778c-4f14-a7d1-a0aca433b4e7",
+      "Names": [
+        "Dynamics 365 for Marketing Addnl Contacts Tier 5"
+      ],
+      "PartNumbers": [
+        "DYN365_MARKETING_CONTACT_ADDON_T5"
+      ]
+    },
+    {
+      "SkuId": "d9020d1c-94ef-495a-b6de-818cbbcaa3b8",
+      "Names": [
+        "Privacy Management - subject rights request (1)"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_SUB_RIGHTS_REQ_1_V2"
+      ]
+    },
+    {
+      "SkuId": "d979703c-028d-4de5-acbf-7955566b69b9",
+      "Names": [
+        "Microsoft Teams Phone Standard for Faculty"
+      ],
+      "PartNumbers": [
+        "MCOEV_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "d9d89b70-a645-4c24-b041-8d3cb1884ec7",
+      "Names": [
+        "Intune for Education"
+      ],
+      "PartNumbers": [
+        "INTUNE_EDU"
+      ]
+    },
+    {
+      "SkuId": "d9de51e5-d8cd-45bb-8da3-1d55e28c52e6",
+      "Names": [
+        "Power Automate per flow plan for Government"
+      ],
+      "PartNumbers": [
+        "FLOW_BUSINESS_PROCESS_GCC"
+      ]
+    },
+    {
+      "SkuId": "dab7782a-93b1-4074-8bb1-0e61318bea0b",
+      "Names": [
+        "Microsoft 365 Business Basic"
+      ],
+      "PartNumbers": [
+        "SMB_BUSINESS_ESSENTIALS"
+      ]
+    },
+    {
+      "SkuId": "dadd2312-b5b1-4fa0-8c15-0903de3e2303",
+      "Names": [
+        "Dynamics 365 Customer Service Voice Channel Add-in"
+      ],
+      "PartNumbers": [
+        "DYN365_CS_VOICE"
+      ]
+    },
+    {
+      "SkuId": "db5bd06c-b99a-4c54-98e9-90fea5164c88",
+      "Names": [
+        "Dynamics 365 Finance Attach to Qualifying Base Offer Embedded with Project Management & Accounting"
+      ],
+      "PartNumbers": [
+        "DYN365_FINANCE_ATTACH_ISVEMB_PROJOPS"
+      ]
+    },
+    {
+      "SkuId": "db684ac5-c0e7-4f92-8284-ef9ebde75d33",
+      "Names": [
+        "Microsoft 365 E5 (500 seats min)_HUB"
+      ],
+      "PartNumbers": [
+        "Microsoft_365_E5"
+      ]
+    },
+    {
+      "SkuId": "dbd31205-338e-4dec-903d-44402e305e32",
+      "Names": [
+        "Microsoft Teams Calling Plan pay-as-you-go (country zone 1)"
+      ],
+      "PartNumbers": [
+        "Microsoft_Teams_Calling_Plan_pay_as_you_go_(country_zone_1)"
+      ]
+    },
+    {
+      "SkuId": "dcb1a3ae-b33f-4487-846a-a640262fadf4",
+      "Names": [
+        "Microsoft Power Apps Plan 2 Trial"
+      ],
+      "PartNumbers": [
+        "POWERAPPS_VIRAL"
+      ]
+    },
+    {
+      "SkuId": "dcdbaae7-d8c9-40cb-8bb1-62737b9e5a86",
+      "Names": [
+        "Privacy Management - risk for EDU"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_RISK_EDU"
+      ]
+    },
+    {
+      "SkuId": "dcf0408c-aaec-446c-afd4-43e3683943ea",
+      "Names": [
+        "Microsoft 365 E3 (no Teams)"
+      ],
+      "PartNumbers": [
+        "Microsoft_365_E3_(no_Teams)"
+      ]
+    },
+    {
+      "SkuId": "ddfae3e3-fcb2-4174-8ebd-3023cb213c8b",
+      "Names": [
+        "Microsoft Power Apps Plan 2 (Qualified Offer)"
+      ],
+      "PartNumbers": [
+        "POWERFLOW_P2"
+      ]
+    },
+    {
+      "SkuId": "de176c31-616d-4eae-829a-718918d7ec23",
+      "Names": [
+        "Dynamics 365 Hybrid Connector"
+      ],
+      "PartNumbers": [
+        "CRM_HYBRIDCONNECTOR"
+      ]
+    },
+    {
+      "SkuId": "de3312e1-c7b0-46e6-a7c3-a515ff90bc86",
+      "Names": [
+        "TELSTRA Calling for O365"
+      ],
+      "PartNumbers": [
+        "MCOPSTNEAU2"
+      ]
+    },
+    {
+      "SkuId": "de376a03-6e5b-42ec-855f-093fb50b8ca5",
+      "Names": [
+        "Power BI Premium Per User Add-On"
+      ],
+      "PartNumbers": [
+        "PBI_PREMIUM_PER_USER_ADDON"
+      ]
+    },
+    {
+      "SkuId": "de597797-22fb-4d65-a9fe-b7dbe8893914",
+      "Names": [
+        "Microsoft Entra ID P1_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "AAD_PREMIUM_USGOV_GCCHIGH "
+      ]
+    },
+    {
+      "SkuId": "de5f128b-46d7-4cfc-b915-a89ba060ea56",
+      "Names": [
+        "Power BI Pro for Faculty"
+      ],
+      "PartNumbers": [
+        "POWER_BI_PRO_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "debc9e58-f2d7-412c-a0b6-575608564228",
+      "Names": [
+        "Power Pages authenticated users T1 100 users/per site/month capacity pack"
+      ],
+      "PartNumbers": [
+        "Power_Pages_authenticated_users_T1_100_users/per_site/month_capacity_pack"
+      ]
+    },
+    {
+      "SkuId": "df845ce7-05f9-4894-b5f2-11bbfbcfd2b6",
+      "Names": [
+        "Microsoft Cloud App Security"
+      ],
+      "PartNumbers": [
+        "ADALLOM_STANDALONE"
+      ]
+    },
+    {
+      "SkuId": "df9561a4-4969-4e6a-8e73-c601b68ec077",
+      "Names": [
+        "Microsoft 365 Audio Conferencing Pay-Per-Minute - EA"
+      ],
+      "PartNumbers": [
+        "MCOMEETACPEA"
+      ]
+    },
+    {
+      "SkuId": "dfb1700c-013e-4132-8bce-0d319c43a95d",
+      "Names": [
+        "Dynamics 365 Contact Center"
+      ],
+      "PartNumbers": [
+        "DYNAMICS_365_CONTACT_CENTER"
+      ]
+    },
+    {
+      "SkuId": "e001d9f1-5047-4ebf-8927-148530491f83",
+      "Names": [
+        "Privacy Management - subject rights request (10) for EDU"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_SUB_RIGHTS_REQ_10_EDU_V2"
+      ]
+    },
+    {
+      "SkuId": "e06abcc2-7ec5-4a79-b08b-d9c282376f72",
+      "Names": [
+        "Dynamics 365 - Additional Non-Production Instance (Qualified Offer)"
+      ],
+      "PartNumbers": [
+        "CRMTESTINSTANCE"
+      ]
+    },
+    {
+      "SkuId": "e0dfc8b9-9531-4ec8-94b4-9fec23b05fc8",
+      "Names": [
+        "Microsoft Teams Exploratory Dept"
+      ],
+      "PartNumbers": [
+        "Microsoft_Teams_Exploratory_Dept"
+      ]
+    },
+    {
+      "SkuId": "e2767865-c3c9-4f09-9f99-6eee6eef861a",
+      "Names": [
+        "Power BI"
+      ],
+      "PartNumbers": [
+        "POWER_BI_INDIVIDUAL_USER"
+      ]
+    },
+    {
+      "SkuId": "e2ae107b-a571-426f-9367-6d4c8f1390ba",
+      "Names": [
+        "Dynamics 365 Customer Voice USL"
+      ],
+      "PartNumbers": [
+        "Forms_Pro_USL"
+      ]
+    },
+    {
+      "SkuId": "e2aebe6c-897d-480f-9d62-fff1381581f7",
+      "Names": [
+        "Windows 365 Enterprise 2 vCPU 8 GB 128 GB"
+      ],
+      "PartNumbers": [
+        "CPC_E_2C_8GB_128GB"
+      ]
+    },
+    {
+      "SkuId": "e2be619b-b125-455f-8660-fb503e431a5d",
+      "Names": [
+        "Microsoft 365 GCC G5"
+      ],
+      "PartNumbers": [
+        "M365_G5_GCC"
+      ]
+    },
+    {
+      "SkuId": "e3f0522e-ebb7-4561-9f90-b44516d65b77",
+      "Names": [
+        "Microsoft Teams Phone Resource Account_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "PHONESYSTEM_VIRTUALUSER_USGOV_GCCHIGH "
+      ]
+    },
+    {
+      "SkuId": "e42bc969-759a-4820-9283-6b73085b68e6",
+      "Names": [
+        "Privacy Management – risk"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_RISK"
+      ]
+    },
+    {
+      "SkuId": "e430a580-c37b-4d16-adba-d881d7cd0364",
+      "Names": [
+        "Microsoft Defender for Endpoint F2"
+      ],
+      "PartNumbers": [
+        "Microsoft_Defender_for_Endpoint_F2"
+      ]
+    },
+    {
+      "SkuId": "e433b246-63e7-4d0b-9efa-7940fa3264d6",
+      "Names": [
+        "Project Online Essentials for Faculty"
+      ],
+      "PartNumbers": [
+        "PROJECTESSENTIALS_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "e43b5b99-8dfb-405f-9987-dc307f34bcbd",
+      "Names": [
+        "Microsoft Teams Phone Standard"
+      ],
+      "PartNumbers": [
+        "MCOEV"
+      ]
+    },
+    {
+      "SkuId": "e4654015-5daf-4a48-9b37-4f309dddd88b",
+      "Names": [
+        "Advanced Communications"
+      ],
+      "PartNumbers": [
+        "ADV_COMMS"
+      ]
+    },
+    {
+      "SkuId": "e48328a2-8e98-4484-a70f-a99f8ac9ec89",
+      "Names": [
+        "Dynamics 365 Remote Assist HoloLens"
+      ],
+      "PartNumbers": [
+        "MICROSOFT_REMOTE_ASSIST_HOLOLENS"
+      ]
+    },
+    {
+      "SkuId": "e485d696-4c87-4aac-bf4a-91b2fb6f0fa7",
+      "Names": [
+        "Dynamics 365 Operations - Sandbox Tier 2:Standard Acceptance Testing"
+      ],
+      "PartNumbers": [
+        "Dynamics_365_for_Operations_Sandbox_Tier2_SKU"
+      ]
+    },
+    {
+      "SkuId": "e4e55366-9635-46f4-a907-fc8c3b5ec81f",
+      "Names": [
+        "Power Virtual Agent"
+      ],
+      "PartNumbers": [
+        "VIRTUAL_AGENT_BASE"
+      ]
+    },
+    {
+      "SkuId": "e53d92fc-778b-4a8b-83de-791240ebf88d",
+      "Names": [
+        "Power BI Premium Per User for Government"
+      ],
+      "PartNumbers": [
+        "PBI_PREMIUM_PER_USER_GCC"
+      ]
+    },
+    {
+      "SkuId": "e561871f-74fa-4f02-abee-5b0ef54dd36d",
+      "Names": [
+        "Dynamics 365 Talent: Attract"
+      ],
+      "PartNumbers": [
+        "Dynamics_365_Hiring_SKU"
+      ]
+    },
+    {
+      "SkuId": "e5788282-6381-469f-84f0-3d7d4021d34d",
+      "Names": [
+        "Office 365 Extra File Storage for GCC"
+      ],
+      "PartNumbers": [
+        "SHAREPOINTSTORAGE_GOV"
+      ]
+    },
+    {
+      "SkuId": "e578b273-6db4-4691-bba0-8d691f4da603",
+      "Names": [
+        "Office 365 A3 for faculty"
+      ],
+      "PartNumbers": [
+        "ENTERPRISEPACKPLUS_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "e5a17adf-8f0d-4b57-bc14-d331235f9307",
+      "Names": [
+        "Microsoft 365 Business Voice (UK"
+      ],
+      "PartNumbers": [
+        "BUSINESS_VOICE"
+      ]
+    },
+    {
+      "SkuId": "e6025b08-2fa5-4313-bd0a-7e5ffca32958",
+      "Names": [
+        "Microsoft Intune SMB"
+      ],
+      "PartNumbers": [
+        "INTUNE_SMB"
+      ]
+    },
+    {
+      "SkuId": "e612d426-6bc3-4181-9658-91aa906b0ac0",
+      "Names": [
+        "Common Data Service Database Capacity"
+      ],
+      "PartNumbers": [
+        "CDS_DB_CAPACITY"
+      ]
+    },
+    {
+      "SkuId": "e6778190-713e-4e4f-9119-8b8238de25df",
+      "Names": [
+        "OneDrive for Business (Plan 1)"
+      ],
+      "PartNumbers": [
+        "WACONEDRIVESTANDARD"
+      ]
+    },
+    {
+      "SkuId": "e7965e3a-1f49-4d67-a3de-ad1ce460bbcc",
+      "Names": [
+        "Dynamics 365 Field Service Contractor for Government"
+      ],
+      "PartNumbers": [
+        "D365_FIELD_SERVICE_CONTRACTOR_GOV"
+      ]
+    },
+    {
+      "SkuId": "e823ca47-49c4-46b3-b38d-ca11d5abe3d2",
+      "Names": [
+        "Microsoft 365 G3 GCC"
+      ],
+      "PartNumbers": [
+        "M365_G3_GOV"
+      ]
+    },
+    {
+      "SkuId": "e82ae690-a2d5-4d76-8d30-7c6e01e6022e",
+      "Names": [
+        "Office 365 A1 Plus for students"
+      ],
+      "PartNumbers": [
+        "STANDARDWOFFPACK_IW_STUDENT"
+      ]
+    },
+    {
+      "SkuId": "e85b3345-2fd5-45cf-a196-7968d3e18e56",
+      "Names": [
+        "Dynamics 365 for Sales Enterprise for Government"
+      ],
+      "PartNumbers": [
+        "D365_ENTERPRISE_SALES_GOV"
+      ]
+    },
+    {
+      "SkuId": "e8ecdf70-47a8-4d39-9d15-093624b7f640",
+      "Names": [
+        "Exchange Enterprise CAL Services (EOP DLP)"
+      ],
+      "PartNumbers": [
+        "EOP_ENTERPRISE_PREMIUM"
+      ]
+    },
+    {
+      "SkuId": "e8f81a67-bd96-4074-b108-cf193eb9433b",
+      "Names": [
+        "Exchange Online Essentials"
+      ],
+      "PartNumbers": [
+        "EXCHANGE_S_ESSENTIALS"
+      ]
+    },
+    {
+      "SkuId": "e97c048c-37a4-45fb-ab50-922fbf07a370",
+      "Names": [
+        "Microsoft 365 A5 for faculty"
+      ],
+      "PartNumbers": [
+        "M365EDU_A5_FACULTY"
+      ]
+    },
+    {
+      "SkuId": "ea126fc5-a19e-42e2-a731-da9d437bffcf",
+      "Names": [
+        "Dynamics 365 Customer Engagement Plan"
+      ],
+      "PartNumbers": [
+        "DYN365_ENTERPRISE_PLAN1"
+      ]
+    },
+    {
+      "SkuId": "ea4c5ec8-50e3-4193-89b9-50da5bd4cdc7",
+      "Names": [
+        "Microsoft 365 Apps for enterprise (device)"
+      ],
+      "PartNumbers": [
+        "OFFICE_PROPLUS_DEVICE1"
+      ]
+    },
+    {
+      "SkuId": "ea9ba490-50b8-474e-8671-9fec0f1268f3",
+      "Names": [
+        "Dynamics 365 Customer Service Digital Messaging and Voice Add-in for Government for Test"
+      ],
+      "PartNumbers": [
+        "DYN365_CS_OC_MESSAGING_VOICE_GOV_TEST"
+      ]
+    },
+    {
+      "SkuId": "eb18b715-ea9d-4290-9994-2ebf4b5042d2",
+      "Names": [
+        "Dynamics 365 for Customer Service Enterprise Attach to Qualifying Dynamics 365 Base Offer A"
+      ],
+      "PartNumbers": [
+        "D365_CUSTOMER_SERVICE_ENT_ATTACH"
+      ]
+    },
+    {
+      "SkuId": "ec156933-b85b-4c50-84ec-c9e5603709ef",
+      "Names": [
+        "Microsoft Stream Plan 2"
+      ],
+      "PartNumbers": [
+        "STREAM_P2"
+      ]
+    },
+    {
+      "SkuId": "eca22b68-b31f-4e9c-a20c-4d40287bc5dd",
+      "Names": [
+        "PowerApps Plan 1 for Government"
+      ],
+      "PartNumbers": [
+        "POWERAPPS_P1_GOV"
+      ]
+    },
+    {
+      "SkuId": "ece037b4-a52b-4cf8-93ea-649e5d83767a",
+      "Names": [
+        "Microsoft Sustainability Manager USL Essentials"
+      ],
+      "PartNumbers": [
+        "Microsoft_Cloud_for_Sustainability_USL"
+      ]
+    },
+    {
+      "SkuId": "ed01faf2-1d88-4947-ae91-45ca18703a96",
+      "Names": [
+        "OneDrive for Business (Plan 2)"
+      ],
+      "PartNumbers": [
+        "WACONEDRIVEENTERPRISE"
+      ]
+    },
+    {
+      "SkuId": "ed45d397-7d61-4110-acc0-95674917bb14",
+      "Names": [
+        "Privacy Management - subject rights request (50) for EDU"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_SUB_RIGHTS_REQ_50_EDU_V2"
+      ]
+    },
+    {
+      "SkuId": "eda1941c-3c4f-4995-b5eb-e85a42175ab9",
+      "Names": [
+        "Power Automate Premium"
+      ],
+      "PartNumbers": [
+        "POWERAUTOMATE_ATTENDED_RPA"
+      ]
+    },
+    {
+      "SkuId": "eddf428b-da0e-4115-accf-b29eb0b83965",
+      "Names": [
+        "Common Data Service Database Capacity for Government"
+      ],
+      "PartNumbers": [
+        "CDS_DB_CAPACITY_GOV"
+      ]
+    },
+    {
+      "SkuId": "ee02fd1b-340e-4a4b-b355-4a514e4c8943",
+      "Names": [
+        "Exchange Online Archiving for Exchange Online"
+      ],
+      "PartNumbers": [
+        "EXCHANGEARCHIVE_ADDON"
+      ]
+    },
+    {
+      "SkuId": "ee656612-49fa-43e5-b67e-cb1fdf7699df",
+      "Names": [
+        "Office 365 A5 for students"
+      ],
+      "PartNumbers": [
+        "ENTERPRISEPREMIUM_STUDENT"
+      ]
+    },
+    {
+      "SkuId": "efccb6f7-5641-4e0e-bd10-b4976e1bf68e",
+      "Names": [
+        "Enterprise Mobility + Security E3"
+      ],
+      "PartNumbers": [
+        "EMS"
+      ]
+    },
+    {
+      "SkuId": "f0612879-44ea-47fb-baf0-3d76d9235576",
+      "Names": [
+        "Power BI Pro for GCC"
+      ],
+      "PartNumbers": [
+        "POWERBI_PRO_GOV"
+      ]
+    },
+    {
+      "SkuId": "f168a3fb-7bcf-4a27-98c3-c235ea4b78b4",
+      "Names": [
+        "Power BI Premium Per User Dept"
+      ],
+      "PartNumbers": [
+        "PBI_PREMIUM_PER_USER_DEPT"
+      ]
+    },
+    {
+      "SkuId": "f1de227b-f1bd-4959-bd80-b80547095e6d",
+      "Names": [
+        "Microsoft Copilot Studio User License for GCC",
+        "Power Virtual Agent User License for GCC"
+      ],
+      "PartNumbers": [
+        "VIRTUAL_AGENT_USL_GCC"
+      ]
+    },
+    {
+      "SkuId": "f2230877-72be-4fec-b1ba-7156d6f75bd6",
+      "Names": [
+        "Project Plan 5 for GCC"
+      ],
+      "PartNumbers": [
+        "PROJECTPREMIUM_GOV"
+      ]
+    },
+    {
+      "SkuId": "f245ecc8-75af-4f8e-b61f-27d8114de5f3",
+      "Names": [
+        "Microsoft 365 Business Standard"
+      ],
+      "PartNumbers": [
+        "O365_BUSINESS_PREMIUM"
+      ]
+    },
+    {
+      "SkuId": "f2e48cb3-9da0-42cd-8464-4a54ce198ad0",
+      "Names": [
+        "Dynamics 365 for Supply Chain Management"
+      ],
+      "PartNumbers": [
+        "DYN365_SCM"
+      ]
+    },
+    {
+      "SkuId": "f30db892-07e9-47e9-837c-80727f46fd3d",
+      "Names": [
+        "Microsoft Power Automate Free"
+      ],
+      "PartNumbers": [
+        "FLOW_FREE"
+      ]
+    },
+    {
+      "SkuId": "f319c63a-61a9-42b7-b786-5695bc7edbaf",
+      "Names": [
+        "Windows 365 Shared Use 8 vCPU 32 GB 128 GB"
+      ],
+      "PartNumbers": [
+        "Windows_365_S_8vCPU_32GB_128GB"
+      ]
+    },
+    {
+      "SkuId": "f37d5ebf-4bf1-4aa2-8fa3-50c51059e983",
+      "Names": [
+        "Exchange Online (Plan 1) for GCC"
+      ],
+      "PartNumbers": [
+        "EXCHANGESTANDARD_GOV"
+      ]
+    },
+    {
+      "SkuId": "f3d55e2d-4367-44fa-952e-83d0b5dd53fc",
+      "Names": [
+        "Power Pages authenticated users T2 min 100 units - 100 users/per site/month capacity pack_USGOV_DOD"
+      ],
+      "PartNumbers": [
+        "Power_Pages_authenticated_users_T2_min_100_units_100_users/per_site/month_capacity_pack_USGOV_DOD"
+      ]
+    },
+    {
+      "SkuId": "f4dc1de8-8c94-4d37-af8a-1fca6675590a",
+      "Names": [
+        "Windows 365 Shared Use 8 vCPU 32 GB 512 GB"
+      ],
+      "PartNumbers": [
+        "Windows_365_S_8vCPU_32GB_512GB"
+      ]
+    },
+    {
+      "SkuId": "f59b22a0-9819-48bf-b01d-715ef2b31027",
+      "Names": [
+        "Power BI Premium P1 GCC"
+      ],
+      "PartNumbers": [
+        "PBI_PREMIUM_P1_ADDON_GCC"
+      ]
+    },
+    {
+      "SkuId": "f5b15d67-b99e-406b-90f1-308452f94de6",
+      "Names": [
+        "Microsoft 365 E3 Extra Features"
+      ],
+      "PartNumbers": [
+        "Microsoft_365_E3_Extra_Features"
+      ]
+    },
+    {
+      "SkuId": "f61d4aba-134f-44e9-a2a0-f81a5adb26e4",
+      "Names": [
+        "SharePoint Syntex"
+      ],
+      "PartNumbers": [
+        "Intelligent_Content_Services"
+      ]
+    },
+    {
+      "SkuId": "f698ca06-024f-4562-b029-9cb1f1e02646",
+      "Names": [
+        "Office 365 E1_USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "STANDARDPACK_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "f6aa3b3d-62f4-4c1d-a44f-0550f40f729c",
+      "Names": [
+        "Privacy Management - subject rights request (10) USGOV_GCCHIGH"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_SUB_RIGHTS_REQ_10_V2_USGOV_GCCHIGH"
+      ]
+    },
+    {
+      "SkuId": "f6c82f13-9554-4da1-bed3-c024cc906e02",
+      "Names": [
+        "Privacy Management - subject rights request (50)"
+      ],
+      "PartNumbers": [
+        "PRIVACY_MANAGEMENT_SUB_RIGHTS_REQ_50_V2"
+      ]
+    },
+    {
+      "SkuId": "f7ad4bca-7221-452c-bdb6-3e6089f25e06",
+      "Names": [
+        "Dynamics 365 Operations - Sandbox Tier 4:Standard Performance Testing"
+      ],
+      "PartNumbers": [
+        "Dynamics_365_for_Operations_Sandbox_Tier4_SKU"
+      ]
+    },
+    {
+      "SkuId": "f7ee79a7-7aec-4ca4-9fb9-34d6b930ad87",
+      "Names": [
+        "Microsoft 365 F3 EEA (no Teams)"
+      ],
+      "PartNumbers": [
+        "Microsoft_365_F3_EEA_(no_Teams)"
+      ]
+    },
+    {
+      "SkuId": "f82a60b8-1ee3-4cfb-a4fe-1c6a53c2656c",
+      "Names": [
+        "Project Online With Project for Office 365"
+      ],
+      "PartNumbers": [
+        "PROJECTONLINE_PLAN_2"
+      ]
+    },
+    {
+      "SkuId": "f8a1db68-be16-40ed-86d5-cb42ce701560",
+      "Names": [
+        "Power BI Pro"
+      ],
+      "PartNumbers": [
+        "POWER_BI_PRO"
+      ]
+    },
+    {
+      "SkuId": "f8ced641-8e17-4dc5-b014-f5a2d53f6ac8",
+      "Names": [
+        "Office 365 E1 (no Teams)"
+      ],
+      "PartNumbers": [
+        "Office_365_E1_(no_Teams)"
+      ]
+    },
+    {
+      "SkuId": "f991cecc-3f91-4cd0-a9a8-bf1c8167e029",
+      "Names": [
+        "Dynamics 365 Business Central Premium"
+      ],
+      "PartNumbers": [
+        "DYN365_BUSCENTRAL_PREMIUM"
+      ]
+    },
+    {
+      "SkuId": "fb019e88-26a0-4218-bd61-7767d109ac26",
+      "Names": [
+        "Windows 365 Shared Use 8 vCPU 32 GB 256 GB"
+      ],
+      "PartNumbers": [
+        "Windows_365_S_8vCPU_32GB_256GB"
+      ]
+    },
+    {
+      "SkuId": "fbc79df2-da01-4c17-8d88-17f8c9493d8f",
+      "Names": [
+        "Windows 365 Business 8 vCPU 32 GB 256 GB"
+      ],
+      "PartNumbers": [
+        "CPC_B_8C_32RAM_256GB"
+      ]
+    },
+    {
+      "SkuId": "fc14ec4a-4169-49a4-a51e-2c852931814b",
+      "Names": [
+        "Office 365 Small Business Premium"
+      ],
+      "PartNumbers": [
+        "LITEPACK_P2"
+      ]
+    },
+    {
+      "SkuId": "fc4581aa-6b1f-459d-95b6-84bd49d6f843",
+      "Names": [
+        "Dynamics 365 for Marketing Addnl Contacts Tier 1"
+      ],
+      "PartNumbers": [
+        "DYN365_MARKETING_CONTACT_ADDON"
+      ]
+    },
+    {
+      "SkuId": "fcecd1f9-a91e-488d-a918-a96cdb6ce2b0",
+      "Names": [
+        "Microsoft Dynamics AX7 User Trial"
+      ],
+      "PartNumbers": [
+        "AX7_USER_TRIAL"
+      ]
+    },
+    {
+      "SkuId": "fde42873-30b6-436b-b361-21af5a6b84ae",
+      "Names": [
+        "Microsoft Teams Essentials"
+      ],
+      "PartNumbers": [
+        "Teams_Ess"
+      ]
+    },
+    {
+      "SkuId": "ff22b8d4-5073-4b24-ba45-84ad5d9b6642",
+      "Names": [
+        "Dynamics 365 Customer Insights Attach"
+      ],
+      "PartNumbers": [
+        "Dynamics_365_Customer_Insights_Attach_New"
+      ]
+    },
+    {
+      "SkuId": "ff5a82be-1edd-4d48-94e0-52527825b589",
+      "Names": [
+        "Dynamics 365 for Case Management, Enterprise Edition for Government"
+      ],
+      "PartNumbers": [
+        "DYN365_ENTERPRISE_CASE_MANAGEMENT_GOV"
+      ]
+    },
+    {
+      "SkuId": "ffa3a2a0-3820-462a-aa81-8a4d741f0cba",
+      "Names": [
+        "Microsoft 365 Business Standard EEA (no Teams)"
+      ],
+      "PartNumbers": [
+        "Microsoft_365_Business_Standard_EEA_(no_Teams)"
+      ]
+    },
+    {
+      "SkuId": "ffaf2d68-1c95-4eb3-9ddd-59b81fba0f61",
+      "Names": [
+        "Microsoft Teams Phone Standard for TELSTRA"
+      ],
+      "PartNumbers": [
+        "MCOEV_TELSTRA"
+      ]
+    }
+  ]
+}

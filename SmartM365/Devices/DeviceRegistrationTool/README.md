@@ -1,4 +1,33 @@
-# Smart DeviceRegistration Tool
+# Smart Device Registration Tool
+
+## User view (1.6.2)
+
+WinDC/MMP-C linked enrollments are recognized as Microsoft companion registrations when
+ProviderID is `Microsoft Device Management`, EnrollmentType is 26 (or `0x1a`) and the HTTPS
+discovery endpoint is exactly `discovery.dm.microsoft.com/EnrollmentConfiguration`.
+They remain visible in technical evidence as `MicrosoftLinkedEnrollment` and an informational
+message, without a foreign-MDM warning. This does not prove enrollment health, synchronization
+or primary Intune enrollment. Missing/mismatched evidence and unrelated MDM warnings remain
+distinct; no enrollment or task is modified. See [Microsoft WinDC enrollment](https://learn.microsoft.com/en-us/windows/client-management/declared-configuration-enrollment).
+
+User mode opens a compact, read-only view: one overall message, work-account connection,
+organization connection and locally detected device management. Warnings and incomplete
+evidence produce a review message even when the underlying registration status is healthy.
+Unknown evidence stays unconfirmed. The existing diagnostic results and exports are unchanged.
+
+The primary actions are **Check my device** and **Copy report for support**. The latter only
+copies the existing support summary to the local clipboard; it never opens or sends email.
+**Details for support** is collapsed initially and retains Summary, Diagnostic output and
+Device status, including all findings and existing explicit support export/email controls.
+Opening the details temporarily replaces the compact result card, giving technical tabs
+the full content area; collapsing them returns to the compact view.
+User mode hides the legacy Admin PRT control and all repair/options controls. A separate
+**Renew my work connection** action requires confirmation, as described below. Admin mode keeps
+its technical layout and existing guarded actions. User labels support English and French
+and fall back to English for other configured languages.
+
+The local check remains read-only. Optional license verification and confirmed session connection
+renewal are separate actions; neither runs automatically as part of the diagnostic.
 
 Standalone local tool for Hybrid Join and Microsoft Entra device registration diagnostics.
 
@@ -11,6 +40,47 @@ In the GUI, `Run diagnostic` only runs diagnostics. In Admin mode, `Run repair` 
 `Refresh Azure AD PRT` is a separate user-context action that can be run without local admin rights; it executes `dsregcmd /refreshprt` and then refreshes the diagnostic view.
 
 Use `-Cli` when an operator wants command-line mode.
+
+## User diagnostics
+
+The User diagnostic includes read-only capabilities adapted from Smart Endpoint Migration
+Toolkit's HybridJoin endpoint. It does not invoke the endpoint, worker, prerequisite tasks,
+PsExec, WinRM, Microsoft Graph, enrollment, cleanup, policy changes or automatic PRT renewal.
+Existing explicit Admin and PRT-refresh actions remain separate and unchanged.
+
+- **Summary** separates device registration, current-user SSO/PRT and local Intune evidence.
+  `HEALTHY` still describes registration, not Intune enrollment or cloud compliance.
+- **Diagnostic output** includes PRT update/expiry dates, WAM/Hello/CloudTgt/OnPremTgt when
+  available, attributed acquire/refresh failures, DNS/TCP443 probes, local MDM classification,
+  readable policies and recent accessible AAD/registration/MDM events.
+- **Device status** retains the raw `dsregcmd /status` snapshot.
+- An old PRT error or an error belonging to another account is informational. Only a dated
+  failure for the current account in the last 24 hours is treated as current PRT evidence.
+  Expiration is evaluated only when the source includes an explicit timezone.
+- Local MDM evidence distinguishes Windows internal providers, the SCCM management bridge,
+  explicit Intune provider, other MDM and unconfirmed/incomplete Intune candidates. No trace
+  is removed. Discovery URLs alone do not confirm enrollment.
+- Refused or invisible registry/task/event evidence is **Unknown / not verifiable with this
+  account**, never proof that a task, policy or enrollment is absent. Positive local evidence
+  is not a cloud verification. Events may concern another user or the device and are not a
+  substitute for checking current license assignments with support.
+- Connectivity probes use at most six hosts, with 1.5-second DNS and TCP waits per host.
+  They test user-context DNS/TCP443 only; they do not validate TLS, proxy, authentication or
+  SYSTEM-context access. No DNS flush or configuration change is performed.
+
+Structured evidence is saved as `Output/UserDiagnostics_<RunId>.json` in the effective output
+folder; its path and the independent state fields are included in JSON/CSV exports. Keep
+this evidence private: it can contain account identifiers and event messages. User guidance
+recommends network/sign-in checks or contacting support, never an automatic enrollment trigger.
+The additional Summary labels use English with French context labels where available.
+
+The candidate needs both the main script and its local
+`SmartM365-DeviceRegistration.UserDiagnostics.ps1` helper. The published 1.2.1 ZIP predates
+this candidate. Offline regression command:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\Tests\Test-SmartM365DeviceRegistrationUserDiagnostics.ps1
+```
 
 ## Download
 
@@ -330,3 +400,25 @@ pwsh -NoProfile -STA -ExecutionPolicy Bypass -File SmartM365/Tests/Test-SmartM36
 ```
 
 These checks use temporary files, harmless child processes or mocked operational boundaries. They do not qualify a real tenant, endpoint repair, campaign delivery or deployment. Demo assets remain local in `DemoAssets/`, ignored by Git, and must be refreshed after GUI changes. Live deployment requires separate qualification.
+# Optional Microsoft 365 license check
+
+In User mode, expand **Microsoft 365 licenses (optional)** and select **Check my licenses**. This is a separate, interactive, read-only Graph check; it never runs automatically or changes the local diagnostic result, enrollment or licenses.
+
+The isolated worker requests delegated `User.Read`, uses a process-only context and reads only `GET /v1.0/me?$select=id,userPrincipalName,assignedLicenses`. The signed-in account must match the Microsoft work account entered in the optional panel (initially the Windows work UPN). Results identify that verified Microsoft account, which can differ from the Windows identity. No administrator role, application secret, directory-wide permission or `/licenseDetails` call is used. Tenant policies may require approval; this tool does not grant permissions or bypass them.
+
+Results distinguish verified assigned SKUs, a verified empty assignment, and **Unverifiable**. Refused access, cancellation, missing dependency, timeout, account mismatch or incomplete data are never interpreted as no license. SKU identifiers alone do not prove a full Microsoft 365 suite, an Intune entitlement, service provisioning or Office activation. The check shows the account and UTC timestamp; it does not claim continuous freshness.
+
+Optional dependency: official `Microsoft.Graph.Authentication` **2.41.2** (Windows PowerShell 5.1), either installed for the user or placed alongside the tool under `Modules/Microsoft.Graph.Authentication/2.41.2`. It is not downloaded or installed automatically. The isolated Windows PowerShell STA worker retains a hidden console handle for WAM. Complete the Microsoft sign-in and user-consent window manually. The requested User.Read consent does not grant the user an administrator role. SDK output and error streams are drained in memory, never saved. Closing the GUI or a three-minute timeout ends its own worker only.
+
+Minimal results are saved separately as `Output/Licenses_<id>.json` under the current user's output directory. No tokens or raw SDK error text are saved. A separate progress sidecar records phase/time only; safe failure diagnostics may include phase, exception type, HTTP status, HRESULT and AADSTS code. The simple **Copy report for support** action includes the optional result when available and remains clipboard-only.
+
+References: [Get own user profile](https://learn.microsoft.com/en-us/graph/api/user-get?view=graph-rest-1.0), [user assignedLicenses](https://learn.microsoft.com/en-us/graph/api/resources/user?view=graph-rest-1.0), [official authentication module](https://www.powershellgallery.com/packages/Microsoft.Graph.Authentication/2.41.2).
+
+
+Assigned SKU names are resolved locally using `SmartM365-DeviceRegistration.LicenseCatalog.json`, a 619-product snapshot of Microsoft's public licensing reference (reference date 2026-08-19). Multiple assignments retain all names; unknown or newly introduced SKUs remain unidentified with their exact IDs. The catalog contains no tenant data, makes no extra Graph request and is not automatically refreshed. Product names are assignment labels, not proof that every included service is enabled or healthy.
+
+## User session connection renewal
+
+User mode offers **Renew my work connection** / **Renouveler ma connexion professionnelle**, after a diagnostic. Confirmation defaults to No; cancel sends no request. Accept launches only `dsregcmd /refreshprt` under the current user token, followed by the unchanged User diagnostic. No elevation, join/leave, enrollment cleanup, policy change or auto-enrollment is performed. The local diagnostic and this explicit action run in a hidden background worker so the GUI remains responsive.
+
+A zero native exit code means a request was accepted, not proof of a repaired connection. A present PRT with a strictly newer observed update time confirms renewal; missing/unchanged/unreadable evidence stays **requested, unconfirmed**, with advice to lock/unlock and contact support. A command failure and a failed post-check are distinct. This does not certify Intune enrollment, compliance or application sign-in. The local session-action receipt and clipboard support report include safe timestamps/status and identity, never token contents. Optional Graph remains a separate user action.

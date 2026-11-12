@@ -1,6 +1,6 @@
 ﻿<#
 .VERSION
-1.2
+1.6.2
 
 .SYNOPSIS
 SmartM365 local device registration diagnostic and repair tool.
@@ -159,8 +159,12 @@ if ($Demo) {
 if ($ValidateOnly) { throw 'For offline GUI validation, specify -Demo -ValidateOnly.' }
 
 
-$Script:ToolName = "Smart DeviceRegistration Tool"
-$Script:Version = "1.2"
+$Script:ToolName = "Smart Device Registration Tool"
+. (Join-Path $PSScriptRoot 'SmartM365-DeviceRegistration.UserDiagnostics.ps1')
+. (Join-Path $PSScriptRoot 'SmartM365-DeviceRegistration.Licenses.ps1')
+. (Join-Path $PSScriptRoot 'SmartM365-DeviceRegistration.GuiDiagnosticWorker.ps1')
+
+$Script:Version = "1.6.2"
 $Script:RunId = Get-Date -Format "yyyyMMdd_HHmmss_fff"
 $Script:ComputerName = $env:COMPUTERNAME
 $Script:RunLogPath = $null
@@ -470,6 +474,15 @@ function Get-DeviceRegistrationToolConfig {
 
     try {
         $config = Get-Content -LiteralPath $effectivePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if (Test-Path -LiteralPath $templateConfig) {
+            $defaults = Get-Content -LiteralPath $templateConfig -Raw -Encoding UTF8 | ConvertFrom-Json
+            $added = New-Object Collections.Generic.List[string]
+            Sync-DrtConfigDefaults -Config $config -Template $defaults -Added $added
+            if ($added.Count -gt 0) {
+                $config | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $effectivePath -Encoding UTF8
+                Write-Verbose ('Configuration defaults added: ' + ($added -join ', '))
+            }
+        }
         $config | Add-Member -NotePropertyName ConfigPath -NotePropertyValue $effectivePath -Force
         return $config
     }
@@ -1019,7 +1032,7 @@ function Send-DeviceRegistrationSupportBundleEmail {
     $body = @(
         "Hello,",
         "",
-        "Please find attached the Smart DeviceRegistration Tool support bundle.",
+        "Please find attached the Smart Device Registration Tool support bundle.",
         "",
         (Format-DeviceRegistrationSupportSummary -Result $Result),
         "",
@@ -1117,7 +1130,7 @@ function Send-DeviceRegistrationSupportSummaryEmail {
     $body = @(
         "Hello,",
         "",
-        "Please find below the Smart DeviceRegistration Tool support summary.",
+        "Please find below the Smart Device Registration Tool support summary.",
         "",
         (Format-DeviceRegistrationSupportSummary -Result $Result),
         "",
@@ -1213,7 +1226,14 @@ function Write-AtomicCsvAppend {
         if ($existing) { $combined += $existing }
         if ($newRow) { $combined += $newRow }
 
-        $combined | Export-Csv -LiteralPath $tmpNew -NoTypeInformation -Encoding UTF8 -Force
+        $columnNames = New-Object Collections.Generic.List[string]
+        $seenColumns = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+        foreach ($row in $combined) {
+            foreach ($name in $row.PSObject.Properties.Name) {
+                if ($seenColumns.Add($name)) { $columnNames.Add($name) }
+            }
+        }
+        $combined | Select-Object -Property $columnNames.ToArray() | Export-Csv -LiteralPath $tmpNew -NoTypeInformation -Encoding UTF8 -Force
         Move-Item -LiteralPath $tmpNew -Destination $Path -Force
     }
     finally {
@@ -1521,9 +1541,10 @@ function Get-MdmEnrollmentState {
                 $hasDiscoveryUrl = -not [string]::IsNullOrWhiteSpace($discoveryServiceFullUrl)
                 $isInternalProvider = $hasProviderId -and ($internalProviderIds -contains $providerId)
                 $isIntuneProvider = ($providerId -eq "MS DM Server")
+                $isMicrosoftLinked = Test-DrtMicrosoftLinkedEnrollment -Provider $providerId -DiscoveryUrl $discoveryServiceFullUrl -EnrollmentType $enrollmentType
                 $isIntuneDiscovery = ($discoveryServiceFullUrl -match "(?i)enrollment\.manage\.microsoft\.com")
-                $isExternalProvider = $hasProviderId -and -not $isInternalProvider -and -not $isIntuneProvider
-                $isExternalDiscovery = $hasDiscoveryUrl -and -not $isIntuneDiscovery
+                $isExternalProvider = $hasProviderId -and -not $isInternalProvider -and -not $isIntuneProvider -and -not $isMicrosoftLinked
+                $isExternalDiscovery = $hasDiscoveryUrl -and -not $isIntuneDiscovery -and -not $isMicrosoftLinked
 
                 $statusKeyPresent = Test-RegistrySubKeyExists -BaseKey $base -SubKeyPath ("SOFTWARE\Microsoft\Enrollments\Status\{0}" -f $subName)
                 $omadmAccountPresent = Test-RegistrySubKeyExists -BaseKey $base -SubKeyPath ("SOFTWARE\Microsoft\Provisioning\OMADM\Accounts\{0}" -f $subName)
@@ -1535,6 +1556,7 @@ function Get-MdmEnrollmentState {
                 if ($omadmAccountPresent) { $evidence += "OMADMAccount" }
                 if ($policyProviderPresent) { $evidence += "PolicyProvider" }
                 if ($enterpriseMgmtTaskPresent) { $evidence += "EnterpriseMgmtTasks" }
+                if ($isMicrosoftLinked) { $evidence += 'MicrosoftLinkedEnrollment (WinDC/MMP-C; presence only)' }
                 $evidenceText = ($evidence -join ",")
 
                 $isIntuneCandidate = $isIntuneProvider -or $isIntuneDiscovery
@@ -2415,6 +2437,7 @@ function Invoke-SmartM365DeviceRegistrationTool {
     $intuneAutoEnrollResult = $null
     $intuneDetected = $false
     $eventLogPaths = @()
+    $userEnrollmentEvidence = $null
 
     try {
         Write-SmartM365DeviceRegistrationLog ("Start. RunId={0}; Mode={1}; RepairDisabledDeletedDevice={2}; AllowDsregLeave={3}; TriggerJoin={4}; TriggerIntuneAutoEnrollment={5}; AllowRemoveStaleIntuneEnrollment={6}; AllowRemoveNonIntuneMdmEnrollment={7}; AllowIntuneEnrolledAction={8}; AuditOnly={9}; RetryCount={10}; RetrySleepMinutes={11}" -f $Script:RunId, $Mode, [bool]$RepairDisabledDeletedDevice, [bool]$AllowDsregLeave, [bool]$TriggerJoin, [bool]$TriggerIntuneAutoEnrollment, [bool]$AllowRemoveStaleIntuneEnrollment, [bool]$AllowRemoveNonIntuneMdmEnrollment, [bool]$AllowIntuneEnrolledAction, [bool]$AuditOnly, $RetryCount, $RetrySleepMinutes)
@@ -2442,6 +2465,13 @@ function Invoke-SmartM365DeviceRegistrationTool {
         Write-SmartM365DeviceRegistrationLog ("Intune enrollment detected: {0}; Evidence={1}" -f $intuneDetected, $intuneState.Evidence)
 
         $mdmEnrollmentState = Get-MdmEnrollmentState
+        if ($Mode -eq 'User') {
+            $userEnrollmentEvidence = Get-DrtEnrollmentEvidence
+            $intuneDetected = $userEnrollmentEvidence.State -eq 'Detected'
+            $mdmEnrollmentState.IntuneEnrollmentDetected = $intuneDetected
+            $mdmEnrollmentState.NonIntuneMdmEnrollmentDetected = @($userEnrollmentEvidence.Entries | Where-Object Classification -eq 'OtherMdm').Count -gt 0
+            $mdmEnrollmentState.UnconfirmedIntuneEnrollmentIds = (@($userEnrollmentEvidence.Entries | Where-Object Classification -match 'IntuneCandidate' | ForEach-Object EnrollmentId) -join ';')
+        }
         $Script:MdmEnrollmentState = $mdmEnrollmentState
         if ($mdmEnrollmentState.IntuneEnrollmentDetected) {
             $intuneDetected = $true
@@ -2676,6 +2706,14 @@ function Invoke-SmartM365DeviceRegistrationTool {
         return $result
     }
     finally {
+        if ($result -and $Mode -eq 'User') {
+            try { Add-DrtUserDiagnostics -Result $result -OutputDir $paths.Output -EnrollmentEvidence $userEnrollmentEvidence }
+            catch {
+                $result | Add-Member NoteProperty DiagnosticCoverage 'Unavailable' -Force
+                $result | Add-Member NoteProperty UserDiagnosticsError $_.Exception.Message -Force
+                Write-SmartM365DeviceRegistrationLog ('User diagnostics unavailable: ' + $_.Exception.Message)
+            }
+        }
         if ($transcriptStarted) {
             try {
                 Stop-Transcript | Out-Null
@@ -2706,7 +2744,7 @@ function Invoke-SmartM365DeviceRegistrationTool {
 
         if ($result) {
             try {
-                Write-AtomicCsvAppend -Path $paths.CsvPath -RowObject $result -RunIdValue $Script:RunId
+                Write-AtomicCsvAppend -Path $paths.CsvPath -RowObject ($result | Select-Object * -ExcludeProperty UserDiagnostics) -RunIdValue $Script:RunId
                 Write-SmartM365DeviceRegistrationLog ("CSV summary appended: {0}" -f $paths.CsvPath)
             }
             catch {
@@ -2726,7 +2764,7 @@ function Invoke-SmartM365DeviceRegistrationTool {
 function Format-DeviceRegistrationResultText {
     param([Parameter(Mandatory = $true)][psobject]$Result)
 
-    @(
+    $legacyText = @(
         ("Status              : {0}" -f $Result.Status),
         ("NextAction          : {0}" -f $Result.NextAction),
         ("OverallHealth       : {0}" -f $Result.OverallHealth),
@@ -2814,6 +2852,8 @@ function Format-DeviceRegistrationResultText {
         ("LogPath             : {0}" -f $Result.LogPath),
         ("CsvPath             : {0}" -f $Result.CsvPath)
     ) -join [Environment]::NewLine
+    if ($Result.PSObject.Properties['UserDiagnostics']) { return (Format-DrtUserDiagnostics -Diagnostics $Result.UserDiagnostics) + [Environment]::NewLine + '[Device checks]' + [Environment]::NewLine + $legacyText }
+    return $legacyText
 }
 
 function Get-DeviceRegistrationFindingLines {
@@ -3005,6 +3045,18 @@ function Get-DeviceRegistrationFindingLines {
         $findings.Add(("{0} Support summary email: {1}" -f $prefix, $Result.SupportSummaryEmailMessage))
     }
 
+    if ($Result.PSObject.Properties['UserDiagnostics']) {
+        $d = $Result.UserDiagnostics
+        $kept = @($findings | Where-Object {
+            -not ($d.Enrollment.State -in @('Unknown','Unconfirmed') -and $_ -match 'Device is not enrolled in Intune|Weak Intune enrollment|Unconfirmed Intune enrollment') -and
+            -not ($d.Policies.MdmState -eq 'Unknown' -and $_ -match 'MDM.*policy') -and
+            -not ($d.Policies.WorkplaceState -eq 'Unknown' -and $_ -match 'Workplace Join.*policy') -and
+            -not ($d.Policies.AutomaticJoinTask.State -notin @('Available','Missing') -and $_ -match 'Automatic-Device-Join scheduled task')
+        })
+        $findings.Clear()
+        foreach ($line in (Get-DrtSummaryLines $d) + $kept) { $findings.Add([string]$line) }
+        if ($d.Enrollment.State -eq 'Unknown') { $findings.Add('[INFO] Local Intune enrollment is not verifiable with this account.') }
+    }
     if ($findings.Count -eq 0) {
         $findings.Add("[OK] No issue or warning detected.")
     }
@@ -3036,6 +3088,76 @@ function Format-DeviceRegistrationInfoText {
     }
 
     return $lines -join [Environment]::NewLine
+}
+
+function Get-DrtUserViewStrings {
+    param([string]$Language = 'en')
+    $text = @{
+        Subtitle='Check your work account and device connection.'; Action='Read-only device check'
+        Check='Check my device'; Copy='Copy report for support'; Details='Details for support'
+        Running='Checking your device...'; Ready='Ready to check your device'; Checking='Checking...'
+        Good='Check complete - everything looks good'; Review='Check complete - a point needs review'; Failed='Contact your support team'
+        Account='Work account'; Device='Organization connection'; Management='Device management'
+        Connected='Connected'; Detected='Detected on this device'; Unknown='Could not confirm'; Missing='Needs review'
+        GoodDetail='Your work account and device connection look good.'
+        ReviewDetail='The check found a point that your support team can review. The full findings remain available below.'
+        ExtraManagement='An additional management trace was detected. Support can check whether it is expected.'
+        FailedDetail='The check could not confirm that everything is working. Copy the report and contact your support team.'
+        NextGood='You can continue working. If a problem persists, share the report with support.'
+        NextReview='Next step: copy the report and share it with your support team if you need help.'
+        NoChanges='No changes were made. This view only checks your device.'
+        LocalEvidence='Based on local evidence; your organization can confirm the management status.'
+        Copied='Report copied. Share it with your support team.'
+    }
+    if ($Language -like 'fr*') {
+        $text = @{
+            Subtitle='Vérifiez votre compte professionnel et la connexion de votre appareil.'; Action='Vérification de votre appareil'
+            Check='Vérifier mon appareil'; Copy='Copier le compte rendu pour le support'; Details='Détails pour le support'
+            Running='Vérification de votre appareil...'; Ready='Prêt à vérifier votre appareil'; Checking='Vérification...'
+            Good='Vérification terminée - tout fonctionne'; Review='Vérification terminée - un point à examiner'; Failed='Contactez votre support'
+            Account='Compte professionnel'; Device="Connexion à l'organisation"; Management="Gestion de l'appareil"
+            Connected='Connecté'; Detected='Détectée sur cet appareil'; Unknown='Impossible à confirmer'; Missing='À vérifier'
+            GoodDetail='Votre compte professionnel et la connexion de votre appareil fonctionnent correctement.'
+            ReviewDetail='Un point mérite une vérification par le support. Les constats détaillés restent disponibles ci-dessous.'
+            ExtraManagement='Une trace supplémentaire de gestion a été détectée. Le support peut vérifier si elle est attendue.'
+            FailedDetail="La vérification ne permet pas de confirmer le bon fonctionnement. Copiez le compte rendu et contactez votre support."
+            NextGood='Vous pouvez continuer à travailler. Si un problème persiste, partagez le compte rendu avec le support.'
+            NextReview="Prochaine étape : copiez le compte rendu et partagez-le avec votre support si vous avez besoin d'aide."
+            NoChanges="Aucune modification n'a été effectuée. Cette vue vérifie uniquement votre appareil."
+            LocalEvidence="Selon les traces locales ; votre organisation peut confirmer l'état de gestion."
+            Copied='Compte rendu copié. Vous pouvez le partager avec votre support.'
+        }
+    }
+    return [pscustomobject]$text
+}
+
+function Get-DrtUserViewModel {
+    param([psobject]$Result, [string[]]$Findings = @(), [string]$Language = 'en')
+    # Presentation only: do not mutate diagnostic results or infer success from missing evidence.
+    $t = Get-DrtUserViewStrings -Language $Language
+    $model = [ordered]@{ Title=$t.Ready; Detail=$t.NoChanges; Next=$t.NextReview; Account=$t.Checking; Device=$t.Checking; Management=$t.Checking; Tone='Neutral' }
+    if (-not $Result) { return [pscustomobject]$model }
+    $get = { param($Name) if ($Result.PSObject.Properties[$Name]) { $Result.$Name } }
+    $sso = [string](& $get 'UserSsoState')
+    $registration = [string](& $get 'RegistrationHealth')
+    $mdm = [string](& $get 'LocalMdmState')
+    $model.Account = if ($sso -eq 'Present') { $t.Connected } elseif ($sso -in @('Missing','Expired','Failed')) { $t.Missing } else { $t.Unknown }
+    $model.Device = if ($registration -eq 'Healthy') { $t.Connected } elseif ($registration -in @('Unhealthy','Failed','AttentionRequired')) { $t.Missing } else { $t.Unknown }
+    $model.Management = if ($mdm -eq 'Detected') { $t.Detected } elseif ($mdm -eq 'NotDetected') { $t.Missing } else { $t.Unknown }
+    $warnings = @($Findings | Where-Object { $_ -match '^\[(ERROR|WARNING)\]' })
+    $errors = @($Findings | Where-Object { $_ -match '^\[ERROR\]' })
+    $complete = (& $get 'DiagnosticCoverage') -eq 'Complete' -and -not (& $get 'UserDiagnosticsError')
+    if ($errors.Count -gt 0 -or (& $get 'Status') -eq 'ERROR') {
+        $model.Title=$t.Failed; $model.Detail=$t.FailedDetail; $model.Tone='Error'
+    }
+    elseif ($warnings.Count -eq 0 -and $complete -and $sso -eq 'Present' -and $registration -eq 'Healthy' -and $mdm -eq 'Detected' -and (& $get 'Status') -eq 'HEALTHY') {
+        $model.Title=$t.Good; $model.Detail=$t.GoodDetail; $model.Next=$t.NextGood; $model.Tone='Good'
+    }
+    else {
+        $model.Title=$t.Review; $model.Detail=$t.ReviewDetail; $model.Tone='Review'
+        if ([string](& $get 'MdmNonIntuneEnrollmentDetected') -eq 'True') { $model.Detail=$t.ExtraManagement }
+    }
+    return [pscustomobject]$model
 }
 
 function Import-SmartM365GuiSplash {
@@ -3077,7 +3199,7 @@ function Show-SmartM365DeviceRegistrationGui {
     $xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Smart DeviceRegistration Tool"
+        Title="Smart Device Registration Tool"
         Height="900"
         Width="1240"
         MinHeight="760"
@@ -3230,7 +3352,7 @@ function Show-SmartM365DeviceRegistrationGui {
                     <Border HorizontalAlignment="Left" CornerRadius="12" Padding="10,4" Background="{StaticResource AccentSoftBrush}">
                         <TextBlock x:Name="EyebrowText" Text="LOCAL DEVICE REGISTRATION" Foreground="#005A9E" FontWeight="SemiBold" FontSize="12"/>
                     </Border>
-                    <TextBlock x:Name="TitleText" Text="Smart DeviceRegistration Tool" Margin="0,12,0,0" FontSize="28" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="TitleText" Text="Smart Device Registration Tool" Margin="0,12,0,0" FontSize="28" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" TextWrapping="Wrap"/>
                     <TextBlock x:Name="SubtitleText" Text="Hybrid Join, Entra device registration, policy checks, and support-ready diagnostics." Margin="0,8,0,0" FontSize="14" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                 </StackPanel>
                 <Border x:Name="HeaderLogoLink" Grid.Column="1" Width="124" Height="88" CornerRadius="8" Background="#FFFFFF" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" Padding="4" Margin="18,0,0,0" Cursor="Hand" ToolTip="Open WorkplaceCloudHub.com">
@@ -3245,8 +3367,9 @@ function Show-SmartM365DeviceRegistrationGui {
             </Grid>
         </Border>
 
-        <Grid Grid.Row="1" Margin="0,12,0,12">
+        <Grid x:Name="ContentGrid" Grid.Row="1" Margin="0,12,0,12">
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
@@ -3263,16 +3386,49 @@ function Show-SmartM365DeviceRegistrationGui {
                         <TextBlock x:Name="DeviceNameText" Text="PC: COMPUTERNAME" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" TextWrapping="Wrap"/>
                         <TextBlock x:Name="ActionTitleText" Text="Device registration diagnostic" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold" FontSize="12" TextWrapping="Wrap" Margin="0,3,0,0"/>
                         <TextBlock x:Name="StatusText" Text="User mode. Diagnostic only." Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                        <ProgressBar x:Name="DiagnosticProgress" Height="4" Width="180" HorizontalAlignment="Left" IsIndeterminate="True" Visibility="Collapsed" Margin="0,6,0,0"/>
                     </StackPanel>
                     <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
                         <Button x:Name="RunButton" Content="Run diagnostic" Style="{StaticResource PrimaryButton}" MinWidth="150" Margin="0,0,8,0"/>
+                        <Button x:Name="UserCopyButton" Content="Copy report for support" MinWidth="190" Visibility="Collapsed" IsEnabled="False"/>
                         <Button x:Name="RefreshPrtButton" Content="Refresh Azure AD PRT" MinWidth="170" Margin="0,0,8,0"/>
                         <Button x:Name="RepairButton" Content="Run repair" MinWidth="150" Margin="0"/>
                     </StackPanel>
                 </Grid>
             </Border>
 
-            <TabControl x:Name="MainTabs" Grid.Row="1">
+            <Border x:Name="UserSimplePanel" Grid.Row="1" Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Padding="22" Margin="0,0,0,12" Visibility="Collapsed">
+                <StackPanel>
+                    <Border x:Name="UserResultBanner" CornerRadius="8" Background="#F8FAFC" Padding="16" Margin="0,0,0,18">
+                        <StackPanel>
+                            <TextBlock x:Name="UserResultTitle" Text="Ready to check your device" FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="UserResultDetail" Margin="0,8,0,0" FontSize="14" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+                    <Grid Margin="0,0,0,18">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <StackPanel Margin="0,0,16,0"><TextBlock x:Name="UserAccountLabel" Text="Work account" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/><TextBlock x:Name="UserAccountValue" Margin="0,6,0,0" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"/></StackPanel>
+                        <StackPanel Grid.Column="1" Margin="0,0,16,0"><TextBlock x:Name="UserDeviceLabel" Text="Organization connection" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/><TextBlock x:Name="UserDeviceValue" Margin="0,6,0,0" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"/></StackPanel>
+                        <StackPanel Grid.Column="2"><TextBlock x:Name="UserManagementLabel" Text="Device management" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/><TextBlock x:Name="UserManagementValue" Margin="0,6,0,0" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"/></StackPanel>
+                    </Grid>
+                    <TextBlock x:Name="UserNextStep" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                    <TextBlock x:Name="UserNoChangesText" FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="UserLocalEvidenceText" FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                    <Button x:Name="UserRenewPrtButton" Content="Renew my work connection" HorizontalAlignment="Left" Margin="0,12,0,6" IsEnabled="False"/>
+                    <TextBlock x:Name="UserPrtStatus" TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource MutedBrush}"/>
+                    <Expander x:Name="LicenseExpander" Header="Microsoft 365 licenses (optional)" IsExpanded="False" Margin="0,16,0,0">
+                        <StackPanel Margin="20,8,0,0">
+                            <TextBlock x:Name="LicenseAccountLabel" Text="Microsoft work account to check" FontSize="12" Foreground="{StaticResource MutedBrush}"/>
+                            <TextBox x:Name="LicenseAccountBox" MinWidth="360" MaxWidth="600" HorizontalAlignment="Left" Margin="0,4,0,8"/>
+                            <TextBlock x:Name="LicenseNotice" TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource MutedBrush}"/>
+                            <Button x:Name="LicenseButton" Content="Check my licenses" HorizontalAlignment="Left" Margin="0,8,0,8"/>
+                            <TextBlock x:Name="LicenseStatus" TextWrapping="Wrap" FontSize="12"/>
+                        </StackPanel>
+                    </Expander>
+                </StackPanel>
+            </Border>
+            <Expander x:Name="UserDetailsExpander" Grid.Row="2" Header="Details for support" IsExpanded="False" Visibility="Collapsed" FontSize="14" VerticalContentAlignment="Stretch" HorizontalContentAlignment="Stretch"/>
+            <TabControl x:Name="MainTabs" Grid.Row="1" Grid.RowSpan="2">
                 <TabItem x:Name="SummaryTab" Header="Summary">
                     <Grid Margin="0,12,0,0">
                         <Grid.RowDefinitions>
@@ -3433,6 +3589,107 @@ function Show-SmartM365DeviceRegistrationGui {
     $headerLogoFallback = $window.FindName("HeaderLogoFallback")
     $headerLogoLink = $window.FindName("HeaderLogoLink")
     $brushConverter = New-Object System.Windows.Media.BrushConverter
+    $contentGrid = $window.FindName('ContentGrid')
+    $userSimplePanel = $window.FindName('UserSimplePanel')
+    $userDetailsExpander = $window.FindName('UserDetailsExpander')
+    $userCopyButton = $window.FindName('UserCopyButton')
+    $userResultBanner = $window.FindName('UserResultBanner')
+    $userResultTitle = $window.FindName('UserResultTitle')
+    $userResultDetail = $window.FindName('UserResultDetail')
+    $userAccountValue = $window.FindName('UserAccountValue')
+    $userDeviceValue = $window.FindName('UserDeviceValue')
+    $userManagementValue = $window.FindName('UserManagementValue')
+    $userNextStep = $window.FindName('UserNextStep')
+    $userViewText = Get-DrtUserViewStrings -Language $script:SelectedLanguage
+    $userDetailsExpander.Add_Expanded({ $userSimplePanel.Visibility='Collapsed' })
+    $userDetailsExpander.Add_Collapsed({
+        if ((& $getSelectedMode) -eq 'User') { $userSimplePanel.Visibility='Visible' }
+    })
+    $userRenewPrtButton=$window.FindName('UserRenewPrtButton');$userPrtStatus=$window.FindName('UserPrtStatus')
+    $prtState=@{Requested=$false;Result=$null}
+    $userRenewPrtButton.Content=if($script:SelectedLanguage -like 'fr*'){'Renouveler ma connexion professionnelle'}else{'Renew my work connection'}
+    $licenseAccountBox=$window.FindName('LicenseAccountBox'); $diagnosticProgress=$window.FindName('DiagnosticProgress')
+    $licenseButton=$window.FindName('LicenseButton'); $licenseStatus=$window.FindName('LicenseStatus')
+    $licenseState=@{Process=$null;Result=$null;Path=$null;Started=$null;ExpectedUpn=$null;OutputTask=$null;ErrorTask=$null}
+    $licenseFrench=$script:SelectedLanguage -like 'fr*'
+    $window.FindName('LicenseExpander').Header=if($licenseFrench){'Licences Microsoft 365 (facultatif)'}else{'Microsoft 365 licenses (optional)'}
+    $window.FindName('LicenseAccountLabel').Text=if($licenseFrench){'Compte Microsoft professionnel a verifier'}else{'Microsoft work account to check'}
+    $licenseButton.Content=if($licenseFrench){'Verifier mes licences'}else{'Check my licenses'}
+    $window.FindName('LicenseNotice').Text=if($licenseFrench){'Le resultat concerne le compte Microsoft saisi. Les services actives et Office ne sont pas verifies.'}else{'Results apply to the Microsoft account entered above. Enabled services and Office activation are not checked.'}
+    $licenseStatus.Text=Get-DrtLicenseText -Language $script:SelectedLanguage
+    $licenseTimer=New-Object System.Windows.Threading.DispatcherTimer
+    $licenseTimer.Interval=[TimeSpan]::FromMilliseconds(500)
+    $finishLicenseCheck={
+        param($Result)
+        $licenseTimer.Stop(); $licenseState.Result=$Result
+        $licenseStatus.Text=Get-DrtLicenseText -Result $Result -Language $script:SelectedLanguage
+        $licenseButton.IsEnabled=$true;$licenseAccountBox.IsEnabled=$true
+        if($licenseState.Process){$licenseState.Process.Dispose();$licenseState.Process=$null};$licenseState.OutputTask=$null;$licenseState.ErrorTask=$null
+    }
+    $licenseTimer.Add_Tick({
+        try {
+            if(Test-Path -LiteralPath $licenseState.Path){
+                $r=Get-Content -LiteralPath $licenseState.Path -Raw -ErrorAction Stop|ConvertFrom-Json -ErrorAction Stop
+                if($r.SchemaVersion -ne 1 -or $r.Status -notin @('Assigned','None','Unverifiable')){throw 'Invalid license result'}
+                & $finishLicenseCheck $r
+            } elseif($licenseState.Process.HasExited){
+                & $finishLicenseCheck (New-DrtLicenseResult -Reason WorkerUnavailable -Account $licenseState.ExpectedUpn)
+            } elseif(((Get-Date)-$licenseState.Started).TotalSeconds -gt 180){
+                $licenseState.Process.Kill()
+                & $finishLicenseCheck (New-DrtLicenseResult -Reason Timeout -Account $licenseState.ExpectedUpn)
+            }
+        } catch {& $finishLicenseCheck (New-DrtLicenseResult -Reason WorkerUnavailable -Account $licenseState.ExpectedUpn)}
+    })
+    $licenseButton.Add_Click({
+        if($licenseState.Process -or $diagnosticState.Process -or -not $script:lastResult){return}
+        $upn=$licenseAccountBox.Text.Trim()
+        if($upn -notmatch '^[^\s@"]+@[^\s@"]+$'){
+            & $finishLicenseCheck (New-DrtLicenseResult -Reason AccountUnavailable); return
+        }
+        try {
+            $licenseButton.IsEnabled=$false;$licenseAccountBox.IsEnabled=$false; $licenseState.Result=$null
+            $licenseStatus.Text=if($licenseFrench){'Connexion Microsoft et verification en cours...'}else{'Complete the Microsoft sign-in and consent window. Checking your licenses...'}
+            $licenseState.ExpectedUpn=$upn
+            $root=Join-Path (Split-Path $script:lastResult.CsvPath -Parent) 'Output'
+            New-Item -ItemType Directory -Path $root -Force|Out-Null
+            $licenseState.Path=Join-Path $root ('Licenses_'+[guid]::NewGuid().ToString('N')+'.json')
+            $worker=Join-Path $PSScriptRoot 'SmartM365-DeviceRegistration.Licenses.ps1'
+            $arguments='-NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File "'+$worker+'" -Check -ExpectedUpn "'+$upn+'" -ResultPath "'+$licenseState.Path+'"'
+            # WAM needs a real parent console handle; the STA worker keeps that console hidden.
+            $psi=New-Object Diagnostics.ProcessStartInfo
+            $psi.FileName="$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe";$psi.Arguments=$arguments
+            $psi.UseShellExecute=$false;$psi.CreateNoWindow=$false;$psi.WindowStyle='Hidden'
+            $psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true
+            $licenseState.Process=New-Object Diagnostics.Process;$licenseState.Process.StartInfo=$psi
+            [void]$licenseState.Process.Start()
+            # Drain SDK streams in memory. Never save authentication output or raw error text.
+            $licenseState.OutputTask=$licenseState.Process.StandardOutput.ReadToEndAsync()
+            $licenseState.ErrorTask=$licenseState.Process.StandardError.ReadToEndAsync()
+            $licenseState.Started=Get-Date; $licenseTimer.Start()
+        } catch {& $finishLicenseCheck (New-DrtLicenseResult -Reason WorkerUnavailable -Account $upn)}
+    })
+    $window.Add_Closed({
+        $licenseTimer.Stop()
+        if($licenseState.Process){try{if(-not $licenseState.Process.HasExited){$licenseState.Process.Kill()}}finally{$licenseState.Process.Dispose();$licenseState.Process=$null};$licenseState.OutputTask=$null;$licenseState.ErrorTask=$null}
+    })
+    $userDetailsExpander.Header = $userViewText.Details
+    foreach ($pair in @(@('UserAccountLabel','Account'),@('UserDeviceLabel','Device'),@('UserManagementLabel','Management'),@('UserNoChangesText','NoChanges'),@('UserLocalEvidenceText','LocalEvidence'))) {
+        $window.FindName($pair[0]).Text = $userViewText.($pair[1])
+    }
+    $updateUserView = {
+        param([psobject]$Result)
+        $findings = if ($Result) { @(Get-DeviceRegistrationFindingLines -Result $Result) } else { @() }
+        $model = Get-DrtUserViewModel -Result $Result -Findings $findings -Language $script:SelectedLanguage
+        $userResultTitle.Text=$model.Title; $userResultDetail.Text=$model.Detail; $userNextStep.Text=$model.Next
+        $userAccountValue.Text=$model.Account; $userDeviceValue.Text=$model.Device; $userManagementValue.Text=$model.Management
+        $color = switch ($model.Tone) { 'Good' { '#ECFDF3' } 'Review' { '#FFFAEB' } 'Error' { '#FEF3F2' } default { '#F8FAFC' } }
+        $userResultBanner.Background=$brushConverter.ConvertFromString($color)
+        $userCopyButton.IsEnabled=($null -ne $Result)
+        $userRenewPrtButton.IsEnabled=($null -ne $Result -and $Result.Mode -eq 'User')
+        if($prtState.Requested){$window.FindName('UserNoChangesText').Text=if($licenseFrench){"L'inscription du poste n'a pas ete modifiee. Seule la connexion de votre session a ete sollicitee."}else{'Device enrollment was not changed. Only your session connection was requested.'}}
+        if($Result -and [string]::IsNullOrWhiteSpace($licenseAccountBox.Text)){$licenseAccountBox.Text=[string]$Result.CurrentUserUpn}
+        if ((& $getSelectedMode) -eq 'User') { $statusText.Text = $model.Title }
+    }
 
     function Open-ExternalUrl {
         param([Parameter(Mandatory)][string]$Url)
@@ -3575,7 +3832,7 @@ function Show-SmartM365DeviceRegistrationGui {
         $hasRepairAction = ([bool]$repairCheck.IsChecked -or [bool]$triggerJoinCheck.IsChecked -or [bool]$triggerIntuneAutoEnrollCheck.IsChecked -or [bool]$removeStaleIntuneCheck.IsChecked -or [bool]$removeNonIntuneMdmCheck.IsChecked -or [bool]$auditOnlyCheck.IsChecked)
         $repairButton.Visibility = if ($isAdminMode) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
         $repairButton.IsEnabled = ($isAdminMode -and $hasRepairAction)
-        $refreshPrtButton.Visibility = [System.Windows.Visibility]::Visible
+        $refreshPrtButton.Visibility = if ($isAdminMode) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
         $hasPrt = $false
         if ($script:lastResult -and $script:lastResult.PSObject.Properties.Name -contains "AzureAdPrt") {
             $hasPrt = ([string]$script:lastResult.AzureAdPrt).Trim().ToUpperInvariant() -eq "YES"
@@ -3588,6 +3845,26 @@ function Show-SmartM365DeviceRegistrationGui {
         $isAdminMode = $false
         if ((& $getSelectedMode) -eq "Admin") {
             $isAdminMode = $true
+        }
+
+        if ($isAdminMode) {
+            if ($userDetailsExpander.Content -eq $mainTabs) {
+                $userDetailsExpander.Content=$null
+                [void]$contentGrid.Children.Add($mainTabs)
+            }
+            $userSimplePanel.Visibility='Collapsed'; $userDetailsExpander.Visibility='Collapsed'; $userCopyButton.Visibility='Collapsed'
+            $subtitleText.Text=$script:Strings.Subtitle; $actionTitleText.Text=$script:Strings.ActionTitle; $runButton.Content=$script:Strings.RunDiagnostic
+        }
+        else {
+            if ($userDetailsExpander.Content -ne $mainTabs) {
+                [void]$contentGrid.Children.Remove($mainTabs)
+                $userDetailsExpander.Content=$mainTabs
+            }
+            $userSimplePanel.Visibility=if($userDetailsExpander.IsExpanded){'Collapsed'}else{'Visible'}
+            $userDetailsExpander.Visibility='Visible'; $userCopyButton.Visibility='Visible'
+            $userCopyButton.Content=$userViewText.Copy
+            $subtitleText.Text=$userViewText.Subtitle; $actionTitleText.Text=$userViewText.Action; $runButton.Content=$userViewText.Check
+            & $updateUserView $script:lastResult
         }
 
         foreach ($control in @($repairCheck, $triggerJoinCheck, $triggerIntuneAutoEnrollCheck, $removeStaleIntuneCheck, $removeNonIntuneMdmCheck, $allowIntuneCheck, $auditOnlyCheck)) {
@@ -3631,59 +3908,26 @@ function Show-SmartM365DeviceRegistrationGui {
     $auditOnlyCheck.Add_Click({ & $updateRepairButtonState })
     & $setModeState
 
-    $runDiagnostic = {
-        param([bool]$DiagnosticOnly)
-
-        $runButton.IsEnabled = $false
-        $refreshPrtButton.IsEnabled = $false
-        $repairButton.IsEnabled = $false
-        $statusText.Text = $script:Strings.Running
-        $issuesBox.Text = ""
-        $infoBox.Text = ""
-        $outputBox.Text = ""
-        $dsregOutputBox.Text = ""
-        $script:lastResult = $null
-        $copySummaryButton.IsEnabled = $false
-        $createBundleButton.IsEnabled = $false
-        $enrollmentBanner.Background = $brushConverter.ConvertFromString("#F8FAFC")
-        $enrollmentBanner.BorderBrush = $brushConverter.ConvertFromString("#DDE7F0")
-        $enrollmentBannerText.Foreground = $brushConverter.ConvertFromString("#5F6B7A")
-        $enrollmentBannerText.Text = $script:Strings.RunningDiagnostic
-        $mdmPolicyBanner.Background = $brushConverter.ConvertFromString("#F8FAFC")
-        $mdmPolicyBanner.BorderBrush = $brushConverter.ConvertFromString("#DDE7F0")
-        $mdmPolicyBannerText.Foreground = $brushConverter.ConvertFromString("#5F6B7A")
-        $mdmPolicyBannerText.Text = $script:Strings.CheckingMdmPolicy
-
+    $completeDiagnostic = {
+        param([psobject]$result,[string]$Failure='')
         try {
-            $selectedMode = & $getSelectedMode
-            $isAdminMode = $selectedMode -eq "Admin"
-            $effectiveRetryCount = if ($DiagnosticOnly) { 0 } else { $RetryCount }
-
-            $result = Invoke-SmartM365DeviceRegistrationTool `
-                -Mode $selectedMode `
-                -RepairDisabledDeletedDevice:$false `
-                -AllowDsregLeave:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$repairCheck.IsChecked) `
-                -TriggerJoin:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$triggerJoinCheck.IsChecked) `
-                -TriggerIntuneAutoEnrollment:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$triggerIntuneAutoEnrollCheck.IsChecked) `
-                -AllowRemoveStaleIntuneEnrollment:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$removeStaleIntuneCheck.IsChecked) `
-                -AllowRemoveNonIntuneMdmEnrollment:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$removeNonIntuneMdmCheck.IsChecked) `
-                -AllowIntuneEnrolledAction:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$allowIntuneCheck.IsChecked) `
-                -AuditOnly:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$auditOnlyCheck.IsChecked) `
-                -RetryCount $effectiveRetryCount `
-                -RetrySleepMinutes $RetrySleepMinutes `
-                -LogRetentionCount $LogRetentionCount `
-                -OutputRoot $OutputRoot `
-                -SupportBundle:$false `
-                -NoTranscript:$NoTranscript
-
+            if($Failure){throw $Failure}
+            $isAdminMode=((& $getSelectedMode) -eq 'Admin')
             $outputBox.Text = Format-DeviceRegistrationResultText -Result $result
             $issuesBox.Text = Format-DeviceRegistrationFindingsText -Result $result
             $infoBox.Text = Format-DeviceRegistrationInfoText -Result $result
             $dsregOutputBox.Text = & $getDsregSnapshotText $result
             $statusText.Text = ([string]::Format($script:Strings.CompletedFormat, $result.Status))
             $script:lastResult = $result
+            & $updateUserView $result
 
-            if ($result.IntuneEnrolled) {
+            if ($result.PSObject.Properties['UserDiagnostics'] -and $result.UserDiagnostics.Enrollment.State -in @('Unknown','Unconfirmed')) {
+                $enrollmentBanner.Background = $brushConverter.ConvertFromString('#F8FAFC')
+                $enrollmentBanner.BorderBrush = $brushConverter.ConvertFromString('#DDE7F0')
+                $enrollmentBannerText.Foreground = $brushConverter.ConvertFromString('#5F6B7A')
+                $enrollmentBannerText.Text = $result.EnrollmentStatusMessage
+            }
+            elseif ($result.IntuneEnrolled) {
                 $enrollmentBanner.Background = $brushConverter.ConvertFromString("#ECFDF3")
                 $enrollmentBanner.BorderBrush = $brushConverter.ConvertFromString("#ABEFC6")
                 $enrollmentBannerText.Foreground = $brushConverter.ConvertFromString("#027A48")
@@ -3732,6 +3976,7 @@ function Show-SmartM365DeviceRegistrationGui {
             $openLogButton.IsEnabled = ($isAdminMode -and [bool]$script:lastLogFolder)
             $copySummaryButton.IsEnabled = $true
             $createBundleButton.IsEnabled = $true
+            $script:RunId=$result.RunId;$footerText.Text='RunId: '+$result.RunId
         }
         catch {
             $issuesBox.Text = ("[ERROR] {0}" -f $_.Exception.Message)
@@ -3739,13 +3984,130 @@ function Show-SmartM365DeviceRegistrationGui {
             $outputBox.Text = $_.Exception.Message
             $dsregOutputBox.Text = ""
             $statusText.Text = $script:Strings.Failed
+            if ((& $getSelectedMode) -eq 'User') {
+                & $updateUserView ([pscustomobject]@{Status='ERROR'})
+                $userCopyButton.IsEnabled=$false
+            }
         }
         finally {
+            $diagnosticProgress.Visibility='Collapsed';$modeCombo.IsEnabled=$true
             $runButton.IsEnabled = $true
-            $runButton.Content = $script:Strings.RunDiagnostic
+            $runButton.Content = if ((& $getSelectedMode) -eq 'User') { $userViewText.Check } else { $script:Strings.RunDiagnostic }
             & $updateRepairButtonState
         }
     }
+
+    $diagnosticState=@{Process=$null;Path=$null;Started=$null;OutputTask=$null;ErrorTask=$null}
+    $diagnosticTimer=New-Object System.Windows.Threading.DispatcherTimer
+    $diagnosticTimer.Interval=[TimeSpan]::FromMilliseconds(150)
+    $finishBackgroundDiagnostic={
+        param([psobject]$Result,[string]$Failure='')
+        $diagnosticTimer.Stop()
+        try {
+            & $completeDiagnostic $Result $Failure
+            if($Result -and $Result.PSObject.Properties['UserPrtRenewal']){
+                $prtState.Result=$Result.UserPrtRenewal
+                $userPrtStatus.Text=Get-DrtPrtRenewalText -Assessment $prtState.Result.Assessment -Language $script:SelectedLanguage
+            }elseif($prtState.Requested -and $Failure){
+                $userPrtStatus.Text=Get-DrtPrtRenewalText -Assessment 'CheckFailed' -Language $script:SelectedLanguage
+            }
+        }
+        finally {
+            if($diagnosticState.Process){$diagnosticState.Process.Dispose();$diagnosticState.Process=$null}
+            if($diagnosticState.Path -and (Test-Path -LiteralPath $diagnosticState.Path)){Remove-Item -LiteralPath $diagnosticState.Path -ErrorAction SilentlyContinue}
+            $diagnosticState.OutputTask=$null;$diagnosticState.ErrorTask=$null
+        }
+    }
+    $diagnosticTimer.Add_Tick({
+        if(-not $diagnosticState.Process){return}
+        try {
+            if(Test-Path -LiteralPath $diagnosticState.Path){
+                $result=Read-DrtGuiDiagnosticReceipt -Path $diagnosticState.Path
+                & $finishBackgroundDiagnostic $result
+            }elseif($diagnosticState.Process.HasExited){
+                & $finishBackgroundDiagnostic $null 'The background diagnostic ended without a result.'
+            }elseif(((Get-Date)-$diagnosticState.Started).TotalSeconds -gt 300){
+                $diagnosticState.Process.Kill()
+                & $finishBackgroundDiagnostic $null 'The background diagnostic timed out.'
+            }
+        }catch{& $finishBackgroundDiagnostic $null $_.Exception.Message}
+    })
+    $window.Add_Closed({
+        $diagnosticTimer.Stop()
+        if($diagnosticState.Process){try{if(-not $diagnosticState.Process.HasExited){$diagnosticState.Process.Kill()}}finally{$diagnosticState.Process.Dispose();$diagnosticState.Process=$null}}
+    })
+    $runDiagnostic = {
+        param([bool]$DiagnosticOnly,[bool]$RenewConnection=$false)
+        if($diagnosticState.Process -or $licenseState.Process){return}
+        $runButton.IsEnabled = $false
+        $refreshPrtButton.IsEnabled = $false
+        $repairButton.IsEnabled = $false
+        $statusText.Text = $script:Strings.Running
+        $issuesBox.Text = ""
+        $infoBox.Text = ""
+        $outputBox.Text = ""
+        $dsregOutputBox.Text = ""
+        $script:lastResult = $null
+        & $updateUserView $null
+        if ((& $getSelectedMode) -eq 'User') { $statusText.Text=$userViewText.Running; $userResultTitle.Text=$userViewText.Running }
+        $copySummaryButton.IsEnabled = $false
+        $createBundleButton.IsEnabled = $false
+        $enrollmentBanner.Background = $brushConverter.ConvertFromString("#F8FAFC")
+        $enrollmentBanner.BorderBrush = $brushConverter.ConvertFromString("#DDE7F0")
+        $enrollmentBannerText.Foreground = $brushConverter.ConvertFromString("#5F6B7A")
+        $enrollmentBannerText.Text = $script:Strings.RunningDiagnostic
+        $mdmPolicyBanner.Background = $brushConverter.ConvertFromString("#F8FAFC")
+        $mdmPolicyBanner.BorderBrush = $brushConverter.ConvertFromString("#DDE7F0")
+        $mdmPolicyBannerText.Foreground = $brushConverter.ConvertFromString("#5F6B7A")
+        $mdmPolicyBannerText.Text = $script:Strings.CheckingMdmPolicy
+
+        $diagnosticProgress.Visibility='Visible';$modeCombo.IsEnabled=$false
+        $runButton.Content=$userViewText.Checking
+
+        if($DiagnosticOnly -and (& $getSelectedMode) -eq 'User'){
+            try {
+                $config=if($script:ToolConfig){[string]$script:ToolConfig.ConfigPath}else{''}
+                $worker=Start-DrtGuiUserDiagnostic -ToolPath $PSCommandPath -ConfigPath $config -OutputRoot $OutputRoot -Language $script:SelectedLanguage -NoTranscript ([bool]$NoTranscript) -RenewConnection $RenewConnection
+                foreach($key in 'Process','Path','Started','OutputTask','ErrorTask'){$diagnosticState[$key]=$worker.$key}
+                $diagnosticTimer.Start()
+            }catch{& $finishBackgroundDiagnostic $null $_.Exception.Message}
+            return
+        }
+        try {
+            $selectedMode = & $getSelectedMode
+            $isAdminMode = $selectedMode -eq "Admin"
+            $effectiveRetryCount = if ($DiagnosticOnly) { 0 } else { $RetryCount }
+
+            $result = Invoke-SmartM365DeviceRegistrationTool `
+                -Mode $selectedMode `
+                -RepairDisabledDeletedDevice:$false `
+                -AllowDsregLeave:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$repairCheck.IsChecked) `
+                -TriggerJoin:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$triggerJoinCheck.IsChecked) `
+                -TriggerIntuneAutoEnrollment:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$triggerIntuneAutoEnrollCheck.IsChecked) `
+                -AllowRemoveStaleIntuneEnrollment:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$removeStaleIntuneCheck.IsChecked) `
+                -AllowRemoveNonIntuneMdmEnrollment:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$removeNonIntuneMdmCheck.IsChecked) `
+                -AllowIntuneEnrolledAction:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$allowIntuneCheck.IsChecked) `
+                -AuditOnly:((-not $DiagnosticOnly) -and $isAdminMode -and [bool]$auditOnlyCheck.IsChecked) `
+                -RetryCount $effectiveRetryCount `
+                -RetrySleepMinutes $RetrySleepMinutes `
+                -LogRetentionCount $LogRetentionCount `
+                -OutputRoot $OutputRoot `
+                -SupportBundle:$false `
+                -NoTranscript:$NoTranscript
+
+            & $completeDiagnostic $result
+        }catch{& $completeDiagnostic $null $_.Exception.Message}
+    }
+
+    $userRenewPrtButton.Add_Click({
+        if($diagnosticState.Process -or $licenseState.Process -or (& $getSelectedMode) -ne 'User' -or -not $script:lastResult){return}
+        $prompt=if($licenseFrench){'Demander le renouvellement de votre connexion professionnelle, puis verifier a nouveau ? Aucun changement de l inscription Entra ou Intune. Une connexion interactive peut etre necessaire. Vous pouvez annuler.'}else{'Request renewal of your work connection, then check again? Entra and Intune enrollment will not be changed. Interactive sign-in may be required. You can cancel.'}
+        $answer=[System.Windows.MessageBox]::Show($window,$prompt,[string]$userRenewPrtButton.Content,'YesNo','Question','No')
+        if($answer -ne 'Yes'){return}
+        $prtState.Requested=$true;$prtState.Result=$null
+        $userPrtStatus.Text=if($licenseFrench){'Demande et verification en cours...'}else{'Requesting renewal and checking...'}
+        & $runDiagnostic $true $true
+    })
 
     $runButton.Add_Click({
         & $runDiagnostic $true
@@ -3816,6 +4178,17 @@ function Show-SmartM365DeviceRegistrationGui {
             else {
                 $statusText.Text = $script:Strings.SupportSummaryCopied
             }
+        }
+    })
+
+    # The simple User action copies locally only; existing email/bundle actions remain in support details.
+    $userCopyButton.Add_Click({
+        if ($script:lastResult) {
+            $report=Format-DeviceRegistrationSupportSummary -Result $script:lastResult
+            if($prtState.Requested){$report+="`r`n`r`nSession PRT request: "+$userPrtStatus.Text;if($prtState.Result){$report+="`r`n"+($prtState.Result|ConvertTo-Json -Compress)}}
+            if($licenseState.Result){$report+="`r`n`r`nMicrosoft licenses (optional, separate Graph check):`r`n"+(Get-DrtLicenseText -Result $licenseState.Result -Language $script:SelectedLanguage)}
+            [System.Windows.Clipboard]::SetText($report)
+            $statusText.Text=$userViewText.Copied
         }
     })
 
@@ -3939,8 +4312,8 @@ exit $cliResult.ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAwhn8GKocfLMTL
-# 6GIyo868EAXge0HoSFLNV7gKYQyrQKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCArRSbk4GWGAkja
+# bl48Ep3n5m6qe7s7Qu9cQ4cZluncQqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4073,31 +4446,31 @@ exit $cliResult.ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDWo1d0wybtFzc1EZjCecV2nuDuZgno0/KvwlA5BZ6p4MA0GCSqG
-# SIb3DQEBAQUABIIBgH+NUA6wouUYoqD8vqdiOh2+qtY98/OgtbWum4t2Cx2g13wQ
-# DjKlzFotisHd+eAT5XnQN7qTDVW00fu7KTZCrxCQAEjj07tQAPbFW63qHWC6KfnD
-# 2hjYsdb/y11GXOoJCc/dYFmAgcOWujG9+Td8ZBDnnrznd3+qdeC5ddaeOaI52TZo
-# ZakL7bWy3Ua/h6FUfdfU5yc8E3iqJ8PoUnnZYXJ44VPnS3yvedAk5xeDwHtpuo/8
-# CVKc0lz5RqHtaKXB6dsJxhPF8gskcVpg+Gz3/e5a67IjEu98i/bEsDaKxn1Y2EA8
-# DFOjavzOzTlkLENJZfvMtXsx9dn8ge6OtOugkPSA1oEvO4prwYkfbcb0jHXfFpVa
-# 15FO3kM5Qq7XEoCHs1Y9bTONIhVlLio9ZU7rFBRmwZelkbugrEbMCvXG0RXBPlev
-# tA4BpWiyjVIctQWQGChEgCgBxob5B5rCkuRTj0Dpkw7kG5dPJxVnD9WH+48RwPJH
-# DJj4irFl/e4dQdzbgqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDB6f/3tGDppevJQ5Whavk/rfDXtONKJmxJFtO+WatknMA0GCSqG
+# SIb3DQEBAQUABIIBgErkAAQvh86kE+LC9t2QtuzJS+hdJHTXOhwiJ5Bw6o7MDHQf
+# lbToj/j3B2aROVDIEqXzroqchPh1ZuhCdG9UHpXlJ1Ts3IsfaH5O05S6oCX093mP
+# qpO5XNe/INpr4xriW9Ji4kAX3N3xKTOm61lS5nIzMy6dxRZCuEMa1NLm7BkTWcG8
+# uP5YPHIdpcxYg21W6HTDAhDw5Ja0foVGZOydUFiethMQL6eTGX+/ddIwRfDtJjma
+# cqpFsmS9a1v3hDIRkqU6bsIAoxeE6Qet0ROJUTwsE/cqWiWyLVZiV6+Kgyc7o6W+
+# bj9Nj/Pg/5lT6pIhKkZcz/7JeQnLfUtb3AJ9Rz5rO5fwkBnL5gxHFaQLyBR570Zr
+# 5bJckBrObeYqiFrAU/Y6OFQJGrDEabvioi4CS7te9scf8rvHMU6s5LI7NNNGfWjH
+# yMpRF6mh0cBVuM6uqySRxs1PcR6R5t8hT1Pzy/fF4GSkRA1lK6K4uoNl9h9O7dr0
+# pDL0DehQf9NAOOY+CqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMjQw
-# MDRaMC8GCSqGSIb3DQEJBDEiBCAa7+DbZ/CTNPBzsw1NJcz7qqpS9g34dX1m5Gge
-# iIZ9/TANBgkqhkiG9w0BAQEFAASCAgApUqHuogAemPTHjY+v9+8omYORkVhHIYYU
-# 4JY3pio8LIGu41MoI4RqbcyuQOJoeovbzWoW3ZgNTJ9QWqX6HYZPRutZjhXTGQiY
-# Bi19d4Mxmk0smGWhm89jFT8HL0yj7M5fZdfpkxvZS2YgkVtqHo1KbPrwCL4GM+HI
-# m0KKtli+GGbfoizf4XGPwX6DdTG9poGTAnmTQg4lJLPVia6Mp4XK3+i7Cd6Fwq7R
-# OPkfxyOy/HR+LiS5JvHhHkyx0XeCg59syGEqsr5OUz+0xN1vfuBe3xxmU4YhmmDw
-# BDr+9gml46j5jAPCJd8UECayqwviJGy40fqt7gGvZF+sLz5wqogu64VGNwX+jzae
-# EdDGtEQFgDl01Ng93MDxxQRw79VWCvJqulEky0fcRXwDQDim5+EXjjh7mlCzAGLf
-# DHM/fRnxAZ+/neXOPIpGYeMievbUzJigOEUnGCfCcRujnS65eC7dgGEI5ITqcsq7
-# 21E8dH503pMTzHNEL7xQ3AJBNqVM6KR52NvU+4shRKQ8+0+irRowNxdNFRFoedU3
-# T0KBMtz5FaB2Thq24LFYKlSrixCPooVPuWEeCpI9xdDuOfT49ket6PEB9Kt9k3eF
-# 3yORMdZHw+wnGcQJXM8kLrvE8MFlxTkQ06/Ejl9Upcn6zufhskehIeGfY7u5LX1c
-# E88W/0TC0Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTIyMjE0
+# NTNaMC8GCSqGSIb3DQEJBDEiBCBMm4NBG7NjhIcm7lCuohvscpAW84Y2C78n+JFF
+# UAi2hjANBgkqhkiG9w0BAQEFAASCAgB6qOKmrpEo9fgJ2nZVR35fFhs0QKVnoE49
+# O5mwyxzn0gVnQLiZaGkKYH0KML1WK/eEl6T2Z/uVwc3X77BujG9J4nBAun9jZU0y
+# kqKSXsTrOsCngAfczI8laHXevGzZvIaM0Uv+HsdfQYkv4Otc49eru0pH3xdJ+v/C
+# YmFcbb9et6VRBGSiNg1Td+uhQ2rbkJ4NQzZKSHP+fYLyGV5zGaTOOASYpqgkZeaG
+# GS82NMA/Y2kPK5ADrk8nDUs+tVniT6GIgotItGLToWbTDxww6mzHQbIlZiE6QCUy
+# iLFvTDagAzLxgRmrvwRePUAp70GvpwJu0qLIjhrb6bQszO/j3dP1+ebJAZH5YOKA
+# Vm7ax5oYOxamDq3iyGn9OIu8X+RI4qNDfpTvWggdNmypkoph8pp99gNmIu2is7BT
+# djQN0yu5hVid4WXjeOoiSMH2gzvt05ktmB+edKrnD5sxdbHqxov4juNFtNG0CDtv
+# IlcMyPB7roOH6tda5eMalBrV0MBgswqt41YB5/Sxc4DZK07n6TDcDBPiNzDHm/jl
+# w8kYewlcw08Vn25AtHL5Nzv9IG4HiZOHQv0A/Hl04nTqLD+dK8WByR2aJpM15jb+
+# 2uU/MtytGDAnf1Jd+vxoML8W6GEZXfiK49O7RitpESnsb5zYPpG4Td4hXP5pWt/B
+# NzXwl9kfWQ==
 # SIG # End signature block

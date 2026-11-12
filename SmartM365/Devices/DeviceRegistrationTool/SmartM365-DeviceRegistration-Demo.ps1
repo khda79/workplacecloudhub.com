@@ -1,15 +1,15 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
 Fictional device registration scenarios for the original user/admin interface.
 .VERSION
-1.0.0
+1.4.1
 #>
 function script:Initialize-SmartM365DemoProfile {
     $s=$script:SmartM365Demo;$c=$s.Controls
     $issue=$s.Scenario -eq 'Issues'
     $texts=@{
-        EyebrowText='SMARTM365 | DEMO';TitleText='Smart DeviceRegistration Tool';SubtitleText='Device-side registration and enrollment evidence - Contoso sample'
+        EyebrowText='SMARTM365 | DEMO';TitleText='Smart Device Registration Tool';SubtitleText='Device-side registration and enrollment evidence - Contoso sample'
         DeviceNameText='CTSO-LAP-0142 | CONTOSO | user01@contoso.example';ActionTitleText='Diagnostics and guarded repair'
         EnrollmentBannerText=$(if($issue){'DEMO - Intune enrollment needs attention'}else{'DEMO - Device enrolled in Intune'})
         MdmPolicyBannerText='MDM auto-enrollment policy: configured (sample)'
@@ -20,25 +20,67 @@ function script:Initialize-SmartM365DemoProfile {
     }
     foreach($key in $texts.Keys){$c[$key].Text=$texts[$key]}
     $c.IssuesBox.Text=if($issue){"Device authentication: FAILED (sample)`r`nStale enrollment trace detected (sample).`r`nNext action: review identity and use guarded repair."}else{"No blocking issue in this fictional scenario.`r`nNo device assessment was performed."}
-    $c.InfoBox.Text="Computer: CTSO-LAP-0142`r`nDomain: ad.contoso.example`r`nUser: user01@contoso.example`r`nOS: Windows 11 Enterprise 24H2`r`nAddress: 192.0.2.42`r`nEnrollment: Intune (sample)"
+    $c.InfoBox.Text="DEMO - Read-only user diagnostics 1.3`r`nRegistration: Healthy | User SSO: Present | Local Intune: $(if($issue){'Unknown'}else{'Detected'})`r`nCoverage: $(if($issue){'Partial - inaccessible evidence remains unknown'}else{'Complete for this fictional sample'})`r`nPRT dates and WAM/Hello/CloudTgt/OnPremTgt: available (sample)`r`nPrior failure for another account: informational, no refresh`r`nDNS/TCP443: reachable (sample; TLS and SYSTEM not tested)`r`nComputer: CTSO-LAP-0142 | User: user01@contoso.example`r`nNo native device or tenant commands executed."
     $c.DsregOutputBox.Text="DEMO - Synthetic dsregcmd evidence`r`nAzureAdJoined : YES`r`nDomainJoined : YES`r`nDomainName : CONTOSO`r`nDeviceName : CTSO-LAP-0142`r`nDeviceId : 00000000-0000-4000-8000-000000000142`r`nTenantName : Contoso (DEMO)`r`nTenantId : 00000000-0000-4000-8000-000000000001`r`nAzureAdPrt : YES`r`nDeviceAuthStatus : $(if($issue){'FAILED'}else{'SUCCESS'})"
-    $c.OutputBox.Text="[2026-10-18 09:30:00] DEMO - Domain connectivity: available (sample).`r`n[2026-10-18 09:30:00] DEMO - MDM enrollment: observed (sample).`r`n[2026-10-18 09:30:00] DEMO - No device commands executed."
-    Set-SmartM365DemoCombo ModeCombo @('User','Admin') 1
-    $c.RepairButton.Visibility='Visible';$c.RepairButton.IsEnabled=$true
+    $c.OutputBox.Text="DEMO - Fictional user diagnostics 1.3`r`n[User PRT / SSO]`r`nAzureAdPrt: YES | Update: 2026-11-10T08:00:00Z | Expiry: 2026-11-24T08:00:00Z`r`nWamDefaultSet: YES | NgcSet: NO | CloudTgt: YES | OnPremTgt: YES`r`nAcquirePrtDiagnostics: other@contoso.example; RelevantFailure=False`r`n[Connectivity: current user, DNS and TCP 443 only]`r`nlogin.microsoftonline.com: DNS=Resolved; TCP443=Reachable (sample)`r`n[Local MDM classification]`r`nMS DM Server: Intune (sample) | WMI_Bridge_SCCM_Server: ManagementBridge (sample)`r`n[Recent accessible events]`r`nNo matching fictional events. Inaccessible logs would remain Unknown.`r`n[Next steps - guidance only]`r`nNo repair, enrollment or PRT refresh requested. No native commands executed."
+    Set-SmartM365DemoCombo ModeCombo @('User','Admin') 0
+    if (-not (Get-Command Get-DrtUserViewModel -ErrorAction SilentlyContinue)) {
+        $tokens=$null;$errors=$null
+        $ast=[Management.Automation.Language.Parser]::ParseFile($s.GuiPath,[ref]$tokens,[ref]$errors)
+        foreach($fn in $ast.EndBlock.Statements|Where-Object {$_ -is [Management.Automation.Language.FunctionDefinitionAst] -and $_.Name -in @('Get-DrtUserViewStrings','Get-DrtUserViewModel')}) { Invoke-Expression $fn.Extent.Text }
+    }
+    $sample=[pscustomobject]@{Status='HEALTHY';UserSsoState='Present';RegistrationHealth='Healthy';LocalMdmState='Detected';DiagnosticCoverage='Complete';MdmNonIntuneEnrollmentDetected=$issue}
+    $findings=if($issue){@('[WARNING] Additional management trace (fictional)')}else{@()}
+    $model=Get-DrtUserViewModel -Result $sample -Findings $findings
+    $c.UserResultTitle.Text='DEMO - '+$model.Title;$c.UserResultDetail.Text=$model.Detail;$c.UserNextStep.Text=$model.Next
+    $c.UserAccountValue.Text=$model.Account;$c.UserDeviceValue.Text=$model.Device;$c.UserManagementValue.Text=$model.Management
+    $t=Get-DrtUserViewStrings
+    $c.UserNoChangesText.Text='DEMO - Sample data. No device assessment was performed.';$c.UserLocalEvidenceText.Text=$t.LocalEvidence
+    $c.UserResultBanner.Background=if($issue){'#FFFAEB'}else{'#ECFDF3'}
+    $c.UserCopyButton.Content=$t.Copy;$c.UserCopyButton.IsEnabled=$true;$c.RunButton.Content=$t.Check
+    $c.LicenseNotice.Text='DEMO - Optional own-account Graph check. No Microsoft sign-in or network call in demos.';$c.LicenseStatus.Text='DEMO - Not checked.'
+    $c.LicenseAccountBox.Text='user01@contoso.example';$c.LicenseAccountLabel.Text='Microsoft work account to check'
+    $c.UserPrtStatus.Text='';$c.UserRenewPrtButton.Content='Renew my work connection';$c.UserRenewPrtButton.IsEnabled=$true
+    Set-SmartM365DemoUserLayout
     foreach($name in @('TriggerJoinCheck','TriggerIntuneAutoEnrollCheck','AuditOnlyCheck')){$c[$name].IsChecked=$true}
+    $c.InfoBox.Text+="`r`n[INFO] Microsoft linked enrollment (WinDC/MMP-C) recognized (sample). Presence only; synchronization and health not checked."
+    $c.OutputBox.Text+="`r`n[Local MDM classification - additional Microsoft entry]`r`nMicrosoftLinkedEnrollment; Provider=Microsoft Device Management; EnrollmentType=26 (fictional). Presence only; no enrollment change."
     $s.Data.SupportSummary=$c.InfoBox.Text+"`r`n`r`n"+$c.IssuesBox.Text
 }
 function script:Connect-SmartM365DemoProfileEvents {
+    $script:SmartM365Demo.Controls.UserRenewPrtButton.Content='Renew my work connection'
+    $script:SmartM365Demo.Controls.UserRenewPrtButton.IsEnabled=$true
+    $script:SmartM365Demo.Controls.UserRenewPrtButton.Add_Click({$script:SmartM365Demo.Controls.UserPrtStatus.Text='DEMO - Request sent, renewal not confirmed (simulated). No native command executed.'})
+    $script:SmartM365Demo.Controls.LicenseButton.Add_Click({$script:SmartM365Demo.Controls.LicenseStatus.Text='DEMO - Unverifiable (simulated denied access). No sign-in or network call.'})
+    $script:SmartM365Demo.Controls.UserDetailsExpander.Add_Expanded({$script:SmartM365Demo.Controls.UserSimplePanel.Visibility='Collapsed'})
+    $script:SmartM365Demo.Controls.UserDetailsExpander.Add_Collapsed({if($script:SmartM365Demo.Controls.ModeCombo.SelectedItem -eq 'User'){$script:SmartM365Demo.Controls.UserSimplePanel.Visibility='Visible'}})
+    $script:SmartM365Demo.Controls.MainTabs.Add_SelectionChanged({
+        $c=$script:SmartM365Demo.Controls
+        if ($c.MainTabs.SelectedItem -ne $c.SummaryTab -and $c.UserDetailsExpander.Content -eq $c.MainTabs) { $c.UserDetailsExpander.IsExpanded=$true }
+    })
     $script:SmartM365Demo.Controls.ModeCombo.Add_SelectionChanged({
         $c=$script:SmartM365Demo.Controls;$admin=$c.ModeCombo.SelectedItem -eq 'Admin'
         $c.RepairButton.Visibility=if($admin){'Visible'}else{'Collapsed'}
         foreach($name in @('RepairCheck','TriggerJoinCheck','TriggerIntuneAutoEnrollCheck','RemoveStaleIntuneCheck','RemoveNonIntuneMdmCheck','AllowIntuneCheck')){$c[$name].IsEnabled=$admin}
+        $c.LicenseNotice.Text='DEMO - Optional own-account Graph check. No Microsoft sign-in or network call in demos.';$c.LicenseStatus.Text='DEMO - Not checked.'
+    Set-SmartM365DemoUserLayout
     })
+}
+function script:Set-SmartM365DemoUserLayout {
+    $c=$script:SmartM365Demo.Controls;$admin=$c.ModeCombo.SelectedItem -eq 'Admin'
+    if($admin){
+        if($c.UserDetailsExpander.Content -eq $c.MainTabs){$c.UserDetailsExpander.Content=$null;[void]$c.ContentGrid.Children.Add($c.MainTabs)}
+        $c.UserSimplePanel.Visibility='Collapsed';$c.UserDetailsExpander.Visibility='Collapsed';$c.UserCopyButton.Visibility='Collapsed';$c.OptionsTab.Visibility='Visible';$c.RefreshPrtButton.Visibility='Visible';$c.RepairButton.Visibility='Visible'
+    }else{
+        if($c.UserDetailsExpander.Content -ne $c.MainTabs){[void]$c.ContentGrid.Children.Remove($c.MainTabs);$c.UserDetailsExpander.Content=$c.MainTabs}
+        $c.UserSimplePanel.Visibility='Visible';$c.UserDetailsExpander.Visibility='Visible';$c.UserCopyButton.Visibility='Visible';$c.OptionsTab.Visibility='Collapsed';$c.RefreshPrtButton.Visibility='Collapsed';$c.RepairButton.Visibility='Collapsed'
+    }
 }
 function script:Invoke-SmartM365DemoProfileAction {
     param([string]$Name)
     $s=$script:SmartM365Demo
     switch($Name){
+        'UserCopyButton' {Write-SmartM365DemoActivity 'Report copy simulated locally. No email or Outlook action.';return $true}
         'RepairButton' {$s.Scenario='Completed';Initialize-SmartM365DemoProfile;Write-SmartM365DemoActivity 'Guarded repair completed in memory. No dsregcmd, registry, task, enrollment or reboot operation ran.';return $true}
         'RunButton' {Initialize-SmartM365DemoProfile;Write-SmartM365DemoActivity 'Synthetic diagnostic completed.';return $true}
         'RefreshPrtButton' {Write-SmartM365DemoActivity 'PRT renewal simulated successfully.';return $true}
@@ -71,8 +113,8 @@ function script:Export-SmartM365DemoProfileOutputs {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCdEUSyyk+Jl4Fk
-# qNKtl+ShouaTtfXfuvOI4C+rrSFrVKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDeLjHJcDnluGu5
+# v+kReErXc2R1EYaj0LZFkAtqvzgR0KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -205,31 +247,31 @@ function script:Export-SmartM365DemoProfileOutputs {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAiLoPv5TTZG3c1mBMYPiZtos5ozYGRZp4tSLvdbYcAiMA0GCSqG
-# SIb3DQEBAQUABIIBgGryCRDvEuTuQl2XMpHZS6yVLIPJ9snFzoaR9IKaPHIW17wi
-# Bt1/mprVAclcm2qPR+yQ18O7LOFl7OozBm8JkfDtPWJjTXHUmT4aNRmMDoZmGz2Q
-# iwKiRaVfsntZMkNKAM1CIm5BDhQbc2cfLpJpv15dMHgWgilXh2bEryvKwudiJsUR
-# VzTm00KNltNghq7iP81Ib9Q4kZll96i4rKveWfe2pyLq8O3NavMGwqPDwZ/f81pj
-# KMBg5NSBmpX5FttOWLxCSlx3vi7vpYXKGDDci/DANte6sEYyPge6N3J7ESb1pmfH
-# ljVBvYkFNC+GiWqnv/N6WtV5Zzw8m9u1KQ6PoTyfuF7kQaQR5gUFawSdG+HeujCe
-# ANIpr/DgGH1o4U0766n0LztPqYDD+eaoyj6ynsKINQbmd418RinBrkQEdNeBjLHE
-# YCKf8b3JSI+ut4/p1azG4oInJOKJQHzcg142BT2/JBTsxpeZTSMBgi/fVRUczQL0
-# YhzmxXMXSrcl8zcUn6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMYsz9cefMe5oWDVQ61z25GcVM4OlwHYVTHj5k1iUVH0MA0GCSqG
+# SIb3DQEBAQUABIIBgHM3gUbRV34St9BEea7qLcZLKOmwhAcceCNMdJt4dbuszo6j
+# ese+Ml1fqSFf4Tx01RK9NQzNjq145T7kJVYDE1foFo0oYEAZTFi2noXLsHq6uaHS
+# hc6ZMfMB/eEw27P4BEiyvGO9oj1iRkXhFRBnSRlVNFltdwg/XRTPoNFSUh8vvtxk
+# +GgG0hImkDoawFWBovqoZ/DO7W15dw/kAK/OO0r/JJUkFs3Xp9k0tiBDRizD2XQl
+# 28z+REnhJL1AIQycOyoHvFqcpyTSeSP75TRoVFGIqj5JJHDPI19jvHRVblOPaK/e
+# yI4naa/cDQTpJ2cJJnbVjdOI8140zPLI1fIBbIOjCZBxd9oRHQwhRzUT6Mbu76rb
+# shggGXoo3mUW0YsGDR0/dzbyhrjAdZkbCP2jcz2VS7u2tOo/v6RS78ZrP7mgqmJU
+# ugEchvmvM+CVBXlg+k/nWJ2FkDYxzbO/2wDA4DvOl9knCFmMmzm5Z2AYcphEqwYw
+# A4s23tQet0+7fUpslKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMDQ2
-# MzFaMC8GCSqGSIb3DQEJBDEiBCC+v40gVtuY8rSi19/Lc2c9MrD1+wq/ve2Sninj
-# ayIbRzANBgkqhkiG9w0BAQEFAASCAgCTGmdL8u08d75aZe6sYNAs74zwqPhZYfYo
-# 3FBWcTVP4p68KIBgdkAm9fxglZawkmcW12itkKQx2EjJstn3KbG70Aegdx740joI
-# 6Q3wVUlp1HzMvMsWOv7t9YVoRSnTraku+zFyNHrMx5ViNedx0SADyM4v5zR3zlHi
-# QvhfCKeYdY7GzAtVddwE3vfXo+nbrchjYJfKpqWW8LZPFBlXjoLzCq8YBKj0WODO
-# oY5grCwwa3Xshg2q/ssGw9jKGbyZEum87VES6HfJfJ3MV+oI0PQ9XtHYXPCmKYoQ
-# jQMBC1U7f7GFLAkg+hzFdCMG+D3fvVux6yCdN7YoFM7rruGak7RSuH4Dw1JQc3YN
-# Yh2wta85hSAo1zIPXVyAyNNLHNkh9hkbppIMd5Jp2v+zj4oE27lvYHlsTTpuAH6s
-# 1dZBGbuQKLWzzhxRHvGqTBxSzdx4kPGXLq+5SQzeJsKxzQHqgJi32jvBINridIcI
-# qcQU5tD0Y2BYqgjg2Lwqy7LFElhazsSIPZFnY/SsiuKx7+Ei3mV8UhfV/G7Yy7To
-# m6nO5kiyWH77cPYRXdgy+abZrA79qdKgL06kMwNwTNK2Qg6IfIm1kKTOQ5r1C4+Q
-# apFalzVgsU617waaa7K4w8JCJKap8yojO/V8ENEBYK2pSivYNhThTJzUz1Jus37U
-# lh5tERu2HQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTIyMjM4
+# NDRaMC8GCSqGSIb3DQEJBDEiBCDUMTV055S/JhyD5baLEltff+q8WAiJ2o7ceP+p
+# WxfxdjANBgkqhkiG9w0BAQEFAASCAgCzcmn1S8NP0kYpqfLbMbGt0vUqwC8OFxCE
+# VRWbMsHTNQiuRKl/RPlWXKAha31j5yS+wbDTUiIy9ZRZ4HIh40/96MXP6Dxj73ID
+# FgLd8xPioqvlWUbx0d2v3l2mxByy2HbAkWb9PobqnmYlcJXL+abAoxD5ZkJiuvI6
+# qgIl5bIueklhUeR6iFBdXqA3+eUc+g+QNsNXM1HDr9vOPXvjayqPZ4ZuhldPxU5H
+# 2MHjD+lLA3OyEzZGAessgzLCwiTBGGep6vlggK4v5NkZAlBJRB2dD0RlPUwisCXG
+# ko5FgEZxjHgfty0zRITxIJ9+Zsy01iIQnDAdfffYcb9mqt7pHjAcbTo4B3mI3iwI
+# JIoP3HZCUs7wA+vT2bAlAxu9hCBiEDEIDZQ22o3MQU9r6Qz0A/v0IXmcZF/T1Gwo
+# ahCElsoEKPhjjvXMq3YQMDQDrE7NN6bRwxTYKzl6ggMTPB/AQxMUbP1MhH3VHqy6
+# vyucPKGZGXsHKh7xlBnlxTS4E8n7v30XiOndEUrdahGrypRnOmNGMTczuD83t2yO
+# 7Ha8KsEY2/ejF/YcKk6izryzESdu8A9DFcCJZQkDWydpKAgXNeF0G7e98Q8nhPaW
+# pWtDZEvUeCOPYhE4yD4TvsnE3i11dF4TtjriT2dnmxRIN1cXjkeGq0RnmxnXjxgv
+# vZoJmANz1w==
 # SIG # End signature block
