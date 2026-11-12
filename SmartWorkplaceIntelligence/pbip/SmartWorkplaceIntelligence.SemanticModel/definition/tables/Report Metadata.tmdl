@@ -164,11 +164,19 @@ table 'Report Metadata'
 	/// Red only when selected batch UTC age exceeds 74 hours (a Friday batch stays normal over the weekend). Missing or mixed provenance is amber here; the separate Mixed batches alert is unchanged.
 	measure 'Dataset Batch Timestamp UTC' =
 			VAR _id = [Dataset Loaded Batch ID]
-			VAR _stamp = IF(LEN(_id)>=19 && MID(_id,9,1)="T" && MID(_id,19,1)="Z",
-			    IFERROR(DATE(VALUE(LEFT(_id,4)),VALUE(MID(_id,5,2)),VALUE(MID(_id,7,2))) +
-			        TIME(VALUE(MID(_id,10,2)),VALUE(MID(_id,12,2)),VALUE(MID(_id,14,2))) +
-			        DIVIDE(VALUE(MID(_id,16,3)),86400000),BLANK()))
-			RETURN IF(NOT ISBLANK(_stamp) && FORMAT(_stamp,"yyyyMMdd") & "T" & FORMAT(_stamp,"HHmmss") = LEFT(_id,15), _stamp)
+			VAR _digits = CONCATENATEX(FILTER(GENERATESERIES(1,18), [Value] <> 9), MID(_id,[Value],1), "", [Value], ASC)
+			VAR _validText = LEN(_id) >= 19 && EXACT(MID(_id,9,1),"T") && EXACT(MID(_id,19,1),"Z") && LEN(_digits) = 17 && COUNTROWS(FILTER(GENERATESERIES(1,17), NOT CONTAINSSTRING("0123456789", MID(_digits,[Value],1)))) = 0
+			VAR _y = IFERROR(VALUE(LEFT(_id,4)),BLANK())
+			VAR _m = IFERROR(VALUE(MID(_id,5,2)),BLANK())
+			VAR _d = IFERROR(VALUE(MID(_id,7,2)),BLANK())
+			VAR _h = IFERROR(VALUE(MID(_id,10,2)),BLANK())
+			VAR _n = IFERROR(VALUE(MID(_id,12,2)),BLANK())
+			VAR _s = IFERROR(VALUE(MID(_id,14,2)),BLANK())
+			VAR _ms = IFERROR(VALUE(MID(_id,16,3)),BLANK())
+			VAR _validParts = _validText && _y >= 1900 && _y <= 9999 && _m >= 1 && _m <= 12 && _d >= 1 && _d <= 31 && _h >= 0 && _h <= 23 && _n >= 0 && _n <= 59 && _s >= 0 && _s <= 59 && _ms >= 0 && _ms <= 999
+			VAR _date = IF(_validParts, IFERROR(DATE(_y,_m,_d),BLANK()))
+			VAR _validDate = NOT ISBLANK(_date) && YEAR(_date) = _y && MONTH(_date) = _m && DAY(_date) = _d && _date >= DATE(1900,3,1)
+			RETURN IF(_validDate, IFERROR(_date + TIME(_h,_n,_s) + DIVIDE(_ms,86400000),BLANK()))
 		formatString: yyyy-MM-dd HH:mm:ss
 		isHidden
 		displayFolder: Dataset freshness

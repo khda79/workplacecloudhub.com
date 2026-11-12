@@ -12,6 +12,5 @@
   "visualGroup": {
     "displayName": "Migration queue to EXO",
     "groupMode": "ScaleMode"
-  },
-  "isHidden": true
+  }
 }

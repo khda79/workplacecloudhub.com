@@ -1,5 +1,5 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "bc1d1d45d3073e7e05bd",
   "position": {
     "x": 336,
@@ -417,6 +417,23 @@
             }
           ]
         }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "Mailbox Migration Inventory"
+                  }
+                },
+                "Property": "Report UPN"
+              }
+            },
+            "direction": "Ascending"
+          }
+        ]
       }
     },
     "objects": {
@@ -576,9 +593,6 @@
       ],
       "columnFormatting": [
         {
-          "selector": {
-            "metadata": "Mailbox Migration Inventory.Display Name"
-          },
           "properties": {
             "alignment": {
               "expr": {
@@ -608,12 +622,47 @@
                 }
               }
             }
+          },
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Display Name"
           }
         },
         {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Report UPN"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -643,12 +692,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Report SAM"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -678,12 +727,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Primary SMTP Address"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -713,12 +762,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Report Country"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -748,12 +797,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Source Domain"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -783,12 +832,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Report Server"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -818,12 +867,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Report Database"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -853,12 +902,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Report Exchange Version"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -888,12 +937,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Mailbox Type"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -923,12 +972,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Mailbox Size GB"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -958,12 +1007,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Archive State"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -993,12 +1042,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Archive Size GB"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -1028,12 +1077,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Report AD Account State"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -1063,12 +1112,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Report Entra Account State"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -1098,12 +1147,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Report M365 Licences"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -1133,12 +1182,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Migration Status"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -1168,12 +1217,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Batch Name"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -1203,12 +1252,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Risk Reasons"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -1238,12 +1287,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Next Action"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -1273,12 +1322,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Report Stats Collected UTC"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -1308,12 +1357,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Evidence Date"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -1343,12 +1392,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Mailbox GUID"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -1378,47 +1427,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Mailbox Migration Inventory.Object GUID"
-          },
-          "properties": {
-            "alignment": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Center'"
-                }
-              }
-            },
-            "styleHeader": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleValues": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleTotal": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            }
           }
         },
         {
-          "selector": {
-            "metadata": "Mailbox Migration Inventory.Report Linked Mailbox Key"
-          },
           "properties": {
             "alignment": {
               "expr": {
@@ -1448,6 +1462,9 @@
                 }
               }
             }
+          },
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Report Linked Mailbox Key"
           }
         }
       ],

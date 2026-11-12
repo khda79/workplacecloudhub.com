@@ -140966,6 +140966,572 @@ cultureInfo en-US
 			          }
 			        }
 			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.decision_reason": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Decision Reason"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Decision Reason": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.shared_conversion_review": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Shared Conversion Review"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Shared Conversion Review": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        },
+			        {
+			          "Review": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.shared_conversion_strong_candidates": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Shared Conversion Strong Candidates"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Strong candidates": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        },
+			        {
+			          "Shared Conversion Strong Candidates": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.shared_conversion_licensed_strong_candidates": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Shared Conversion Licensed Strong Candidates"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Strong candidates still licensed": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.shared_conversion_not_candidate": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Shared Conversion Not Candidate"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Not candidate": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.shared_conversion_mailboxes": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Shared Conversion Mailboxes"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "EXO user mailboxes assessed": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.primary_smtp_address": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Primary SMTP Address"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Primary SMTP Address": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.conversion_state": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Conversion State"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Conversion State": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.owner_account_state": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Owner Account State"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Owner Account State": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.owner_last_signin": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Owner Last Sign-In"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Owner Last Sign-In": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.days_since_owner_signin": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Days Since Owner Sign-In"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Days Since Owner Sign-In": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.owner_last_signin_source": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Owner Last Sign-In Source"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Owner Last Sign-In Source": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.delegate_count": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Delegate Count"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Delegate Count": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.active_delegate_count": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Active Delegate Count"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Active Delegate Count": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.unresolved_sid_delegate_count": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Unresolved SID Delegate Count"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Unresolved SID Delegate Count": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.mailbox_size_gb": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Mailbox Size GB"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Mailbox Size GB": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.archive_state": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Archive State"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Archive State": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.hold_state": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Hold State"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Hold State": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.direct_protocol_use": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Direct Protocol Use"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Direct Protocol Use": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.owner_licenses": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Owner Licenses"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Owner Licenses": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.ad_domain": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "AD Domain"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "AD Domain": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.country": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Country"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Country": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.account_population": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Account Population"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Account Population": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.secondary_reasons": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Secondary Reasons"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Secondary Reasons": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.recommended_action": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "Recommended Action"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Recommended Action": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_shared_conversion_evidence.exo_last_logon": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Shared Conversion Evidence",
+			          "ConceptualProperty": "EXO Last Logon"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "EXO Last Logon": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
 			    }
 			  },
 			  "Relationships": {

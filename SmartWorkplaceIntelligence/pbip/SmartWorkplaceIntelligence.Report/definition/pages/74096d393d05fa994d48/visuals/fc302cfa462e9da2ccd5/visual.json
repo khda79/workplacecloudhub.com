@@ -399,7 +399,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Observed snapshots · 2026-07-15 to 2026-10-04'"
+                  "Value": "'Observed snapshots · rolling 90-day window'"
                 }
               }
             },
@@ -430,7 +430,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Workforce activity · last 90 days; Observed snapshots · 2026-07-15 to 2026-10-04'"
+                  "Value": "'Workforce activity · last 90 days; Observed snapshots · rolling 90-day window'"
                 }
               }
             }
@@ -570,7 +570,7 @@
             "Property": "Snapshot Date"
           }
         },
-        "type": "Advanced",
+        "type": "RelativeDate",
         "filter": {
           "Version": 2,
           "From": [
@@ -594,16 +594,8 @@
                       "Property": "Snapshot Date"
                     }
                   },
-                  "LowerBound": {
-                    "Literal": {
-                      "Value": "datetime'2026-07-07T00:00:00'"
-                    }
-                  },
-                  "UpperBound": {
-                    "Literal": {
-                      "Value": "datetime'2026-10-04T23:59:59'"
-                    }
-                  }
+                  "LowerBound": {"DateSpan":{"Expression":{"DateAdd":{"Expression":{"Now":{}},"Amount":-90,"TimeUnit":0}},"TimeUnit":0}},
+                  "UpperBound": {"DateSpan":{"Expression":{"Now":{}},"TimeUnit":0}}
                 }
               }
             }

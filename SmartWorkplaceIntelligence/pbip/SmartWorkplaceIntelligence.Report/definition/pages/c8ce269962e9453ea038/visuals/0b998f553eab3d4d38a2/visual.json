@@ -339,7 +339,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Device count (AD) · trend - last 90 days. Observed history only; 2026-07-12 to 2026-10-09.'"
+                  "Value": "'Device count (AD) · trend - last 90 days. Observed history only; rolling 90-day window.'"
                 }
               }
             }

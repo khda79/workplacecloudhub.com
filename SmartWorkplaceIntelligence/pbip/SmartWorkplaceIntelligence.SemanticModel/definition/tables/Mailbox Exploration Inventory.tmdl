@@ -17,6 +17,18 @@ table 'Mailbox Exploration Inventory'
 	measure 'Selected Mailbox Statistics Collection' = IF(NOT HASONEVALUE('Mailbox Exploration Inventory'[Mailbox Key]),"Select one mailbox to read delegation details and statistics provenance", "Statistics collection UTC: " & COALESCE(SELECTEDVALUE('Mailbox Exploration Inventory'[Stats Collected UTC]),"Not supplied by source") & UNICHAR(10) & "Source: " & COALESCE(SELECTEDVALUE('Mailbox Exploration Inventory'[Stats Source]),"Unknown") & " | Export UTC (separate): " & COALESCE(SELECTEDVALUE('Mailbox Exploration Inventory'[Export Collected UTC]),"Not supplied"))
 		lineageTag: aec5ce55-3e70-4a5f-b926-16fc8506d93a
 
+	/// Range of observed local mailbox collection dates in UTC; missing or invalid timestamps are disclosed.
+	measure 'Local Mailbox Collection Tooltip' =
+			VAR _rows = CALCULATETABLE('Mailbox Exploration Inventory', KEEPFILTERS('Mailbox Exploration Inventory'[Hosting Location] = "On-premises"))
+			VAR _dated = ADDCOLUMNS(_rows, "__collection_day", IFERROR(DATEVALUE(LEFT(TRIM('Mailbox Exploration Inventory'[Export Collected UTC] & ""), 10)), BLANK()))
+			VAR _valid = FILTER(_dated, NOT ISBLANK([__collection_day]))
+			VAR _first = MINX(_valid, [__collection_day])
+			VAR _last = MAXX(_valid, [__collection_day])
+			VAR _missing = COUNTROWS(_rows) - COUNTROWS(_valid)
+			RETURN IF(COUNTROWS(_valid) = 0, "Local mailbox collection dates (UTC): not supplied", "Local mailbox collection (UTC): " & FORMAT(_first, "yyyy-MM-dd") & IF(_first <> _last, " to " & FORMAT(_last, "yyyy-MM-dd"), "") & IF(_missing > 0, " | Missing or invalid: " & FORMAT(_missing, "#,0"), "")) & UNICHAR(10) & "RemoteMailbox excluded. System discovery mailbox kept in full inventory. Weekly history is provisional. Country = matched directory identity."
+		isHidden
+		lineageTag: 99a8caec-9175-489c-853b-39be3fb8baaf
+
 	column 'Mailbox Key'
 		dataType: string
 		lineageTag: 8e986681-5c15-45a6-af08-4fa98665d0bf

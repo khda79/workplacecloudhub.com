@@ -12,5 +12,6 @@
   "visualGroup": {
     "displayName": "Licensing review",
     "groupMode": "ScaleMode"
-  }
+  },
+  "isHidden": true
 }

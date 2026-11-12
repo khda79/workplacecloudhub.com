@@ -214,6 +214,26 @@ def has_current_batch_provenance(table, source, expressions):
             'Result = Table.Buffer(Table.FromRecords(List.Combine(List.Transform(Sources, ReadSource)), Schema, MissingField.Error))',
             'if ForcedRows >= 0 and CheckStable("verify-infrastructure") then Result else error'
         ]) and '#"Loaded Batch ID"=BatchId' in placeholder and '#"Loaded Batch ID"=BatchId' in observed
+    # Newer evidence tables return the stamped final step under their own names.
+    # Match the returned expression (or its final Result binding), not a dead Finish call.
+    final_steps = {
+        'Mailbox Shared Conversion Evidence': 'OwnerLicenses',
+        'Computer Cleanup Evidence': 'CountryRenamed',
+        'Mailbox Cleanup Evidence': 'CountryRenamed',
+        'User Cleanup Evidence': 'CountryRenamed',
+        'Directory Cleanup Source Qualification': 'Dates',
+        'Copilot Daily Adoption Evidence': 'Typed',
+        'Email Client Usage Evidence': 'Typed',
+        'Group Activity Evidence': 'Typed',
+        'OneDrive Activity Evidence': 'Typed',
+    }
+    if table in final_steps:
+        return bool(re.search(r'\bin\s+Readers\[Finish\]\(' + re.escape(final_steps[table]) + r'\)\s*$', source))
+    result_steps = {'Historical Windows Readiness': 'Checked',
+                    'Shared Mailbox License Detail': 'Typed',
+                    'Shared Mailbox License Evidence': 'WithExceptionDate'}
+    if table in result_steps:
+        return bool(re.search(r'\bResult\s*=\s*Readers\[Finish\]\(' + re.escape(result_steps[table]) + r'\)\s*\bin\s+Result\s*$', source))
     expected = {
         'User Inventory Evidence': r'Table\.AddColumn\(Readers\[Finish\]\(BusinessRows\), "TenantKey", each PreparedExpectedTenantKey, type text\)',
         'Data Trust Evidence': r'Readers\[Finish\]\(Combined\)',
@@ -226,8 +246,21 @@ def has_current_batch_provenance(table, source, expressions):
 
 
 class PreparedLatestModelTests(unittest.TestCase):
-    def test_provenance_is_hidden_not_a_business_key_or_linguistic_field(self):
+    def test_provenance_coverage_and_audited_columns(self):
         monitored = []
+        audit = (DEFINITION / "tables/Loaded Batch Audit.tmdl").read_text(encoding="utf-8-sig")
+        rows = re.findall(r'ROW\("Table Name", "([^\"]+)"', audit)
+        audited = set(rows)
+        # The private master remains untouched; keep this known coverage
+        # gap explicit so adding/removing evidence requires a deliberate review.
+        outside_audit = {
+            "Computer Cleanup Evidence", "Copilot Daily Adoption Evidence",
+            "Directory Cleanup Source Qualification", "Email Client Usage Evidence",
+            "Group Activity Evidence", "Historical Windows Readiness",
+            "Mailbox Cleanup Evidence", "Mailbox Shared Conversion Evidence", "OneDrive Activity Evidence",
+            "Shared Mailbox License Detail", "Shared Mailbox License Evidence",
+            "User Cleanup Evidence",
+        }
         expressions = (DEFINITION / "expressions.tmdl").read_text(encoding="utf-8-sig")
         for path in (DEFINITION / "tables").glob("*.tmdl"):
             source = path.read_text(encoding="utf-8-sig")
@@ -242,9 +275,10 @@ class PreparedLatestModelTests(unittest.TestCase):
             monitored.append(path.stem)
             column = re.search(r"\tcolumn 'Loaded Batch ID'\n(.*?)(?=\n\t(?:partition|column|measure)|\Z)", source, re.S)
             self.assertIsNotNone(column, path.name)
-            self.assertIn("\n\t\tisHidden", column[1])
+            if path.stem in audited:
+                self.assertRegex(column[1], r"(?m)^\t\tisHidden\s*$", path.name)
+                self.assertIn("summarizeBy: none", column[1], path.name)
             self.assertIn("dataType: string", column[1])
-            self.assertIn("summarizeBy: none", column[1])
             self.assertNotRegex(column[1], r"\n\t\t(?:isKey|isUnique)(?:\s|$)")
             self.assertTrue(has_current_batch_provenance(path.stem, source, expressions), path.name)
         self.assertGreater(len(monitored), 100)
@@ -259,10 +293,20 @@ class PreparedLatestModelTests(unittest.TestCase):
                 self.assertIn('#"Loaded Batch ID"=V[BatchId]', source)
             else:
                 self.assertRegex(source, r'in R\[Finish\]\(')
-        self.assertEqual(sorted(rows), sorted(set(monitored) | readiness))
+        self.assertEqual(set(monitored) - audited, outside_audit)
+        self.assertEqual(sorted(rows), sorted((set(monitored) - outside_audit) | readiness))
         self.assertNotIn("Loaded Batch ID", (DEFINITION / "relationships.tmdl").read_text(encoding="utf-8-sig"))
         for path in (DEFINITION / "cultures").glob("*.tmdl"):
-            self.assertNotIn("Loaded Batch", path.read_text(encoding="utf-8-sig"))
+            culture = path.read_text(encoding="utf-8-sig")
+            if "linguisticMetadata =" not in culture:
+                continue
+            metadata = json.loads(culture.split("linguisticMetadata =", 1)[1].rsplit("contentType: json", 1)[0])
+            for key, entity in metadata.get("Entities", {}).items():
+                binding = entity.get("Definition", {}).get("Binding", {})
+                if (binding.get("ConceptualProperty") == "Loaded Batch ID"
+                        and binding.get("ConceptualEntity") in audited
+                        and binding.get("ConceptualEntity") != "Readiness Source Status"):
+                    self.assertEqual(entity.get("Visibility", {}).get("Value"), "Hidden", key)
 
     def test_provenance_contract_rejects_unstamped_returns(self):
         expressions = (DEFINITION / "expressions.tmdl").read_text(encoding="utf-8-sig")
@@ -284,6 +328,23 @@ class PreparedLatestModelTests(unittest.TestCase):
             with self.subTest(missing=token):
                 self.assertFalse(has_current_batch_provenance('Exchange On-prem Infrastructure', source, expressions.replace(token, 'null')))
         self.assertFalse(has_current_batch_provenance('Example', 'let Unused = Readers[Finish](BusinessRows) in BusinessRows', expressions))
+
+    def test_new_evidence_returns_stamped_result_not_dead_finish(self):
+        expressions = (DEFINITION / "expressions.tmdl").read_text(encoding="utf-8-sig")
+        cases = {
+            "Mailbox Shared Conversion Evidence": "OwnerLicenses",
+            "Computer Cleanup Evidence": "CountryRenamed",
+            "Directory Cleanup Source Qualification": "Dates",
+            "Copilot Daily Adoption Evidence": "Typed",
+            "Historical Windows Readiness": "Checked",
+            "Shared Mailbox License Detail": "Typed",
+        }
+        for table, step in cases.items():
+            source = (DEFINITION / ("tables/" + table + ".tmdl")).read_text(encoding="utf-8-sig")
+            stamped = "Readers[Finish](" + step + ")"
+            with self.subTest(table=table):
+                self.assertTrue(has_current_batch_provenance(table, source, expressions))
+                self.assertFalse(has_current_batch_provenance(table, source.replace(stamped, step), expressions))
 
     def test_service_adapter_has_no_local_transport_and_keeps_fresh_reads(self):
         adapter = (DEFINITION.parents[2] / "powerquery/PreparedReadFolder.SharePoint.pq").read_text()

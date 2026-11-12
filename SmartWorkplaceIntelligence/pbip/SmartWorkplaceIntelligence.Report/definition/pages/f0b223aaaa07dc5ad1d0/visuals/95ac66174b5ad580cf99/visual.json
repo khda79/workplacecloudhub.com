@@ -325,14 +325,14 @@
             "zoom": {
               "expr": {
                 "Literal": {
-                  "Value": "0.9D"
+                  "Value": "0.57D"
                 }
               }
             },
             "centerLatitude": {
               "expr": {
                 "Literal": {
-                  "Value": "26.0192778817554D"
+                  "Value": "26.01927788175543D"
                 }
               }
             },

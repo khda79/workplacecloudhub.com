@@ -32,7 +32,9 @@ table 'Mailbox Migration Inventory'
 		lineageTag: a743d8de-73d1-4656-be03-78a2fa1422ae
 
 	/// Observed local migration planning evidence. Missing evidence is not zero; see provenance and task views.
-	measure 'Mailbox Migration Source Date' = "2026-10-08 · batch observations may be stale"
+	measure 'Mailbox Migration Source Date' =
+			VAR _text = [Local Mailbox Collection Tooltip]
+			RETURN LEFT(_text, FIND(UNICHAR(10), _text, 1, LEN(_text) + 1) - 1)
 		displayFolder: Migration planning
 		lineageTag: d1d8ba32-d974-4757-b873-0b868ee1cde6
 
@@ -553,8 +555,44 @@ table 'Mailbox Migration Inventory'
 		dataType: string
 		lineageTag: 28238848-36d9-4054-a776-eb4653d6104e
 
-	/// Provisional candidates: on-premises with database minus matched retained exceptions. Unmatched/ambiguous exceptions remain for review.
-	column 'Report EXO Candidate' = VAR a='Mailbox Migration Inventory'[Primary SMTP Address] VAR retained=COUNTROWS(FILTER('Mailbox Migration Exceptions','Mailbox Migration Exceptions'[Retained]=1 && 'Mailbox Migration Exceptions'[Primary SMTP Address]=a)) RETURN SWITCH(TRUE(),LEN(TRIM('Mailbox Migration Inventory'[Report Database]))=0,"No database",retained>0,"DONTMIGRATE","Candidate")
+	/// A Yes register decision for the exact address or a confirmed same-tenant, same-batch identity excludes the local mailbox from EXO migration. Identity conflicts remain visible in the exception register.
+	column 'Report EXO Candidate' = ```
+			VAR _batch = TRIM('Mailbox Migration Inventory'[Loaded Batch ID])
+			VAR _key = 'Mailbox Migration Inventory'[Report Linked Mailbox Key]
+			VAR _tenant = LOOKUPVALUE('Mailbox Exploration Inventory'[TenantKey], 'Mailbox Exploration Inventory'[Mailbox Key], _key, 'Mailbox Exploration Inventory'[Loaded Batch ID], _batch, BLANK())
+			VAR _object = LOWER(SUBSTITUTE(SUBSTITUTE(TRIM('Mailbox Migration Inventory'[Object GUID]), "{", ""), "}", ""))
+			VAR _identity = IF(_object <> "", "local_mailboxes|" & _object, "")
+			VAR _address = LOWER(TRIM('Mailbox Migration Inventory'[Primary SMTP Address]))
+			VAR _qualified = _batch <> "" && NOT ISBLANK(_key) && NOT ISBLANK(_tenant) &&
+			    COUNTROWS(FILTER('Mailbox Migration Exception Summary',
+			        'Mailbox Migration Exception Summary'[Loaded Batch ID] = _batch &&
+			        'Mailbox Migration Exception Summary'[TenantKey] = _tenant &&
+			        'Mailbox Migration Exception Summary'[Domain Key] = "__all__" &&
+			        'Mailbox Migration Exception Summary'[Source Status] = "Qualified")) = 1
+			VAR _matching = FILTER('Mailbox Migration Exceptions',
+			    'Mailbox Migration Exceptions'[Loaded Batch ID] = _batch &&
+			    'Mailbox Migration Exceptions'[TenantKey] = _tenant)
+			VAR _retained = COUNTROWS(FILTER(_matching,
+			    'Mailbox Migration Exceptions'[Retained] = 1 && _identity <> "" &&
+			    LOWER(TRIM('Mailbox Migration Exceptions'[Mailbox Identity])) = _identity)) > 0
+			VAR _accepted = COUNTROWS(FILTER(_matching,
+			    LOWER(TRIM('Mailbox Migration Exceptions'[Retain On-premises])) = "yes" &&
+			    _address <> "" && PATHCONTAINS(SUBSTITUTE(LOWER(TRIM('Mailbox Migration Exceptions'[Primary SMTP Address])), UNICHAR(10), "|"), _address))) > 0
+			VAR _review = COUNTROWS(FILTER(_matching,
+			    'Mailbox Migration Exceptions'[Requires Review] = 1 &&
+			    ((_identity <> "" && (LOWER(TRIM('Mailbox Migration Exceptions'[Mailbox Identity])) = _identity ||
+			                           LOWER(TRIM('Mailbox Migration Exceptions'[Candidate Identity])) = _identity)) ||
+			     (_address <> "" && PATHCONTAINS(SUBSTITUTE(LOWER(TRIM('Mailbox Migration Exceptions'[Primary SMTP Address])), UNICHAR(10), "|"), _address))))) > 0
+			RETURN SWITCH(TRUE(),
+			    LEN(TRIM('Mailbox Migration Inventory'[Report Database])) = 0, "No database",
+			    NOT _qualified, "Review",
+			    _retained, "DONTMIGRATE",
+			    _accepted, "DONTMIGRATE",
+			    _review, "Review",
+			    "Candidate")
+
+
+			```
 		dataType: string
 		lineageTag: 670fb80d-e784-4e38-b3d0-01a951caaf99
 

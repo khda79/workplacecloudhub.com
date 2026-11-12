@@ -6,13 +6,12 @@ collaboration, messaging, and source quality. Native details retain their source
 identity and grain; reported configuration and status are qualified evidence,
 not proof of effective on-device behavior.
 
-The public master now contains 33 pages, including Remediation Backlog, and uses
-prepared Hybrid Identity Findings and Device Readiness Gap Evidence. The public
-storage adapter retains Local/SharePoint selection and neutral parameters. See
-[legacy readiness retirement](docs/LEGACY-READINESS-RETIREMENT.md) before deployment.
-The existing thematic profiles below cover 30 and 32 pages. No thematic reports
-were regenerated for this port; the 33-page master requires a reviewed manifest
-that assigns Remediation Backlog before thematic generation (coverage stays strict).
+The public report contains 47 pages: 43 visible pages and four hidden pages,
+including tooltips. It uses prepared Hybrid Identity Findings and Device Readiness
+Gap Evidence. The public storage adapter supports Local/SharePoint selection with
+neutral parameters. The existing thematic profiles cover 30 and 32 pages; they do
+not cover this 47-page master. A reviewed manifest assigning every page is required
+before generating thematic reports (coverage remains strict).
 
 ## Data flow
 
@@ -155,9 +154,9 @@ Keep its private runtime copy beside the preparation wrapper. An operator must
 review all declared distributed consumers; a local PBIP scan cannot establish
 completeness. The template is deliberately empty and unqualified.
 
-See [server qualification, activation and recovery](../SmartM365/SmartInventory/PreparedEvidence/docs/DEPLOYMENT.md#qualified-coupled-batch-retention)
-for the exact configuration fields, coordination conditions, plan/hash workflow,
-recovery limitations and offline tests. Until activation, local payloads can grow.
+Consult the deployment documentation supplied with the matching SmartInventory
+installation for configuration, coordination, recovery and offline tests. Until
+activation, local payloads can grow.
 Retention errors never roll back or replace a correctly published root pointer.
 
 Deploy `SmartM365` and `SmartWorkplaceIntelligence` as matching sibling folders,
@@ -373,10 +372,7 @@ value is in the card tooltip and in the `Over-assigned Units` table column.
 
 ## Further reading
 
-- [Prepared evidence reconstruction](docs/prepared-evidence-reconstruction.md)
 - [Native domain migration and generic layer retirement](docs/CMDB-CONSOLIDATION.md)
-- [Teams and SharePoint evidence](docs/TEAMS-SHAREPOINT-INTEGRATION.md)
-- [Device system evidence](docs/DEVICE-SYSTEM-EVIDENCE.md)
 - [Private classification templates](config/README.md)
 
 Offline validation, a successful server preparation, publication, and Power BI

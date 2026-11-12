@@ -37,9 +37,6 @@
     "objects": {
       "value": [
         {
-          "selector": {
-            "id": "default"
-          },
           "properties": {
             "fontSize": {
               "expr": {
@@ -80,6 +77,9 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "default"
           }
         }
       ],
@@ -268,5 +268,6 @@
       ]
     }
   },
-  "parentGroupName": "b752060c616c209f2c3a"
+  "parentGroupName": "b752060c616c209f2c3a",
+  "isHidden": true
 }

@@ -786,13 +786,7 @@
                 }
               }
             },
-            "tooltip": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Local prepared exports. Source publication time (UTC): see Inventory Observation Date; not a device event date. Country = primary-user proxy; AD-only = Unknown. History = Intune only. Missing evidence is not zero.'"
-                }
-              }
-            },
+            "tooltip": {"expr":{"Measure":{"Expression":{"SourceRef":{"Entity":"Windows Migration Evidence"}},"Property":"Windows Migration Source Date"}}},
             "showDefaultTooltip": {
               "expr": {
                 "Literal": {
@@ -807,20 +801,8 @@
                 }
               }
             },
-            "enabledTooltip": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Local prepared exports. Source publication time (UTC): see Inventory Observation Date; not a device event date. Country = primary-user proxy; AD-only = Unknown. History = Intune only. Missing evidence is not zero.'"
-                }
-              }
-            },
-            "disabledTooltip": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Local prepared exports. Source publication time (UTC): see Inventory Observation Date; not a device event date. Country = primary-user proxy; AD-only = Unknown. History = Intune only. Missing evidence is not zero.'"
-                }
-              }
-            }
+            "enabledTooltip": {"expr":{"Measure":{"Expression":{"SourceRef":{"Entity":"Windows Migration Evidence"}},"Property":"Windows Migration Source Date"}}},
+            "disabledTooltip": {"expr":{"Measure":{"Expression":{"SourceRef":{"Entity":"Windows Migration Evidence"}},"Property":"Windows Migration Source Date"}}}
           }
         }
       ]

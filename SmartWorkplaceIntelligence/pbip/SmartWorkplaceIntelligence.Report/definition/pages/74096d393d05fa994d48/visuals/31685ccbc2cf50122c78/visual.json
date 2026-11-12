@@ -393,7 +393,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Intune snapshots · 2026-07-12 to 2026-10-05'"
+                  "Value": "'Intune snapshots · rolling 90-day window'"
                 }
               }
             },
@@ -424,7 +424,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows 11 adoption · last 90 days; Intune snapshots · 2026-07-12 to 2026-10-05'"
+                  "Value": "'Windows 11 adoption · last 90 days; Intune snapshots · rolling 90-day window'"
                 }
               }
             }
@@ -564,7 +564,7 @@
             "Property": "Snapshot Date"
           }
         },
-        "type": "Advanced",
+        "type": "RelativeDate",
         "filter": {
           "Version": 2,
           "From": [
@@ -588,16 +588,8 @@
                       "Property": "Snapshot Date"
                     }
                   },
-                  "LowerBound": {
-                    "Literal": {
-                      "Value": "datetime'2026-07-08T00:00:00'"
-                    }
-                  },
-                  "UpperBound": {
-                    "Literal": {
-                      "Value": "datetime'2026-10-05T23:59:59'"
-                    }
-                  }
+                  "LowerBound": {"DateSpan":{"Expression":{"DateAdd":{"Expression":{"Now":{}},"Amount":-90,"TimeUnit":0}},"TimeUnit":0}},
+                  "UpperBound": {"DateSpan":{"Expression":{"Now":{}},"TimeUnit":0}}
                 }
               }
             }

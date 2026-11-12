@@ -786,13 +786,7 @@
                 }
               }
             },
-            "tooltip": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Current local inventory: 2026-10-08; RemoteMailbox excluded. System discovery mailbox kept in full inventory. Weekly history is provisional. Country = matched directory identity.'"
-                }
-              }
-            },
+            "tooltip": {"expr":{"Measure":{"Expression":{"SourceRef":{"Entity":"Mailbox Exploration Inventory"}},"Property":"Local Mailbox Collection Tooltip"}}},
             "showDefaultTooltip": {
               "expr": {
                 "Literal": {
@@ -807,20 +801,8 @@
                 }
               }
             },
-            "enabledTooltip": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Current local inventory: 2026-10-08; RemoteMailbox excluded. System discovery mailbox kept in full inventory. Weekly history is provisional. Country = matched directory identity.'"
-                }
-              }
-            },
-            "disabledTooltip": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Current local inventory: 2026-10-08; RemoteMailbox excluded. System discovery mailbox kept in full inventory. Weekly history is provisional. Country = matched directory identity.'"
-                }
-              }
-            }
+            "enabledTooltip": {"expr":{"Measure":{"Expression":{"SourceRef":{"Entity":"Mailbox Exploration Inventory"}},"Property":"Local Mailbox Collection Tooltip"}}},
+            "disabledTooltip": {"expr":{"Measure":{"Expression":{"SourceRef":{"Entity":"Mailbox Exploration Inventory"}},"Property":"Local Mailbox Collection Tooltip"}}}
           }
         }
       ]

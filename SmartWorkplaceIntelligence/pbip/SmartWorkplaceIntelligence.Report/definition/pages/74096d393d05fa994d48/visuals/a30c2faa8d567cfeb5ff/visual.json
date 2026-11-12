@@ -393,7 +393,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Install observations · 2026-07-10 to 2026-10-06'"
+                  "Value": "'Install observations · rolling 90-day window'"
                 }
               }
             },
@@ -424,7 +424,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Dominant version coverage · last 90 days; Install observations · 2026-07-10 to 2026-10-06'"
+                  "Value": "'Dominant version coverage · last 90 days; Install observations · rolling 90-day window'"
                 }
               }
             }
@@ -564,7 +564,7 @@
             "Property": "Snapshot Date"
           }
         },
-        "type": "Advanced",
+        "type": "RelativeDate",
         "filter": {
           "Version": 2,
           "From": [
@@ -588,16 +588,8 @@
                       "Property": "Snapshot Date"
                     }
                   },
-                  "LowerBound": {
-                    "Literal": {
-                      "Value": "datetime'2026-07-09T00:00:00'"
-                    }
-                  },
-                  "UpperBound": {
-                    "Literal": {
-                      "Value": "datetime'2026-10-06T23:59:59'"
-                    }
-                  }
+                  "LowerBound": {"DateSpan":{"Expression":{"DateAdd":{"Expression":{"Now":{}},"Amount":-90,"TimeUnit":0}},"TimeUnit":0}},
+                  "UpperBound": {"DateSpan":{"Expression":{"Now":{}},"TimeUnit":0}}
                 }
               }
             }

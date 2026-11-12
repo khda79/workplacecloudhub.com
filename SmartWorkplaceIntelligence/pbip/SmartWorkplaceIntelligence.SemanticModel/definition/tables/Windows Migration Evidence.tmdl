@@ -40,9 +40,15 @@ table 'Windows Migration Evidence'
 
 	/// Local source-file modification timestamps, not individual device event timestamps.
 	measure 'Windows Migration Source Date' =
-			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
-			VAR _pu=VALUES('Primary User Selection'[Primary user])
-			RETURN IF(_puFilter,CALCULATE(("Frozen local exports: Intune 2026-10-08 22:47 UTC; AD 2026-10-09 00:39 UTC; history remains Intune-only"),KEEPFILTERS(TREATAS(_pu,'Windows Migration Evidence'[Primary User (report)]))),("Frozen local exports: Intune 2026-10-08 22:47 UTC; AD 2026-10-09 00:39 UTC; history remains Intune-only"))
+			VAR _hasUserFilter = ISFILTERED('Primary User Selection'[Primary user])
+			VAR _users = VALUES('Primary User Selection'[Primary user])
+			VAR _rows = FILTER('Windows Migration Evidence', NOT _hasUserFilter || 'Windows Migration Evidence'[Primary User (report)] IN _users)
+			VAR _dated = ADDCOLUMNS(_rows, "__observed_day", IFERROR(DATEVALUE(LEFT(TRIM('Windows Migration Evidence'[Inventory Observation Date] & ""), 10)), BLANK()))
+			VAR _valid = FILTER(_dated, NOT ISBLANK([__observed_day]))
+			VAR _first = MINX(_valid, [__observed_day])
+			VAR _last = MAXX(_valid, [__observed_day])
+			VAR _missing = COUNTROWS(_rows) - COUNTROWS(_valid)
+			RETURN IF(COUNTROWS(_valid) = 0, "Inventory source publication dates (UTC): not supplied", "Inventory source publication (UTC): " & FORMAT(_first, "yyyy-MM-dd") & IF(_first <> _last, " to " & FORMAT(_last, "yyyy-MM-dd"), "") & IF(_missing > 0, " | Missing or invalid: " & FORMAT(_missing, "#,0"), "")) & UNICHAR(10) & "Source-file timestamps; not device event dates. Country = primary-user proxy; AD-only = Unknown. History = Intune only. Missing evidence is not zero."
 		displayFolder: Migration planning
 		lineageTag: f9a94ad8-c625-4fea-b4e9-87c35dcba5c8
 
