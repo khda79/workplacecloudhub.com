@@ -37,11 +37,11 @@ $rows = @(
     [pscustomobject]@{ DomainName='a.example'; TotalMailboxCount=4; TotalLocalMailboxCount=1; TotalRemoteMailboxCount=3; EnabledAccounts=3; DisabledAccounts=1; TotalLocalMailboxSizeGB=12.5 },
     [pscustomobject]@{ DomainName='b.example'; TotalMailboxCount=6; TotalLocalMailboxCount=2; TotalRemoteMailboxCount=4; EnabledAccounts=5; DisabledAccounts=1; TotalLocalMailboxSizeGB=7.25 }
 )
-$rendered = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $rows -DailyStatsCsv 'daily.csv' -SummaryCsv 'summary.csv' -Title 'Fixture' -ShowMailLinks:$false
+$rendered = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $rows -DailyStatsCsv 'daily.csv' -SummaryCsv 'summary.csv' -Title 'Fixture' -LocalMailboxWithDatabaseCount 3 -ShowMailLinks:$false
 # Semantic checks keep a baseline refresh from accepting wrong totals or unsafe HTML.
 $plain = ($rendered -replace '<[^>]+>', ' ') -replace '\s+', ' '
 $plain = [Net.WebUtility]::HtmlDecode($plain)
-foreach ($expected in @('Domains 2', 'Total mailboxes 10', 'Local mailboxes 3', 'Remote mailboxes 7', 'Enabled accounts 8', 'Disabled accounts 2', '19.75 GB', 'daily.csv', 'summary.csv')) {
+foreach ($expected in @('Domains 2', 'Inventory objects 10', 'Local mailboxes 3', 'distinct, with database', 'Remote mailboxes 7', 'Enabled accounts 8', 'Disabled accounts 2', '19.75 GB', 'daily.csv', 'summary.csv')) {
     if ($plain -notlike ('*' + $expected + '*')) { throw "Missing mailbox report evidence: $expected" }
 }
 $unsafeRows = @([pscustomobject]@{DomainName='<script>alert(1)</script>';TotalMailboxCount=0;TotalLocalMailboxCount=0;TotalRemoteMailboxCount=0;EnabledAccounts=0;DisabledAccounts=0;TotalLocalMailboxSizeGB=0})
@@ -50,7 +50,7 @@ if ($escaped -match '<script>alert' -or $escaped -notmatch '&lt;script&gt;') { t
 $bytes = [Text.Encoding]::UTF8.GetBytes($rendered)
 $hasher = [Security.Cryptography.SHA256]::Create()
 try { $hash = ([BitConverter]::ToString($hasher.ComputeHash($bytes))).Replace('-', '') } finally { $hasher.Dispose() }
-$baseline = '4B1F6548006A16A684F21CAD8BF7A9F1D83CD543B5DF853CCF8695517CCF8EF0'
+$baseline = '4D326EE41C9F16F768328068B50EF841B35F6141EE891222EA760C3E593C08AA'
 if ($RecordBaseline) { Write-Output "EXCHANGE_HTML_BASELINE=$hash"; return }
 if ($hash -ne $baseline) { throw "Exchange HTML changed: expected $baseline, got $hash" }
 Write-Output "PASS: Exchange HTML unchanged ($hash)."
@@ -113,8 +113,8 @@ Write-Output "PASS: $proxyChecks ProxyAddresses mail layout checks (synthetic da
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZ6Nnwwu699+wC
-# gdbJ78sSn+BuWtTnQJaNt/F2bBDZXaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA/qLw+VzqVaC7a
+# aLFxgHNU9S+lcVl37wgZgrNY0kOcCKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -247,31 +247,31 @@ Write-Output "PASS: $proxyChecks ProxyAddresses mail layout checks (synthetic da
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJrMS8DKn8/o2DBOoEAo0PfWEaTPHaE3sWEJZD7Ce5KoMA0GCSqG
-# SIb3DQEBAQUABIIBgK0efXQ2Hn06z5s/s+XyZ1Sg8FFugim2vWrLm0uCBCr/JaWX
-# CGxk7bm7pUbNzvLCBrHWPXnos2OWIgHYollRLo7XkTPGa4sWnJA8xeZi6+0zTH5/
-# GMaSje9rTwTOdvr9kGx+KyORaQilvWs9ZocveMyGCVwFVPCI2eoDD8jMoxr/iGH8
-# 9MrseQ+6d0UEQWcbiVilt9guqtdcsijfNuxyuEN48tNW3wLmKutAu9sHIZYtG3Tb
-# k+UKbVDVZTEpDz80loBlBEnUrs6e5ttONaOylz+wGWlF2ml9zwJJDn7jgoGRhmMM
-# bwaqqx0HFq8d+Z9Stzjoq7GJE1WIRN9vGukLcKunj4OTBuPOtGK0yFuuMgQUTYjX
-# dMUNX/OFq/9BMR8m+Sw1rlroy7+iCA7G10+F/X6BHqeVPvIIfjYVDCjwGdHpcGye
-# QyusHHw9x9uTJ0d9i2Smo8qVnpD0Ch8P891J/91lcKUIE1aX4qpd/U9U616FE+gi
-# cNo9rLkTVWGA1FLx96GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHREzqIEY3xAxdXswDeclXBxHOl94J0MrNAEAh+ztsH4MA0GCSqG
+# SIb3DQEBAQUABIIBgA2VUydVcho/iW8xemOJn2e2xqPH2JiNr4/oRW5VpVrLGULs
+# Y8oobRqO/pJKDpNLoBl7KaKSxc5Wz0lLQkt+svkSvHRrCYO0cI8CMXJkqPU5fScR
+# hS1uTsERv7XzpNFtZntK+dPyrPsJUhAwKxZf6mIslxe/wI0oCQfc9NQYw8k7Ufyd
+# ShGiYg9umG9qSnI0NudR9NXoZQRKq9IloGdVFQCwcUUiay4OGBFQhdrQzeXAV4bG
+# dot2lqGHbHUQFAj6c/COqbwuM/p2AJh3Burlj8or9G0OA9/A5Albtuqb0iuDPx8m
+# 2VF0MJATqskVhvYifBeqz4tG0N09GaxNvXyvPbYw9ixYVXo8JmaSSdQthv9MMIJd
+# 61devC/xlM8cyjiWiuBW+1YXx+tYsRv9Ht9FkbrQ/4uCd6GgLpOE45/3xboae2PA
+# CRuEHJT0itRubmPDVDFnAcdal0Btq+Q6HUZ4ViL9WYK/dyiwp8zAe7N7mAzGAcLK
+# c8wuOmHZdTBMBA7J66GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxNDIy
-# NTBaMC8GCSqGSIb3DQEJBDEiBCAsa68+M1o6tBUW++LBhgxXPy6C9g2sAP7J2PxO
-# hOFdiDANBgkqhkiG9w0BAQEFAASCAgBMNGzeIlQJdd3URLgMhjj3ikEn9wBbAe6h
-# PcMTo1n9w9h5mPsuHUGgpPciLKOzd3TK0UT6l39Utcmb7O0YT6UneB7LIY7VItpw
-# 4oDIYf0YfpulRYI3wJKzJCRTxFEimta7E0hlQqrbDeB1ML38qUoequAR4v0dbAnb
-# usjtYdIPPUWznd3QMA3t33NaQeIvNzT85ecuWqOpf+i+cacYvmSMdow+b/OZMeS7
-# jq+JG7FngfS5JY0qXEcC0UuqUSidwTU5LpQvW0vjvhG95VbcqtOM92DMq0YHZIds
-# IKq17TMkh05k/M9/QlC9UYjJrv+ui9pdY8mfPHPXo5Cn6hsVrPjXaFAL8vlEI334
-# iIr5MQHsZmpsGymXEPkJrK0TWdwtkUGOuMGWR3MvV6DZ5hBXSFDFTLRaL6NwyD03
-# PEp829YJ7jX8e8wpRLxkF0LSmUUT+ty53BIXlQYOpfzDZv0V5cFC2O9ieuWVGoJJ
-# +ALTFarwkNSElVA8p37kSCivp0qS8//JkrgA71H5Q8mGJN9390apEy4/S/vRnixa
-# TQVc+/rWI8GAeZpUSl7JiNUvPnKuOyGo1dLqTvU35IUwDLrg5du+0Tt5207Q82V/
-# DlAwjaYgkZKivqSJsIQ0QGoMNETf8i8JwIi7DCqqgMvmYXGUzAPJNvRiVBy1lZ4K
-# ErAhRxpYBQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTIxMDIz
+# NDNaMC8GCSqGSIb3DQEJBDEiBCDr/FVqh8A3M4kz6pKrVAFGKUuq6ozBPzHmieMh
+# V+AkZzANBgkqhkiG9w0BAQEFAASCAgA/RVYI4jQ+37GNYEO6YeChzginXkYCQP1O
+# cg1oL6uGq8Cpinptvjtsk2NsvCtPTfCtKoMlckQSwEPwuIT77ICF/UP2r4iD9Wu3
+# ai6C6cgiYsuzTN0Rb3ONpOO406KiUL2k/SaNojFX4PjvrAwzYqetiqJiHCfbewCG
+# xRSy9xwP6oVn6RyfmmRdxEgfncYuuBf/OSOf6iW25cnaibXG1e74G4pAasN32doU
+# 50XdCxyeEzUwwnXNKSrSfCkgsl5JQYS6VqLuApIzVh+4cWJkrzSrRIojIKpHEo3U
+# xfluidsjAOgWK0ap2HanjrMENgzz3QXCdMC3IsCDzvNUIJXanEVrAwj2sfyKfZ8K
+# SeP0weRhnZl/vxY6Ho4ZaqXW8BGPg5gIVdXUbgP1si9HW9vNdHQKgfnQq9mjSnUp
+# QJmchi8p9w0NHeNEQ9zESNEupSVRU/nOmsYoC48BEF7mgV+5eWyUJ+ICpjGQad7x
+# f84I6JEYtUK62uDeE2wY83JQm/qpw47+EGtNn01QTp4F+X518hw8HgPj9Pu+/qRL
+# BeLUy7sxoDAzGzKGQLlkeJLsCWEXQpDkUUzyUGU2fhpus02cbMYaLQZ1K+AVr7LL
+# oytwdkr2qt0L0QHzi9fB7qN5t1qKBRW94crrUrRzPlDmyH+SXEEdskWvtJn2eDLi
+# kHoHJG3gZw==
 # SIG # End signature block

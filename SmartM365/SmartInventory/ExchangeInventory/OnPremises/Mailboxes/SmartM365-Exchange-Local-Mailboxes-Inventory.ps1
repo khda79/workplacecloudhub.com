@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Inventories local and optional remote Exchange mailboxes in an on-premises environment.
 
@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.78
+1.79
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules: SmartM365 WindowsPowerShell5 compatibility module; Exchange remote PowerShell (default) or local snap-in (rollback); ActiveDirectory when AD permission export is enabled.
@@ -26,7 +26,7 @@
     SendAs is read from the mailbox object DACL (nTSecurityDescriptor) with the ActiveDirectory module; Get-ADPermission is the per-mailbox fallback.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-Version: 1.78
+Version: 1.79
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access. Remote uses the current Windows identity with Kerberos.
@@ -151,7 +151,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.78"
+$ScriptVersion = "1.79"
 $script:SendAsRightGuids = $null
 $script:SendAsSidCache = @{}
 $script:SendAsAclReadCount = 0
@@ -1323,9 +1323,34 @@ function ConvertTo-SmartM365MailboxReportRecord {
         AccountDisabled      = ([string]$disabledRaw -match '^(?i:true|1|yes|oui)$')
         RecipientTypeDetails = [string]$type
         ADDomain             = [string]$domain
+        DatabaseFieldPresent = ($null -ne $Row.PSObject.Properties['Database'])
+        Database             = [string](Get-SmartM365MailboxReportValue -Row $Row -Names @('Database'))
+        MailboxGuid          = [string](Get-SmartM365MailboxReportValue -Row $Row -Names @('MailboxGuid', 'ExchangeGuid'))
+        ObjectGuid           = [string](Get-SmartM365MailboxReportValue -Row $Row -Names @('ObjectGuid'))
         TotalItemSizeToMB    = [math]::Round($sizeMb, 2)
         TotalItemSizeKnown   = $sizeKnown
     }
+}
+
+function Get-SmartM365LocalMailboxWithDatabaseCount {
+    [CmdletBinding()]
+    param([AllowEmptyCollection()][object[]]$Records)
+
+    $identities = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $localSeen = $false
+    foreach ($record in @($Records)) {
+        if ([string]$record.RecipientTypeDetails -match '^(?i:Remote)') { continue }
+        $localSeen = $true
+        if (-not $record.DatabaseFieldPresent) { return $null }
+        if ([string]::IsNullOrWhiteSpace([string]$record.Database)) { continue }
+        $key = [string]$record.MailboxGuid
+        $kind = 'mailbox'
+        if ([string]::IsNullOrWhiteSpace($key)) { $key = [string]$record.ObjectGuid; $kind = 'ad' }
+        if ([string]::IsNullOrWhiteSpace($key)) { return $null }
+        [void]$identities.Add(($kind + '|' + $key.Trim()))
+    }
+    if (-not $localSeen) { return $null }
+    return $identities.Count
 }
 
 function Import-SmartM365MailboxReportCsv {
@@ -1495,7 +1520,7 @@ function New-SmartM365ExchangeMailboxDailyDiffSection {
         }
         '<tr><td style="border-bottom:1px solid #eef2f7;padding:8px 6px;font-size:11px;color:#334155;">{0}</td><td align="right" style="border-bottom:1px solid #eef2f7;padding:8px 6px;font-size:11px;font-weight:700;">{1}</td>{2}</tr>' -f (ConvertTo-SmartM365EmailHtmlText $metric.Label),$currentHtml,($cells -join '')
     }
-    return [pscustomobject]@{ Title = 'Diff against previous scans'; Html = @"
+    return [pscustomobject]@{ Title = 'Raw inventory diff against previous scans'; Html = @"
 <div style="font-size:12px;color:#64748b;margin-bottom:8px;">Each delta compares Current with a complete dated scan. n/a means no comparable scan on that date or unavailable local mailbox size statistics. Colors show direction, not health.</div>
 <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
   <tr><th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:8px 6px;font-size:11px;color:#475569;">Metric</th><th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:8px 6px;font-size:11px;color:#475569;">Current ($($Current.SnapshotDate))</th>$($headers -join "`n")</tr>
@@ -1584,6 +1609,8 @@ function New-SmartM365ExchangeLocalMailboxReportEmailBody {
         [AllowNull()]$ProxyEvidence,
         [AllowNull()]$DailyDiffSection,
 
+        [AllowNull()]$LocalMailboxWithDatabaseCount,
+
         [bool]$ShowMailLinks = $false,
 
         [Parameter(Mandatory = $true)]
@@ -1630,12 +1657,13 @@ function New-SmartM365ExchangeLocalMailboxReportEmailBody {
     if ($null -eq $totalDisabledAccounts) { $totalDisabledAccounts = 0 }
     if ($null -eq $totalSizeGb) { $totalSizeGb = 0 }
     $totalSizeGb = [math]::Round([double]$totalSizeGb, 2)
+    $qualifiedLocalValue = if ($null -eq $LocalMailboxWithDatabaseCount) { 'N/A' } else { Format-SmartM365ExchangeMailboxReportNumber -Value $LocalMailboxWithDatabaseCount }
 
     $summaryCards = @(
         [pscustomobject]@{ Label = 'Domains'; Value = Format-SmartM365ExchangeMailboxReportNumber -Value $domainCount; Detail = 'domains inventoried'; Background = '#f8fafc'; Border = '#dbe3ef'; Accent = '#0f172a'; Span = 1 }
-        [pscustomobject]@{ Label = 'Total mailboxes'; Value = Format-SmartM365ExchangeMailboxReportNumber -Value $totalMailboxes; Detail = 'local + remote'; Background = '#eff6ff'; Border = '#bfdbfe'; Accent = '#1d4ed8'; Span = 1 }
-        [pscustomobject]@{ Label = 'Local mailboxes'; Value = Format-SmartM365ExchangeMailboxReportNumber -Value $totalLocalMailboxes; Detail = 'on-premises'; Background = '#f0fdf4'; Border = '#bbf7d0'; Accent = '#166534'; Span = 1 }
-        [pscustomobject]@{ Label = 'Remote mailboxes'; Value = Format-SmartM365ExchangeMailboxReportNumber -Value $totalRemoteMailboxes; Detail = 'Exchange remote'; Background = '#faf5ff'; Border = '#e9d5ff'; Accent = '#7e22ce'; Span = 1 }
+        [pscustomobject]@{ Label = 'Inventory objects'; Value = Format-SmartM365ExchangeMailboxReportNumber -Value $totalMailboxes; Detail = 'raw local + remote'; Background = '#eff6ff'; Border = '#bfdbfe'; Accent = '#1d4ed8'; Span = 1 }
+        [pscustomobject]@{ Label = 'Local mailboxes'; Value = $qualifiedLocalValue; Detail = 'distinct, with database'; Background = '#f0fdf4'; Border = '#bbf7d0'; Accent = '#166534'; Span = 1 }
+        [pscustomobject]@{ Label = 'Remote mailboxes'; Value = Format-SmartM365ExchangeMailboxReportNumber -Value $totalRemoteMailboxes; Detail = 'remote recipient objects'; Background = '#faf5ff'; Border = '#e9d5ff'; Accent = '#7e22ce'; Span = 1 }
         [pscustomobject]@{ Label = 'Enabled accounts'; Value = Format-SmartM365ExchangeMailboxReportNumber -Value $totalEnabledAccounts; Detail = 'accounts enabled'; Background = '#f0fdfa'; Border = '#99f6e4'; Accent = '#0f766e'; Span = 1 }
         [pscustomobject]@{ Label = 'Disabled accounts'; Value = Format-SmartM365ExchangeMailboxReportNumber -Value $totalDisabledAccounts; Detail = 'accounts disabled'; Background = '#fff7ed'; Border = '#fed7aa'; Accent = '#9a3412'; Span = 1 }
         [pscustomobject]@{ Label = 'Local mailbox size'; Value = Format-SmartM365ExchangeMailboxReportNumber -Value $totalSizeGb; Detail = 'GB'; Background = '#eef2ff'; Border = '#c7d2fe'; Accent = '#4338ca'; Span = 2 }
@@ -1715,7 +1743,7 @@ function New-SmartM365ExchangeLocalMailboxReportEmailBody {
         [pscustomobject]@{ Title = 'Summary'; Html = $summaryCardsHtml }
     )
     if ($DailyDiffSection) { $sections += $DailyDiffSection }
-    $sections += [pscustomobject]@{ Title = 'Domain summary'; Html = $domainTableHtml }
+    $sections += [pscustomobject]@{ Title = 'Domain summary (raw inventory objects)'; Html = $domainTableHtml }
     $localIssueSection = New-SmartM365LocalMailboxIssueEmailSection -Issues $LocalMailboxCollectionIssues -IssuesCsvPath $CollectionIssuesCsvPath
     if ($localIssueSection) { $sections += $localIssueSection }
 
@@ -1832,8 +1860,9 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
         WriteLog -Message ('Local mailbox CSV not found; mailbox report will use remote mailbox CSV only. Missing local path: {0}' -f $localCsv) 'WARN'
     }
     if ($remoteCsvAvailable) { [void](Test-SmartM365MailboxReportCsvSchema -Path $remoteCsv); $records += Import-SmartM365MailboxReportCsv -Path $remoteCsv | ForEach-Object { ConvertTo-SmartM365MailboxReportRecord -Row $_ -Remote } }
-    $records = @($records | Where-Object { $_.RecipientTypeDetails -and ($allowedTypes -contains $_.RecipientTypeDetails) })
     if ($TargetDomains -and $TargetDomains.Count -gt 0) { $records = @($records | Where-Object { $_.ADDomain -in $TargetDomains }) }
+    $localRecordsForMail = @($records | Where-Object { $_.RecipientTypeDetails -and ([string]$_.RecipientTypeDetails -notmatch '^(?i:Remote)') })
+    $records = @($records | Where-Object { $_.RecipientTypeDetails -and ($allowedTypes -contains $_.RecipientTypeDetails) })
     if ($records.Count -eq 0) { WriteLog -Message 'No mailbox data available for report generation.' 'WARN'; return $null }
     $mailboxTypes = $allowedTypes | Sort-Object
     $report = @($records | Group-Object -Property ADDomain | ForEach-Object {
@@ -1922,7 +1951,8 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
             $proxyEvidence = [pscustomobject]@{ Available = $false; Reason = $_.Exception.Message; Summary = @(); Detail = @() }
             WriteLog -Message ("ProxyAddresses mail evidence unavailable: {0}" -f $proxyEvidence.Reason) -Level 'WARNING'
         }
-        $mailBody = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $report -DailyStatsCsv $dailyCsv -LatestDailyStatsCsv $latestDailyCsv -SummaryCsv $summaryCsvForMail -LocalMailboxCsv $localCsv -LatestLocalMailboxCsv $latestLocalCsv -RemoteMailboxCsv $remoteCsv -LatestRemoteMailboxCsv $latestRemoteCsv -DailyStatsUpload $latestDailyUpload -SummaryUpload $summaryUpload -LocalMailboxUpload $localMailboxUpload -RemoteMailboxUpload $remoteMailboxUpload -RemoteMailboxDataQualityWarnings $remoteMailboxDataQualityWarnings -LocalMailboxCollectionIssues @($script:LocalMailboxIssues.ToArray()) -CollectionIssuesCsvPath $issueCsvPath -ProxyEvidence $proxyEvidence -DailyDiffSection $dailyDiffSection -ShowMailLinks:$script:ShowMailLinks -Title ($TaskName + ' - Mailbox report')
+        $localMailboxWithDatabaseCount = Get-SmartM365LocalMailboxWithDatabaseCount -Records $localRecordsForMail
+        $mailBody = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $report -DailyStatsCsv $dailyCsv -LatestDailyStatsCsv $latestDailyCsv -SummaryCsv $summaryCsvForMail -LocalMailboxCsv $localCsv -LatestLocalMailboxCsv $latestLocalCsv -RemoteMailboxCsv $remoteCsv -LatestRemoteMailboxCsv $latestRemoteCsv -DailyStatsUpload $latestDailyUpload -SummaryUpload $summaryUpload -LocalMailboxUpload $localMailboxUpload -RemoteMailboxUpload $remoteMailboxUpload -RemoteMailboxDataQualityWarnings $remoteMailboxDataQualityWarnings -LocalMailboxCollectionIssues @($script:LocalMailboxIssues.ToArray()) -CollectionIssuesCsvPath $issueCsvPath -ProxyEvidence $proxyEvidence -DailyDiffSection $dailyDiffSection -LocalMailboxWithDatabaseCount $localMailboxWithDatabaseCount -ShowMailLinks:$script:ShowMailLinks -Title ($TaskName + ' - Mailbox report')
         $mailMarkerPath = Join-Path $reportOutputPath 'SmartM365-ExchangeLocalMailboxSummary.sent'
         Invoke-SmartM365MailboxDailySummaryMail -MarkerPath $mailMarkerPath -SendAction {
             Send-SmartM365OptionalEmailHtmlReport -BodyHtml $mailBody
@@ -3844,12 +3874,11 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 
 #End of script
 
-
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCAd0eCKqNwBGh1
-# XWX3TXrnzPYFb5Uhc5w77fY4XRk17aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBGuRbQb6fgEc5D
+# 5+KKd69dIWynGIklwq8MJ2MjAYf/N6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3982,31 +4011,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAUtwCv21F6RHKWyRloEBMhV3lG4VXk5vnkN8upEE92fMA0GCSqG
-# SIb3DQEBAQUABIIBgE2QZ2gb6/Lsj+pvKyn7JNpA95Dhk44uQ1VHjD4QjeFYxZ3T
-# FgskjjuklJix/jzX8s1OgarhHLzHIPoy3Rm63KxZ4Enwak5LtOj236CA+WvmY4dS
-# ZRC+f8++haxq8C8LM8kEWAgG3Jgm9yfTOQAMLTxVCMdRp4WqeCuYgmmEuXcyHm2A
-# Q7y01FKAolDi0hxqiCLrG6Qcqzvc2NOdPJyuokI5EmZJv5VViT+yzBoW8ZtGBUB1
-# Ytlssnhi59ZnLMzEwaWFpubb8P2Q+C4nItbc0k0c/U4mkGJJUSb4lyH/Vx4xpToS
-# xN5UPHsfxvTGSHyXCq0VHFit4Q75pWv1wVXgD8pueToH8nQoNoHaUagmwYHziAdg
-# NrBsnoFSMlbC4tsqTkI1V6ywxJEiNhK6zXke5q1ub8OKP0YZt4cqi7PdIVv4O/ug
-# /fBryT78dPAw3rYfUe/OlcUHYTonTiJDlS/3vEOCS6/3SmIqjKp55SCulOMus7Kp
-# /nJ42XDBSmCkiuIGtqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFF37odeSlrKEXE68UBU1cj+SA4N+VaadqckuacQKJ2ZMA0GCSqG
+# SIb3DQEBAQUABIIBgEvV29iTFnue0rx1IH3CxL7aP3st4LjXHjsKwnZcALPbKrIm
+# cJWXi+lZSCCPAPpXhJ9D8hSPdAvKhTCMBLXX54qvQn4Cgt7+RyDbQI1xvEp1QI6Q
+# S95HdTF0pAJa+ibmiskPHViqchAolOc+ot4A6eNAliNWn7ovFAsfIzCnFzwapedm
+# ifD2HHcSD2FaXR4fmNowwN6sXYrgvDxFlcX7lEeApLGLeL2ZY07KyMOh/l7p8q53
+# OO6ZLppjB2b2PY67OFZfD1wr8f6K3tnQJvk7V4H0lvjlHXALKCL1YDDU6tSPIBVs
+# JuJHjG8iQeHcsdZwiKNEXTrBbXJEM1wh0PkjqwhB30G4DielJks51ylJZZ1pQhnb
+# 7e4HXNwdBETbJysxeGVWuuI8butkeno3askojQVO3OtSaQs6lItdrNLRlwVDa/NX
+# DEVTloVBZ7otbpCTBKDwxILwBhJRlLz8SCN36HyWrDtfqWDJPdb9YeenW4ngmDvF
+# WZBhLFS2rYlfAetUt6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTAxODI2
-# NTNaMC8GCSqGSIb3DQEJBDEiBCBt153IXTteBdjV3YRi+Lr0tWw61o4iBHNpStEC
-# A+3TKzANBgkqhkiG9w0BAQEFAASCAgCR5BtqLPhGoruaJ1FQYJBvkXhYGbPJweqM
-# XJ0ZS5pFOQRNTbDS/YkXvVUSmIYBPNsRMacsd/Xn8vi8Vap4QcKIftu/VPDtHW/d
-# Nx86d889ZQcyrp/jEH6ml/LNxV3+Pb/VPGp3DBBxzH3F3rqbCLk/lhVwsxsGgqkP
-# zbDpmescaGRL8AlwAqBr2b7mhIRjxCqw8ZUNwicL0UaVWO/TgkcTaQUNq7rNP8sS
-# 8sqyLVqCelP/EWdvVUCH36SCSqVN7V6rOBsmjJT4qsqgXNI6t9/7MQsDmjZ4G/A8
-# i7sfsrq1i2KoWyPJJK8yHjL66HS2eIk1Tej5vE2qaC69n6aOs1vVaw4dLS1idm8C
-# uuPfIJfs9euhz1NoLj+9bruKcjxBAXHL/2Ze3Uy5kkVkltcpLIetukJpbRrj7K9Y
-# JomwvhIFxtiKG+bL35uvOXcywoo8MGY+bqZMuHURXOcFGWFNexBZ4wUCh2WbN415
-# jsgg/ZBhm7a+W6iFOiS4UGzD5AqFRJn0jxkH8EgiSv6qSNO/abXQaaro8YiPCLQJ
-# Ct92pa+nb4V3kOM4uMumE2Bdg7MoKmEkcVBeOiY65wwGAp10NZtKQRQ7tMtmprLZ
-# UIYNMsYMpDOyqHT6iY2PGVfSxjLbNiK+qNSHj9BwPzmF8k5W7qWhx2ya6BRmnmc0
-# Raki6rXK/w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTIxMDIz
+# NDNaMC8GCSqGSIb3DQEJBDEiBCAowYa8RsAo8JhlMP7Ajs0QO6K/ZTdXUyopcmLY
+# uxfQYDANBgkqhkiG9w0BAQEFAASCAgBK9cNRj6Q7yZAvxycjDP8ksP/AisdUg+79
+# ZvuVIxZmIgcmlnTFaiQYSSst3+0ft34qfIhACRHjk1m8zLlbXtRS3gBENw1nOqWY
+# HxvJ0AmNHZvPyzKH/vOnG1vQ8PI12tnfCX99mAfY4sGXd2MDoKZ2pn/KXCOKlBLb
+# lwD0mADXXhlpCqLcTQZkvounVIMXQrvOU5d0KFRFEqbM2ry2M+c/2RvvI7qXP7y6
+# D+LBH7GfJSMQU89idSL8X4YzZtHFTx13Nl5nhvv7entDuNPw9Ey4OTf/iJ1OzBpK
+# jBzNccr1eSu9mrW5L83oxaSK8wmNLSadZUZR0NvYYr04/6qzxgcPx17o+fOl1lFf
+# gBPu1X0bP8VQCQ21cB/ScjSFECwbhO1A0KDZFSNSPmevNUWXurAa7liwGj4/6b25
+# 7n+ZMAxYJTCrclnd6f/27W3zfASNJ8Jn6gNUrPXjxVhrlws/NKpSQKLm9EvSp/Zr
+# akkWB9LkrJhcdUGT6NNR8/0BN3L5OLM1NT0OJom2FoWFoATo02bJadAkMOEje0Ta
+# geOzCikg5YHhdLKpY05XTXEqpBnDu1Rd3OyFMNp3D5inRYnpSJK+5JoxUiL2aOX/
+# JAnpQsate3VN6LxVUGhIC8S5BdFrnJpbkFO/x89V0KVvfbYo9Cruz7mrvwrA6dGS
+# KpZm9R4/Og==
 # SIG # End signature block
