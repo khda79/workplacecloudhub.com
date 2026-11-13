@@ -759,6 +759,7 @@ finally {
         Set-SemtActiveRunState -Status $historyStatus -ReportPath $finalPath
     }
     catch { Microsoft.PowerShell.Utility\Write-Host ("Final report or history update failed: {0}" -f $_.Exception.Message) }
+    if ($script:Gate) { try { Write-SemtWorkerGateRecoverySummary -Gate $script:Gate -OnLog { param($message) Write-Host $message -ForegroundColor DarkGray } } catch { } }
     Complete-SemtCancellation
     Exit-SemtWaveLock -WaveLock $script:WaveLock
     Write-Host ("{0} Run finished. Status={1}; Cycles={2}; Log={3}" -f $script:Product.DisplayName,$stopReason,$cycle,$script:RunContext.LauncherLogPath)

@@ -356,6 +356,45 @@ function Get-SemtWorkerGateSnapshot {
     })
 }
 
+function Add-SemtWorkerGateQuietRecovery {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Gate,
+        [Parameter(Mandatory = $true)][int]$Count
+    )
+
+    if ($null -eq $Gate.PSObject.Properties['QuietRecoveredPending']) { $Gate | Add-Member -NotePropertyName QuietRecoveredPending -NotePropertyValue 0 }
+    if ($null -eq $Gate.PSObject.Properties['QuietRecoveredTotal']) { $Gate | Add-Member -NotePropertyName QuietRecoveredTotal -NotePropertyValue 0 }
+    $Gate.QuietRecoveredPending = [int]$Gate.QuietRecoveredPending + $Count
+    $Gate.QuietRecoveredTotal = [int]$Gate.QuietRecoveredTotal + $Count
+}
+
+function Write-SemtWorkerGateRecoverySummary {
+    <#
+    Logs one line for the WorkerProcessExited reservations cleaned since the last summary.
+    IntervalMinutes 0 logs now (end of Run); otherwise at most once per interval.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Gate,
+        [Parameter(Mandatory = $true)][scriptblock]$OnLog,
+        [ValidateRange(0, 1440)][int]$IntervalMinutes = 0
+    )
+
+    $pending = [int](Get-SemtPropertyValue -InputObject $Gate -Name 'QuietRecoveredPending' -Default 0)
+    if ($pending -le 0) { return }
+    if ($null -eq $Gate.PSObject.Properties['QuietRecoveredLastSummary']) { $Gate | Add-Member -NotePropertyName QuietRecoveredLastSummary -NotePropertyValue $null }
+    $now = Get-Date
+    if ($IntervalMinutes -gt 0) {
+        if ($null -eq $Gate.QuietRecoveredLastSummary) { $Gate.QuietRecoveredLastSummary = $now; return }
+        if (($now - $Gate.QuietRecoveredLastSummary).TotalMinutes -lt $IntervalMinutes) { return }
+    }
+    $sinceText = if ($null -ne $Gate.QuietRecoveredLastSummary) { ' since {0:HH:mm}' -f $Gate.QuietRecoveredLastSummary } else { '' }
+    & $OnLog ("{0} stale worker reservation(s) (WorkerProcessExited) cleaned{1}; Run total={2}." -f $pending,$sinceText,[int](Get-SemtPropertyValue -InputObject $Gate -Name 'QuietRecoveredTotal' -Default $pending))
+    $Gate.QuietRecoveredPending = 0
+    $Gate.QuietRecoveredLastSummary = $now
+}
+
 function Request-SemtWorkerLease {
     <#
     Waits for a slot under the shared cap and returns the lease path, or '' when the cap is
@@ -420,9 +459,16 @@ function Request-SemtWorkerLease {
             })
             return [pscustomobject]@{ LeasePath = $path; Active = $snapshot.Active.Count + 1; EffectiveLimit = $effectiveLimit; Removed = $snapshot.Removed }
         }
-        if ($OnWaitLog -and @($attempt.Removed).Count -gt 0) {
-            & $OnWaitLog ("Recovered {0} stale worker reservation(s): {1}" -f @($attempt.Removed).Count,((@($attempt.Removed) | ForEach-Object { '{0}/{1}={2}' -f $_.Campaign,$_.Computer,$_.Reason }) -join ', '))
+        # WorkerProcessExited under a live launcher is the normal gap between a worker's end and
+        # its collection by that launcher: the slot is still freed and counted, and a summary line
+        # is logged at most every 15 minutes (and at the end of the Run). Other reasons are logged at once.
+        $logged = @(@($attempt.Removed) | Where-Object { $_.Reason -ne 'WorkerProcessExited' })
+        $quiet = @($attempt.Removed).Count - $logged.Count
+        if ($OnWaitLog -and $logged.Count -gt 0) {
+            & $OnWaitLog ("Recovered {0} stale worker reservation(s): {1}" -f $logged.Count,(($logged | ForEach-Object { '{0}/{1}={2}' -f $_.Campaign,$_.Computer,$_.Reason }) -join ', '))
         }
+        if ($quiet -gt 0) { Add-SemtWorkerGateQuietRecovery -Gate $Gate -Count $quiet }
+        if ($OnWaitLog) { Write-SemtWorkerGateRecoverySummary -Gate $Gate -OnLog $OnWaitLog -IntervalMinutes 15 }
         if (-not [string]::IsNullOrWhiteSpace($attempt.LeasePath)) { return $attempt.LeasePath }
         # Its output is discarded: this function returns only the lease path. A failure is logged
         # (at most every 5 minutes) and never ends the wait; stale recovery stays the safety net.

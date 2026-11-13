@@ -379,8 +379,32 @@ Invoke-CompletedRules -Rows @([pscustomobject]@{ ComputerName = 'PC-R1.contoso.t
     Write-SemtJsonFileAtomic -Path $oldLease -InputObject ([pscustomobject]@{ SchemaVersion = 1; Campaign = 'HybridJoin'; Computer = 'PC-OLD'; Limit = 2; LauncherProcessId = $PID; LauncherProcessStartUtc = $selfStart; CreatedUtc = (Get-Date).ToUniversalTime().AddMinutes(-30).ToString('o'); HeartbeatUtc = (Get-Date).ToUniversalTime().AddMinutes(-25).ToString('o') })
     $snapshot = & $module { param($g) Get-SemtWorkerGateSnapshotUnlocked -Gate $g -RemoveStale } $gate
     Test-Step 'reservation without heartbeat is recovered as stale' { @($snapshot.Removed | Where-Object { $_.Reason -eq 'HeartbeatStale' }).Count -eq 1 }
+    Test-Step 'stale recovery log: a finished worker under a live launcher is freed silently, abnormal reasons stay logged' {
+        $quietRoot = Join-Path $tempRoot 'GateQuietLog'
+        $quietGate = Initialize-SemtWorkerGate -Limit 3 -LeaseTimeoutMinutes 120 -HeartbeatStaleMinutes 20 -Root $quietRoot
+        New-Item -ItemType Directory -Path $quietGate.LeaseRoot -Force | Out-Null
+        $finishedWorker = Join-Path $quietGate.LeaseRoot 'lease_finished_worker.json.txt'
+        Write-SemtJsonFileAtomic -Path $finishedWorker -InputObject ([pscustomobject]@{ SchemaVersion = 1; Campaign = 'HybridJoin'; Computer = 'PC-DONE'; Limit = 3; LauncherProcessId = $PID; LauncherProcessStartUtc = $selfStart; WorkerProcessId = 999999; WorkerProcessStartUtc = '2020-01-01T00:00:00.0000000Z'; CreatedUtc = (Get-SemtUtcNowText); HeartbeatUtc = (Get-SemtUtcNowText) })
+        $deadLauncher = Join-Path $quietGate.LeaseRoot 'lease_dead_launcher.json.txt'
+        Write-SemtJsonFileAtomic -Path $deadLauncher -InputObject ([pscustomobject]@{ SchemaVersion = 1; Campaign = 'Windows11Upgrade'; Computer = 'PC-DEAD'; Limit = 3; LauncherProcessId = 999999; LauncherProcessStartUtc = '2020-01-01T00:00:00.0000000Z'; CreatedUtc = (Get-SemtUtcNowText); HeartbeatUtc = (Get-SemtUtcNowText) })
+        $script:SemtQuietLogs = New-Object System.Collections.Generic.List[string]
+        $quietLease = Request-SemtWorkerLease -Gate $quietGate -Campaign HybridJoin -RunId RQ -WaveName WQ -Computer PC-Q -CycleNumber 1 -OnWaitLog { param($message) $script:SemtQuietLogs.Add([string]$message) }
+        $quietLines = @($script:SemtQuietLogs.ToArray())
+        $ok = -not [string]::IsNullOrWhiteSpace([string]$quietLease) -and -not (Test-Path -LiteralPath $finishedWorker) -and -not (Test-Path -LiteralPath $deadLauncher) `
+            -and $quietLines.Count -eq 1 -and $quietLines[0] -like 'Recovered 1 stale worker reservation(s): Windows11Upgrade/PC-DEAD=LauncherProcessExited' -and $quietLines[0] -notlike '*PC-DONE*' `
+            -and $quietGate.QuietRecoveredPending -eq 1 -and $quietGate.QuietRecoveredTotal -eq 1
+        [void](Remove-SemtWorkerLease -Gate $quietGate -LeasePath ([string]$quietLease))
+        # Interval not reached: no summary; end of Run (interval 0): one summary, then the pending count resets.
+        Write-SemtWorkerGateRecoverySummary -Gate $quietGate -OnLog { param($message) $script:SemtQuietLogs.Add([string]$message) } -IntervalMinutes 15
+        $beforeEnd = $script:SemtQuietLogs.Count
+        $quietGate.QuietRecoveredLastSummary = (Get-Date).AddMinutes(-16)
+        Write-SemtWorkerGateRecoverySummary -Gate $quietGate -OnLog { param($message) $script:SemtQuietLogs.Add([string]$message) } -IntervalMinutes 15
+        Write-SemtWorkerGateRecoverySummary -Gate $quietGate -OnLog { param($message) $script:SemtQuietLogs.Add([string]$message) }
+        $summaryLines = @($script:SemtQuietLogs.ToArray() | Select-Object -Skip 1)
+        $ok -and $beforeEnd -eq 1 -and $summaryLines.Count -eq 1 -and $summaryLines[0] -like '1 stale worker reservation(s) (WorkerProcessExited) cleaned since *; Run total=1.' -and $quietGate.QuietRecoveredPending -eq 0
+    }
     Remove-SemtWorkerLease -LeasePath $lease2 | Out-Null
-    $strict = Join-Path $gate.LeaseRoot 'lease_strict.json.txt'
+    $strict =Join-Path $gate.LeaseRoot 'lease_strict.json.txt'
     Write-SemtJsonFileAtomic -Path $strict -InputObject ([pscustomobject]@{ SchemaVersion = 1; Campaign = 'Windows11Upgrade'; Computer = 'PC-STRICT'; Limit = 1; LauncherProcessId = $PID; LauncherProcessStartUtc = $selfStart; CreatedUtc = (Get-SemtUtcNowText); HeartbeatUtc = (Get-SemtUtcNowText) })
     Test-Step 'strictest active limit wins when launchers use different limits' { (Get-SemtWorkerGateSnapshot -Gate $gate).StrictestActiveLimit -eq 1 }
     Remove-Item -LiteralPath $strict -Force
