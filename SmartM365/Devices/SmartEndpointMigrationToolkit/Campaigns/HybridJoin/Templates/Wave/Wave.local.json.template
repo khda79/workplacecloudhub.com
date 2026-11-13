@@ -58,6 +58,9 @@
                     "HybridJoin.IntuneRetryMaxRetries":  "__INHERIT__",
                     "HybridJoin.CommunicationLostEvidenceWaitMinutes":  "__INHERIT__",
                     "HybridJoin.CommunicationLostEvidencePollMinutes":  "__INHERIT__",
-                    "HybridJoin.PostCycleCloudInventoryRefresh":  "__INHERIT__"
+                    "HybridJoin.PostCycleCloudInventoryRefresh":  "__INHERIT__",
+                    "HybridJoin.CloudConfirmationMaxSyncAgeDays":  "__INHERIT__",
+                    "HybridJoin.InterimCloudConfirmationMinutes":  "__INHERIT__",
+                    "HybridJoin.ArchiveUnreachableWithCloudIdentity":  "__INHERIT__"
                 }
 }

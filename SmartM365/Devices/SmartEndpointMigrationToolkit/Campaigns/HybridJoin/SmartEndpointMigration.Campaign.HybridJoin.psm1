@@ -32,7 +32,7 @@ $script:HybridJoinExtensionFields = @(
 )
 $script:HybridJoinEngineFields = @(
     'StatusBeforePostCycle','BackoffStatus','BackoffUntilUtc','BackoffCount',
-    'IntuneConfirmationState','IntuneConfirmationDetail','UserLicensePreflightState','UserLicensePreflightDetail','UserLicenseAuditOnly','UserLicenseState','UserLicenseDetail','UserLicenseUpn','UserLicenseInventoryUtc','MdmUserScopeState','PostCycleIntuneInventoryChecked','PostCycleIntuneInventoryPresent','PostCycleIntuneEnrollmentDetected','PostCycleIntuneInventoryCsv','PostCycleIntuneInventoryError',
+    'IntuneConfirmationState','IntuneConfirmationDetail','IntuneConfirmationSource','UserLicensePreflightState','UserLicensePreflightDetail','UserLicenseAuditOnly','UserLicenseState','UserLicenseDetail','UserLicenseUpn','UserLicenseInventoryUtc','MdmUserScopeState','PostCycleIntuneInventoryChecked','PostCycleIntuneInventoryPresent','PostCycleIntuneEnrollmentDetected','PostCycleIntuneInventoryCsv','PostCycleIntuneInventoryError',
     'PostCycleEntraInventoryChecked','PostCycleEntraInventoryPresent','PostCycleEntraRegisteredState','PostCycleEntraAlternativeSecurityIdCount','PostCycleEntraPendingResolved','PostCycleEntraInventoryCsv','PostCycleEntraInventoryError',
     'PostCycleADInventoryChecked','PostCycleADInventoryPresent','PostCycleADInventoryCsv','PostCycleADInventoryError',
     'PrerequisitesAutoState','PrerequisitesAutoDetail'
@@ -46,6 +46,8 @@ function Get-HybridJoinNextAction {
         'AUDIT_SUCCESS_ALREADY_INTUNE' { return 'NO_ACTION_ALREADY_INTUNE' }
         'SKIPPED_ALREADY_INTUNE_IN_INVENTORY' { return 'NO_ACTION_ALREADY_INTUNE' }
         'ENROLLED_DETECTED_POST_CYCLE' { return 'NO_ACTION_ALREADY_INTUNE' }
+        'ENROLLED_CONFIRMED_IN_CYCLE' { return 'NO_ACTION_ALREADY_INTUNE' }
+        'ENROLLED_CONFIRMED_BY_CLOUD_IDENTITY' { return 'NO_ACTION_ALREADY_INTUNE' }
         'ENTRA_PENDING_RESOLVED_POST_CYCLE' { return 'RECHECK_INTUNE_ENROLLMENT' }
         'INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY' { return 'REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN' }
         'INTUNE_TRACE_REMOVE_FAILED' { return 'REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN' }
@@ -60,8 +62,16 @@ function Get-HybridJoinNextAction {
 
 function Test-HybridJoinAlreadyEnrolled {
     param([Parameter(Mandatory = $true)]$Row)
-    # Archival requires the same local device identity in a successful cloud result.
-    return ([string](Get-SemtPropertyValue -InputObject $Row -Name 'UserLicensePreflightState' -Default '') -ne 'NoAssignedLicense' -and [string](Get-SemtPropertyValue -InputObject $Row -Name 'IntuneConfirmationState' -Default '') -eq 'Confirmed' -and [string](Get-SemtPropertyValue -InputObject $Row -Name 'Status' -Default '') -eq 'ENROLLED_DETECTED_POST_CYCLE')
+    # Archival requires the same device identity in a successful cloud result: local identity
+    # (post-cycle or in-cycle confirmation) or AD/Entra/Intune identity chain (unreachable target).
+    if ([string](Get-SemtPropertyValue -InputObject $Row -Name 'UserLicensePreflightState' -Default '') -eq 'NoAssignedLicense') { return $false }
+    $state = [string](Get-SemtPropertyValue -InputObject $Row -Name 'IntuneConfirmationState' -Default '')
+    switch ([string](Get-SemtPropertyValue -InputObject $Row -Name 'Status' -Default '')) {
+        'ENROLLED_DETECTED_POST_CYCLE' { return ($state -eq 'Confirmed') }
+        'ENROLLED_CONFIRMED_IN_CYCLE' { return ($state -eq 'Confirmed') }
+        'ENROLLED_CONFIRMED_BY_CLOUD_IDENTITY' { return ($state -eq 'CloudIdentityConfirmed') }
+        default { return $false }
+    }
 }
 
 function Get-HybridJoinIntuneConfirmation {
@@ -98,7 +108,7 @@ function Get-HybridJoinCentralLogBucket {
     param([Parameter(Mandatory = $true)]$Result)
 
     $status = ([string](Get-SemtPropertyValue -InputObject $Result -Name 'Status' -Default '')).ToUpperInvariant()
-    if ($status -in @('SUCCESS','AUDIT_SUCCESS_ALREADY_INTUNE','ENROLLED_DETECTED_POST_CYCLE')) { return 'Success' }
+    if ($status -in @('SUCCESS','AUDIT_SUCCESS_ALREADY_INTUNE','ENROLLED_DETECTED_POST_CYCLE','ENROLLED_CONFIRMED_IN_CYCLE','ENROLLED_CONFIRMED_BY_CLOUD_IDENTITY')) { return 'Success' }
     if ($status -like '*ADMIN_SHARE_UNREACHABLE') { return 'AdminShareUnreachable' }
     if ($status -like 'PSEXEC_TIMEOUT*') { return 'PsExecTimeout' }
     if ($status -eq 'PSEXEC_COMMUNICATION_LOST') { return 'PsExecCommunicationLost' }
@@ -119,7 +129,7 @@ function Get-HybridJoinCooldownHours {
     }
     if ($normalized -match '(USER|INTERACTIVE|PRT|LOGON|SESSION_REMOTE|LOCAL_INTERACTIVE)') { return 24.0 }
     if ($normalized -match '(RUN_GUARD|ENDPOINT_RUN_ACTIVE|PENDING_CONFIRMATION|REBOOT_TRIGGERED|WAITING_FOR_AAD_CONNECT|WAITING_POST_LEAVE)') { return 12.0 }
-    if ($normalized -eq 'ENROLLED_DETECTED_POST_CYCLE') { return 168.0 }
+    if ($normalized -in @('ENROLLED_DETECTED_POST_CYCLE','ENROLLED_CONFIRMED_IN_CYCLE','ENROLLED_CONFIRMED_BY_CLOUD_IDENTITY')) { return 168.0 }
     return [double][math]::Max(1, $DefaultHours)
 }
 
@@ -286,6 +296,7 @@ function Invoke-HybridJoinPostCycle {
         } catch { $userInventoryValid = $false }
     }
     foreach ($row in $allRows) {
+        $confirmedInCycle = ([string]$row.Status -in $script:HybridJoinInCycleStatuses)
         Set-SemtResultField -Result $row -Name 'UserLicenseState' -Value 'Unknown'
         Set-SemtResultField -Result $row -Name 'UserLicenseDetail' -Value 'Fresh same-tenant inventory or unique user SID unavailable'
         Set-SemtResultField -Result $row -Name 'MdmUserScopeState' -Value 'Unknown: verify MDM user scope in Entra'
@@ -312,6 +323,8 @@ function Invoke-HybridJoinPostCycle {
                 Set-SemtResultField -Result $row -Name 'UserLicenseDetail' -Value $detail
             }
         }
+        # Confirmed and archived during the cycle: the post-cycle confirmation keeps that proof.
+        if ($confirmedInCycle) { continue }
         Set-SemtResultField -Result $row -Name 'IntuneConfirmationState' -Value 'Unknown'
         Set-SemtResultField -Result $row -Name 'IntuneConfirmationDetail' -Value 'Cloud identity confirmation not completed'
         if ([string]$row.Status -in @('SUCCESS','AUDIT_SUCCESS_ALREADY_INTUNE') -and [string](Get-SemtPropertyValue -InputObject $row -Name 'UserLicensePreflightState' -Default '') -ne 'NoAssignedLicense') {
@@ -321,7 +334,7 @@ function Invoke-HybridJoinPostCycle {
         }
     }
     if ($Context.DryRun -or $allRows.Count -eq 0) { return }
-    $cloudRows = @($allRows | Where-Object { [string](Get-SemtPropertyValue -InputObject $_ -Name 'UserLicensePreflightState' -Default '') -ne 'NoAssignedLicense' -and [string]$_.Status -notmatch '^(USER_LICENSE_REVIEW_REQUIRED|ADMIN_SHARE_UNREACHABLE|DNS_PREFLIGHT_ALL_SAMPLES_FAILED|REMOTE_PAYLOAD_COPY_FAILED|REMOTE_SCRIPT_MISSING|CANCELLED_|SKIPPED_|DRYRUN_|TARGET_|LEGACY_)' })
+    $cloudRows = @($allRows | Where-Object { [string](Get-SemtPropertyValue -InputObject $_ -Name 'UserLicensePreflightState' -Default '') -ne 'NoAssignedLicense' -and [string]$_.Status -notin $script:HybridJoinInCycleStatuses -and [string]$_.Status -notmatch '^(USER_LICENSE_REVIEW_REQUIRED|ADMIN_SHARE_UNREACHABLE|DNS_PREFLIGHT_ALL_SAMPLES_FAILED|REMOTE_PAYLOAD_COPY_FAILED|REMOTE_SCRIPT_MISSING|CANCELLED_|SKIPPED_|DRYRUN_|TARGET_|LEGACY_)' })
     $log = $Context.Log
     if ($cloudRows.Count -eq 0) { & $log ('Cycle {0}: post-cycle Graph confirmation skipped: no result could have changed Intune or Entra.' -f $Context.CycleNumber) 'DarkGray'; return }
     if (-not (Get-SemtOption -Options $Context.Options -Name 'HybridJoin.PostCycleCloudInventoryRefresh')) { & $log ('Cycle {0}: post-cycle Graph confirmation disabled by option.' -f $Context.CycleNumber) 'DarkGray'; return }
@@ -413,6 +426,267 @@ function Invoke-HybridJoinPostCycle {
     else { & $log ('Cycle {0}: post-cycle Entra confirmation failed: {1}' -f $Context.CycleNumber,$entraExport.Error) 'Yellow' }
 }
 
+#region In-cycle Intune confirmation and archival
+
+# Results confirmed during the cycle are archived at once (Wave and Campaign lists) and are left
+# untouched by the post-cycle confirmation.
+$script:HybridJoinInCycleStatuses = @('ENROLLED_CONFIRMED_IN_CYCLE','ENROLLED_CONFIRMED_BY_CLOUD_IDENTITY')
+$script:HybridJoinFreshInventorySources = @('Shared','RunScopedRefresh')
+$script:HybridJoinIndexCache = @{}
+$script:HybridJoinInterim = $null
+$script:HybridJoinInterimTimeoutMinutes = 20
+
+function Get-HybridJoinContextOption {
+    param($Context,[Parameter(Mandatory = $true)][string]$Name,$Default)
+    if ($null -ne $Context.Options -and $Context.Options.Contains($Name)) { return (Get-SemtOption -Options $Context.Options -Name $Name) }
+    return $Default
+}
+
+function New-HybridJoinDeviceIdIndex {
+    <#
+    Index of inventory rows by Entra device ID (Intune: AzureADDeviceId; Entra: DeviceId). TenantId
+    is set only when every indexed row comes from the same tenant.
+    #>
+    param([object[]]$Rows,[Parameter(Mandatory = $true)][ValidateSet('Intune','Entra')][string]$Kind)
+    $idColumn = if ($Kind -eq 'Intune') { 'AzureADDeviceId' } else { 'DeviceId' }
+    $presence = '{0}InventoryPresent' -f $Kind
+    $byId = @{}
+    $tenants = @{}
+    foreach ($row in @($Rows)) {
+        if ($null -eq $row) { continue }
+        if (-not (Test-SemtBooleanLikeTrue -Value (Get-SemtPropertyValue -InputObject $row -Name $presence -Default 'True'))) { continue }
+        $id = [guid]::Empty
+        if (-not [guid]::TryParse([string](Get-SemtPropertyValue -InputObject $row -Name $idColumn -Default ''), [ref]$id) -or $id -eq [guid]::Empty) { continue }
+        $tenants[([string](Get-SemtPropertyValue -InputObject $row -Name 'InventoryTenantId' -Default '')).Trim().ToLowerInvariant()] = $true
+        $key = $id.ToString()
+        if (-not $byId.ContainsKey($key)) { $byId[$key] = New-Object System.Collections.Generic.List[object] }
+        $byId[$key].Add($row)
+    }
+    $tenantList = @($tenants.Keys)
+    return [pscustomobject]@{ Kind = $Kind; ById = $byId; TenantId = $(if ($tenantList.Count -eq 1) { [string]$tenantList[0] } else { '' }) }
+}
+
+function Get-HybridJoinInventoryIndex {
+    <# Device ID index of the cycle inventory, built once per CSV; $null unless the inventory is fresh. #>
+    param([Parameter(Mandatory = $true)]$Context,[Parameter(Mandatory = $true)][ValidateSet('Intune','Entra')][string]$Kind)
+    if ($null -eq $Context.Inventory -or -not $Context.Inventory.ContainsKey($Kind)) { return $null }
+    $state = $Context.Inventory[$Kind]
+    if ($null -eq $state -or [string]$state.Source -notin $script:HybridJoinFreshInventorySources) { return $null }
+    $csv = [string]$state.CsvPath
+    if ([string]::IsNullOrWhiteSpace($csv) -or -not (Test-Path -LiteralPath $csv -PathType Leaf)) { return $null }
+    $cacheKey = '{0}|{1}|{2}' -f $Kind,$csv,(Get-Item -LiteralPath $csv).LastWriteTimeUtc.Ticks
+    if (-not $script:HybridJoinIndexCache.ContainsKey($cacheKey)) {
+        foreach ($old in @($script:HybridJoinIndexCache.Keys | Where-Object { $_ -like ('{0}|*' -f $Kind) })) { $script:HybridJoinIndexCache.Remove($old) }
+        $script:HybridJoinIndexCache[$cacheKey] = New-HybridJoinDeviceIdIndex -Rows @(Import-Csv -LiteralPath $csv) -Kind $Kind
+    }
+    return $script:HybridJoinIndexCache[$cacheKey]
+}
+
+function Test-HybridJoinRecentSync {
+    param($IntuneRow,[int]$MaxSyncAgeDays,[datetime]$NowUtc)
+    $sync = ConvertTo-SemtUtcDateTime -Value (Get-SemtPropertyValue -InputObject $IntuneRow -Name 'LastSyncDateTime' -Default '')
+    return ($null -ne $sync -and ($NowUtc - $sync).TotalDays -le $MaxSyncAgeDays)
+}
+
+function Get-HybridJoinIndexedIntuneConfirmation {
+    <#
+    Same proof as the post-cycle confirmation (local enrollment and exactly one Intune object with
+    the local Entra device ID in the same tenant), plus an Intune sync within MaxSyncAgeDays.
+    #>
+    param([Parameter(Mandatory = $true)]$Row,$Index,[int]$MaxSyncAgeDays = 30,[datetime]$NowUtc = (Get-Date).ToUniversalTime())
+    if ($null -eq $Index) { return [pscustomobject]@{ State = 'Unknown'; Detail = 'Fresh Intune inventory unavailable' } }
+    $localId = [guid]::Empty
+    if (-not [guid]::TryParse([string](Get-SemtPropertyValue -InputObject $Row -Name 'Dsreg_DeviceId' -Default ''), [ref]$localId) -or $localId -eq [guid]::Empty) { return [pscustomobject]@{ State = 'Unknown'; Detail = 'Local Entra device ID unavailable' } }
+    $localTenant = [guid]::Empty
+    if (-not [guid]::TryParse([string](Get-SemtPropertyValue -InputObject $Row -Name 'Dsreg_TenantId' -Default ''), [ref]$localTenant) -or $localTenant -eq [guid]::Empty) { return [pscustomobject]@{ State = 'Unknown'; Detail = 'Local tenant ID unavailable' } }
+    if ([string]::IsNullOrWhiteSpace($Index.TenantId) -or $Index.TenantId -ne $localTenant.ToString()) { return [pscustomobject]@{ State = 'Unknown'; Detail = 'Intune inventory tenant unavailable or mismatched' } }
+    $key = $localId.ToString()
+    if (-not $Index.ById.ContainsKey($key)) { return [pscustomobject]@{ State = 'NotFound'; Detail = 'No matching Entra device ID in the Intune inventory' } }
+    $found = $Index.ById[$key]
+    if ($found.Count -ne 1) { return [pscustomobject]@{ State = 'Ambiguous'; Detail = 'Multiple Intune objects match the local Entra device ID' } }
+    if (-not (Test-HybridJoinRecentSync -IntuneRow $found[0] -MaxSyncAgeDays $MaxSyncAgeDays -NowUtc $NowUtc)) { return [pscustomobject]@{ State = 'SyncTooOld'; Detail = ('Intune object found, but its last sync is older than {0} day(s)' -f $MaxSyncAgeDays) } }
+    if (-not (Test-SemtBooleanLikeTrue -Value (Get-SemtPropertyValue -InputObject $Row -Name 'IntuneEnrolled' -Default ''))) { return [pscustomobject]@{ State = 'CloudOnly'; Detail = 'Intune identity matched; local enrollment not confirmed' } }
+    return [pscustomobject]@{ State = 'Confirmed'; Detail = 'Local enrollment and one matching Intune Entra device ID with a recent sync' }
+}
+
+function Get-HybridJoinCloudIdentityProof {
+    <#
+    Enrollment proof for a computer the Run could not reach, without relying on names in the
+    cloud: AD ObjectGUID = DeviceId of one enabled hybrid (ServerAd) Entra object = AzureADDeviceId
+    of exactly one Intune MDM object of the same tenant, synced within MaxSyncAgeDays. The computer
+    name is only used to read its own AD object.
+    #>
+    param([Parameter(Mandatory = $true)]$Context,[Parameter(Mandatory = $true)]$Row,[int]$MaxSyncAgeDays = 30,[datetime]$NowUtc = (Get-Date).ToUniversalTime())
+    $no = { param([string]$Why) [pscustomobject]@{ Confirmed = $false; DeviceId = ''; Detail = $Why } }
+    $ad = if ($null -ne $Context.Inventory -and $Context.Inventory.ContainsKey('AD')) { $Context.Inventory['AD'] } else { $null }
+    if ($null -eq $ad -or [string]$ad.Source -notin $script:HybridJoinFreshInventorySources -or $null -eq $ad.Map) { return (& $no 'Fresh AD inventory unavailable') }
+    $key = Get-SemtComputerKey -ComputerName ([string]$Row.ComputerName)
+    if (-not $ad.Map.ContainsKey($key)) { return (& $no 'Computer not found in the AD inventory') }
+    $guid = [guid]::Empty
+    if (-not [guid]::TryParse([string](Get-SemtPropertyValue -InputObject $ad.Map[$key] -Name 'ObjectGUID' -Default ''), [ref]$guid) -or $guid -eq [guid]::Empty) { return (& $no 'AD ObjectGUID unavailable') }
+    $entraIndex = Get-HybridJoinInventoryIndex -Context $Context -Kind Entra
+    $intuneIndex = Get-HybridJoinInventoryIndex -Context $Context -Kind Intune
+    if ($null -eq $entraIndex -or $null -eq $intuneIndex) { return (& $no 'Fresh Entra or Intune inventory unavailable') }
+    $id = $guid.ToString()
+    if (-not $entraIndex.ById.ContainsKey($id) -or $entraIndex.ById[$id].Count -ne 1) { return (& $no 'No single Entra device with the AD ObjectGUID as device ID') }
+    $entra = $entraIndex.ById[$id][0]
+    if ([string](Get-SemtPropertyValue -InputObject $entra -Name 'TrustType' -Default '') -ne 'ServerAd') { return (& $no 'Entra device is not hybrid joined (TrustType is not ServerAd)') }
+    if (-not (Test-SemtBooleanLikeTrue -Value (Get-SemtPropertyValue -InputObject $entra -Name 'AccountEnabled' -Default ''))) { return (& $no 'Entra device is disabled') }
+    if ([string]::IsNullOrWhiteSpace($entraIndex.TenantId) -or $entraIndex.TenantId -ne $intuneIndex.TenantId) { return (& $no 'Entra and Intune inventory tenants unavailable or mismatched') }
+    if (-not $intuneIndex.ById.ContainsKey($id) -or $intuneIndex.ById[$id].Count -ne 1) { return (& $no 'No single Intune object with the Entra device ID') }
+    $intune = $intuneIndex.ById[$id][0]
+    if ([string](Get-SemtPropertyValue -InputObject $intune -Name 'ManagementAgent' -Default '') -notmatch 'mdm') { return (& $no 'Intune object is not MDM managed') }
+    if (-not (Test-HybridJoinRecentSync -IntuneRow $intune -MaxSyncAgeDays $MaxSyncAgeDays -NowUtc $NowUtc)) { return (& $no ('Intune last sync older than {0} day(s)' -f $MaxSyncAgeDays)) }
+    return [pscustomobject]@{ Confirmed = $true; DeviceId = $id; Detail = ('AD ObjectGUID = hybrid Entra device ID = one Intune MDM object synced within {0} day(s); DeviceId={1}; LastSync={2}' -f $MaxSyncAgeDays,$id,[string](Get-SemtPropertyValue -InputObject $intune -Name 'LastSyncDateTime' -Default '')) }
+}
+
+function Set-HybridJoinInCycleConfirmed {
+    param([Parameter(Mandatory = $true)]$Row,[Parameter(Mandatory = $true)][string]$Status,[Parameter(Mandatory = $true)][string]$ConfirmationState,[Parameter(Mandatory = $true)][string]$Source,[string]$Detail)
+    Set-SemtResultField -Result $Row -Name 'StatusBeforePostCycle' -Value ([string]$Row.Status)
+    Set-SemtResultField -Result $Row -Name 'IntuneConfirmationState' -Value $ConfirmationState
+    Set-SemtResultField -Result $Row -Name 'IntuneConfirmationDetail' -Value $Detail
+    Set-SemtResultField -Result $Row -Name 'IntuneConfirmationSource' -Value $Source
+    Set-SemtResultField -Result $Row -Name 'Status' -Value $Status
+    Set-SemtResultField -Result $Row -Name 'NextAction' -Value 'NO_ACTION_ALREADY_INTUNE'
+}
+
+function Get-HybridJoinInterimState {
+    param([Parameter(Mandatory = $true)]$Context)
+    $runKey = [string](Get-SemtPropertyValue -InputObject $Context.RunContext -Name 'InventoryRoot' -Default '')
+    if ($null -eq $script:HybridJoinInterim -or $script:HybridJoinInterim.RunKey -ne $runKey) {
+        $script:HybridJoinInterim = [pscustomobject]@{ RunKey = $runKey; Pending = @{}; Job = $null; JobKeys = @(); JobStartedUtc = $null; LastStartUtc = (Get-Date).ToUniversalTime(); Disabled = $false; Sequence = 0 }
+    }
+    return $script:HybridJoinInterim
+}
+
+function Invoke-HybridJoinCompletedRow {
+    <#
+    Runs for each result as soon as its worker is collected, before the run guard update and the
+    archive rules. A confirmed result gets an in-cycle status that the archive rule accepts.
+    A local success not yet visible in the cycle inventory waits for the interim confirmation.
+    #>
+    param([Parameter(Mandatory = $true)]$Context,$Row)
+    if ($null -eq $Row -or $Context.DryRun) { return }
+    if ([string](Get-SemtPropertyValue -InputObject $Row -Name 'UserLicensePreflightState' -Default '') -eq 'NoAssignedLicense') { return }
+    $status = [string]$Row.Status
+    $maxAge = [int](Get-HybridJoinContextOption -Context $Context -Name 'HybridJoin.CloudConfirmationMaxSyncAgeDays' -Default 30)
+    if ($status -in @('SUCCESS','AUDIT_SUCCESS_ALREADY_INTUNE')) {
+        if (-not (Test-SemtBooleanLikeTrue -Value (Get-SemtPropertyValue -InputObject $Row -Name 'IntuneEnrolled' -Default ''))) { return }
+        $confirmation = Get-HybridJoinIndexedIntuneConfirmation -Row $Row -Index (Get-HybridJoinInventoryIndex -Context $Context -Kind Intune) -MaxSyncAgeDays $maxAge
+        if ($confirmation.State -eq 'Confirmed') {
+            Set-HybridJoinInCycleConfirmed -Row $Row -Status 'ENROLLED_CONFIRMED_IN_CYCLE' -ConfirmationState 'Confirmed' -Source 'CycleInventory' -Detail $confirmation.Detail
+            return
+        }
+        $state = Get-HybridJoinInterimState -Context $Context
+        if (-not $state.Disabled) { $state.Pending[(Get-SemtComputerKey -ComputerName ([string]$Row.ComputerName))] = $Row }
+        return
+    }
+    if ($status -like '*ADMIN_SHARE_UNREACHABLE' -and [bool](Get-HybridJoinContextOption -Context $Context -Name 'HybridJoin.ArchiveUnreachableWithCloudIdentity' -Default $true)) {
+        $proof = Get-HybridJoinCloudIdentityProof -Context $Context -Row $Row -MaxSyncAgeDays $maxAge
+        if ($proof.Confirmed) { Set-HybridJoinInCycleConfirmed -Row $Row -Status 'ENROLLED_CONFIRMED_BY_CLOUD_IDENTITY' -ConfirmationState 'CloudIdentityConfirmed' -Source 'CloudIdentityChain' -Detail $proof.Detail }
+    }
+}
+
+function Complete-HybridJoinInterimExport {
+    param([Parameter(Mandatory = $true)]$Context,[Parameter(Mandatory = $true)]$State,$Export)
+    $log = $Context.Log
+    $confirmed = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Export -or -not [bool](Get-SemtPropertyValue -InputObject $Export -Name 'Success' -Default $false)) {
+        if (Test-HybridJoinGraphSignInMissing -Export $Export) {
+            $State.Disabled = $true
+            $State.Pending.Clear()
+            & $log ('WARNING: interim Intune confirmation disabled for the rest of the Run: {0}. Results are still confirmed after each cycle.' -f $script:HybridJoinGraphSignInRequiredDetail) 'Yellow'
+        }
+        else { & $log ('WARNING: interim Intune confirmation failed; next attempt at the next interval: {0}' -f [string](Get-SemtPropertyValue -InputObject $Export -Name 'Error' -Default 'no export result')) 'Yellow' }
+        return @()
+    }
+    $maxAge = [int](Get-HybridJoinContextOption -Context $Context -Name 'HybridJoin.CloudConfirmationMaxSyncAgeDays' -Default 30)
+    $index = New-HybridJoinDeviceIdIndex -Rows @(Import-Csv -LiteralPath ([string]$Export.CsvPath)) -Kind Intune
+    foreach ($key in @($State.JobKeys)) {
+        if (-not $State.Pending.ContainsKey($key)) { continue }
+        $row = $State.Pending[$key]
+        $confirmation = Get-HybridJoinIndexedIntuneConfirmation -Row $row -Index $index -MaxSyncAgeDays $maxAge
+        if ($confirmation.State -ne 'Confirmed') { continue }
+        Set-HybridJoinInCycleConfirmed -Row $row -Status 'ENROLLED_CONFIRMED_IN_CYCLE' -ConfirmationState 'Confirmed' -Source 'InterimInventory' -Detail $confirmation.Detail
+        $State.Pending.Remove($key)
+        $confirmed.Add($row)
+    }
+    & $log ('Cycle {0}: interim Intune confirmation: {1}/{2} confirmed; CSV={3}' -f $Context.CycleNumber,$confirmed.Count,@($State.JobKeys).Count,[string]$Export.CsvPath) 'Green'
+    return $confirmed.ToArray()
+}
+
+function Invoke-HybridJoinInterimConfirmation {
+    <#
+    Interim Intune confirmation of local successes, every HybridJoin.InterimCloudConfirmationMinutes.
+    The scoped export runs in a background job and never blocks worker slots or dispatch; it is
+    bounded in time, skipped when nothing is pending, and disabled for the Run when Graph sign-in
+    is missing. Poll returns the rows newly confirmed; Stop discards the job and the pending set.
+    #>
+    param([Parameter(Mandatory = $true)]$Context,[ValidateSet('Poll','Stop')][string]$Mode = 'Poll')
+    $state = Get-HybridJoinInterimState -Context $Context
+    if ($Mode -eq 'Stop') {
+        if ($null -ne $state.Job) { Stop-Job -Job $state.Job -ErrorAction SilentlyContinue; Remove-Job -Job $state.Job -Force -ErrorAction SilentlyContinue; $state.Job = $null }
+        $state.Pending.Clear()
+        $state.LastStartUtc = (Get-Date).ToUniversalTime()
+        return @()
+    }
+    $interval = [int](Get-HybridJoinContextOption -Context $Context -Name 'HybridJoin.InterimCloudConfirmationMinutes' -Default 60)
+    if ($state.Disabled -or $interval -le 0 -or $Context.DryRun) { return @() }
+    $now = (Get-Date).ToUniversalTime()
+    if ($null -ne $state.Job) {
+        if ($state.Job.State -in @('Running','NotStarted')) {
+            if (($now - $state.JobStartedUtc).TotalMinutes -ge $script:HybridJoinInterimTimeoutMinutes) {
+                Stop-Job -Job $state.Job -ErrorAction SilentlyContinue
+                Remove-Job -Job $state.Job -Force -ErrorAction SilentlyContinue
+                $state.Job = $null
+                & $Context.Log ('WARNING: interim Intune confirmation stopped after {0} minute(s); next attempt at the next interval.' -f $script:HybridJoinInterimTimeoutMinutes) 'Yellow'
+            }
+            return @()
+        }
+        $output = @(Receive-Job -Job $state.Job -ErrorAction SilentlyContinue)
+        Remove-Job -Job $state.Job -Force -ErrorAction SilentlyContinue
+        $state.Job = $null
+        $export = if ($output.Count -gt 0) { $output[$output.Count - 1] } else { $null }
+        return @(Complete-HybridJoinInterimExport -Context $Context -State $state -Export $export)
+    }
+    if ($state.Pending.Count -eq 0 -or ($now - $state.LastStartUtc).TotalMinutes -lt $interval) { return @() }
+    $keys = @($state.Pending.Keys)
+    $state.Sequence++
+    $stamp = '{0}_{1:D3}' -f (Get-Date -Format 'yyyyMMdd_HHmmss'),$state.Sequence
+    $root = [string]$Context.RunContext.InventoryRoot
+    $scopePath = Join-Path -Path $root -ChildPath ('Cycle{0}_InterimScope_{1}.txt' -f $Context.CycleNumber,$stamp)
+    Write-SemtTextLinesAtomic -Path $scopePath -Lines @($keys | ForEach-Object { [string]$state.Pending[$_].ComputerName })
+    $idLines = New-Object System.Collections.Generic.List[string]
+    $idLines.Add('ComputerName,DeviceId')
+    foreach ($key in $keys) { $idLines.Add(('{0},{1}' -f [string]$state.Pending[$key].ComputerName,[string](Get-SemtPropertyValue -InputObject $state.Pending[$key] -Name 'Dsreg_DeviceId' -Default ''))) }
+    $idPath = Join-Path -Path $root -ChildPath ('Cycle{0}_InterimDeviceIds_{1}.csv' -f $Context.CycleNumber,$stamp)
+    Write-SemtTextLinesAtomic -Path $idPath -Lines @($idLines.ToArray())
+    $exportArguments = @{
+        Kind = 'Intune'
+        ExportScriptPath = [string]$Context.ExportScripts.Intune
+        OutputPath = (Join-Path -Path $root -ChildPath ('DevicesIntune_Cycle{0}Interim_{1}.csv' -f $Context.CycleNumber,$stamp))
+        LogPath = (Join-Path -Path $root -ChildPath ('DevicesIntune_Cycle{0}Interim_{1}.log' -f $Context.CycleNumber,$stamp))
+        ComputerListPath = $scopePath
+        DeviceIdListPath = $idPath
+        TenantId = [string](Get-HybridJoinContextOption -Context $Context -Name 'IntuneTenantId' -Default '')
+        PageSize = [int](Get-HybridJoinContextOption -Context $Context -Name 'IntuneInventoryPageSize' -Default 999)
+        SharedInventoryPath = [string]$Context.Inventory['Intune'].SharedPath
+    }
+    $modulePath = Join-Path -Path ([string]$Context.PackageRoot) -ChildPath 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1'
+    $state.Job = Start-Job -ArgumentList $modulePath,$exportArguments -ScriptBlock {
+        param($ModulePath,$ExportArguments)
+        Import-Module $ModulePath -MinimumVersion 1.0.0 -Force
+        Invoke-SemtInventoryExport @ExportArguments
+    }
+    $state.JobKeys = $keys
+    $state.JobStartedUtc = $now
+    $state.LastStartUtc = $now
+    & $Context.Log ('Cycle {0}: interim Intune confirmation started in the background for {1} pending result(s).' -f $Context.CycleNumber,$keys.Count) 'DarkGray'
+    return @()
+}
+
+#endregion
+
 function Get-SemtHybridJoinProfile {
     [CmdletBinding()]
     param()
@@ -450,6 +724,8 @@ function Get-SemtHybridJoinProfile {
             PreCycle = ${function:Invoke-HybridJoinPreCycle}
             PerComputerArguments = ${function:Get-HybridJoinPerComputerArguments}
             PostCycle = ${function:Invoke-HybridJoinPostCycle}
+            CompletedRow = ${function:Invoke-HybridJoinCompletedRow}
+            InterimConfirmation = ${function:Invoke-HybridJoinInterimConfirmation}
             NextAction = ${function:Get-HybridJoinNextAction}
             CentralLogBucket = ${function:Get-HybridJoinCentralLogBucket}
             WorkerRecovery = { param($Result,$RemoteDataShare,$Contract) $null }

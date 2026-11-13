@@ -540,6 +540,18 @@ try {
         $lastProgressLog = Get-Date
         $lastHtml = [datetime]::MinValue
         $cycleIgnoreGuard = [bool]((Opt 'IgnoreEndpointRunGuard') -and ($cycle -eq 1 -or (Opt 'IgnoreEndpointRunGuardEveryCycle')))
+        # Optional campaign hooks: in-cycle confirmation of each result and a background interim
+        # confirmation; both feed the archive rules at once and never block slots or dispatch.
+        $completedRowHook = if ($script:CampaignProfile.Hooks.PSObject.Properties['CompletedRow']) { $script:CampaignProfile.Hooks.CompletedRow } else { $null }
+        $interimHook = if ($script:CampaignProfile.Hooks.PSObject.Properties['InterimConfirmation']) { $script:CampaignProfile.Hooks.InterimConfirmation } else { $null }
+        $pollInterim = {
+            if ($null -eq $interimHook) { return }
+            try {
+                $confirmedRows = @(& $interimHook $hookContext 'Poll' | Where-Object { $null -ne $_ })
+                if ($confirmedRows.Count -gt 0) { Invoke-CompletedRules -Rows $confirmedRows -CycleNumber $cycle }
+            }
+            catch { Write-Host ("WARNING: Cycle {0}: interim confirmation step failed: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
+        }
         # Collects this launcher's finished workers and releases their shared slots. It also runs
         # while Request-SemtWorkerLease waits for a slot: otherwise our own finished workers keep
         # their slots until another launcher recovers them as stale (WorkerProcessExited).
@@ -592,6 +604,7 @@ try {
                 }
                 if ($jobErrors.Count -gt 0) { Set-SemtResultField -Result $row -Name 'JobErrorMessage' -Value ((@(Get-SemtPropertyValue -InputObject $row -Name 'JobErrorMessage' -Default '') + @($jobErrors)) -join ' | ').Trim(' ','|') }
                 $row = Add-InventoryFields -Row $row
+                if ($null -ne $completedRowHook) { try { & $completedRowHook $hookContext $row } catch { Write-Host ("WARNING: Cycle {0}: in-cycle confirmation of {1} failed: {2}" -f $cycle,$item.Computer,$_.Exception.Message) -ForegroundColor Yellow } }
                 if ($useRunGuard) { try { Update-RunGuardEntry -Fqdn $item.Fqdn -Computer $item.Computer -State Result -Result $row -JobId ([string]$item.Job.Id) -CycleNumber $cycle } catch { Write-Host ("TECH_RUN_GUARD_HISTORY_WRITE_DEFERRED: Result; {0}; {1}" -f $item.Computer,$_.Exception.Message) -ForegroundColor Yellow } }
                 [void]$cycleRows.Add($row)
                 Invoke-CompletedRules -Rows @($row) -CycleNumber $cycle
@@ -603,6 +616,7 @@ try {
                 Remove-Job -Job $item.Job -Force -ErrorAction SilentlyContinue
                 $running.Remove($item)
             }
+            & $pollInterim
         }
         while ($next -lt $computers.Count -or $running.Count -gt 0) {
             $cancel = Get-SemtCancellationState
@@ -699,6 +713,7 @@ try {
                     }
                     catch { Write-Host ("WARNING: live report update failed: {0}" -f $_.Exception.Message) -ForegroundColor Yellow }
                 }
+                & $pollInterim
                 Start-Sleep -Seconds 2
                 continue
             }
@@ -714,6 +729,8 @@ try {
                 }
             }
         }
+        # Results still waiting for the interim confirmation are confirmed by the post-cycle step.
+        if ($null -ne $interimHook) { try { [void](& $interimHook $hookContext 'Stop') } catch { } }
         try { & $script:CampaignProfile.Hooks.PostCycle $hookContext $rows } catch { Write-Host ("WARNING: Cycle {0}: post-cycle step failed: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
         Invoke-CompletedRules -Rows $rows -CycleNumber $cycle
         $csvPath = Join-Path $script:RunContext.ReportRoot ('SEMT_{0}_cycle{1}_{2}.csv' -f $Campaign,$cycle,(Get-Date -Format 'yyyyMMdd-HHmmss'))
@@ -759,6 +776,8 @@ finally {
         Set-SemtActiveRunState -Status $historyStatus -ReportPath $finalPath
     }
     catch { Microsoft.PowerShell.Utility\Write-Host ("Final report or history update failed: {0}" -f $_.Exception.Message) }
+    $finalHookContext = Get-Variable -Name hookContext -ValueOnly -ErrorAction SilentlyContinue
+    if ($null -ne $finalHookContext -and $script:CampaignProfile.Hooks.PSObject.Properties['InterimConfirmation']) { try { [void](& $script:CampaignProfile.Hooks.InterimConfirmation $finalHookContext 'Stop') } catch { } }
     if ($script:Gate) { try { Write-SemtWorkerGateRecoverySummary -Gate $script:Gate -OnLog { param($message) Write-Host $message -ForegroundColor DarkGray } } catch { } }
     Complete-SemtCancellation
     Exit-SemtWaveLock -WaveLock $script:WaveLock

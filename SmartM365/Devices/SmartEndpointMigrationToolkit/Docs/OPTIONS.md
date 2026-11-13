@@ -125,6 +125,22 @@ Generated from catalog SHA256 `E90D622C8AC4CCA290E6D4DE2C9851B939DDB9CA477A1606B
 | `HybridJoin.CommunicationLostEvidenceWaitMinutes` | Integer | 65 minutes | 0..600 | `SEMT_HYBRIDJOIN_COMMUNICATION_LOST_EVIDENCE_WAIT_MINUTES` | Evidence | no |
 | `HybridJoin.CommunicationLostEvidencePollMinutes` | Integer | 10 minutes | 1..120 | `SEMT_HYBRIDJOIN_COMMUNICATION_LOST_EVIDENCE_POLL_MINUTES` | Evidence | no |
 | `HybridJoin.PostCycleCloudInventoryRefresh` | Boolean | True |  | `SEMT_HYBRIDJOIN_POST_CYCLE_CLOUD_INVENTORY_REFRESH` | Inventory | yes |
+| `HybridJoin.CloudConfirmationMaxSyncAgeDays` | Integer | 30 days | 1..365 | `SEMT_HYBRIDJOIN_CLOUD_CONFIRMATION_MAX_SYNC_AGE_DAYS` | Inventory | yes |
+| `HybridJoin.InterimCloudConfirmationMinutes` | Integer | 60 minutes | 0..1440 | `SEMT_HYBRIDJOIN_INTERIM_CLOUD_CONFIRMATION_MINUTES` | Inventory | yes |
+| `HybridJoin.ArchiveUnreachableWithCloudIdentity` | Boolean | True |  | `SEMT_HYBRIDJOIN_ARCHIVE_UNREACHABLE_WITH_CLOUD_IDENTITY` | Inventory | yes |
+
+In-cycle archiving of `Computers.AlreadyEnrolled.txt` (Wave folder and Campaign root): each result
+is checked as soon as its worker ends. A local success (`SUCCESS`, `AUDIT_SUCCESS_ALREADY_INTUNE`) whose
+local Entra device ID matches exactly one Intune object of the same tenant in the cycle inventory, with
+a sync within `HybridJoin.CloudConfirmationMaxSyncAgeDays`, becomes `ENROLLED_CONFIRMED_IN_CYCLE` and is
+archived at once. A local success not yet in that inventory waits for the interim confirmation: every
+`HybridJoin.InterimCloudConfirmationMinutes`, a background Intune export scoped to the pending results
+(20-minute limit) confirms them the same way; it never blocks worker slots, and a missing Graph sign-in
+disables it for the rest of the Run with one warning. An unreachable computer (`*ADMIN_SHARE_UNREACHABLE`)
+becomes `ENROLLED_CONFIRMED_BY_CLOUD_IDENTITY` when `HybridJoin.ArchiveUnreachableWithCloudIdentity` is on
+and fresh inventories prove AD ObjectGUID = DeviceId of one enabled hybrid (ServerAd) Entra device =
+AzureADDeviceId of one Intune MDM object of the same tenant, synced within the same limit. Results
+confirmed during the cycle are left as they are by the post-cycle confirmation.
 
 `HybridJoin.RepairUnhealthyJoinWithIntuneTrace` (default false): a device reported
 `INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY` keeps a local trace (`State\IntuneTraceRepair.json.txt`). On a

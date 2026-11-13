@@ -338,6 +338,164 @@ foreach ($backupName in $backupNames) {
 if (@($backupNames | Select-Object -Unique).Count -ne $backupNames.Count) { throw 'Two enrollment keys share one backup file name.' }
 Write-Host ('PASS: enrollment backup paths stay below MAX_PATH (longest {0})' -f (@($backupNames | ForEach-Object { (Join-Path $worstDir $_).Length } | Measure-Object -Maximum).Maximum))
 
+# In-cycle archiving: a local success matched in the cycle inventory, an unreachable computer proven
+# by the AD/Entra/Intune identity chain, and the background interim confirmation.
+& $module {
+    param($PackageRoot)
+    $base = Join-Path ([IO.Path]::GetTempPath()) ('SEMT-incycle-'+[guid]::NewGuid().ToString('N'))
+    $inventoryRoot = Join-Path $base 'Inventory'
+    New-Item -ItemType Directory -Path $inventoryRoot -Force | Out-Null
+    try {
+        $tenant = '22222222-2222-2222-2222-222222222222'
+        $idA = 'aaaaaaaa-0000-0000-0000-000000000001'
+        $idB = 'bbbbbbbb-0000-0000-0000-000000000002'
+        $idOld = 'cccccccc-0000-0000-0000-000000000003'
+        $recent = [datetime]::UtcNow.AddDays(-2).ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $old = [datetime]::UtcNow.AddDays(-45).ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $intuneCsv = Join-Path $base 'DevicesIntune.csv'
+        @(
+            [pscustomobject]@{ ComputerName='PC-A'; AzureADDeviceId=$idA; ManagementAgent='mdm'; LastSyncDateTime=$recent; IntuneInventoryPresent='True'; InventoryTenantId=$tenant },
+            [pscustomobject]@{ ComputerName='CLOUD-NAME-B'; AzureADDeviceId=$idB; ManagementAgent='mdm'; LastSyncDateTime=$recent; IntuneInventoryPresent='True'; InventoryTenantId=$tenant },
+            [pscustomobject]@{ ComputerName='PC-OLD'; AzureADDeviceId=$idOld; ManagementAgent='mdm'; LastSyncDateTime=$old; IntuneInventoryPresent='True'; InventoryTenantId=$tenant }
+        ) | Export-Csv -LiteralPath $intuneCsv -NoTypeInformation -Encoding UTF8
+        $entraCsv = Join-Path $base 'DevicesEntra.csv'
+        @(
+            [pscustomobject]@{ ComputerName='PC-B'; DeviceId=$idB; TrustType='ServerAd'; AccountEnabled='True'; EntraInventoryPresent='True'; InventoryTenantId=$tenant },
+            [pscustomobject]@{ ComputerName='PC-OLD'; DeviceId=$idOld; TrustType='ServerAd'; AccountEnabled='True'; EntraInventoryPresent='True'; InventoryTenantId=$tenant }
+        ) | Export-Csv -LiteralPath $entraCsv -NoTypeInformation -Encoding UTF8
+        $adMap = @{
+            (Get-SemtComputerKey -ComputerName 'PC-B') = [pscustomobject]@{ ComputerName='PC-B'; ObjectGUID=$idB }
+            (Get-SemtComputerKey -ComputerName 'PC-OLD') = [pscustomobject]@{ ComputerName='PC-OLD'; ObjectGUID=$idOld }
+            (Get-SemtComputerKey -ComputerName 'PC-NOCLOUD') = [pscustomobject]@{ ComputerName='PC-NOCLOUD'; ObjectGUID='dddddddd-0000-0000-0000-000000000004' }
+        }
+        $options = [ordered]@{
+            'HybridJoin.CloudConfirmationMaxSyncAgeDays' = [pscustomobject]@{ Value = 30 }
+            'HybridJoin.InterimCloudConfirmationMinutes' = [pscustomobject]@{ Value = 60 }
+            'HybridJoin.ArchiveUnreachableWithCloudIdentity' = [pscustomobject]@{ Value = $true }
+            'HybridJoin.PostCycleCloudInventoryRefresh' = [pscustomobject]@{ Value = $true }
+            'IntuneTenantId' = [pscustomobject]@{ Value = '' }
+            'IntuneInventoryPageSize' = [pscustomobject]@{ Value = 999 }
+        }
+        $messages = New-Object System.Collections.Generic.List[string]
+        $context = [pscustomobject]@{
+            PackageRoot = $PackageRoot; DryRun = $false; CycleNumber = 1; Options = $options
+            Log = { param($text,$color) $messages.Add([string]$text) }.GetNewClosure()
+            RunContext = [pscustomobject]@{ InventoryRoot = $inventoryRoot }
+            ExportScripts = [pscustomobject]@{ Intune = ''; Entra = '' }
+            Inventory = @{
+                AD = [pscustomobject]@{ Source = 'Shared'; Map = $adMap; CsvPath = ''; SharedPath = '' }
+                Intune = [pscustomobject]@{ Source = 'Shared'; Map = @{}; CsvPath = $intuneCsv; SharedPath = $intuneCsv }
+                Entra = [pscustomobject]@{ Source = 'Shared'; Map = @{}; CsvPath = $entraCsv; SharedPath = $entraCsv }
+            }
+        }
+        $index = Get-HybridJoinInventoryIndex -Context $context -Kind Intune
+        $probe = [pscustomobject]@{ Dsreg_DeviceId=$idA; Dsreg_TenantId=$tenant; IntuneEnrolled='True' }
+        if ((Get-HybridJoinIndexedIntuneConfirmation -Row $probe -Index $index -MaxSyncAgeDays 30).State -ne 'Confirmed') { throw 'Indexed confirmation failed.' }
+        $probe.Dsreg_DeviceId = $idOld
+        if ((Get-HybridJoinIndexedIntuneConfirmation -Row $probe -Index $index -MaxSyncAgeDays 30).State -ne 'SyncTooOld') { throw 'An old Intune sync was accepted.' }
+        $probe.Dsreg_DeviceId = 'eeeeeeee-0000-0000-0000-000000000005'
+        if ((Get-HybridJoinIndexedIntuneConfirmation -Row $probe -Index $index -MaxSyncAgeDays 30).State -ne 'NotFound') { throw 'An absent device ID was not reported NotFound.' }
+        $probe.Dsreg_DeviceId = $idA; $probe.Dsreg_TenantId = '44444444-4444-4444-4444-444444444444'
+        if ((Get-HybridJoinIndexedIntuneConfirmation -Row $probe -Index $index -MaxSyncAgeDays 30).State -ne 'Unknown') { throw 'A tenant mismatch was accepted.' }
+        $probe.Dsreg_TenantId = $tenant; $probe.IntuneEnrolled = 'False'
+        if ((Get-HybridJoinIndexedIntuneConfirmation -Row $probe -Index $index -MaxSyncAgeDays 30).State -ne 'CloudOnly') { throw 'Missing local enrollment was accepted.' }
+        $first = @(Import-Csv -LiteralPath $intuneCsv)[0]
+        $dup = New-HybridJoinDeviceIdIndex -Rows @($first,$first) -Kind Intune
+        $probe.IntuneEnrolled = 'True'
+        if ((Get-HybridJoinIndexedIntuneConfirmation -Row $probe -Index $dup -MaxSyncAgeDays 30).State -ne 'Ambiguous') { throw 'Duplicate Intune objects were accepted.' }
+        Write-Host 'PASS: indexed Intune confirmation requires one same-tenant device ID with a recent sync'
+
+        # A: local success already in the cycle inventory is confirmed and archivable at once.
+        $rowA = [pscustomobject]@{ ComputerName='PC-A'; Status='SUCCESS'; NextAction='NO_ACTION_ALREADY_INTUNE_OR_HEALTHY'; Dsreg_DeviceId=$idA; Dsreg_TenantId=$tenant; IntuneEnrolled='True'; UserLicensePreflightState='Unknown' }
+        Invoke-HybridJoinCompletedRow -Context $context -Row $rowA
+        if ($rowA.Status -ne 'ENROLLED_CONFIRMED_IN_CYCLE' -or $rowA.IntuneConfirmationSource -ne 'CycleInventory' -or -not (Test-HybridJoinAlreadyEnrolled $rowA)) { throw "In-cycle success was not archivable: $($rowA.Status)" }
+        # A success not yet in the inventory stays SUCCESS and waits for the interim confirmation.
+        $newId = 'ffffffff-0000-0000-0000-000000000006'
+        $rowNew = [pscustomobject]@{ ComputerName='PC-NEW'; Status='SUCCESS'; NextAction='NO_ACTION_ALREADY_INTUNE_OR_HEALTHY'; Dsreg_DeviceId=$newId; Dsreg_TenantId=$tenant; IntuneEnrolled='True'; UserLicensePreflightState='Unknown' }
+        Invoke-HybridJoinCompletedRow -Context $context -Row $rowNew
+        if ($rowNew.Status -ne 'SUCCESS' -or (Test-HybridJoinAlreadyEnrolled $rowNew)) { throw 'A success absent from Intune was archived.' }
+        if (-not (Get-HybridJoinInterimState -Context $context).Pending.ContainsKey((Get-SemtComputerKey -ComputerName 'PC-NEW'))) { throw 'The new success was not queued for the interim confirmation.' }
+        $unlicensed = [pscustomobject]@{ ComputerName='PC-LIC'; Status='SUCCESS'; Dsreg_DeviceId=$idA; Dsreg_TenantId=$tenant; IntuneEnrolled='True'; UserLicensePreflightState='NoAssignedLicense' }
+        Invoke-HybridJoinCompletedRow -Context $context -Row $unlicensed
+        if ($unlicensed.Status -ne 'SUCCESS') { throw 'An unlicensed result was confirmed in cycle.' }
+        Write-Host 'PASS: in-cycle confirmation archives only local successes found in the cycle inventory'
+
+        # C: unreachable computer proven by AD ObjectGUID = hybrid Entra device ID = Intune MDM object.
+        $rowB = [pscustomobject]@{ ComputerName='PC-B'; Status='ADMIN_SHARE_UNREACHABLE'; NextAction='' }
+        Invoke-HybridJoinCompletedRow -Context $context -Row $rowB
+        if ($rowB.Status -ne 'ENROLLED_CONFIRMED_BY_CLOUD_IDENTITY' -or $rowB.IntuneConfirmationState -ne 'CloudIdentityConfirmed' -or -not (Test-HybridJoinAlreadyEnrolled $rowB)) { throw "Unreachable enrolled computer was not archivable: $($rowB.Status)" }
+        if ((Get-HybridJoinCooldownHours -Status $rowB.Status) -ne 168.0 -or (Get-HybridJoinCentralLogBucket -Result $rowB) -ne 'Success') { throw 'Cloud identity status has the wrong cooldown or bucket.' }
+        foreach ($name in @('PC-OLD','PC-NOCLOUD','PC-UNKNOWN')) {
+            $r = [pscustomobject]@{ ComputerName=$name; Status='ADMIN_SHARE_UNREACHABLE'; NextAction='' }
+            Invoke-HybridJoinCompletedRow -Context $context -Row $r
+            if ($r.Status -ne 'ADMIN_SHARE_UNREACHABLE' -or (Test-HybridJoinAlreadyEnrolled $r)) { throw "Unproven unreachable computer $name was archived." }
+        }
+        $options['HybridJoin.ArchiveUnreachableWithCloudIdentity'].Value = $false
+        $rowOff = [pscustomobject]@{ ComputerName='PC-B'; Status='ADMIN_SHARE_UNREACHABLE'; NextAction='' }
+        Invoke-HybridJoinCompletedRow -Context $context -Row $rowOff
+        if ($rowOff.Status -ne 'ADMIN_SHARE_UNREACHABLE') { throw 'Option off still archived an unreachable computer.' }
+        $options['HybridJoin.ArchiveUnreachableWithCloudIdentity'].Value = $true
+        $context.Inventory['Entra'].Source = 'SharedNotFresh'
+        $rowStale = [pscustomobject]@{ ComputerName='PC-B'; Status='ADMIN_SHARE_UNREACHABLE'; NextAction='' }
+        Invoke-HybridJoinCompletedRow -Context $context -Row $rowStale
+        if ($rowStale.Status -ne 'ADMIN_SHARE_UNREACHABLE') { throw 'A stale Entra inventory proved an unreachable computer.' }
+        $context.Inventory['Entra'].Source = 'Shared'
+        Write-Host 'PASS: unreachable computers are archived only with the full AD/Entra/Intune identity chain'
+
+        # The post-cycle step keeps in-cycle proofs and does not query Graph for them.
+        $exportMarker = Join-Path $base 'postcycle-export.txt'
+        $markerScript = Join-Path $base 'Marker.ps1'
+        Set-Content -LiteralPath $markerScript -Encoding ASCII -Value @('param([string]$OutputPath,[switch]$ForceRefresh,[string]$ComputerListPath,[string]$PageSize,[string]$TenantId,[string]$DeviceIdListPath)',("Set-Content -LiteralPath '{0}' -Value started" -f $exportMarker),'exit 5')
+        $context.ExportScripts = [pscustomobject]@{ Intune = $markerScript; Entra = $markerScript }
+        Invoke-HybridJoinPostCycle -Context $context -Rows @($rowA,$rowB)
+        if ($rowA.Status -ne 'ENROLLED_CONFIRMED_IN_CYCLE' -or $rowA.IntuneConfirmationState -ne 'Confirmed' -or $rowB.Status -ne 'ENROLLED_CONFIRMED_BY_CLOUD_IDENTITY' -or $rowB.IntuneConfirmationState -ne 'CloudIdentityConfirmed') { throw 'Post-cycle step reset an in-cycle proof.' }
+        if (Test-Path -LiteralPath $exportMarker) { throw 'Post-cycle step queried Graph for in-cycle confirmed results.' }
+        Write-Host 'PASS: post-cycle confirmation keeps in-cycle proofs and stays idempotent'
+
+        # B: background interim export confirms the pending success; slots are never awaited.
+        $fakeIntune = Join-Path $base 'Intune-Interim.ps1'
+        Set-Content -LiteralPath $fakeIntune -Encoding ASCII -Value @(
+            'param([string]$OutputPath,[switch]$ForceRefresh,[string]$ComputerListPath,[string]$PageSize,[string]$TenantId,[string]$DeviceIdListPath)',
+            'Write-Output ''Account     : admin@example.test''',
+            ('[pscustomobject]@{{ ComputerName=''PC-NEW''; AzureADDeviceId=''{0}''; ManagementAgent=''mdm''; LastSyncDateTime=''{1}''; IntuneInventoryPresent=''True''; InventoryTenantId=''{2}'' }} | Export-Csv -LiteralPath $OutputPath -NoTypeInformation -Encoding UTF8' -f $newId,$recent,$tenant),
+            'exit 0')
+        $context.ExportScripts = [pscustomobject]@{ Intune = $fakeIntune; Entra = $markerScript }
+        $state = Get-HybridJoinInterimState -Context $context
+        if (@(Invoke-HybridJoinInterimConfirmation -Context $context).Count -ne 0 -or $null -ne $state.Job) { throw 'Interim confirmation started before its interval.' }
+        $state.LastStartUtc = [datetime]::UtcNow.AddHours(-2)
+        [void](Invoke-HybridJoinInterimConfirmation -Context $context)
+        if ($null -eq $state.Job) { throw 'Interim confirmation did not start in the background.' }
+        [void](Wait-Job -Job $state.Job -Timeout 120)
+        $confirmed = @(Invoke-HybridJoinInterimConfirmation -Context $context)
+        if ($confirmed.Count -ne 1 -or $rowNew.Status -ne 'ENROLLED_CONFIRMED_IN_CYCLE' -or $rowNew.IntuneConfirmationSource -ne 'InterimInventory' -or -not (Test-HybridJoinAlreadyEnrolled $rowNew)) { throw "Interim confirmation failed: $($rowNew.Status); $($messages -join ' | ')" }
+        if ($state.Pending.Count -ne 0) { throw 'Confirmed result stayed pending.' }
+        Write-Host 'PASS: background interim confirmation archives a new enrollment during the cycle'
+
+        # Missing Graph sign-in disables the interim confirmation for the Run with one warning.
+        $noAccount = Join-Path $base 'Intune-NoAccount.ps1'
+        Set-Content -LiteralPath $noAccount -Encoding ASCII -Value @('param([string]$OutputPath,[switch]$ForceRefresh,[string]$ComputerListPath,[string]$PageSize,[string]$TenantId,[string]$DeviceIdListPath)','exit 5')
+        $context.ExportScripts = [pscustomobject]@{ Intune = $noAccount; Entra = $markerScript }
+        $rowLate = [pscustomobject]@{ ComputerName='PC-LATE'; Status='SUCCESS'; Dsreg_DeviceId='99999999-0000-0000-0000-000000000009'; Dsreg_TenantId=$tenant; IntuneEnrolled='True'; UserLicensePreflightState='Unknown' }
+        Invoke-HybridJoinCompletedRow -Context $context -Row $rowLate
+        $state.LastStartUtc = [datetime]::UtcNow.AddHours(-2)
+        [void](Invoke-HybridJoinInterimConfirmation -Context $context)
+        [void](Wait-Job -Job $state.Job -Timeout 120)
+        [void](Invoke-HybridJoinInterimConfirmation -Context $context)
+        if (-not $state.Disabled -or $state.Pending.Count -ne 0) { throw "Missing sign-in did not disable the interim confirmation: $($messages -join ' | ')" }
+        $state.LastStartUtc = [datetime]::UtcNow.AddHours(-2)
+        Invoke-HybridJoinCompletedRow -Context $context -Row ([pscustomobject]@{ ComputerName='PC-LATE2'; Status='SUCCESS'; Dsreg_DeviceId='99999999-0000-0000-0000-000000000010'; Dsreg_TenantId=$tenant; IntuneEnrolled='True'; UserLicensePreflightState='Unknown' })
+        [void](Invoke-HybridJoinInterimConfirmation -Context $context)
+        if ($null -ne $state.Job -or @($messages | Where-Object { $_ -like 'WARNING: interim Intune confirmation disabled*' }).Count -ne 1) { throw 'Disabled interim confirmation restarted or warned more than once.' }
+        [void](Invoke-HybridJoinInterimConfirmation -Context $context -Mode Stop)
+        Write-Host 'PASS: missing Graph sign-in disables the interim confirmation once for the Run'
+    }
+    finally {
+        if ($null -ne $script:HybridJoinInterim -and $null -ne $script:HybridJoinInterim.Job) { Remove-Job -Job $script:HybridJoinInterim.Job -Force -ErrorAction SilentlyContinue }
+        $script:HybridJoinInterim = $null
+        Remove-Item -LiteralPath $base -Recurse -Force -ErrorAction SilentlyContinue
+    }
+} $root
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
