@@ -15,7 +15,7 @@
     The target receives only the autonomous endpoint script.
 
 .VERSION
-    1.0.2
+    1.0.3
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -28,7 +28,7 @@ param([Parameter(Mandatory = $true)][string]$ContractPath)
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:WorkerVersion = '1.0.2'
+$script:WorkerVersion = '1.0.3'
 
 $packageRoot = Split-Path -Path $PSScriptRoot -Parent
 Import-Module (Join-Path -Path $packageRoot -ChildPath 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -MinimumVersion 1.0.0 -Force -ErrorAction Stop
@@ -114,6 +114,10 @@ function Invoke-WorkerPrerequisitesEndpoint {
         $run = Invoke-SemtSystemTaskEndpoint -Mode $remoteMode -ConnectionTarget $target -CorrelationId $prerequisitesCorrelation -RemoteScriptPath ([string]$payload.RemoteScriptPath) -RemoteSharePath ([string]$payload.RemoteSharePath) -ExpectedSha256 $sha -Arguments $prerequisitesArguments -LogPath $logPath -TimeoutMinutes $timeout -LeasePath $leasePath -RpcFailureWindowMinutes ([int](Get-SemtPropertyValue -InputObject $contract.PsExec -Name 'RpcFailureWindowMinutes' -Default 30)) -RemoteDataShare ([string]$payload.RemoteDataShare) -StartTimeoutMinutes ([int](Get-SemtPropertyValue -InputObject $contract.PsExec -Name 'StartTimeoutMinutes' -Default 0))
         $transportDetail = ('{0} completed={1}; exit code {2}' -f $remoteMode,$run.Completed,$run.ExitCode)
         $done = Read-SemtRemoteAttemptResult -RemoteDataShare ([string]$payload.RemoteDataShare) -CorrelationId $prerequisitesCorrelation
+        if (-not $done.Completed -and $run.PSObject.Properties['NotRegistered'] -and [bool]$run.NotRegistered) {
+            # Run was never called: nothing started on the target.
+            return [pscustomobject]@{ State = 'NotStarted'; Detail = ('Prerequisites endpoint task could not be registered. {0}' -f $run.Detail) }
+        }
         if (-not $done.Completed -and $run.PSObject.Properties['NotStarted'] -and [bool]$run.NotStarted) {
             # The start limit already ran the cleanup (Remove-SemtUnstartedSystemTask) for this task.
             return [pscustomobject]@{ State = 'NotStarted'; Detail = ('Prerequisites endpoint task did not start. {0}' -f $run.Detail) }
@@ -187,6 +191,7 @@ function Get-WorkerNextAction {
         '^REMOTE_RESULT_INCOMPLETE$' { return 'CHECK_TARGET_ENDPOINT_LOG' }
         '^REMOTE_LOG_COLLECTION_FAILED$' { return 'CHECK_TARGET_ENDPOINT_LOG' }
         '^REMOTE_TASK_NOT_STARTED$' { return 'RETRY_LATER_TASK_NOT_STARTED' }
+        '^REMOTE_TASK_NOT_REGISTERED$' { return 'RETRY_LATER_TASK_NOT_REGISTERED' }
         '^COMPONENT_INTEGRITY_MISMATCH$' { return 'REINSTALL_SIGNED_PACKAGE' }
         '^ERROR$' { return 'CHECK_CONNECTIVITY_OR_ADMIN_ACCESS' }
         default { return 'REVIEW_LOGS' }
@@ -363,6 +368,8 @@ try {
                 if ($attemptResult.Completed) {
                     Set-ResultFromAttempt -Attempt $attemptResult.Result
                     if (-not $transport.Completed) { $result.JobErrorMessage = ('Remote cleanup unconfirmed: {0}' -f $transport.Detail) }
+                } elseif ($transport.PSObject.Properties['NotRegistered'] -and [bool]$transport.NotRegistered) {
+                    Set-WorkerStatus -Status 'REMOTE_TASK_NOT_REGISTERED' -Detail ("{0}: {1}" -f $remoteMode,$transport.Detail) -NextAction 'RETRY_LATER_TASK_NOT_REGISTERED'
                 } elseif ($transport.PSObject.Properties['NotStarted'] -and [bool]$transport.NotStarted) {
                     Set-WorkerStatus -Status 'REMOTE_TASK_NOT_STARTED' -Detail ("{0}: {1}" -f $remoteMode,$transport.Detail) -NextAction 'RETRY_LATER_TASK_NOT_STARTED'
                 } elseif ($transport.Completed -and $transport.ExitCode -in @('-1073741790','3221225506')) {

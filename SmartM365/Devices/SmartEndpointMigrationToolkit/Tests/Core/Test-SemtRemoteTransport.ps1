@@ -27,7 +27,19 @@ class SemtFakeTask {
     [int]$State = 3
     [datetime]$LastRunTime = [datetime]::Now
     [int]$LastTaskResult = 0
-    [object] Run([object]$arg) { return $null }
+    # Run failures: the request is lost (RunApplies = false) or applied without reply (true).
+    [int]$RunCalls = 0
+    [int]$RunFailures = 0
+    [bool]$RunApplies = $false
+    [object] Run([object]$arg) {
+        $this.RunCalls++
+        if ($this.RunFailures -gt 0) {
+            $this.RunFailures--
+            if ($this.RunApplies) { $this.LastRunTime = [datetime]::Now; $this.State = 3 }
+            throw [System.Runtime.InteropServices.COMException]::new('Synthetic RPC failure. (Exception from HRESULT: 0x800706BE)', -2147023170)
+        }
+        return $null
+    }
 }
 class SemtFakeFolder {
     [SemtFakeTask]$Task
@@ -51,16 +63,32 @@ class SemtFakeFolder {
     # Replies without State/LastRunTime, as seen right after a dropped RPC connection.
     [int]$EmptyReplies = 0
     [bool]$DeleteAppliesBeforeFailure = $false
+    # Registration failures: lost request, or applied without reply (RegisterAppliesBeforeFailure).
+    [int]$RegisterAttempts = 0
+    [int]$RegisterFailures = 0
+    [bool]$RegisterAlwaysFails = $false
+    [bool]$RegisterAppliesBeforeFailure = $false
+    [int]$RegisterFailHResult = -2147023170
+    [datetime]$InitialLastRun = [datetime]::Now
+    [int]$TaskRunFailures = 0
+    [bool]$TaskRunApplies = $false
     [object] RegisterTaskDefinition([string]$name,[object]$definition,[int]$flags,[object]$user,[object]$password,[int]$logon,[object]$sddl) {
+        $this.RegisterAttempts++
         if ($this.Collide) { throw 'task already exists' }
+        if ($null -ne $this.Task) { throw [System.Runtime.InteropServices.COMException]::new('Cannot create a file when that file already exists. (Exception from HRESULT: 0x800700B7)', -2147024713) }
+        if ($this.RegisterAlwaysFails -or $this.RegisterFailures -gt 0) {
+            $this.RegisterFailures--
+            if ($this.RegisterAppliesBeforeFailure) { $this.Task = [SemtFakeTask]::new(); $this.Task.Definition = $definition; $this.Task.State = $this.InitialState; $this.Task.LastRunTime = $this.InitialLastRun; $this.Task.RunFailures = $this.TaskRunFailures; $this.Task.RunApplies = $this.TaskRunApplies }
+            throw [System.Runtime.InteropServices.COMException]::new(('Synthetic RPC failure. (Exception from HRESULT: 0x{0:X8})' -f $this.RegisterFailHResult), $this.RegisterFailHResult)
+        }
         $this.RegisterCalls++
         $this.Flags = $flags
-        $this.Task = [SemtFakeTask]::new(); $this.Task.Definition = $definition; $this.Task.State = $this.InitialState
+        $this.Task = [SemtFakeTask]::new(); $this.Task.Definition = $definition; $this.Task.State = $this.InitialState; $this.Task.LastRunTime = $this.InitialLastRun; $this.Task.RunFailures = $this.TaskRunFailures; $this.Task.RunApplies = $this.TaskRunApplies
         return $this.Task
     }
     [object] GetTask([string]$name) {
         $this.GetTaskCalls++
-        if ($this.Gone) { throw [System.Runtime.InteropServices.COMException]::new('The system cannot find the file specified. (Exception from HRESULT: 0x80070002)', -2147024894) }
+        if ($this.Gone -or ($null -eq $this.Task -and -not $this.AlwaysFail -and $this.GetTaskFailures -le 0)) { throw [System.Runtime.InteropServices.COMException]::new('The system cannot find the file specified. (Exception from HRESULT: 0x80070002)', -2147024894) }
         if ($this.AlwaysFail -or $this.GetTaskFailures -gt 0) {
             $this.GetTaskFailures--
             throw [System.Runtime.InteropServices.COMException]::new(('Synthetic RPC failure. (Exception from HRESULT: 0x{0:X8})' -f $this.FailHResult), $this.FailHResult)
@@ -81,8 +109,16 @@ class SemtFakeFolder {
 class SemtFakeService {
     [SemtFakeFolder]$Folder = [SemtFakeFolder]::new()
     [int]$Connects = 0
-    [void] Connect() { $this.Connects++ }
-    [void] Connect([string]$target) { $this.Connects++ }
+    [int]$ConnectFailures = 0
+    [bool]$ConnectAlwaysFails = $false
+    [void] Connect() { $this.Connect('') }
+    [void] Connect([string]$target) {
+        $this.Connects++
+        if ($this.ConnectAlwaysFails -or $this.ConnectFailures -gt 0) {
+            $this.ConnectFailures--
+            throw [System.Runtime.InteropServices.COMException]::new('The RPC server is unavailable. (Exception from HRESULT: 0x800706BA)', -2147023174)
+        }
+    }
     [object] GetFolder([string]$path) { return $this.Folder }
     [object] NewTask([int]$flags) { return [SemtFakeDefinition]::new() }
 }
@@ -136,7 +172,7 @@ foreach ($mode in @('ScheduledTask','WinRM')) {
     [IO.File]::WriteAllText($file,'synthetic')
     $hash=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
     $request=@{Target='synthetic.invalid'; Name='WCH-SEMT-11111111111111111111111111111111'; Arguments='-File "C:\Program Files\test.ps1"'; Script=$file; ShareScript=$file; Sha256=$hash; Mode=$mode}
-    $result=& $operation $request
+    $result=& $operation $request 3>$null
     if (-not $result.Cleaned -or -not $script:fake.Folder.Deleted -or (Test-Path -LiteralPath $dir)) { throw "$mode cleanup failed" }
     if ($script:fake.Folder.Flags -ne 2 -or $script:fake.Folder.Task.Definition.Principal.UserId -ne 'SYSTEM' -or $script:fake.Folder.Task.Definition.Principal.LogonType -ne 5) { throw "$mode SYSTEM or collision guard failed" }
     $passed++
@@ -151,25 +187,25 @@ foreach ($principal in @('S-1-5-18',$localizedName,$shortName)) {
     [void][IO.Directory]::CreateDirectory($dir)
     $file=Join-Path $dir 'endpoint.ps1'; [IO.File]::WriteAllText($file,'synthetic')
     $hash=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
-    $result=& $operation @{Target='synthetic.invalid';Name='WCH-SEMT-11111111111111111111111111111111';Arguments='test';Script=$file;ShareScript=$file;Sha256=$hash;Mode='ScheduledTask'}
+    $result=& $operation @{Target='synthetic.invalid';Name='WCH-SEMT-11111111111111111111111111111111';Arguments='test';Script=$file;ShareScript=$file;Sha256=$hash;Mode='ScheduledTask'} 3>$null
     if (-not $result.Cleaned -or -not $script:fake.Folder.Deleted -or (Test-Path -LiteralPath $dir)) { throw "SYSTEM principal '$principal' was not accepted" }
     $passed++
 }
 $script:fake=[SemtFakeService]::new()
 $script:fake.Folder.ReplacementPrincipal='S-1-5-19'
-try { & $operation @{Target='x';Name='x';Arguments='x';Mode='ScheduledTask'}; throw 'Expected rejection of non-SYSTEM principal' }
+try { & $operation @{Target='x';Name='x';Arguments='x';Mode='ScheduledTask'} 3>$null; throw 'Expected rejection of non-SYSTEM principal' }
 catch { if ($_.Exception.Message -notmatch 'identity changed') { throw } }
 if ($script:fake.Folder.Deleted) { throw 'Non-SYSTEM task was deleted' }
 $passed++
 $script:fake=[SemtFakeService]::new()
 $script:fake.Folder.Collide=$true
-try { & $operation @{Target='x';Name='x';Arguments='x';Mode='ScheduledTask'}; throw 'Expected a collision' }
+try { & $operation @{Target='x';Name='x';Arguments='x';Mode='ScheduledTask'} 3>$null; throw 'Expected a collision' }
 catch { if ($_.Exception.Message -notmatch 'already exists') { throw } }
 if ($script:fake.Folder.Deleted) { throw 'Collision deleted a task' }
 $passed++
 $script:fake=[SemtFakeService]::new()
 $script:fake.Folder.ChangeAction=$true
-try { & $operation @{Target='x';Name='x';Arguments='x';Mode='ScheduledTask'}; throw 'Expected an identity mismatch' }
+try { & $operation @{Target='x';Name='x';Arguments='x';Mode='ScheduledTask'} 3>$null; throw 'Expected an identity mismatch' }
 catch { if ($_.Exception.Message -notmatch 'identity changed') { throw } }
 if ($script:fake.Folder.Deleted) { throw 'Changed task was deleted' }
 $passed++
@@ -178,7 +214,7 @@ $dir=Join-Path ([IO.Path]::GetTempPath()) ('SEMT-transport-test-' + [guid]::NewG
 [void][IO.Directory]::CreateDirectory($dir)
 $file=Join-Path $dir 'endpoint.ps1'; [IO.File]::WriteAllText($file,'synthetic')
 try {
-    try { & $operation @{Target='x';Name='x';Arguments='x';Mode='ScheduledTask';Script=$file;ShareScript=$file;Sha256='wrong'}; throw 'Expected a hash mismatch' }
+    try { & $operation @{Target='x';Name='x';Arguments='x';Mode='ScheduledTask';Script=$file;ShareScript=$file;Sha256='wrong'} 3>$null; throw 'Expected a hash mismatch' }
     catch { if ($_.Exception.Message -notmatch 'hash changed') { throw } }
     if (-not (Test-Path -LiteralPath $file)) { throw 'Changed endpoint was deleted' }
     if ($script:fake.Folder.Deleted) { throw 'Task deleted despite changed endpoint' }
@@ -187,7 +223,7 @@ try {
 
 # Transient RPC failures while following or cleaning the task.
 function Invoke-SemtRpcScenario {
-    param([Parameter(Mandatory=$true)]$Service,[int]$Window = 15)
+    param([Parameter(Mandatory=$true)]$Service,[int]$Window = 15,[int]$StartTimeout = 0)
     $script:fake=$Service
     $dir=Join-Path ([IO.Path]::GetTempPath()) ('SEMT-transport-test-' + [guid]::NewGuid().ToString('N'))
     [void][IO.Directory]::CreateDirectory($dir)
@@ -196,7 +232,7 @@ function Invoke-SemtRpcScenario {
     $startedAt=$script:FakeNow
     $outcome=[ordered]@{ Output=$null; Warnings=@(); Error=''; DirectoryKept=$false; ElapsedMinutes=0 }
     try {
-        $records=@(& $operation @{Target='synthetic.invalid';Name='WCH-SEMT-11111111111111111111111111111111';Arguments='test';Script=$file;ShareScript=$file;Sha256=$hash;Mode='ScheduledTask';RpcFailureWindowMinutes=$Window} 3>&1)
+        $records=@(& $operation @{Target='synthetic.invalid';Name='WCH-SEMT-11111111111111111111111111111111';Arguments='test';Script=$file;ShareScript=$file;Sha256=$hash;Mode='ScheduledTask';RpcFailureWindowMinutes=$Window;StartTimeoutMinutes=$StartTimeout} 3>&1)
         $outcome.Warnings=@($records | Where-Object { $_ -is [System.Management.Automation.WarningRecord] } | ForEach-Object { [string]$_.Message })
         $outcome.Output=@($records | Where-Object { $_ -isnot [System.Management.Automation.WarningRecord] })
     }
@@ -211,7 +247,9 @@ function Invoke-SemtRpcScenario {
 $service=[SemtFakeService]::new(); $service.Folder.GetTaskFailures=3
 $scenario=Invoke-SemtRpcScenario -Service $service
 if ($scenario.Error -or $scenario.Output.Count -ne 1 -or -not $scenario.Output[0].Cleaned -or -not $service.Folder.Deleted -or $scenario.DirectoryKept) { throw "Intermittent RPC failure was not recovered: $($scenario.Error)" }
-if (@($scenario.Warnings | Where-Object { $_ -like 'SEMT_RPC_TRANSIENT*' }).Count -ne 3 -or $scenario.Warnings[2] -notmatch 'ConsecutiveFailures=3; TotalFailures=3' -or $scenario.Warnings[0] -notmatch 'Code=0x800706BE' -or @($scenario.Warnings | Where-Object { $_ -like 'SEMT_RPC_RECOVERED*' }).Count -ne 1) { throw 'RPC failures were not reported with a counter' }
+$transientWarnings=@($scenario.Warnings | Where-Object { $_ -like 'SEMT_RPC_TRANSIENT*' })
+if (@($scenario.Warnings | Where-Object { $_ -like 'SEMT_TASK_STEP*' }).Count -ne 3 -or $scenario.Warnings[0] -ne 'SEMT_TASK_STEP: Connect') { throw 'Task steps were not reported before Connect, Register and Run' }
+if ($transientWarnings.Count -ne 3 -or $transientWarnings[2] -notmatch 'ConsecutiveFailures=3; TotalFailures=3' -or $transientWarnings[0] -notmatch 'Code=0x800706BE' -or @($scenario.Warnings | Where-Object { $_ -like 'SEMT_RPC_RECOVERED*' }).Count -ne 1) { throw 'RPC failures were not reported with a counter' }
 if ($scenario.Output[0].RpcTransientFailures -ne 3 -or $service.Connects -lt 4) { throw 'RPC recovery did not reconnect to the Task Scheduler' }
 $passed++
 foreach ($code in @(-2147023174,-2147023169,-2147023436,-2147024775,-2147417848,-2147024843,-2147024832)) {
@@ -251,6 +289,43 @@ $passed++
 $service=[SemtFakeService]::new(); $service.Folder.DeleteFailures=1; $service.Folder.DeleteAppliesBeforeFailure=$true
 $scenario=Invoke-SemtRpcScenario -Service $service
 if ($scenario.Error -or -not $scenario.Output[0].Cleaned -or $scenario.DirectoryKept) { throw "A delete applied before a lost reply was not accepted: $($scenario.Error)" }
+$passed++
+# Connection and registration (single 0x800706BE before Run): retried; Run is never repeated.
+$service=[SemtFakeService]::new(); $service.ConnectFailures=2
+$scenario=Invoke-SemtRpcScenario -Service $service
+if ($scenario.Error -or -not $scenario.Output[0].Cleaned -or $service.Connects -lt 3 -or @($scenario.Warnings | Where-Object { $_ -like 'SEMT_RPC_TRANSIENT: Step=Connect; Code=0x800706BA*' }).Count -ne 2 -or $service.Folder.RegisterCalls -ne 1) { throw "A transient connection failure was not retried: $($scenario.Error)" }
+$passed++
+$service=[SemtFakeService]::new(); $service.Folder.RegisterFailures=1
+$scenario=Invoke-SemtRpcScenario -Service $service
+if ($scenario.Error -or -not $scenario.Output[0].Cleaned -or $service.Folder.RegisterAttempts -ne 2 -or $service.Folder.RegisterCalls -ne 1 -or $service.Folder.Task.RunCalls -ne 1 -or @($scenario.Warnings | Where-Object { $_ -like 'SEMT_RPC_TRANSIENT: Step=RegisterTask*' }).Count -ne 1) { throw "A lost registration was not registered again exactly once: $($scenario.Error)" }
+$passed++
+$service=[SemtFakeService]::new(); $service.Folder.RegisterFailures=1; $service.Folder.RegisterAppliesBeforeFailure=$true
+$scenario=Invoke-SemtRpcScenario -Service $service
+if ($scenario.Error -or -not $scenario.Output[0].Cleaned -or $service.Folder.RegisterAttempts -ne 1 -or $service.Folder.Task.RunCalls -ne 1 -or @($scenario.Warnings | Where-Object { $_ -like 'SEMT_TASK_STEP: Register already applied*' }).Count -ne 1) { throw "A registration applied without reply was registered twice: $($scenario.Error)" }
+$passed++
+$service=[SemtFakeService]::new(); $service.Folder.RegisterFailures=1; $service.Folder.RegisterAppliesBeforeFailure=$true; $service.Folder.ChangeAction=$true
+$scenario=Invoke-SemtRpcScenario -Service $service
+if ($scenario.Error -notmatch '^SEMT_TASK_IDENTITY_MISMATCH' -or $service.Folder.RegisterAttempts -ne 1 -or $service.Folder.Task.RunCalls -ne 0 -or $service.Folder.Deleted) { throw "An existing task with another identity was taken or started: $($scenario.Error)" }
+$passed++
+$service=[SemtFakeService]::new(); $service.Folder.RegisterAlwaysFails=$true
+$scenario=Invoke-SemtRpcScenario -Service $service -Window 15
+if ($scenario.Error -or $scenario.Output.Count -ne 1 -or -not $scenario.Output[0].NotRegistered -or $scenario.Output[0].Detail -notmatch '^SEMT_RPC_UNAVAILABLE: Step=RegisterTask' -or $service.Folder.Deleted -or $scenario.ElapsedMinutes -lt 15 -or $scenario.ElapsedMinutes -gt 17) { throw "Registration failing for the whole window was not reported NotRegistered: $($scenario.Error)" }
+$passed++
+$service=[SemtFakeService]::new(); $service.ConnectAlwaysFails=$true
+$scenario=Invoke-SemtRpcScenario -Service $service -Window 15
+if ($scenario.Error -or -not $scenario.Output[0].NotRegistered -or $scenario.Output[0].Detail -notmatch '^SEMT_RPC_UNAVAILABLE: Step=Connect' -or $service.Folder.RegisterAttempts -ne 0) { throw "Connection failing for the whole window was not reported NotRegistered: $($scenario.Error)" }
+$passed++
+$service=[SemtFakeService]::new(); $service.Folder.RegisterFailures=1; $service.Folder.RegisterFailHResult=-2147024891
+$scenario=Invoke-SemtRpcScenario -Service $service
+if ($scenario.Error -notmatch '0x80070005' -or $service.Folder.RegisterAttempts -ne 1 -or $scenario.Output) { throw 'A non-transient registration error was retried or reported NotRegistered' }
+$passed++
+$service=[SemtFakeService]::new(); $service.Folder.TaskRunFailures=1; $service.Folder.TaskRunApplies=$true
+$scenario=Invoke-SemtRpcScenario -Service $service
+if ($scenario.Error -or -not $scenario.Output[0].Cleaned -or $service.Folder.Task.RunCalls -ne 1 -or @($scenario.Warnings | Where-Object { $_ -like 'SEMT_TASK_RUN_UNCONFIRMED: Code=0x800706BE*' }).Count -ne 1) { throw "A Run applied without reply was repeated or not followed: $($scenario.Error)" }
+$passed++
+$service=[SemtFakeService]::new(); $service.Folder.TaskRunFailures=1; $service.Folder.InitialLastRun=[datetime]'1999-11-30'
+$scenario=Invoke-SemtRpcScenario -Service $service -Window 15 -StartTimeout 0
+if ($scenario.Error -or -not $scenario.Output[0].NotStarted -or -not $scenario.Output[0].RunUnconfirmed -or $scenario.Output[0].StartLimitMinutes -ne 15 -or $service.Folder.Task.RunCalls -ne 1 -or $service.Folder.Deleted -or -not $scenario.DirectoryKept) { throw "A lost Run was repeated, or not handed to the start limit: $($scenario.Error)" }
 $passed++
 # Cleanup of the task of an unconfirmed attempt: deleted only when it never started.
 $cleanupFn=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Remove-SemtUnstartedSystemTask'},$true)
@@ -317,7 +392,7 @@ try {
     $script:fake=$service
     $records=@(& $operation @{Target='synthetic.invalid';Name='WCH-SEMT-11111111111111111111111111111111';Arguments='test';Script=$file;ShareScript=$file;Sha256=$hash;Mode='ScheduledTask';StartTimeoutMinutes=1} 3>&1)
     $runOutput=@($records | Where-Object { $_ -isnot [System.Management.Automation.WarningRecord] })
-    if ($runOutput.Count -ne 1 -or $runOutput[0].PSObject.Properties['NotStarted'] -or -not $runOutput[0].Cleaned -or -not $service.Folder.Deleted -or @($records | Where-Object { $_ -is [System.Management.Automation.WarningRecord] }).Count -ne 0) { throw 'A task seen running was cut by the start limit' }
+    if ($runOutput.Count -ne 1 -or $runOutput[0].PSObject.Properties['NotStarted'] -or -not $runOutput[0].Cleaned -or -not $service.Folder.Deleted -or @($records | Where-Object { $_ -is [System.Management.Automation.WarningRecord] -and $_.Message -notlike 'SEMT_TASK_STEP*' }).Count -ne 0) { throw 'A task seen running was cut by the start limit' }
     $passed++
 } finally { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }
 # FollowOnly: the task registered by the first job is followed without a new registration or Run.
@@ -331,7 +406,7 @@ $dir=Join-Path ([IO.Path]::GetTempPath()) ('SEMT-transport-test-' + [guid]::NewG
 $file=Join-Path $dir 'endpoint.ps1'; [IO.File]::WriteAllText($file,'synthetic')
 $hash=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
 try {
-    $followed=& $operation @{Target='synthetic.invalid';Name='WCH-SEMT-11111111111111111111111111111111';Arguments='test';Script=$file;ShareScript=$file;Sha256=$hash;Mode='ScheduledTask';FollowOnly=$true;StartTimeoutMinutes=0}
+    $followed=& $operation @{Target='synthetic.invalid';Name='WCH-SEMT-11111111111111111111111111111111';Arguments='test';Script=$file;ShareScript=$file;Sha256=$hash;Mode='ScheduledTask';FollowOnly=$true;StartTimeoutMinutes=0} 3>$null
     if (-not $followed.Cleaned -or $service.Folder.RegisterCalls -ne 0 -or -not $service.Folder.Deleted) { throw 'FollowOnly registered the task again or did not clean it' }
     $passed++
 } finally { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }
@@ -500,6 +575,16 @@ try {
         $requests=& $module { $script:Requests }
         if (-not $followedTransport.Completed -or $followedTransport.PSObject.Properties['NotStarted'] -or $requests.Count -ne 3 -or -not $requests[2].FollowOnly -or $requests[2].StartTimeoutMinutes -ne 0 -or $requests[2].Name -ne $requests[0].Name) { throw 'A task that started during the cleanup was not followed to the end' }
         $passed++
+        # Transport: connection or registration failed for the whole window => NotRegistered, no cleanup job.
+        & $module {
+            $script:Requests=@()
+            $script:Replies=@([pscustomobject]@{NotRegistered=$true; Detail='SEMT_RPC_UNAVAILABLE: Step=RegisterTask; Code=0x800706BE; ConsecutiveFailures=14; TotalFailures=14; FailingForMinutes=30.4; WindowMinutes=30; Error=synthetic'; Cleaned=$false; ExitCode=''; RpcTransientFailures=14})
+        }
+        $notRegisteredTransport=Invoke-SemtSystemTaskEndpoint -Mode ScheduledTask -ConnectionTarget 'synthetic.invalid' -CorrelationId $cleanupCorrelation -RemoteScriptPath $attemptScript -RemoteSharePath (Join-Path $cleanupShare 'missing\endpoint.ps1') -ExpectedSha256 'test' -Arguments @() -LogPath $log -RemoteDataShare $cleanupShare -StartTimeoutMinutes 15 -RpcFailureWindowMinutes 30
+        $requests=@(& $module { $script:Requests })
+        $logText=[IO.File]::ReadAllText($log)
+        if (-not $notRegisteredTransport.NotRegistered -or $notRegisteredTransport.Completed -or -not $notRegisteredTransport.RpcUnavailable -or $notRegisteredTransport.Detail -notmatch 'could not be registered' -or $notRegisteredTransport.Detail -notmatch 'Step=RegisterTask' -or $requests.Count -ne 1 -or $logText -notmatch 'the endpoint was not started') { throw 'Registration failing for the whole window was not reported NotRegistered' }
+        $passed++
     } finally { Remove-Item -LiteralPath $toolkitRoot -Recurse -Force -ErrorAction SilentlyContinue }
     & $module { function script:Wait-Job { param($Job,$Timeout); return $null } }
 } finally { Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue }
@@ -542,6 +627,32 @@ $transport=$notStartedTransport
 $result=[ordered]@{ExitCode='';JobErrorMessage='';LauncherStatus='UNKNOWN'}
 & $classify
 if ($script:observedStatus -ne 'REMOTE_TASK_NOT_STARTED' -or $script:observedNextAction -ne 'RETRY_LATER_TASK_NOT_STARTED') { throw "A task that did not start was classified $($script:observedStatus)" }
+$passed++
+# A task that could not be registered (nothing started): distinct retryable status, not unconfirmed.
+$script:observedStatus=''; $script:appliedAttempt=$null
+$attemptResult=[pscustomobject]@{Completed=$false;State='';Detail='No result for this attempt on the target.'}
+$transport=$notRegisteredTransport
+$result=[ordered]@{ExitCode='';JobErrorMessage='';LauncherStatus='UNKNOWN'}
+& $classify
+if ($script:observedStatus -ne 'REMOTE_TASK_NOT_REGISTERED' -or $script:observedNextAction -ne 'RETRY_LATER_TASK_NOT_REGISTERED') { throw "A task that could not be registered was classified $($script:observedStatus)" }
+$passed++
+$nextActionFn=$workerAst.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-WorkerNextAction'},$true)
+if (-not $nextActionFn -or $nextActionFn.Extent.Text -notmatch "'\^REMOTE_TASK_NOT_REGISTERED\$' \{ return 'RETRY_LATER_TASK_NOT_REGISTERED' \}") { throw 'REMOTE_TASK_NOT_REGISTERED has no default NextAction' }
+$prerequisitesRunFn=$workerAst.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-WorkerPrerequisitesEndpoint'},$true)
+if ($prerequisitesRunFn.Extent.Text -notmatch "NotRegistered'\] -and \[bool\]\`$run\.NotRegistered\) \{\s+# Run was never called: nothing started on the target\.\s+return \[pscustomobject\]@\{ State = 'NotStarted'") { throw 'Automatic Prerequisites does not treat NotRegistered as not started' }
+$passed++
+# Campaign mapping: Hybrid Join short back-off and bucket, Windows 11 ExecutionTransient and bucket.
+foreach ($campaignFile in @('Campaigns\HybridJoin\SmartEndpointMigration.Campaign.HybridJoin.psm1','Campaigns\Windows11Upgrade\SmartEndpointMigration.Campaign.Windows11Upgrade.psm1')) {
+    $campaignTokens=$null; $campaignErrors=$null
+    $campaignAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $root $campaignFile),[ref]$campaignTokens,[ref]$campaignErrors)
+    foreach ($name in @('Get-HybridJoinCentralLogBucket','Get-HybridJoinCooldownHours','Get-Windows11CentralLogBucket','Get-Windows11FailureCategory')) {
+        $definition=$campaignAst.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
+        if ($definition) { . ([scriptblock]::Create($definition.Extent.Text)) }
+    }
+}
+$notRegistered=[pscustomobject]@{Status='REMOTE_TASK_NOT_REGISTERED';LauncherStatus='REMOTE_TASK_NOT_REGISTERED';RemoteStatus='';Detail='';JobErrorMessage=''}
+if ((Get-HybridJoinCooldownHours -Status 'REMOTE_TASK_NOT_REGISTERED' -BackoffCount 1) -ne 0.25 -or (Get-HybridJoinCooldownHours -Status 'REMOTE_TASK_NOT_REGISTERED' -BackoffCount 9) -ne 6 -or (Get-HybridJoinCentralLogBucket -Result $notRegistered) -ne 'RemoteCollectionFailed') { throw 'Hybrid Join does not give REMOTE_TASK_NOT_REGISTERED the short back-off' }
+if ((Get-Windows11FailureCategory -Result $notRegistered) -ne 'ExecutionTransient' -or (Get-Windows11CentralLogBucket -Result $notRegistered) -ne 'RemoteCollectionFailed') { throw 'Windows 11 does not classify REMOTE_TASK_NOT_REGISTERED as ExecutionTransient' }
 $passed++
 $startDefinition=$catalog.ByName['RemoteTaskStartTimeoutMinutes']
 if ($null -eq $startDefinition -or [int]$startDefinition.Default -ne 15 -or [int]$startDefinition.Minimum -ne 0 -or [string]$startDefinition.Target -ne 'Technician') { throw 'RemoteTaskStartTimeoutMinutes catalog entry differs' }

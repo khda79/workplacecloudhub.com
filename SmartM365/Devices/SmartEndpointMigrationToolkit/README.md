@@ -141,6 +141,17 @@ used and the task is cleaned up. Only failures lasting `RemoteTaskRpcFailureWind
 expires, the target can still be running; cleanup is unconfirmed and must be checked before a
 retry.
 
+The first connection and the task registration are retried the same way, and the worker log
+names each step (Connect, Register, Run) before it starts. A registration is retried only after
+reading the task: if the lost reply hid a registration, the existing task is used only when its
+identity is the one SEMT registers (otherwise nothing is started). When the connection or the
+registration fail for the whole window, the start request was never sent: the PC is reported
+`REMOTE_TASK_NOT_REGISTERED` (NextAction `RETRY_LATER_TASK_NOT_REGISTERED`) and retried with the
+short backoff. A registration applied without reply can leave a task with no trigger, which never
+runs and whose name is not reused. The start request (`Run`) is never repeated: after a lost
+reply the task is followed, and one that never starts goes through the start limit below
+(`RemoteTaskStartTimeoutMinutes`, or the RPC failure window when that option is 0).
+
 A task that Task Scheduler accepts but never launches (for example `Queued`, with a
 `LastRunTime` but no process, as seen when endpoint protection or the target state holds the launch)
 would otherwise hold a worker until the remote execution wait limit. Until the task is seen running,

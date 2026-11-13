@@ -110,10 +110,15 @@ function Remove-SemtTemporaryPayload {
 function Invoke-SemtSystemTaskEndpoint {
     <# ScheduledTask uses remote COM; WinRM uses the same scheduler locally on the target.
        Never stop or delete a task after a lost connection or an unconfirmed start.
-       Transient RPC failures while following or cleaning the task (call failed, server
-       unavailable, timeouts, disconnected object, network path lost) are retried with back-off and a new connection.
-       The task is reported unconfirmed only when they last RpcFailureWindowMinutes in a row
-       (0 = the first failure is final). Registration and start are never retried.
+       Transient RPC failures while connecting, registering, following or cleaning the task (call
+       failed, server unavailable, timeouts, disconnected object, network path lost) are retried
+       with back-off and a new connection. The task is reported unconfirmed only when they last
+       RpcFailureWindowMinutes in a row (0 = the first failure is final).
+       A registration is retried only after reading the task: an existing task is accepted only
+       with the identity SEMT registers. When connection or registration fail for the whole window,
+       Run was never called and the result has NotRegistered. Run is never repeated: after a lost
+       reply the task is followed, and one that never starts goes to the start limit (the RPC
+       window when StartTimeoutMinutes is 0).
        StartTimeoutMinutes (0 = off): a task not seen running within this time (for example
        Queued, State 2, with no process) is removed by Remove-SemtUnstartedSystemTask only when
        nothing ran; the result then has NotStarted. If it started meanwhile, it is followed as usual.
@@ -149,11 +154,39 @@ function Invoke-SemtSystemTaskEndpoint {
         $transientCodes = @('800706BA','800706BB','800706BE','800706BF','80010108','800705B4','80070079','8007274C','80070035','80070033','80070040','80070043','800704CF')
         $windowMinutes = 30
         if ($r.ContainsKey('RpcFailureWindowMinutes') -and $null -ne $r.RpcFailureWindowMinutes) { $windowMinutes = [int]$r.RpcFailureWindowMinutes }
-        $rpc = @{ Folder = $null; Failures = 0; Total = 0; FirstUtc = $null }
+        $rpc = @{ Service = $null; Folder = $null; Failures = 0; Total = 0; FirstUtc = $null }
         $connect = {
             $connected = New-Object -ComObject 'Schedule.Service'
             if ($r.Mode -eq 'WinRM') { $connected.Connect() } else { $connected.Connect($r.Target) }
             $rpc.Folder = $connected.GetFolder('\')
+            $rpc.Service = $connected
+        }
+        # Identity of the temporary task, compared before a registration is taken as done and
+        # before cleanup. Values only: no COM object leaves this block.
+        $describeTask = {
+            param($registered)
+            $readDefinition = $registered.Definition
+            $count = [int]$readDefinition.Actions.Count
+            $first = if ($count -ge 1) { $readDefinition.Actions.Item(1) } else { $null }
+            [pscustomobject]@{
+                ExitCode = [string]$registered.LastTaskResult; ActionCount = $count
+                ActionPath = $(if ($first) { [string]$first.Path } else { '' }); ActionArguments = $(if ($first) { [string]$first.Arguments } else { '' })
+                LogonType = [int]$readDefinition.Principal.LogonType; UserId = [string]$readDefinition.Principal.UserId
+                Description = [string]$readDefinition.RegistrationInfo.Description
+            }
+        }
+        $testIdentity = {
+            param($described)
+            $principalSid = ''
+            try {
+                $principal = $described.UserId
+                if ($principal -match '^S-\d-') {
+                    $principalSid = ([System.Security.Principal.SecurityIdentifier]::new($principal)).Value
+                } else {
+                    $principalSid = ([System.Security.Principal.NTAccount]::new($principal)).Translate([System.Security.Principal.SecurityIdentifier]).Value
+                }
+            } catch { $principalSid = '' }
+            return -not ($described.ActionCount -ne 1 -or $described.ActionPath -ine '%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe' -or $described.ActionArguments -cne $r.Arguments -or $described.LogonType -ne 5 -or $principalSid -ne 'S-1-5-18')
         }
         $getCode = {
             param($exception)
@@ -200,27 +233,72 @@ function Invoke-SemtSystemTaskEndpoint {
         $startLimit = 0
         if ($r.ContainsKey('StartTimeoutMinutes') -and $null -ne $r.StartTimeoutMinutes) { $startLimit = [int]$r.StartTimeoutMinutes }
         $followOnly = ($r.ContainsKey('FollowOnly') -and [bool]$r.FollowOnly)
-        $service = New-Object -ComObject 'Schedule.Service'
-        if ($r.Mode -eq 'WinRM') { $service.Connect() } else { $service.Connect($r.Target) }
-        $folder = $service.GetFolder('\')
-        $rpc.Folder = $folder
+        $description = 'SEMT temporary SYSTEM execution ' + $r.Name
+        $runUnconfirmed = $false
         # FollowOnly: the task was registered and started by an earlier job of this attempt.
         if (-not $followOnly) {
-        $definition = $service.NewTask(0)
-        $definition.RegistrationInfo.Description = 'SEMT temporary SYSTEM execution ' + $r.Name
-        $definition.Principal.UserId = 'SYSTEM'
-        $definition.Principal.LogonType = 5
-        $definition.Principal.RunLevel = 1
-        $definition.Settings.AllowDemandStart = $true
-        $definition.Settings.DisallowStartIfOnBatteries = $false
-        $definition.Settings.StopIfGoingOnBatteries = $false
-        $definition.Settings.ExecutionTimeLimit = 'PT0S'
-        $action = $definition.Actions.Create(0)
-        $action.Path = '%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe'
-        $action.Arguments = $r.Arguments
-        # TASK_CREATE (2): a collision fails instead of replacing an existing task.
-        $task = $folder.RegisterTaskDefinition($r.Name,$definition,2,'SYSTEM',$null,5,$null)
-        [void]$task.Run($null)
+            # Connection and registration have no effect on the endpoint: their transient failures
+            # are retried. When they last the whole window, nothing was started (Run is never reached).
+            try {
+                Write-Warning 'SEMT_TASK_STEP: Connect'
+                [void](& $invokeRpc 'Connect' { $true })
+                $definition = $rpc.Service.NewTask(0)
+                $definition.RegistrationInfo.Description = $description
+                $definition.Principal.UserId = 'SYSTEM'
+                $definition.Principal.LogonType = 5
+                $definition.Principal.RunLevel = 1
+                $definition.Settings.AllowDemandStart = $true
+                $definition.Settings.DisallowStartIfOnBatteries = $false
+                $definition.Settings.StopIfGoingOnBatteries = $false
+                $definition.Settings.ExecutionTimeLimit = 'PT0S'
+                $action = $definition.Actions.Create(0)
+                $action.Path = '%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe'
+                $action.Arguments = $r.Arguments
+                Write-Warning 'SEMT_TASK_STEP: Register'
+                $task = & $invokeRpc 'RegisterTask' {
+                    if ($rpc.Failures -gt 0) {
+                        # A registration retried after a lost reply may already have been applied:
+                        # an existing task is taken only when its identity is the one SEMT registers.
+                        $existing = $null
+                        try { $existing = $rpc.Folder.GetTask($r.Name) }
+                        catch {
+                            $absent = $false
+                            for ($missing = $_.Exception; $null -ne $missing; $missing = $missing.InnerException) { if (('{0:X8}' -f $missing.HResult) -eq '80070002') { $absent = $true } }
+                            if (-not $absent) { throw }
+                        }
+                        if ($null -ne $existing) {
+                            $described = & $describeTask $existing
+                            if ($described.Description -cne $description -or -not (& $testIdentity $described)) { throw ('SEMT_TASK_IDENTITY_MISMATCH: task {0} exists with another definition; nothing was started.' -f $r.Name) }
+                            Write-Warning ('SEMT_TASK_STEP: Register already applied; task {0} found with the expected identity.' -f $r.Name)
+                            return $existing
+                        }
+                    }
+                    # TASK_CREATE (2): a collision fails instead of replacing an existing task.
+                    $rpc.Folder.RegisterTaskDefinition($r.Name,$definition,2,'SYSTEM',$null,5,$null)
+                }
+            }
+            catch {
+                if ([string]$_.Exception.Message -like 'SEMT_RPC_UNAVAILABLE*') {
+                    return [pscustomobject]@{ NotRegistered = $true; Detail = [string]$_.Exception.Message; Cleaned = $false; ExitCode = ''; RpcTransientFailures = $rpc.Total }
+                }
+                throw
+            }
+            # Run is never repeated: a lost reply may hide a launch. The task is followed instead;
+            # if it never starts, the start limit hands it to Remove-SemtUnstartedSystemTask.
+            Write-Warning 'SEMT_TASK_STEP: Run'
+            try { [void]$task.Run($null) }
+            catch {
+                $runCode = & $getCode $_.Exception
+                if (-not $runCode) { throw }
+                $runUnconfirmed = $true
+                $rpc.Folder = $null
+                if ($startLimit -le 0) { $startLimit = [math]::Max(1, $windowMinutes) }
+                Write-Warning ('SEMT_TASK_RUN_UNCONFIRMED: Code=0x{0}; StartLimitMinutes={1}; Error={2}' -f $runCode,$startLimit,$_.Exception.Message)
+            }
+        }
+        else {
+            Write-Warning 'SEMT_TASK_STEP: Connect (follow)'
+            [void](& $invokeRpc 'Connect' { $true })
         }
         $waitStarted = Get-Date
         $nextStateLog = 5
@@ -243,32 +321,13 @@ function Invoke-SemtSystemTaskEndpoint {
                 $nextStateLog = $nextStateLog + 5
             }
             if ($startLimit -gt 0 -and -not $seenRunning -and $poll.State -ne 4 -and $waited -ge $startLimit -and (($poll.State -ne 1 -and $poll.State -ne 3) -or $poll.LastRun.Year -lt 2000)) {
-                return [pscustomobject]@{ NotStarted = $true; State = $poll.State; LastRunTime = $poll.LastRun.ToString('o'); WaitedMinutes = [math]::Round($waited,1); Cleaned = $false; ExitCode = ''; RpcTransientFailures = $rpc.Total }
+                return [pscustomobject]@{ NotStarted = $true; State = $poll.State; LastRunTime = $poll.LastRun.ToString('o'); WaitedMinutes = [math]::Round($waited,1); Cleaned = $false; ExitCode = ''; RpcTransientFailures = $rpc.Total; StartLimitMinutes = $startLimit; RunUnconfirmed = $runUnconfirmed }
             }
         } while (($poll.State -ne 1 -and $poll.State -ne 3) -or $poll.LastRun.Year -lt 2000)
         # Re-read the definition and refuse cleanup if the identity has changed.
-        $actual = & $invokeRpc 'ReadTaskDefinition' {
-            $read = $rpc.Folder.GetTask($r.Name)
-            $readDefinition = $read.Definition
-            $count = [int]$readDefinition.Actions.Count
-            $first = if ($count -ge 1) { $readDefinition.Actions.Item(1) } else { $null }
-            [pscustomobject]@{
-                ExitCode = [string]$read.LastTaskResult; ActionCount = $count
-                ActionPath = $(if ($first) { [string]$first.Path } else { '' }); ActionArguments = $(if ($first) { [string]$first.Arguments } else { '' })
-                LogonType = [int]$readDefinition.Principal.LogonType; UserId = [string]$readDefinition.Principal.UserId
-            }
-        }
+        $actual = & $invokeRpc 'ReadTaskDefinition' { & $describeTask ($rpc.Folder.GetTask($r.Name)) }
         $exitCode = $actual.ExitCode
-        $principalSid = ''
-        try {
-            $principal = $actual.UserId
-            if ($principal -match '^S-\d-') {
-                $principalSid = ([System.Security.Principal.SecurityIdentifier]::new($principal)).Value
-            } else {
-                $principalSid = ([System.Security.Principal.NTAccount]::new($principal)).Translate([System.Security.Principal.SecurityIdentifier]).Value
-            }
-        } catch { $principalSid = '' }
-        if ($actual.ActionCount -ne 1 -or $actual.ActionPath -ine '%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe' -or $actual.ActionArguments -cne $r.Arguments -or $actual.LogonType -ne 5 -or $principalSid -ne 'S-1-5-18') {
+        if (-not (& $testIdentity $actual)) {
             throw 'Task identity changed; cleanup refused.'
         }
         $scriptPath = if ($r.Mode -eq 'WinRM') { $r.Script } else { $r.ShareScript }
@@ -329,6 +388,8 @@ function Invoke-SemtSystemTaskEndpoint {
                 }
             }
             elseif ($message -like 'SEMT_TASK_STATE*') { Write-SemtLogLine -Path $LogPath -Level WARN -Message ("{0} task {1} not started yet: {2}" -f $Mode,$taskName,$message) }
+            elseif ($message -like 'SEMT_TASK_STEP*') { Write-SemtLogLine -Path $LogPath -Message ("{0} task {1} step: {2}" -f $Mode,$taskName,($message -replace '^SEMT_TASK_STEP:\s*','')) }
+            elseif ($message -like 'SEMT_TASK_RUN_UNCONFIRMED*') { Write-SemtLogLine -Path $LogPath -Level WARN -Message ("{0} task {1} start request unconfirmed; Run is not repeated, the task is followed and removed only if it never starts: {2}" -f $Mode,$taskName,$message) }
             else { Write-SemtLogLine -Path $LogPath -Level WARN -Message ("{0} task warning: {1}" -f $Mode,$message) }
         }
         $relay.Seen = $records.Count
@@ -346,12 +407,21 @@ function Invoke-SemtSystemTaskEndpoint {
                 return [pscustomobject]@{ Completed=$false; TimedOut=$true; ExitCode=''; Detail='Remote task may still be running; verify before retrying.'; RpcTransientFailures=$relay.Transient; RpcUnavailable=$false }
             }
             $output = @(Receive-Job -Job $job -ErrorAction Stop -WarningAction SilentlyContinue)
+            if ($job.State -eq 'Completed' -and $output.Count -eq 1 -and $output[0].PSObject.Properties['NotRegistered'] -and [bool]$output[0].NotRegistered) {
+                # Connection or registration failed for the whole window: Run was never called, so
+                # the endpoint did not start. A registration applied without reply leaves a task
+                # with no trigger that never runs; its unique name is not reused.
+                $detail = ('Task {0} could not be registered: RPC failures lasted {1} minute(s) or more in a row before the start request; the endpoint was not started. {2}' -f $taskName,$RpcFailureWindowMinutes,[string]$output[0].Detail)
+                Write-SemtLogLine -Path $LogPath -Level WARN -Message ("{0} {1}" -f $Mode,$detail)
+                return [pscustomobject]@{ Completed=$false; TimedOut=$false; NotRegistered=$true; ExitCode=''; Detail=$detail; RpcTransientFailures=$relay.Transient; RpcUnavailable=$true }
+            }
             if ($job.State -eq 'Completed' -and $output.Count -eq 1 -and $output[0].PSObject.Properties['NotStarted'] -and [bool]$output[0].NotStarted) {
-                Write-SemtLogLine -Path $LogPath -Level WARN -Message ("{0} task {1} not started after {2} minute(s) (State={3}; LastRunTime={4}; limit RemoteTaskStartTimeoutMinutes={5}). Checking whether anything ran before removing it." -f $Mode,$taskName,$output[0].WaitedMinutes,$output[0].State,$output[0].LastRunTime,$StartTimeoutMinutes)
+                $startLimitUsed = if ($output[0].PSObject.Properties['StartLimitMinutes']) { [int]$output[0].StartLimitMinutes } else { $StartTimeoutMinutes }
+                Write-SemtLogLine -Path $LogPath -Level WARN -Message ("{0} task {1} not started after {2} minute(s) (State={3}; LastRunTime={4}; start limit {5} minute(s), RemoteTaskStartTimeoutMinutes={6}). Checking whether anything ran before removing it." -f $Mode,$taskName,$output[0].WaitedMinutes,$output[0].State,$output[0].LastRunTime,$startLimitUsed,$StartTimeoutMinutes)
                 $cleanup = Remove-SemtUnstartedSystemTask -Mode $Mode -ConnectionTarget $ConnectionTarget -CorrelationId $CorrelationId -RemoteDataShare $RemoteDataShare -RemoteSharePath $RemoteSharePath -ExpectedSha256 $ExpectedSha256 -RemoteScriptPath $RemoteScriptPath
                 Write-SemtLogLine -Path $LogPath -Level $(if ($cleanup.Outcome -eq 'Deleted') { 'INFO' } else { 'WARN' }) -Message ("Task start cleanup {0}: {1}" -f $cleanup.Outcome,$cleanup.Detail)
                 if ($cleanup.Outcome -ne 'Started') {
-                    $detail = ('Task {0} did not start within {1} minute(s) (State={2}; LastRunTime={3}). Task cleanup {4}: {5}' -f $taskName,$StartTimeoutMinutes,$output[0].State,$output[0].LastRunTime,$cleanup.Outcome,$cleanup.Detail)
+                    $detail = ('Task {0} did not start within {1} minute(s) (State={2}; LastRunTime={3}). Task cleanup {4}: {5}' -f $taskName,$startLimitUsed,$output[0].State,$output[0].LastRunTime,$cleanup.Outcome,$cleanup.Detail)
                     return [pscustomobject]@{ Completed=$false; TimedOut=$false; NotStarted=$true; StartCleanup=$cleanup.Outcome; ExitCode=''; Detail=$detail; RpcTransientFailures=$relay.Transient; RpcUnavailable=$false }
                 }
                 # It started in the meantime: follow it to the end like any started task.
