@@ -201,6 +201,113 @@ function Stop-SemtGraphWatchdog {
     if ('SemtGraphWatchdog' -as [type]) { [SemtGraphWatchdog]::Disarm() }
 }
 
+function Get-SemtJwtExpiryUtc {
+    # Reads only the exp claim of an access token; $null when it is not a readable JWT.
+    [CmdletBinding()]
+    param([string]$Token)
+
+    $parts = ([string]$Token).Split('.')
+    if ($parts.Count -lt 2) { return $null }
+    $payload = $parts[1].Replace('-', '+').Replace('_', '/')
+    switch ($payload.Length % 4) { 1 { return $null } 2 { $payload += '==' } 3 { $payload += '=' } }
+    try {
+        $claims = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload)) | ConvertFrom-Json -ErrorAction Stop
+        $exp = 0L
+        if (-not $claims.PSObject.Properties['exp'] -or -not [long]::TryParse([string]$claims.exp, [ref]$exp) -or $exp -le 0) { return $null }
+        return (New-Object DateTime 1970, 1, 1, 0, 0, 0, ([DateTimeKind]::Utc)).AddSeconds($exp)
+    }
+    catch { return $null }
+}
+
+function Enable-SemtGraphSingleToken {
+    <#
+    Pins this process to one Graph access token. Microsoft Graph PowerShell with the WAM broker asks
+    the broker for a token on many requests; after a few dozen quick pages Entra ID refuses them as a
+    client request loop (AADSTS50196) and the SDK falls back to an interactive sign-in that a hidden
+    export cannot show. One probe request gives the token the SDK already holds; the process then
+    reconnects with it (Connect-MgGraph -AccessToken: same account, same consented scopes, no broker
+    call per page) and Invoke-SemtGraphPageRequest renews it once, 10 minutes before it expires, with
+    ReconnectParameters. Returns $false and keeps the SDK connection unchanged when it cannot pin.
+    The token stays in this process's memory and is never written.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$ProbeUri,
+        [AllowNull()][hashtable]$ReconnectParameters
+    )
+
+    try {
+        $context = Get-MgContext -ErrorAction Stop
+        if (-not $context -or [string]$context.AuthType -ne 'Delegated') { return $false }
+        $saved = [pscustomobject]@{ TenantId = [string]$context.TenantId; Account = [string]$context.Account; AuthType = 'Delegated'; Scopes = @(if ($context.PSObject.Properties['Scopes']) { $context.Scopes }) }
+        $timeout = Get-SemtGraphPageTimeoutSeconds
+        Start-SemtGraphWatchdog -Seconds $timeout -Message ("GRAPH_SIGN_IN_REQUIRED: Microsoft Graph did not give an access token within {0} s; the Graph SDK is most likely waiting for an interactive sign-in. No CSV was written. Refresh the inventories again; if it repeats, run Connect-MgGraph in a visible Windows PowerShell first." -f $timeout)
+        try { $response = Invoke-MgGraphRequest -Method GET -Uri $ProbeUri -OutputType HttpResponseMessage -ErrorAction Stop }
+        finally { Stop-SemtGraphWatchdog }
+        $token = ''
+        try {
+            $authorization = if ($response -and $response.PSObject.Properties['RequestMessage'] -and $response.RequestMessage) { $response.RequestMessage.Headers.Authorization } else { $null }
+            if ($authorization -and [string]$authorization.Scheme -ieq 'Bearer') { $token = [string]$authorization.Parameter }
+        }
+        finally { if ($response -is [IDisposable]) { $response.Dispose() } }
+        if ([string]::IsNullOrWhiteSpace($token)) {
+            Write-Warning 'Graph access token not readable from the SDK: this export keeps the SDK connection (one broker request per page).'
+            return $false
+        }
+        $expiresUtc = Get-SemtJwtExpiryUtc -Token $token
+        # Unreadable lifetime: Entra ID access tokens last at least 60 minutes.
+        if ($null -eq $expiresUtc) { $expiresUtc = [datetime]::UtcNow.AddMinutes(55) }
+        if (($expiresUtc - [datetime]::UtcNow).TotalMinutes -lt 15) {
+            Write-Warning ('Graph access token expires at {0:HH:mm} UTC: this export keeps the SDK connection.' -f $expiresUtc)
+            return $false
+        }
+        Connect-MgGraph -AccessToken (ConvertTo-SecureString -String $token -AsPlainText -Force) -NoWelcome -ErrorAction Stop | Out-Null
+        $global:SemtGraphTokenPin = @{ Context = $saved; RefreshAfterUtc = $expiresUtc.AddMinutes(-10); ReconnectParameters = $ReconnectParameters; ProbeUri = $ProbeUri }
+        Write-Host ('Graph access token pinned for this process until {0:HH:mm} UTC (no broker request per page).' -f $expiresUtc)
+        return $true
+    }
+    catch {
+        Write-Warning ('Graph access token not pinned: {0}' -f $_.Exception.Message)
+        return $false
+    }
+}
+
+function Get-SemtGraphContext {
+    <#
+    The delegated Graph context of this process. With a pinned token, Get-MgContext describes the
+    access token, so the context saved when it was pinned is returned (tenant, account, Delegated).
+    #>
+    [CmdletBinding()]
+    param()
+
+    $current = Get-MgContext -ErrorAction Stop
+    $pin = Get-Variable -Name SemtGraphTokenPin -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    if ($pin) {
+        if ($current -and [string]$current.AuthType -eq 'UserProvidedAccessToken') { return $pin.Context }
+        Remove-Variable -Name SemtGraphTokenPin -Scope Global -ErrorAction SilentlyContinue
+    }
+    return $current
+}
+
+function Update-SemtGraphSingleToken {
+    # Renews a pinned token 10 minutes before it expires; without a renewal the SDK connection is used.
+    [CmdletBinding()]
+    param()
+
+    $pin = Get-Variable -Name SemtGraphTokenPin -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    if (-not $pin -or [datetime]::UtcNow -lt $pin.RefreshAfterUtc) { return }
+    Remove-Variable -Name SemtGraphTokenPin -Scope Global -ErrorAction SilentlyContinue
+    if (-not $pin.ReconnectParameters) { throw 'The pinned Graph access token is about to expire and this export has no connection to renew it.' }
+    $reconnect = @{} + $pin.ReconnectParameters
+    $reconnect.ErrorAction = 'Stop'
+    Write-Host 'Graph access token about to expire: renewing it once.'
+    $timeout = Get-SemtGraphPageTimeoutSeconds
+    Start-SemtGraphWatchdog -Seconds $timeout -Message ("GRAPH_SIGN_IN_REQUIRED: renewing the Graph access token did not finish within {0} s; the Graph SDK is most likely waiting for an interactive sign-in. No CSV was written. Refresh the inventories again." -f $timeout)
+    try { Connect-MgGraph @reconnect | Out-Null }
+    finally { Stop-SemtGraphWatchdog }
+    [void](Enable-SemtGraphSingleToken -ProbeUri $pin.ProbeUri -ReconnectParameters $pin.ReconnectParameters)
+}
+
 function Invoke-SemtGraphPageRequest {
     <#
     One page of a paged Graph GET. A page that does not answer within Get-SemtGraphPageTimeoutSeconds
@@ -222,6 +329,8 @@ function Invoke-SemtGraphPageRequest {
     $elapsed = if ($ConnectedAt -is [datetime]) { [int]((Get-Date) - $ConnectedAt).TotalSeconds } else { -1 }
     $timeout = Get-SemtGraphPageTimeoutSeconds
     $hint = 'A hidden export cannot show the sign-in window. Refresh the inventories again; if it repeats, run Connect-MgGraph in a visible Windows PowerShell first.'
+    try { Update-SemtGraphSingleToken }
+    catch { throw ("GRAPH_SIGN_IN_REQUIRED: {0} export: renewing the Graph access token failed at page {1} ({2} item(s) already read). {3} Detail: {4}" -f $Label,$Page,$ItemsRead,$hint,$_.Exception.Message) }
     Start-SemtGraphWatchdog -Seconds $timeout -Message ("GRAPH_SIGN_IN_REQUIRED: {0} export stopped: Microsoft Graph did not answer page {1} within {2} s ({3} item(s) already read, {4} s after the connection; request {5}); the Graph SDK is most likely waiting for an interactive sign-in. No CSV was written. {6}" -f $Label,$Page,$timeout,$ItemsRead,($elapsed + $timeout),$target,$hint)
     try {
         $request = @{ Method = 'GET'; Uri = $Uri; ErrorAction = 'Stop' }

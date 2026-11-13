@@ -27,7 +27,7 @@ The Graph sign-in is kept when the script ends: a Run in progress reuses it to c
 results after each cycle without an interactive prompt.
 
 .VERSION
-1.3.0
+1.4.0
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
@@ -46,7 +46,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.3.0'
+$ScriptVersion = '1.4.0'
 
 function Write-Host {
     param(
@@ -132,6 +132,8 @@ try {
     }
     Write-Host ("Tenant      : {0}" -f $context.TenantId)
     Write-Host ("Account     : {0}" -f $context.Account)
+    # One access token for Intune, Entra and users: no broker request per page (AADSTS50196 request loop).
+    [void](Enable-SemtGraphSingleToken -ProbeUri 'https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?$top=1&$select=id' -ReconnectParameters $connectParameters)
 
     try {
         Write-Host 'Exporting the required full Intune managed-device inventory...' -ForegroundColor Cyan

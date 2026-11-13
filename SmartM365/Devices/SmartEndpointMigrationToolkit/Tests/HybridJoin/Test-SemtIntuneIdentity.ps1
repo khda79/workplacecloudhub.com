@@ -226,13 +226,29 @@ try {
     New-Item -ItemType Directory -Path $fakeGraphModule -Force | Out-Null
     Set-Content -LiteralPath (Join-Path $fakeGraphModule 'Microsoft.Graph.Authentication.psd1') -Encoding ASCII -Value "@{ ModuleVersion = '99.0.0'; RootModule = 'Microsoft.Graph.Authentication.psm1'; GUID = '9d1f6a3e-5b7c-4e2a-8f00-000000000099'; FunctionsToExport = @('Connect-MgGraph','Disconnect-MgGraph','Get-MgContext','Invoke-MgGraphRequest') }"
     Set-Content -LiteralPath (Join-Path $fakeGraphModule 'Microsoft.Graph.Authentication.psm1') -Encoding ASCII -Value @'
-function Connect-MgGraph { [CmdletBinding()] param([string[]]$Scopes,[switch]$NoWelcome,[string]$TenantId,[string]$ContextScope) Add-Content -LiteralPath $env:SEMT_FAKE_GRAPH_LOG -Value ('Connect|' + ($Scopes -join ',')) }
+$script:FakeAuthType = 'Delegated'
+function Connect-MgGraph {
+    [CmdletBinding()] param([string[]]$Scopes,[switch]$NoWelcome,[string]$TenantId,[string]$ContextScope,[securestring]$AccessToken)
+    if ($AccessToken) { $script:FakeAuthType = 'UserProvidedAccessToken'; Add-Content -LiteralPath $env:SEMT_FAKE_GRAPH_LOG -Value 'ConnectToken'; return }
+    $script:FakeAuthType = 'Delegated'
+    Add-Content -LiteralPath $env:SEMT_FAKE_GRAPH_LOG -Value ('Connect|' + ($Scopes -join ','))
+}
 function Disconnect-MgGraph { [CmdletBinding()] param() Add-Content -LiteralPath $env:SEMT_FAKE_GRAPH_LOG -Value 'Disconnect' }
-function Get-MgContext { [CmdletBinding()] param() [pscustomobject]@{ TenantId = '22222222-2222-2222-2222-222222222222'; Account = 'admin@example.test'; AuthType = 'Delegated' } }
+# Like the SDK, a context built from an access token does not carry the delegated sign-in details.
+function Get-MgContext { [CmdletBinding()] param() if ($script:FakeAuthType -eq 'Delegated') { [pscustomobject]@{ TenantId = '22222222-2222-2222-2222-222222222222'; Account = 'admin@example.test'; AuthType = 'Delegated' } } else { [pscustomobject]@{ TenantId = $null; Account = $null; AuthType = $script:FakeAuthType } } }
 function Invoke-MgGraphRequest {
     [CmdletBinding()] param([string]$Method,[string]$Uri,[string]$OutputType,[hashtable]$Headers)
+    if ($OutputType -eq 'HttpResponseMessage') {
+        Add-Content -LiteralPath $env:SEMT_FAKE_GRAPH_LOG -Value 'Probe'
+        if ($env:SEMT_FAKE_GRAPH_NO_TOKEN -eq '1') { return [pscustomobject]@{ RequestMessage = $null } }
+        $ttl = 3600; if ($env:SEMT_FAKE_GRAPH_TOKEN_TTL) { $ttl = [int]$env:SEMT_FAKE_GRAPH_TOKEN_TTL }
+        $exp = [long]([datetime]::UtcNow - (New-Object DateTime 1970,1,1,0,0,0,([DateTimeKind]::Utc))).TotalSeconds + $ttl
+        $encode = { param($s) [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($s)).TrimEnd('=').Replace('+','-').Replace('/','_') }
+        $jwt = (& $encode '{"alg":"none"}') + '.' + (& $encode ('{"exp":' + $exp + '}')) + '.sig'
+        return [pscustomobject]@{ RequestMessage = [pscustomobject]@{ Headers = [pscustomobject]@{ Authorization = [pscustomobject]@{ Scheme = 'Bearer'; Parameter = $jwt } } } }
+    }
     $kind = if ($Uri -like '*/users*') { 'Users' } elseif ($Uri -like '*managedDevices*') { 'Intune' } else { 'Entra' }
-    Add-Content -LiteralPath $env:SEMT_FAKE_GRAPH_LOG -Value ('Request|' + $kind)
+    Add-Content -LiteralPath $env:SEMT_FAKE_GRAPH_LOG -Value ('Request|' + $kind + $(if ($script:FakeAuthType -eq 'UserProvidedAccessToken') { '|token' } else { '' }))
     $item = { param($n) if ($kind -eq 'Users') { @{ id = "u$n"; userPrincipalName = "user$n@example.test"; assignedPlans = @(); assignedLicenses = @() } } elseif ($kind -eq 'Intune') { @{ id = "m$n"; deviceName = "PC-00$n"; azureADDeviceId = "1111111$n-1111-1111-1111-111111111111"; operatingSystem = 'Windows' } } else { @{ id = "e$n"; deviceId = "2222222$n-2222-2222-2222-222222222222"; displayName = "PC-00$n"; operatingSystem = 'Windows'; accountEnabled = $true } } }
     if ($Uri -like '*skiptoken=page2*') {
         if ($env:SEMT_FAKE_GRAPH_MODE -eq 'SignIn') { throw 'InteractiveBrowserCredential authentication failed: User canceled authentication.' }
@@ -287,18 +303,52 @@ function Invoke-MgGraphRequest {
     $combined = Join-Path $root 'Scripts\SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1'
     $combinedIntune = Join-Path $graphBase 'Combined-Intune.csv'; $combinedEntra = Join-Path $graphBase 'Combined-Entra.csv'; $combinedUsers = Join-Path $graphBase 'Combined-Users.csv'
     $combinedHang = & $runFakeGraphScript $combined 'Hang' @('-IntuneOutputPath',$combinedIntune,'-EntraOutputPath',$combinedEntra,'-IncludeUserLicenses','-UserLicensesOutputPath',$combinedUsers,'-SkipModuleInstall') 'Entra'
-    if ($combinedHang.ExitCode -ne 7 -or -not (Test-Path -LiteralPath $combinedIntune) -or (Test-Path -LiteralPath $combinedEntra) -or (Test-Path -LiteralPath $combinedUsers) -or @($combinedHang.Calls | Where-Object { $_ -eq 'Request|Users' }).Count -ne 0 -or -not (& $hasText $combinedHang 'GRAPH_SIGN_IN_REQUIRED: Entra export stopped: Microsoft Graph did not answer page 2 within 4 s')) { throw ("A blocked Entra page in the combined export was not stopped cleanly: exit={0}; calls={1}; {2}" -f $combinedHang.ExitCode,($combinedHang.Calls -join ','),$combinedHang.Output) }
+    if ($combinedHang.ExitCode -ne 7 -or -not (Test-Path -LiteralPath $combinedIntune) -or (Test-Path -LiteralPath $combinedEntra) -or (Test-Path -LiteralPath $combinedUsers) -or @($combinedHang.Calls | Where-Object { $_ -like 'Request|Users*' }).Count -ne 0 -or -not (& $hasText $combinedHang 'GRAPH_SIGN_IN_REQUIRED: Entra export stopped: Microsoft Graph did not answer page 2 within 4 s')) { throw ("A blocked Entra page in the combined export was not stopped cleanly: exit={0}; calls={1}; {2}" -f $combinedHang.ExitCode,($combinedHang.Calls -join ','),$combinedHang.Output) }
     # Pages that answer in time disarm the watchdog: the slower CSV writing afterwards never trips it.
     $combinedOk = & $runFakeGraphScript $combined 'Ok' @('-IntuneOutputPath',$combinedIntune,'-EntraOutputPath',$combinedEntra,'-IncludeUserLicenses','-UserLicensesOutputPath',$combinedUsers,'-SkipModuleInstall')
     if ($combinedOk.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $combinedEntra) -or -not (Test-Path -LiteralPath $combinedUsers)) { throw "Fake combined export failed: $($combinedOk.Output)" }
+
+    # Field (AADSTS50196 "client request loop"): the SDK with the WAM broker asks for a token on many
+    # pages until Entra ID refuses them. The combined export signs in once, pins the access token it got
+    # and reads every page of Intune, Entra and users with it; the delegated context saved when pinning
+    # still gives the tenant and account (the token context has neither).
+    $pinnedRequests = @($combinedOk.Calls | Where-Object { $_ -like 'Request|*' })
+    if (@($combinedOk.Calls | Where-Object { $_ -like 'Connect|*' }).Count -ne 1 -or @($combinedOk.Calls | Where-Object { $_ -eq 'ConnectToken' }).Count -ne 1 -or $pinnedRequests.Count -lt 6 -or @($pinnedRequests | Where-Object { $_ -notlike '*|token' }).Count -ne 0) { throw ("The combined export did not read every page with one pinned token: {0}" -f ($combinedOk.Calls -join ',')) }
+    foreach ($csv in @($combinedIntune,$combinedEntra,$combinedUsers)) {
+        if (@(Import-Csv -LiteralPath $csv | Where-Object { $_.InventoryTenantId -ne '22222222-2222-2222-2222-222222222222' }).Count -ne 0) { throw "A pinned-token export lost the delegated tenant: $csv" }
+    }
+    if (@($usersOk.Calls | Where-Object { $_ -eq 'ConnectToken' }).Count -ne 1) { throw ("The users export did not pin its token: {0}" -f ($usersOk.Calls -join ',')) }
+    # No readable token, or one about to expire: the export keeps the SDK connection and still succeeds.
+    foreach ($case in @(@{ Name = 'SEMT_FAKE_GRAPH_NO_TOKEN'; Value = '1'; Text = 'Graph access token not readable' }, @{ Name = 'SEMT_FAKE_GRAPH_TOKEN_TTL'; Value = '600'; Text = 'this export keeps the SDK connection' })) {
+        Set-Item -Path ('Env:' + $case.Name) -Value $case.Value
+        try { $fallback = & $runFakeIntuneExport 'Ok' (Join-Path $graphBase ('Intune-' + $case.Name + '.csv')) }
+        finally { Remove-Item -Path ('Env:' + $case.Name) -ErrorAction SilentlyContinue }
+        if ($fallback.ExitCode -ne 0 -or $fallback.Calls -contains 'ConnectToken' -or @($fallback.Calls | Where-Object { $_ -like 'Request|Intune' }).Count -ne 2 -or -not (& $hasText $fallback $case.Text)) { throw ("Unpinned fallback ({0}) failed: exit={1}; calls={2}; {3}" -f $case.Name,$fallback.ExitCode,($fallback.Calls -join ','),$fallback.Output) }
+    }
+    # A pinned token 10 minutes from expiry is renewed once by the same delegated connection.
+    $renewScript = Join-Path $graphBase 'Renew-PinnedToken.ps1'
+    Set-Content -LiteralPath $renewScript -Encoding ASCII -Value (@'
+$ErrorActionPreference = 'Stop'
+Import-Module '__CORE__' -Force
+Import-Module Microsoft.Graph.Authentication
+Connect-MgGraph -Scopes 'Device.Read.All' -NoWelcome
+if (-not (Enable-SemtGraphSingleToken -ProbeUri 'https://graph.microsoft.com/v1.0/devices?$top=1&$select=id' -ReconnectParameters @{ Scopes = @('Device.Read.All'); NoWelcome = $true })) { throw 'Token not pinned.' }
+$global:SemtGraphTokenPin.RefreshAfterUtc = [datetime]::UtcNow.AddMinutes(-1)
+[void](Invoke-SemtGraphPageRequest -Uri 'https://graph.microsoft.com/v1.0/devices' -Label 'Entra')
+$context = Get-SemtGraphContext
+Write-Output ('CONTEXT|' + $context.TenantId + '|' + $context.AuthType)
+'@).Replace('__CORE__', (Join-Path $root 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1'))
+    $renew = & $runFakeGraphScript $renewScript 'Ok' @()
+    if ($renew.ExitCode -ne 0 -or ($renew.Calls -join ',') -ne 'Connect|Device.Read.All,Probe,ConnectToken,Connect|Device.Read.All,Probe,ConnectToken,Request|Entra|token' -or $renew.Output -notmatch 'CONTEXT\|22222222-2222-2222-2222-222222222222\|Delegated') { throw ("Pinned token renewal failed: exit={0}; calls={1}; {2}" -f $renew.ExitCode,($renew.Calls -join ','),$renew.Output) }
 }
 finally {
     $env:PSModulePath = $savedGraphModulePath
-    Remove-Item Env:SEMT_FAKE_GRAPH_MODE, Env:SEMT_FAKE_GRAPH_LOG, Env:SEMT_FAKE_GRAPH_HANG_KIND, Env:SEMT_GRAPH_PAGE_TIMEOUT_SECONDS -ErrorAction SilentlyContinue
+    Remove-Item Env:SEMT_FAKE_GRAPH_MODE, Env:SEMT_FAKE_GRAPH_LOG, Env:SEMT_FAKE_GRAPH_HANG_KIND, Env:SEMT_GRAPH_PAGE_TIMEOUT_SECONDS, Env:SEMT_FAKE_GRAPH_NO_TOKEN, Env:SEMT_FAKE_GRAPH_TOKEN_TTL -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $graphBase -Recurse -Force -ErrorAction SilentlyContinue
 }
 Write-Host 'PASS: a Graph sign-in request in a hidden Intune export fails with GRAPH_SIGN_IN_REQUIRED and no CSV'
 Write-Host 'PASS: a Graph page blocked on a hidden sign-in ends Intune, users and the combined export with GRAPH_SIGN_IN_REQUIRED (exit 7) and no CSV'
+Write-Host 'PASS: Graph exports read every page with one pinned access token (no broker request loop), keep the delegated tenant, renew it before expiry and fall back to the SDK connection'
 Write-Host 'PASS: local Intune trace with unhealthy join stays a review item'
 $hjEndpointText = [IO.File]::ReadAllText((Join-Path $root 'Campaigns\HybridJoin\Scripts\SmartM365-Invoke-EndpointMigration-HybridJoin.ps1'))
 if ($hjEndpointText -match '\$status = "INTUNE_ENROLLED"' -or $hjEndpointText -notmatch '"INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY" \{ return "REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN" \}' -or $hjEndpointText -notmatch '\$status = "INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY"') { throw 'Endpoint still reports a local Intune trace with unhealthy join as INTUNE_ENROLLED.' }

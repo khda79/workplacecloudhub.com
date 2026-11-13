@@ -1,6 +1,6 @@
 <#
 .VERSION
-1.3.0
+1.4.0
 #>
 <#
 .SYNOPSIS
@@ -48,10 +48,12 @@ if (-not $NoConnect) {
     $connection = @{ Scopes = @('User.Read.All'); ContextScope = 'Process'; NoWelcome = $true; ErrorAction = 'Stop' }
     if ($TenantId) { $connection.TenantId = $TenantId }
     Connect-MgGraph @connection | Out-Null
+    # One access token for the whole export: no broker request per page (AADSTS50196 request loop).
+    [void](Enable-SemtGraphSingleToken -ProbeUri 'https://graph.microsoft.com/v1.0/users?$top=1&$select=id' -ReconnectParameters $connection)
 }
 $graphConnectedAt = Get-Date
 try {
-    $context = Get-MgContext
+    $context = Get-SemtGraphContext
     if (-not $context -or $context.AuthType -ne 'Delegated' -or ($TenantId -and $context.TenantId -ne $TenantId)) { throw 'Delegated Graph context or tenant mismatch.' }
     $tenant = [string]$context.TenantId
     if (-not $tenant) { throw 'Graph tenant unavailable.' }
