@@ -27,7 +27,7 @@ The Graph sign-in is kept when the script ends: a Run in progress reuses it to c
 results after each cycle without an interactive prompt.
 
 .VERSION
-1.2.0
+1.3.0
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
@@ -46,7 +46,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.2.0'
+$ScriptVersion = '1.3.0'
 
 function Write-Host {
     param(
@@ -106,7 +106,8 @@ foreach ($path in @($intuneExporter, $entraExporter, $userLicenseExporter)) {
 
 Write-Host "Smart Endpoint Migration Toolkit - Automatic Graph inventory exporter version $ScriptVersion" -ForegroundColor Cyan
 Import-GraphAuthentication
-Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+# No Disconnect-MgGraph before connecting: with WAM it signs the account out of the broker
+# for every process, so another export or a Run reading Graph would lose its silent token.
 $scopes = @('DeviceManagementManagedDevices.Read.All', 'Device.Read.All')
 if ($IncludeUserLicenses) { $scopes += 'User.Read.All' }
 $connectParameters = @{

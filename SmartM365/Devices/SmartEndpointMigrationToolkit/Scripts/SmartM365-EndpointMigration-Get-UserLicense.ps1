@@ -5,7 +5,7 @@ Read-only targeted user license lookup for an identified Single PC user.
 Uses a unique on-premises SID and the confirmed device tenant ID. The operator must
 obtain these from a current endpoint audit. No user, license or endpoint is modified.
 .VERSION
-1.1.0
+1.2.0
 #>
 #requires -Version 5.1
 [CmdletBinding()]
@@ -22,7 +22,8 @@ $module=Find-SemtGraphAuthenticationModule
 if (-not $module) { throw 'Microsoft.Graph.Authentication is not installed.' }
 Import-Module $module.Path -ErrorAction Stop
 if (-not $NoConnect) {
-    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+    # No Disconnect-MgGraph before connecting: with WAM it signs the account out of the broker
+    # for every process, so another export or a Run reading Graph would lose its silent token.
     Connect-MgGraph -TenantId $TenantId.ToString() -Scopes 'User.Read.All' -ContextScope Process -NoWelcome -ErrorAction Stop | Out-Null
 }
 try {

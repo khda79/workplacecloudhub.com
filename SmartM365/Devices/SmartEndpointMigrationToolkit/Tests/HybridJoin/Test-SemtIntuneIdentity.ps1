@@ -190,16 +190,63 @@ Write-Host 'PASS: unlicensed audit preserves the device diagnostic and skips pos
 }
 Write-Host 'PASS: missing Graph sign-in is reported explicitly and the Entra export is not started'
 
-# With WAM, a Disconnect-MgGraph after the work signs the account out of the broker and a Run in
-# progress can no longer confirm its results silently: no exporter disconnects after connecting.
+# With WAM, Disconnect-MgGraph signs the account out of the broker for every process: an export or a
+# Run already reading Graph then needs an interactive sign-in it cannot show. No exporter disconnects.
 foreach ($name in @('Export-AutomaticGraphInventories','Export-IntuneDevicesCsv','Export-EntraDevicesCsv','Export-UserLicensesCsv','Get-UserLicense')) {
     $text = [IO.File]::ReadAllText((Join-Path $root ('Scripts\SmartM365-EndpointMigration-{0}.ps1' -f $name)))
-    $connectAt = $text.IndexOf('Connect-MgGraph @')
-    if ($connectAt -lt 0) { $connectAt = $text.IndexOf('Connect-MgGraph -TenantId') }
-    if ($connectAt -lt 0) { throw "Connect-MgGraph not found in $name." }
-    if ($text.IndexOf('Disconnect-MgGraph -', $connectAt) -ge 0) { throw "$name disconnects from Graph after its work." }
+    if ($text.IndexOf('Connect-MgGraph @') -lt 0 -and $text.IndexOf('Connect-MgGraph -TenantId') -lt 0) { throw "Connect-MgGraph not found in $name." }
+    if ($text -match '(?m)^\s*Disconnect-MgGraph\b') { throw "$name calls Disconnect-MgGraph." }
 }
-Write-Host 'PASS: Graph exporters keep the sign-in for the Run post-cycle confirmation'
+Write-Host 'PASS: Graph exporters never call Disconnect-MgGraph'
+
+# A Graph page that asks for an interactive sign-in (hidden child process) stops the Intune export
+# with GRAPH_SIGN_IN_REQUIRED, the page reached and no CSV, instead of a bare SDK error.
+$graphBase = Join-Path ([IO.Path]::GetTempPath()) ('semt-fake-graph-' + [guid]::NewGuid().ToString('N'))
+$savedGraphModulePath = $env:PSModulePath
+try {
+    $fakeGraphModule = Join-Path $graphBase 'Modules\Microsoft.Graph.Authentication\99.0.0'
+    New-Item -ItemType Directory -Path $fakeGraphModule -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $fakeGraphModule 'Microsoft.Graph.Authentication.psd1') -Encoding ASCII -Value "@{ ModuleVersion = '99.0.0'; RootModule = 'Microsoft.Graph.Authentication.psm1'; GUID = '9d1f6a3e-5b7c-4e2a-8f00-000000000099'; FunctionsToExport = @('Connect-MgGraph','Disconnect-MgGraph','Get-MgContext','Invoke-MgGraphRequest') }"
+    Set-Content -LiteralPath (Join-Path $fakeGraphModule 'Microsoft.Graph.Authentication.psm1') -Encoding ASCII -Value @'
+function Connect-MgGraph { [CmdletBinding()] param([string[]]$Scopes,[switch]$NoWelcome,[string]$TenantId) Add-Content -LiteralPath $env:SEMT_FAKE_GRAPH_LOG -Value ('Connect|' + ($Scopes -join ',')) }
+function Disconnect-MgGraph { [CmdletBinding()] param() Add-Content -LiteralPath $env:SEMT_FAKE_GRAPH_LOG -Value 'Disconnect' }
+function Get-MgContext { [CmdletBinding()] param() [pscustomobject]@{ TenantId = '22222222-2222-2222-2222-222222222222'; Account = 'admin@example.test'; AuthType = 'Delegated' } }
+function Invoke-MgGraphRequest {
+    [CmdletBinding()] param([string]$Method,[string]$Uri,[string]$OutputType)
+    Add-Content -LiteralPath $env:SEMT_FAKE_GRAPH_LOG -Value 'Request'
+    if ($Uri -like '*skiptoken=page2*') {
+        if ($env:SEMT_FAKE_GRAPH_MODE -eq 'SignIn') { throw 'InteractiveBrowserCredential authentication failed: User canceled authentication.' }
+        return @{ value = @(@{ id = 'm2'; deviceName = 'PC-002'; azureADDeviceId = '33333333-3333-3333-3333-333333333333'; operatingSystem = 'Windows' }) }
+    }
+    return @{ value = @(@{ id = 'm1'; deviceName = 'PC-001'; azureADDeviceId = '11111111-1111-1111-1111-111111111111'; operatingSystem = 'Windows' }); '@odata.nextLink' = 'https://graph.microsoft.com/beta/deviceManagement/managedDevices?$skiptoken=page2' }
+}
+'@
+    $env:PSModulePath = (Join-Path $graphBase 'Modules') + ';' + $savedGraphModulePath
+    $intuneExport = Join-Path $root 'Scripts\SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1'
+    $runFakeIntuneExport = {
+        param([string]$Mode,[string]$CsvPath)
+        $ErrorActionPreference = 'Continue'
+        $env:SEMT_FAKE_GRAPH_MODE = $Mode
+        $env:SEMT_FAKE_GRAPH_LOG = Join-Path $graphBase ('calls-' + $Mode + '.txt')
+        $output = @(& (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -ExecutionPolicy Bypass -File $intuneExport -OutputPath $CsvPath -ForceRefresh -SkipModuleInstall 2>&1)
+        [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($output -join "`n"); Calls = @(Get-Content -LiteralPath $env:SEMT_FAKE_GRAPH_LOG -ErrorAction SilentlyContinue) }
+    }
+    $okCsv = Join-Path $graphBase 'DevicesIntune-ok.csv'
+    $ok = & $runFakeIntuneExport 'Ok' $okCsv
+    if ($ok.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $okCsv) -or @(Import-Csv -LiteralPath $okCsv).Count -ne 2) { throw "Fake two-page Intune export failed: $($ok.Output)" }
+    if (@($ok.Calls | Where-Object { $_ -like 'Connect|*' }).Count -ne 1 -or $ok.Calls -contains 'Disconnect') { throw "Intune export did not connect exactly once without disconnecting: $($ok.Calls -join ', ')" }
+    $signInCsv = Join-Path $graphBase 'DevicesIntune-signin.csv'
+    $signIn = & $runFakeIntuneExport 'SignIn' $signInCsv
+    if ($signIn.ExitCode -eq 0 -or (Test-Path -LiteralPath $signInCsv)) { throw 'An Intune export interrupted by a sign-in request still succeeded or wrote a CSV.' }
+    if ($signIn.Output -notmatch 'GRAPH_SIGN_IN_REQUIRED: Microsoft Graph asked for a new interactive sign-in at page 2 \(1 device\(s\) already read') { throw "Sign-in request was not reported as GRAPH_SIGN_IN_REQUIRED: $($signIn.Output)" }
+    if ($signIn.Calls -contains 'Disconnect') { throw 'Intune export disconnected from Graph.' }
+}
+finally {
+    $env:PSModulePath = $savedGraphModulePath
+    Remove-Item Env:SEMT_FAKE_GRAPH_MODE, Env:SEMT_FAKE_GRAPH_LOG -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $graphBase -Recurse -Force -ErrorAction SilentlyContinue
+}
+Write-Host 'PASS: a Graph sign-in request in a hidden Intune export fails with GRAPH_SIGN_IN_REQUIRED and no CSV'
 Write-Host 'PASS: local Intune trace with unhealthy join stays a review item'
 $hjEndpointText = [IO.File]::ReadAllText((Join-Path $root 'Campaigns\HybridJoin\Scripts\SmartM365-Invoke-EndpointMigration-HybridJoin.ps1'))
 if ($hjEndpointText -match '\$status = "INTUNE_ENROLLED"' -or $hjEndpointText -notmatch '"INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY" \{ return "REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN" \}' -or $hjEndpointText -notmatch '\$status = "INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY"') { throw 'Endpoint still reports a local Intune trace with unhealthy join as INTUNE_ENROLLED.' }

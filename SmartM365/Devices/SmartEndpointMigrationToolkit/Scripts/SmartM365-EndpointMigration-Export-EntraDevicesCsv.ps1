@@ -36,7 +36,7 @@ Do not install Microsoft.Graph.Authentication automatically if it is missing.
 Regenerates the shared cache even when it is less than 2 hours old.
 
 .VERSION
-1.1.0
+1.2.0
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
@@ -57,7 +57,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.1.0"
+$ScriptVersion = "1.2.0"
 $EntraInventoryFreshnessHours = 24
 
 function Write-Host {
@@ -346,7 +346,8 @@ if (-not $NoConnect) {
         NoWelcome = $true
     }
     if (-not [string]::IsNullOrWhiteSpace($TenantId)) { $connectParams.TenantId = $TenantId }
-    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+    # No Disconnect-MgGraph before connecting: with WAM it signs the account out of the broker
+    # for every process, so another export or a Run reading Graph would lose its silent token.
     Connect-MgGraph @connectParams | Out-Null
 }
 

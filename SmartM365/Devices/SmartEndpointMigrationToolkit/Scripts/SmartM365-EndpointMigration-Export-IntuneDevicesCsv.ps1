@@ -51,7 +51,7 @@ Regenerates the shared cache even when a recent delegated full inventory already
 .\SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1 -TenantId "contoso.onmicrosoft.com" -OutputPath .\DevicesIntune.csv
 
 .VERSION
-1.1.0
+1.2.0
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
@@ -74,7 +74,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$ScriptVersion = "1.1.0"
+$ScriptVersion = "1.2.0"
 $IntuneInventoryFreshnessHours = 24
 
 function Write-Host {
@@ -359,7 +359,18 @@ function Invoke-GraphPagedRequest {
     $page = 0
     while (-not [string]::IsNullOrWhiteSpace($nextUri)) {
         $page++
-        $response = Invoke-MgGraphRequest -Method GET -Uri $nextUri -ErrorAction Stop
+        try { $response = Invoke-MgGraphRequest -Method GET -Uri $nextUri -ErrorAction Stop }
+        catch {
+            $detail = $_.Exception.Message
+            $target = try { $requestUri = [uri]$nextUri; '{0}{1}' -f $requestUri.Host,$requestUri.AbsolutePath } catch { '' }
+            $elapsed = if ($script:GraphConnectedAt) { [int]((Get-Date) - $script:GraphConnectedAt).TotalSeconds } else { -1 }
+            # The hidden export process cannot show a sign-in window: a request that asks for one
+            # waits, then fails as "User canceled". Report it as a sign-in to redo, with where it happened.
+            if ($detail -match 'InteractiveBrowserCredential|User canceled|AuthenticationFailed|MsalUiRequired|interaction_required|AADSTS') {
+                throw ("GRAPH_SIGN_IN_REQUIRED: Microsoft Graph asked for a new interactive sign-in at page {0} ({1} device(s) already read, {2} s after the connection; request {3}). A hidden export cannot show the sign-in window. Refresh the inventories again; if it repeats, run Connect-MgGraph in a visible Windows PowerShell first. Detail: {4}" -f $page,$items.Count,$elapsed,$target,$detail)
+            }
+            throw ("Graph request failed at page {0} ({1} device(s) already read; request {2}): {3}" -f $page,$items.Count,$target,$detail)
+        }
         $pageItems = Get-GraphProperty -InputObject $response -Name "value"
         if ($pageItems) {
             foreach ($item in @($pageItems)) {
@@ -382,9 +393,11 @@ if (-not $NoConnect) {
         NoWelcome = $true
     }
     if (-not [string]::IsNullOrWhiteSpace($TenantId)) { $connectParams.TenantId = $TenantId.Trim() }
-    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+    # No Disconnect-MgGraph, before or after: with WAM it signs the account out of the broker for
+    # every process, so an export or a Run already reading Graph would lose its silent token.
     Connect-MgGraph @connectParams | Out-Null
 }
+$script:GraphConnectedAt = Get-Date
 
 $context = Get-GraphConnectionContext
 if (-not $context) {

@@ -1,6 +1,6 @@
 <#
 .VERSION
-1.1.0
+1.2.0
 #>
 <#
 .SYNOPSIS
@@ -43,7 +43,8 @@ $module = Find-SemtGraphAuthenticationModule
 if (-not $module) { throw 'Microsoft.Graph.Authentication is not installed.' }
 Import-Module $module.Path -ErrorAction Stop
 if (-not $NoConnect) {
-    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+    # No Disconnect-MgGraph before connecting: with WAM it signs the account out of the broker
+    # for every process, so another export or a Run reading Graph would lose its silent token.
     $connection = @{ Scopes = @('User.Read.All'); ContextScope = 'Process'; NoWelcome = $true; ErrorAction = 'Stop' }
     if ($TenantId) { $connection.TenantId = $TenantId }
     Connect-MgGraph @connection | Out-Null
