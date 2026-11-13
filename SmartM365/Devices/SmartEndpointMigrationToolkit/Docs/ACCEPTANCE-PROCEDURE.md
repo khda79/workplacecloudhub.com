@@ -147,6 +147,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Tests\Core\Test-SemtProgramFolde
 - [ ] Relancer une Wave déjà en cours : refus (verrou de Wave).
 - [ ] Deux sessions Windows / comptes différents sur le poste technicien : plafond partagé commun.
 - [ ] Launch All Waves : uniquement la Campaign sélectionnée, une Wave toutes les 5 secondes.
+- [ ] Delete Wave : refus si la Wave est en cours ; sinon une confirmation, puis le dossier de la
+      Wave part à la Corbeille ; Runs, rapports, preuves et listes d'archive de la Campaign conservés.
 
 ## 8. Arrêt
 

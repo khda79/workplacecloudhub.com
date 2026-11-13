@@ -152,3 +152,17 @@ asks for an explicit confirmation). A dry run is limited to one cycle.
 Launches every launchable Wave of the **selected Campaign** that is not already running, one
 every 5 seconds, with the same run mode and GUI choices, after one confirmation. It never
 launches Waves of another Campaign.
+
+## Delete Wave
+
+**Delete Wave** (Waves tab, next to Launch Wave) removes the selected Wave of the selected
+Campaign after one confirmation that shows the Wave name, its computer count and its folder:
+
+- the Wave folder `Waves\<Campaign>\<Wave>` (Computers.txt, Wave.local.json.txt, launchers and
+  the Wave archive lists such as `Computers.AlreadyEnrolled.txt`) goes to the **Recycle Bin** of
+  the account running the GUI; restore it from there if needed (a folder on a network share may
+  not be recoverable from the Recycle Bin, so copy it first when in doubt);
+- Runs, reports, evidence and the Campaign archive lists (`Waves\<Campaign>\<ArchiveFileName>`)
+  are kept, so computers already archived stay excluded from new Waves;
+- it is refused while a Run of that Wave is active (checked at the click): stop the Run first;
+- it refuses a name that is not a Wave name or a folder outside `Waves\<Campaign>`.
