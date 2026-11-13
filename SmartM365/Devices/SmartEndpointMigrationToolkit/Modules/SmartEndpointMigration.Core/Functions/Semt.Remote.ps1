@@ -404,11 +404,13 @@ function Remove-SemtUnstartedSystemTask {
     $taskName = 'WCH-SEMT-' + $CorrelationId
     $outcome = { param([string]$Value,[string]$Detail) [pscustomobject]@{ Outcome = $Value; TaskName = $taskName; Detail = $Detail } }
     # Returns a description of the first SEMT trace of this attempt on the target, '' when none.
-    # An unreadable lease or instance file counts as a trace: the task is then kept.
+    # An unreadable lease or instance file, or an unreachable share, counts as a trace: the task is then kept.
+    $traceRead = @{ Failed = $false }
     $readTrace = {
         if ([string]::IsNullOrWhiteSpace($RemoteDataShare)) { return '' }
         $attempt = Read-SemtRemoteAttemptResult -RemoteDataShare $RemoteDataShare -CorrelationId $CorrelationId
         if ($attempt.Exists -and $attempt.State -ne 'Foreign') { return ('the attempt wrote a result ({0})' -f $attempt.Detail) }
+        if ([bool](Get-SemtPropertyValue -InputObject $attempt -Name 'ReadFailed' -Default $false)) { $traceRead.Failed = $true; return ('proof unavailable, {0}' -f $attempt.Detail) }
         $leasePath = Join-Path -Path (Split-Path -Path $RemoteDataShare -Parent) -ChildPath 'State\TargetOperation.json.txt'
         if (Test-Path -LiteralPath $leasePath -PathType Leaf) {
             try { $lease = Read-SemtJsonFile -Path $leasePath -Required } catch { return ('the target operation lease is unreadable: {0}' -f $_.Exception.Message) }
@@ -474,7 +476,11 @@ function Remove-SemtUnstartedSystemTask {
         $result = & $outcome ([string]$reply[0].Outcome) ('{0} Task={1}' -f [string]$reply[0].Detail,$taskName)
         if ($result.Outcome -eq 'Deleted') {
             $late = & $readTrace
-            if ($late) {
+            if ($late -and $traceRead.Failed) {
+                # The task is already gone, but the target can no longer be read: no proof that nothing ran.
+                $result.Detail = ('{0}; temporary payload kept ({1}).' -f $result.Detail,$late)
+            }
+            elseif ($late) {
                 # The endpoint started after the last read: it keeps running and reports normally.
                 $result.Outcome = 'Started'
                 $result.Detail = ('{0}; started at the last moment ({1}); temporary payload kept.' -f $result.Detail,$late)
@@ -749,25 +755,34 @@ function Read-SemtRemoteAttemptResult {
     )
 
     $path = Join-Path -Path $RemoteDataShare -ChildPath ("State\Results\{0}.json.txt" -f $CorrelationId)
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        # Say why: a missing data folder means the endpoint wrote nothing visible (not started,
-        # access denied or blocked on the target), not only that the attempt has not finished.
-        $reason = if (-not (Test-Path -LiteralPath $RemoteDataShare -PathType Container)) { 'the endpoint data folder is not visible through the administrative share' }
-        elseif (-not (Test-Path -LiteralPath (Join-Path -Path $RemoteDataShare -ChildPath 'State\Results') -PathType Container)) { 'the endpoint data folder has no State\Results folder' }
-        else { 'no result file for this attempt' }
-        return [pscustomobject]@{ Exists = $false; State = ''; Completed = $false; Result = $null; Path = $path; Detail = ('No result for this attempt on the target ({0}).' -f $reason) }
+    # A failed read never throws and is never confused with a missing result: ReadFailed=$true
+    # (with ReadError) means the evidence is unavailable, e.g. an unreachable administrative share
+    # (target offline or rebooting, 0x80070035). Status readers treat it as unconfirmed; deletion
+    # decisions (unstarted task, temporary payload) must treat it as unavailable proof and keep both.
+    try {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            # Say why: a missing data folder means the endpoint wrote nothing visible (not started,
+            # access denied or blocked on the target), not only that the attempt has not finished.
+            $reason = if (-not (Test-Path -LiteralPath $RemoteDataShare -PathType Container)) { 'the endpoint data folder is not visible through the administrative share' }
+            elseif (-not (Test-Path -LiteralPath (Join-Path -Path $RemoteDataShare -ChildPath 'State\Results') -PathType Container)) { 'the endpoint data folder has no State\Results folder' }
+            else { 'no result file for this attempt' }
+            return [pscustomobject]@{ Exists = $false; State = ''; Completed = $false; Result = $null; Path = $path; ReadFailed = $false; ReadError = ''; Detail = ('No result for this attempt on the target ({0}).' -f $reason) }
+        }
+    }
+    catch {
+        return [pscustomobject]@{ Exists = $false; State = 'Unreachable'; Completed = $false; Result = $null; Path = $path; ReadFailed = $true; ReadError = [string]$_.Exception.Message; Detail = ('Attempt result not readable: the administrative share is unreachable ({0}).' -f $_.Exception.Message) }
     }
     try {
         $document = Read-SemtJsonFile -Path $path -Required
         $documentCorrelation = [string](Get-SemtPropertyValue -InputObject $document -Name 'CorrelationId' -Default '')
         if ($documentCorrelation -ne $CorrelationId) {
-            return [pscustomobject]@{ Exists = $true; State = 'Foreign'; Completed = $false; Result = $null; Path = $path; Detail = ('Foreign result ignored: CorrelationId={0}' -f $documentCorrelation) }
+            return [pscustomobject]@{ Exists = $true; State = 'Foreign'; Completed = $false; Result = $null; Path = $path; ReadFailed = $false; ReadError = ''; Detail = ('Foreign result ignored: CorrelationId={0}' -f $documentCorrelation) }
         }
         $state = [string](Get-SemtPropertyValue -InputObject $document -Name 'State' -Default '')
-        return [pscustomobject]@{ Exists = $true; State = $state; Completed = ($state -eq 'Completed'); Result = $document; Path = $path; Detail = ('Attempt result State={0}' -f $state) }
+        return [pscustomobject]@{ Exists = $true; State = $state; Completed = ($state -eq 'Completed'); Result = $document; Path = $path; ReadFailed = $false; ReadError = ''; Detail = ('Attempt result State={0}' -f $state) }
     }
     catch {
-        return [pscustomobject]@{ Exists = $true; State = 'Unreadable'; Completed = $false; Result = $null; Path = $path; Detail = ('Attempt result unreadable: {0}' -f $_.Exception.Message) }
+        return [pscustomobject]@{ Exists = $true; State = 'Unreadable'; Completed = $false; Result = $null; Path = $path; ReadFailed = $true; ReadError = [string]$_.Exception.Message; Detail = ('Attempt result unreadable: {0}' -f $_.Exception.Message) }
     }
 }
 

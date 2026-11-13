@@ -537,6 +537,22 @@ Invoke-CompletedRules -Rows @([pscustomobject]@{ ComputerName = 'PC-R1.contoso.t
         $copied = Copy-SemtCentralEvidence -RemoteDataShare $hiddenShare -RemoteDataRoot 'C:\ProgramData\WCH\Test' -TargetPath $evidenceTarget -CorrelationId 'attempt-4' -AttemptResult $null -AttemptStartedUtc ([datetime]::UtcNow)
         $copied -eq 0 -and (Get-Content -LiteralPath (Join-Path $evidenceTarget 'CentralLogCollection.txt') -Raw) -match 'not visible through the administrative share'
     }
+    Test-Step 'unreachable administrative share: the attempt result read never throws, and unstarted-task cleanup keeps the task' {
+        # Simulates the SMB failure seen in the field (0x80070035 raised by the share lookup). The
+        # traces are read before the Task Scheduler is contacted, so whatever the task state (Queued
+        # with a LastRunTime included), unavailable proof keeps the task: never Deleted.
+        $probe = & $module {
+            param($Share)
+            function Test-Path { throw 'Le chemin reseau n''a pas ete trouve' }
+            $read = Read-SemtRemoteAttemptResult -RemoteDataShare $Share -CorrelationId 'attempt-4'
+            $cleanup = Remove-SemtUnstartedSystemTask -Mode ScheduledTask -ConnectionTarget 'PC-OFFLINE' -CorrelationId ('a' * 32) -RemoteDataShare $Share
+            [pscustomobject]@{ Read = $read; Cleanup = $cleanup }
+        } $share
+        $normal = Read-SemtRemoteAttemptResult -RemoteDataShare $share -CorrelationId 'attempt-4'
+        $probe.Read.ReadFailed -and $probe.Read.ReadError -match 'reseau' -and $probe.Read.State -eq 'Unreachable' -and -not $probe.Read.Completed -and -not $probe.Read.Exists -and $probe.Read.Detail -match 'administrative share is unreachable' `
+            -and -not $normal.ReadFailed -and -not $normal.Exists `
+            -and $probe.Cleanup.Outcome -in @('Started','Failed') -and $probe.Cleanup.Outcome -ne 'Deleted' -and $probe.Cleanup.Detail -match 'proof unavailable' -and $probe.Cleanup.Detail -match 'kept'
+    }
     #endregion
 
     #region Inventory isolation
