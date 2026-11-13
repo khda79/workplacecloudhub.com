@@ -106,7 +106,8 @@ Create never launches. The Prerequisites Campaign has no Automatic Wave (button 
 the window X: a waiting window appears at once while the GUI looks for active Runs, then the
 Active Runs question (controlled stop, leave running, or keep the GUI open) is asked if any.
 **Delete Wave** (next to Launch Wave) sends the selected Wave folder (Computers.txt,
-Wave.local.json.txt, launchers, Wave archive lists) to the Recycle Bin after one confirmation;
+Wave.local.json.txt, launchers, Wave archive lists) to the Recycle Bin after one confirmation (on
+a network location, which has no Recycle Bin, it is moved to `Waves\<Campaign>\_DeletedWaves`);
 Runs, reports, evidence and the Campaign archive lists are kept. It is refused while the Wave runs.
 
 Without the GUI, every Wave folder contains:

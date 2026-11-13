@@ -12,7 +12,7 @@
     Requires Windows PowerShell 5.1 started with -STA.
 
 .VERSION
-    1.1.0
+    1.1.1
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -42,7 +42,7 @@ $ErrorActionPreference = 'Stop'
 if ([string]$PSVersionTable['PSEdition'] -eq 'Core' -or [Threading.Thread]::CurrentThread.ApartmentState -ne [Threading.ApartmentState]::STA) {
     throw ('SEMT_UNSUPPORTED_GUI_HOST: the GUI runs in Windows PowerShell 5.1 started with -STA (current: {0} {1}, {2}). Use Start-SmartEndpointMigrationToolkit-GUI.cmd.' -f [string]$PSVersionTable['PSEdition'],[string]$PSVersionTable['PSVersion'],[Threading.Thread]::CurrentThread.ApartmentState)
 }
-$script:GuiVersion = '1.1.0'
+$script:GuiVersion = '1.1.1'
 $script:PackageRoot = Split-Path -Path $PSScriptRoot -Parent
 Import-Module (Join-Path $script:PackageRoot 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -MinimumVersion 1.0.0 -Force
 $script:CampaignTitles = [ordered]@{ HybridJoin = 'Hybrid Join and Intune enrollment'; Windows11Upgrade = 'Windows 11 upgrade' }
@@ -418,23 +418,62 @@ function Split-GuiList {
     return @(([string]$Text -split '[;,\r\n]+') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
+function Test-GuiNetworkPath {
+    <#
+    True when a path is on a network location (UNC path or mapped network drive). Windows has no
+    Recycle Bin there: a delete "to the Recycle Bin" is permanent. Unknown drive type counts as
+    network, so the safe path (move, not delete) is used.
+    #>
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $full = $Path
+    try { $full = [IO.Path]::GetFullPath($Path) } catch { }
+    if ($full.StartsWith('\\?\UNC\', [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    if ($full.StartsWith('\\?\', [StringComparison]::Ordinal)) { $full = $full.Substring(4) }
+    if ($full.StartsWith('\\', [StringComparison]::Ordinal)) { return $true }
+    try { return ([IO.DriveInfo]::new([IO.Path]::GetPathRoot($full)).DriveType -eq [IO.DriveType]::Network) } catch { return $true }
+}
+
+function Get-GuiDeletedWavesRoot {
+    # Folder that receives deleted Waves on a network location. Its name starts with '_': it is not
+    # a valid Wave name and holds no Computers.txt, so it is never listed or launched as a Wave.
+    param([Parameter(Mandatory = $true)][string]$WaveRoot)
+    return (Join-Path $WaveRoot '_DeletedWaves')
+}
+
 function Remove-GuiWaveFolder {
     <#
-    Deletes one Wave of a Campaign: its folder (Computers.txt, Wave.local.json.txt, launchers) goes
-    to the Recycle Bin. Runs, reports and evidence are not touched. Refuses a name that is not a
-    Wave name or a folder outside Waves\<Campaign>.
+    Deletes one Wave of a Campaign: its folder (Computers.txt, Wave.local.json.txt, launchers, Wave
+    archive lists) goes to the Recycle Bin on a local disk. On a network location (no Recycle Bin)
+    the folder is moved to Waves\<Campaign>\_DeletedWaves\<Wave>-<timestamp> instead, so it stays
+    recoverable. Runs, reports and evidence are not touched. Refuses a name that is not a Wave name
+    or a folder outside Waves\<Campaign>. Returns Path, Method (RecycleBin or DeletedWavesFolder)
+    and Destination.
     #>
-    param([Parameter(Mandatory = $true)][string]$PackageRoot,[Parameter(Mandatory = $true)][string]$Campaign,[Parameter(Mandatory = $true)][string]$Name)
+    param([Parameter(Mandatory = $true)][string]$PackageRoot,[Parameter(Mandatory = $true)][string]$Campaign,[Parameter(Mandatory = $true)][string]$Name,[switch]$TreatAsNetworkPath)
 
     if (-not (Test-SemtWaveName -Name $Name)) { throw ("'{0}' is not a valid Wave name." -f $Name) }
     $waveRoot = [IO.Path]::GetFullPath((Get-SemtWaveRoot -PackageRoot $PackageRoot -Campaign $Campaign)).TrimEnd('\')
     $path = [IO.Path]::GetFullPath((Join-Path $waveRoot $Name))
     if (-not [string]::Equals([IO.Path]::GetDirectoryName($path).TrimEnd('\'), $waveRoot, [StringComparison]::OrdinalIgnoreCase)) { throw ('Wave folder outside {0}: {1}' -f $waveRoot,$path) }
     if (-not (Test-Path -LiteralPath $path -PathType Container)) { throw ('Wave folder not found: {0}' -f $path) }
+    if ($TreatAsNetworkPath -or (Test-GuiNetworkPath -Path $path)) {
+        # Same folder tree, so the move is a rename on the share: nothing is copied or lost.
+        $deletedRoot = Get-GuiDeletedWavesRoot -WaveRoot $waveRoot
+        if (-not (Test-Path -LiteralPath $deletedRoot -PathType Container)) { [void](New-Item -ItemType Directory -Path $deletedRoot -Force) }
+        $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        $destination = Join-Path $deletedRoot ('{0}-{1}' -f $Name,$stamp)
+        $suffix = 1
+        while (Test-Path -LiteralPath $destination) { $destination = Join-Path $deletedRoot ('{0}-{1}-{2}' -f $Name,$stamp,$suffix); $suffix++ }
+        [IO.Directory]::Move($path, $destination)
+        if (Test-Path -LiteralPath $path) { throw ('The Wave folder is still present: {0}' -f $path) }
+        if (-not (Test-Path -LiteralPath $destination -PathType Container)) { throw ('The deleted Wave folder was not found after the move: {0}' -f $destination) }
+        return [pscustomobject]@{ Path = $path; Method = 'DeletedWavesFolder'; Destination = $destination }
+    }
     Add-Type -AssemblyName Microsoft.VisualBasic
     [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($path, [Microsoft.VisualBasic.FileIO.UIOption]::OnlyErrorDialogs, [Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin, [Microsoft.VisualBasic.FileIO.UICancelOption]::ThrowException)
     if (Test-Path -LiteralPath $path) { throw ('The Wave folder is still present: {0}' -f $path) }
-    return $path
+    return [pscustomobject]@{ Path = $path; Method = 'RecycleBin'; Destination = '' }
 }
 
 function Get-GuiChildWindowMarkup {
@@ -492,7 +531,7 @@ if (-not $ValidateOnly -and (Get-Command -Name Start-SmartM365GuiSplash -ErrorAc
 $xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Smart Endpoint Migration Toolkit v1.1.0"
+        Title="Smart Endpoint Migration Toolkit v1.1.1"
         Width="1240" Height="860" MinWidth="1080" MinHeight="740"
         WindowStartupLocation="CenterScreen"
         Background="#F5F8FB" FontFamily="Segoe UI" FontSize="12"
@@ -597,7 +636,7 @@ $xaml = @'
                     <Border Background="#E7F3FF" BorderBrush="#B5DCFF" BorderThickness="1" CornerRadius="8" Padding="10,3" HorizontalAlignment="Left" Margin="0,0,0,12">
                         <TextBlock Text="SMARTM365 DEVICES" Foreground="#005A9E" FontWeight="SemiBold"/>
                     </Border>
-                    <TextBlock x:Name="ProductVersionText" Text="v1.1.0" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                    <TextBlock x:Name="ProductVersionText" Text="v1.1.1" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
                     <TextBlock Text="Smart Endpoint Migration Toolkit" Foreground="{StaticResource TextBrush}" FontSize="28" FontWeight="SemiBold"/>
                     <TextBlock Text="Hybrid Join, Intune Enrollment &amp; Windows 11 Upgrade" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0"/>
                 </StackPanel>
@@ -681,7 +720,7 @@ $xaml = @'
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="12,22,0,10">
                                     <Button x:Name="LaunchWaveButton" Content="Launch Wave" Style="{StaticResource PrimaryButtonStyle}" MinWidth="130" Margin="0,0,8,0"/>
-                                    <Button x:Name="DeleteWaveButton" Content="Delete Wave" MinWidth="120" Margin="0" Background="#FDECEC" Foreground="#991B1B" BorderBrush="#FCA5A5" ToolTip="Send the Wave folder to the Recycle Bin (Runs, reports and evidence are kept)."/>
+                                    <Button x:Name="DeleteWaveButton" Content="Delete Wave" MinWidth="120" Margin="0" Background="#FDECEC" Foreground="#991B1B" BorderBrush="#FCA5A5" ToolTip="Send the Wave folder to the Recycle Bin, or to Waves\&lt;Campaign&gt;\_DeletedWaves on a network location (Runs, reports and evidence are kept)."/>
                                 </StackPanel>
                             </Grid>
                             <UniformGrid Grid.Row="2" Columns="4" Margin="0,4,0,12">
@@ -1898,12 +1937,14 @@ $controls.DeleteWaveButton.Add_Click({
         $wave = $script:SelectedWave
         if ($null -eq $wave) { return }
         if (@(Get-SemtActiveRuns -RunsRoot (Get-SemtStorageRoot -PackageRoot $script:PackageRoot -Kind Runs) -Campaign $script:CurrentCampaign | Where-Object { $_.Alive -and $_.WaveName -eq $wave.Name }).Count -gt 0) { Show-GuiError ("Wave '{0}' is running. Stop it before deleting it." -f $wave.Name); return }
-        $question = "Delete Wave '{0}' ({1} computer(s)) of {2}?{3}{3}The Wave folder (Computers.txt, Wave.local.json.txt, launchers) goes to the Recycle Bin. Runs, reports and evidence are kept.{3}{3}Folder: {4}" -f $wave.Name,$wave.ComputerCount,$script:CampaignTitles[$script:CurrentCampaign],[Environment]::NewLine,$wave.Path
+        $target = if (Test-GuiNetworkPath -Path $wave.Path) { 'is moved to {0} (network location: no Recycle Bin)' -f (Get-GuiDeletedWavesRoot -WaveRoot (Get-SemtWaveRoot -PackageRoot $script:PackageRoot -Campaign $script:CurrentCampaign)) } else { 'goes to the Recycle Bin' }
+        $question = "Delete Wave '{0}' ({1} computer(s)) of {2}?{3}{3}The Wave folder (Computers.txt, Wave.local.json.txt, launchers) {5}. Runs, reports and evidence are kept.{3}{3}Folder: {4}" -f $wave.Name,$wave.ComputerCount,$script:CampaignTitles[$script:CurrentCampaign],[Environment]::NewLine,$wave.Path,$target
         if (-not (Show-GuiWarningQuestion -Message $question -Title 'Delete Wave')) { return }
         $deleted = Remove-GuiWaveFolder -PackageRoot $script:PackageRoot -Campaign $script:CurrentCampaign -Name $wave.Name
         Update-WaveList
-        Add-Status -Title 'Wave deleted' -Message ("Wave '{0}' sent to the Recycle Bin: {1}" -f $wave.Name,$deleted)
-        [void][System.Windows.MessageBox]::Show((Get-GuiDialogOwner), ("Wave '{0}' was deleted (sent to the Recycle Bin).{1}{1}Runs, reports and evidence are kept." -f $wave.Name,[Environment]::NewLine), 'Delete Wave', 'OK', 'Information')
+        $where = if ($deleted.Method -eq 'DeletedWavesFolder') { 'moved to ' + $deleted.Destination } else { 'sent to the Recycle Bin' }
+        Add-Status -Title 'Wave deleted' -Message ("Wave '{0}' {1}: {2}" -f $wave.Name,$where,$deleted.Path)
+        [void][System.Windows.MessageBox]::Show((Get-GuiDialogOwner), ("Wave '{0}' was deleted ({1}).{2}{2}Runs, reports and evidence are kept." -f $wave.Name,$where,[Environment]::NewLine), 'Delete Wave', 'OK', 'Information')
     }
     catch { Show-GuiError $_.Exception.Message }
 })

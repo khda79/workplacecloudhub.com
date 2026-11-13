@@ -57,7 +57,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Tests\Core\Test-SemtProgramFolde
 - [ ] `Start-SmartEndpointMigrationToolkit-Demo.cmd` : 3 onglets (Waves, Runs, Options) et les
       3 fenêtres Single PC, New Wave, Automatic Wave, les deux Campaigns, options réelles, actions
       simulées, aucune exécution.
-- [ ] `Start-SmartEndpointMigrationToolkit-GUI.cmd` : splash, en-tête, version 1.1.0, contrôle
+- [ ] `Start-SmartEndpointMigrationToolkit-GUI.cmd` : splash, en-tête, version 1.1.1, contrôle
       de mise à jour silencieux.
 - [ ] Changer de Campaign : options, Waves et Runs propres à chaque Campaign ; les choix sont
       retrouvés à la réouverture.
@@ -148,7 +148,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Tests\Core\Test-SemtProgramFolde
 - [ ] Deux sessions Windows / comptes différents sur le poste technicien : plafond partagé commun.
 - [ ] Launch All Waves : uniquement la Campaign sélectionnée, une Wave toutes les 5 secondes.
 - [ ] Delete Wave : refus si la Wave est en cours ; sinon une confirmation, puis le dossier de la
-      Wave part à la Corbeille ; Runs, rapports, preuves et listes d'archive de la Campaign conservés.
+      Wave part à la Corbeille (sur un partage réseau : déplacé dans `_DeletedWaves` de la Campaign) ;
+      Runs, rapports, preuves et listes d'archive de la Campaign conservés.
 
 ## 8. Arrêt
 

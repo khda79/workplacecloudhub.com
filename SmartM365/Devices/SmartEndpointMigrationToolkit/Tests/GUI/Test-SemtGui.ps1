@@ -87,7 +87,7 @@ try {
     Test-Step 'Launch All is labelled as limited to the selected Campaign in its confirmation' { [IO.File]::ReadAllText($guiPath) -match 'Launch All Waves of this Campaign only' }
     Test-Step 'stop states remote endpoints are reported separately' { [IO.File]::ReadAllText($guiPath) -match 'Remote endpoints may continue and must be verified' }
     $guiText = [IO.File]::ReadAllText($guiPath)
-    foreach ($functionName in @('ConvertTo-PowerShellLiteral','Get-AutomaticWaveCommandText','Get-AutomaticFilterSignature','Split-GuiList','Get-GuiRunCommand','Assert-CmdLiteralValue','ConvertTo-CmdArgument','Get-GuiStatePath','New-GuiSelectionFile','Get-InventoryRefreshCommandText','Get-AdInventoryDomains','Get-InventoryRefreshPlan','Get-AutomaticWaveProcessText','Get-AutomaticWaveLastStage','Get-AutomaticWaveResultText','Get-GuiChildWindowMarkup','Test-AutomaticPreviewReusable','Test-AutomaticSplitByDomainAvailable','Remove-GuiWaveFolder')) {
+    foreach ($functionName in @('ConvertTo-PowerShellLiteral','Get-AutomaticWaveCommandText','Get-AutomaticFilterSignature','Split-GuiList','Get-GuiRunCommand','Assert-CmdLiteralValue','ConvertTo-CmdArgument','Get-GuiStatePath','New-GuiSelectionFile','Get-InventoryRefreshCommandText','Get-AdInventoryDomains','Get-InventoryRefreshPlan','Get-AutomaticWaveProcessText','Get-AutomaticWaveLastStage','Get-AutomaticWaveResultText','Get-GuiChildWindowMarkup','Test-AutomaticPreviewReusable','Test-AutomaticSplitByDomainAvailable','Test-GuiNetworkPath','Get-GuiDeletedWavesRoot','Remove-GuiWaveFolder')) {
         $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
         . ([scriptblock]::Create($definition.Extent.Text))
     }
@@ -282,7 +282,18 @@ try {
     $deleteWave = New-SemtWave -PackageRoot $packageRoot -Campaign HybridJoin -Name 'WAVE-DELETE-TEST' -Computers @('PC-DEL-1') -Source Manual
     $keepWave = New-SemtWave -PackageRoot $packageRoot -Campaign HybridJoin -Name 'WAVE-KEEP-TEST' -Computers @('PC-KEEP-1') -Source Manual
     $deletedPath = Remove-GuiWaveFolder -PackageRoot $packageRoot -Campaign HybridJoin -Name 'WAVE-DELETE-TEST'
-    Test-Step 'Delete Wave removes only the selected Wave folder' { $deletedPath -eq $deleteWave.Path -and -not (Test-Path -LiteralPath $deleteWave.Path) -and (Test-Path -LiteralPath $keepWave.ComputersPath) }
+    Test-Step 'Delete Wave removes only the selected Wave folder' { $deletedPath.Path -eq $deleteWave.Path -and $deletedPath.Method -eq 'RecycleBin' -and -not (Test-Path -LiteralPath $deleteWave.Path) -and (Test-Path -LiteralPath $keepWave.ComputersPath) }
+    # Network location (no Recycle Bin): the Wave folder is moved to _DeletedWaves, never deleted.
+    Test-Step 'network path detection: UNC and \\?\UNC are network, a local drive is not' { (Test-GuiNetworkPath -Path '\\server\share\Waves') -and (Test-GuiNetworkPath -Path '\\?\UNC\server\share\Waves') -and -not (Test-GuiNetworkPath -Path $env:SystemRoot) }
+    $netWave = New-SemtWave -PackageRoot $packageRoot -Campaign HybridJoin -Name 'WAVE-NETDEL-TEST' -Computers @('PC-NET-1') -Source Manual
+    $netDeleted = Remove-GuiWaveFolder -PackageRoot $packageRoot -Campaign HybridJoin -Name 'WAVE-NETDEL-TEST' -TreatAsNetworkPath
+    $deletedWavesRoot = Get-GuiDeletedWavesRoot -WaveRoot (Get-SemtWaveRoot -PackageRoot $packageRoot -Campaign HybridJoin)
+    Test-Step 'Delete Wave on a network location moves the folder to _DeletedWaves with its files' { $netDeleted.Method -eq 'DeletedWavesFolder' -and -not (Test-Path -LiteralPath $netWave.Path) -and (Split-Path -Parent $netDeleted.Destination) -eq $deletedWavesRoot -and (Test-Path -LiteralPath (Join-Path $netDeleted.Destination 'Computers.txt')) -and (Test-Path -LiteralPath $keepWave.ComputersPath) }
+    Test-Step 'the _DeletedWaves folder is never listed as a Wave' { @(Get-SemtWaves -PackageRoot $packageRoot -Campaign HybridJoin | Where-Object { $_.Name -like '_Deleted*' -or $_.Name -like 'WAVE-NETDEL-TEST*' }).Count -eq 0 }
+    $netWave2 = New-SemtWave -PackageRoot $packageRoot -Campaign HybridJoin -Name 'WAVE-NETDEL-TEST' -Computers @('PC-NET-2') -Source Manual
+    $netDeleted2 = Remove-GuiWaveFolder -PackageRoot $packageRoot -Campaign HybridJoin -Name 'WAVE-NETDEL-TEST' -TreatAsNetworkPath
+    Test-Step 'a second delete of the same Wave name never overwrites the first one' { $netDeleted2.Destination -ne $netDeleted.Destination -and (Test-Path -LiteralPath $netDeleted.Destination) -and (Test-Path -LiteralPath $netDeleted2.Destination) }
+    Remove-Item -LiteralPath $deletedWavesRoot -Recurse -Force
     Test-Step 'Delete Wave refuses a name that leaves the Waves folder of the Campaign' { $refused = 0; foreach ($bad in @('..','..\Windows11Upgrade','WAVE-KEEP-TEST\..\..')) { try { [void](Remove-GuiWaveFolder -PackageRoot $packageRoot -Campaign HybridJoin -Name $bad) } catch { $refused++ } }; $refused -eq 3 -and (Test-Path -LiteralPath $keepWave.ComputersPath) }
     Remove-Item -LiteralPath $keepWave.Path -Recurse -Force
     $run = Get-GuiRunCommand -Campaign Windows11Upgrade -WavePath 'C:\Waves\W 1' -RunMode Once -IgnoreRunGuard $true -SelectionPath 'C:\Sel\s.json.txt'
@@ -428,14 +439,14 @@ try {
     #region Windows PowerShell 5.1 STA
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $validate = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $guiPath -ValidateOnly 2>&1 | ForEach-Object { [string]$_ })
-    Test-Step 'GUI -ValidateOnly loads under Windows PowerShell 5.1 STA for both Campaigns' { $LASTEXITCODE -eq 0 -and @($validate | Where-Object { $_ -match '^ValidateOnly: GUI 1\.1\.0 loaded; campaign=(HybridJoin|Windows11Upgrade); options=\d+' }).Count -eq 2 }
+    Test-Step 'GUI -ValidateOnly loads under Windows PowerShell 5.1 STA for both Campaigns' { $LASTEXITCODE -eq 0 -and @($validate | Where-Object { $_ -match '^ValidateOnly: GUI 1\.1\.1 loaded; campaign=(HybridJoin|Windows11Upgrade); options=\d+' }).Count -eq 2 }
     Test-Step 'GUI -ValidateOnly loads the three dedicated windows; Automatic Wave is offered for HybridJoin and Windows 11' { @($validate | Where-Object { $_ -match 'campaign=(HybridJoin|Windows11Upgrade); .*; windows=SinglePc,NewWave,AutomaticWave; automaticWaveButton=Visible\.$' }).Count -eq 2 }
     Test-Step 'GUI hides the Prerequisites Campaign while Prerequisites.Enabled is false (default)' { @($validate | Where-Object { $_ -match 'campaign=Prerequisites' }).Count -eq 0 }
     $globalConfig = Join-Path $packageRoot 'Config\SmartEndpointMigrationToolkit.local.json.txt'
     [IO.File]::WriteAllText($globalConfig, '{ "SchemaVersion": 1, "Options": { "Prerequisites.Enabled": true } }')
     try { $validateEnabled = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $guiPath -ValidateOnly 2>&1 | ForEach-Object { [string]$_ }) }
     finally { Remove-Item -LiteralPath $globalConfig -Force -ErrorAction SilentlyContinue }
-    Test-Step 'GUI lists the Prerequisites Campaign when Prerequisites.Enabled is true in the global configuration' { $LASTEXITCODE -eq 0 -and @($validateEnabled | Where-Object { $_ -match '^ValidateOnly: GUI 1\.1\.0 loaded; campaign=(HybridJoin|Windows11Upgrade|Prerequisites); options=\d+' }).Count -eq 3 -and @($validateEnabled | Where-Object { $_ -match 'campaign=Prerequisites; options=\d+' }).Count -eq 1 }
+    Test-Step 'GUI lists the Prerequisites Campaign when Prerequisites.Enabled is true in the global configuration' { $LASTEXITCODE -eq 0 -and @($validateEnabled | Where-Object { $_ -match '^ValidateOnly: GUI 1\.1\.1 loaded; campaign=(HybridJoin|Windows11Upgrade|Prerequisites); options=\d+' }).Count -eq 3 -and @($validateEnabled | Where-Object { $_ -match 'campaign=Prerequisites; options=\d+' }).Count -eq 1 }
     Test-Step 'Prerequisites hides the Automatic Wave button and keeps Single PC and New Wave' { @($validateEnabled | Where-Object { $_ -match 'campaign=Prerequisites; .*; windows=SinglePc,NewWave,AutomaticWave; automaticWaveButton=Collapsed\.$' }).Count -eq 1 }
     # The three dedicated windows load under Windows PowerShell 5.1 STA with the resources of the main window.
     $windowsScript = Join-Path $tempRoot 'windows-check.ps1'
@@ -558,7 +569,7 @@ $state.Window.Close()
     # the close path of the window X (waiting window, active Run detection) and the GUI exits.
     $smoke = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $guiPath -SmokeTest 2>&1 | ForEach-Object { [string]$_ })
     $smokeText = $smoke -join "`n"
-    Test-Step 'GUI -SmokeTest starts the real window and the Close button closes it through the waiting window' { $LASTEXITCODE -eq 0 -and $smokeText -match 'SmokeTest: GUI 1\.1\.0 rendered and closed by the Close button; campaign=HybridJoin; waves=\d+; closeWaitShown=1; activeRuns=0\.' }
+    Test-Step 'GUI -SmokeTest starts the real window and the Close button closes it through the waiting window' { $LASTEXITCODE -eq 0 -and $smokeText -match 'SmokeTest: GUI 1\.1\.1 rendered and closed by the Close button; campaign=HybridJoin; waves=\d+; closeWaitShown=1; activeRuns=0\.' }
     #endregion
 }
 catch {

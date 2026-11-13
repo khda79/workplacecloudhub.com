@@ -160,8 +160,10 @@ Campaign after one confirmation that shows the Wave name, its computer count and
 
 - the Wave folder `Waves\<Campaign>\<Wave>` (Computers.txt, Wave.local.json.txt, launchers and
   the Wave archive lists such as `Computers.AlreadyEnrolled.txt`) goes to the **Recycle Bin** of
-  the account running the GUI; restore it from there if needed (a folder on a network share may
-  not be recoverable from the Recycle Bin, so copy it first when in doubt);
+  the account running the GUI; restore it from there if needed. On a network location (UNC path
+  or mapped network drive), which has no Recycle Bin, the folder is moved instead to
+  `Waves\<Campaign>\_DeletedWaves\<Wave>-<yyyyMMdd-HHmmss>`; move it back to restore the Wave.
+  `_DeletedWaves` is never listed as a Wave;
 - Runs, reports, evidence and the Campaign archive lists (`Waves\<Campaign>\<ArchiveFileName>`)
   are kept, so computers already archived stay excluded from new Waves;
 - it is refused while a Run of that Wave is active (checked at the click): stop the Run first;
