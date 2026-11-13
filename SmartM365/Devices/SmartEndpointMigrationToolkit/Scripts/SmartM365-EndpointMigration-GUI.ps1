@@ -256,6 +256,8 @@ function Get-AutomaticWaveCommandText {
         if ($items.Count -gt 0) { $parts += @(('-{0}' -f $pair[0]),('@({0})' -f (($items | ForEach-Object { ConvertTo-PowerShellLiteral $_ }) -join ','))) }
     }
     if (-not [string]::IsNullOrWhiteSpace([string]$Filters.AdDomain)) { $parts += @('-AdDomainFilter',('@({0})' -f (ConvertTo-PowerShellLiteral ([string]$Filters.AdDomain)))) }
+    # Indexer: filters built before this option have no SplitByAdDomain key (strict mode).
+    if ([bool]$Filters['SplitByAdDomain']) { $parts += '-SplitByAdDomain' }
     if ($Filters.ExcludeStaleAd) { $parts += @('-ExcludeStaleAd','-AdLastLogonMaxAgeDays',[string][int]$Filters.LastLogonDays) }
     if ($Campaign -eq 'Windows11Upgrade') {
         $parts += @('-Source',$Filters.Source)
@@ -358,6 +360,11 @@ function Get-AutomaticWaveResultText {
     $filtered = Get-SemtPropertyValue -InputObject $Summary -Name 'FilterExcludedDevices' -Default (Get-SemtPropertyValue -InputObject $Summary -Name 'NameFilterExcludedDevices' -Default 0)
     $lines = New-Object System.Collections.Generic.List[string]
     $lines.Add(('Selected: {0}' -f (Get-SemtPropertyValue -InputObject $Summary -Name 'SelectedDevices' -Default 0)))
+    if ([bool](Get-SemtPropertyValue -InputObject $Summary -Name 'SplitByAdDomain' -Default $false)) {
+        $domainWaves = @(Get-SemtPropertyValue -InputObject $Summary -Name 'DomainWaves' -Default $null | Where-Object { $null -ne $_ })
+        $lines.Add(('One Wave per AD domain: {0} Wave(s)' -f $domainWaves.Count))
+        foreach ($domainWave in $domainWaves) { $lines.Add(('  - {0}: {1} ({2})' -f $domainWave.WaveName,$domainWave.SelectedDevices,$(if ([string]$domainWave.ADDomain) { [string]$domainWave.ADDomain } else { 'no AD domain' }))) }
+    }
     $lines.Add(('Safety exclusions: {0}' -f (Get-SemtPropertyValue -InputObject $Summary -Name 'ExcludedDevices' -Default 0)))
     # Count per safety exclusion reason when the engine reports it: a JSON object read back from the
     # summary file, or a dictionary in process.
@@ -440,6 +447,18 @@ function Get-GuiChildWindowMarkup {
     if (-not $resources.Success) { throw 'The main window markup has no Window.Resources.' }
     if ($Markup.IndexOf('<!--SEMT_SHARED_RESOURCES-->') -lt 0) { throw 'The window markup has no <!--SEMT_SHARED_RESOURCES--> placeholder.' }
     return $Markup.Replace('<!--SEMT_SHARED_RESOURCES-->', $resources.Groups['Body'].Value)
+}
+
+function Test-AutomaticSplitByDomainAvailable {
+    <#
+    "Create one Wave per AD domain" applies to (All domains) only and needs the AD inventory
+    (Windows11Upgrade: Source Both or AD).
+    #>
+    param([AllowEmptyString()][string]$Campaign,[AllowEmptyString()][string]$AdDomain,[AllowEmptyString()][string]$Source)
+    if (@('HybridJoin','Windows11Upgrade') -notcontains $Campaign) { return $false }
+    if (-not [string]::IsNullOrWhiteSpace($AdDomain)) { return $false }
+    if ($Campaign -eq 'Windows11Upgrade' -and $Source -eq 'Intune') { return $false }
+    return $true
 }
 
 function Test-AutomaticPreviewReusable {
@@ -920,6 +939,7 @@ $automaticWaveXaml = @'
                         <TextBox x:Name="AutomaticNameNotContainsText"/>
                         <TextBlock Text="AD domain (from the shared AD inventory)"/>
                         <ComboBox x:Name="AutomaticAdDomainCombo"/>
+                        <CheckBox x:Name="AutomaticSplitByDomainCheck" Content="Create one Wave per AD domain" Margin="0,6,0,0" ToolTip="Only with (All domains): one Wave per AD domain that has selected computers, named &lt;Wave name&gt;-&lt;domain&gt;, with the same rules and safety exclusions as one Wave. Windows 11: needs the AD source (Both or AD)."/>
                         <StackPanel x:Name="AutomaticSourcePanel">
                             <TextBlock Text="Inventory source"/>
                             <ComboBox x:Name="AutomaticSourceCombo"/>
@@ -1431,6 +1451,11 @@ function Get-AutomaticInventoryWarning {
     return ('The shared inventories are not up to date:{0}{1}{0}{0}The selection may not match the current state of the devices. Use "Refresh old inventories only" first, or continue with these inventories.' -f [Environment]::NewLine,(@($lines) -join [Environment]::NewLine))
 }
 
+function Update-AutomaticSplitByDomainState {
+    $domain = if ($controls.AutomaticAdDomainCombo.SelectedIndex -gt 0) { [string]$controls.AutomaticAdDomainCombo.SelectedItem } else { '' }
+    $controls.AutomaticSplitByDomainCheck.IsEnabled = (Test-AutomaticSplitByDomainAvailable -Campaign $script:CurrentCampaign -AdDomain $domain -Source ([string]$controls.AutomaticSourceCombo.SelectedItem))
+}
+
 function Update-AutomaticView {
     # Prerequisites has no Automatic Wave (no inventory): its button is hidden for this Campaign.
     if ($script:CurrentCampaign -eq 'Prerequisites') {
@@ -1462,6 +1487,7 @@ function Update-AutomaticView {
         $prefix = if ($isWindows11) { 'W10' } else { 'HJ' }
         $controls.AutomaticWaveNameText.Text = 'WAVE-AUTO-{0}-{1}' -f $prefix,(Get-Date -Format 'yyyyMMdd-HHmmss')
     }
+    Update-AutomaticSplitByDomainState
     $script:AutomaticPreviewSignature = ''
 }
 
@@ -1526,6 +1552,8 @@ function Invoke-AutomaticWave {
         AdDomain = if ($controls.AutomaticAdDomainCombo.SelectedIndex -gt 0) { [string]$controls.AutomaticAdDomainCombo.SelectedItem } else { '' }
         ExcludeIntunePresent = [bool]$controls.AutomaticExcludeIntuneCheck.IsChecked
     }
+    # One Wave per AD domain: only with (All domains) and the AD inventory; the selection is the same.
+    $filters.SplitByAdDomain = ([bool]$controls.AutomaticSplitByDomainCheck.IsChecked -and (Test-AutomaticSplitByDomainAvailable -Campaign $campaign -AdDomain $filters.AdDomain -Source $filters.Source))
     if (-not (Test-SemtWaveName -Name $filters.WaveName)) { throw ("'{0}' is not a valid Wave name." -f $filters.WaveName) }
     $signature = Get-AutomaticFilterSignature -Campaign $campaign -Filters $filters
     # Create never needs a Preview: a Preview of the same filters is reused, otherwise the engine
@@ -1534,7 +1562,10 @@ function Invoke-AutomaticWave {
     # Old inventories: warn before Preview, and again in the Create confirmation (Preview may be old).
     $inventoryWarning = Get-AutomaticInventoryWarning -Checks @(Get-AutomaticInventoryChecks -Campaign $campaign -Source $filters.Source)
     if ($Create) {
-        $question = if ($reusePreview) {
+        $question = if ($filters.SplitByAdDomain) {
+            "Create one Wave per AD domain, named '{0}-<domain>'{1}?{2}{2}Each Wave gets the selected computers of its domain, with the same rules and safety exclusions as one Wave. An existing Wave of the same name stops the Create before any Wave is created.{2}{2}The Waves are created but NOT launched." -f $filters.WaveName,$(if ($reusePreview) { ' from the previewed selection' } else { '' }),[Environment]::NewLine
+        }
+        elseif ($reusePreview) {
             "Create Wave '{0}' from the previewed selection?{1}{1}The Wave is created but NOT launched." -f $filters.WaveName,[Environment]::NewLine
         }
         else {
@@ -1590,10 +1621,14 @@ function Invoke-AutomaticWave {
         $controls.AutomaticSummaryText.Text = ($summary | ConvertTo-Json -Depth 6)
         $counts = Get-AutomaticWaveResultText -Summary $summary
         if ($info.Create) {
-            Add-Status -Title 'Wave created' -Message ("Wave '{0}' created from the automatic selection. It was not launched." -f $info.WaveName)
-            Update-WaveList -SelectName $info.WaveName
+            # One Wave per AD domain: the created Wave names are in DomainWaves.
+            $createdNames = @(@(Get-SemtPropertyValue -InputObject $summary -Name 'DomainWaves' -Default $null | Where-Object { $null -ne $_ }) | ForEach-Object { [string]$_.WaveName })
+            if ($createdNames.Count -eq 0) { $createdNames = @($info.WaveName) }
+            $createdText = if ($createdNames.Count -gt 1) { "Waves '{0}' were" -f ($createdNames -join "', '") } else { "Wave '{0}' was" -f $createdNames[0] }
+            Add-Status -Title 'Wave created' -Message ("{0} created from the automatic selection. Not launched." -f $createdText)
+            Update-WaveList -SelectName $createdNames[0]
             Update-AutomaticView
-            [void][System.Windows.MessageBox]::Show((Get-GuiDialogOwner), ("Wave '{0}' was created.{1}{1}{2}{1}{1}The Wave was NOT launched. It is selected in the Waves tab." -f $info.WaveName,[Environment]::NewLine,$counts), 'Create Wave', 'OK', 'Information')
+            [void][System.Windows.MessageBox]::Show((Get-GuiDialogOwner), ("{0} created.{1}{1}{2}{1}{1}NOT launched. '{3}' is selected in the Waves tab." -f $createdText,[Environment]::NewLine,$counts,$createdNames[0]), 'Create Wave', 'OK', 'Information')
             # The Automatic Wave window closes after a successful Create (the evidence stays in Runs).
             $script:GuiChildWindows['AutomaticWave'].Close()
         }
@@ -1957,7 +1992,7 @@ $controls.CreateWaveButton.Add_Click({
 $controls.OpenNewWaveComputersButton.Add_Click({ if ([string]::IsNullOrWhiteSpace($controls.NewWavePathText.Text)) { Show-GuiError 'No Wave was created from this window yet.' } else { Open-TextFile $controls.NewWavePathText.Text } })
 foreach ($name in @('AutomaticWaveNameText','AutomaticNamePrefixText','AutomaticNameContainsText','AutomaticNameNotContainsText','AutomaticLastLogonDaysText')) { $controls[$name].Add_TextChanged({ $script:AutomaticPreviewSignature = '' }) }
 foreach ($name in @('AutomaticExcludeStaleAdCheck','AutomaticExcludeIntuneCheck')) { $controls[$name].Add_Click({ $script:AutomaticPreviewSignature = '' }) }
-foreach ($name in @('AutomaticSourceCombo','AutomaticAdDomainCombo')) { $controls[$name].Add_SelectionChanged({ $script:AutomaticPreviewSignature = '' }) }
+foreach ($name in @('AutomaticSourceCombo','AutomaticAdDomainCombo')) { $controls[$name].Add_SelectionChanged({ $script:AutomaticPreviewSignature = ''; Update-AutomaticSplitByDomainState }) }
 $controls.AutomaticPreviewButton.Add_Click({ try { Invoke-AutomaticWave } catch { Show-GuiError $_.Exception.Message; $controls.AutomaticPreviewButton.IsEnabled = $true; $controls.AutomaticCreateButton.IsEnabled = $true } })
 $controls.AutomaticCreateButton.Add_Click({ try { Invoke-AutomaticWave -Create } catch { Show-GuiError $_.Exception.Message; $controls.AutomaticPreviewButton.IsEnabled = $true; $controls.AutomaticCreateButton.IsEnabled = $true } })
 $controls.AutomaticOpenEvidenceButton.Add_Click({ Open-ShellPath $controls.AutomaticEvidencePathText.Text })

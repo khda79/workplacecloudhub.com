@@ -36,6 +36,14 @@ Each domain must exist in the AD inventory. The shared AD inventory always cover
 Optional texts (separated by ;). A computer whose name contains one of them is left out and listed
 in AutomaticWaveFilterExclusions.csv with COMPUTER_NAME_EXCLUDED_TEXT_MATCHED. Plain text only.
 
+.PARAMETER SplitByAdDomain
+Creates one Wave per AD domain of the selected computers instead of one Wave, named
+<WaveName>-<domain label> (first DNS label in upper case, or the whole domain with - when two domains
+share it; NO-AD-DOMAIN for selected computers without an AD domain). The selection, its rules and
+safety exclusions are the same as for one Wave: the union of the Waves is the single-Wave selection.
+Every Wave name is checked before the first Wave is created; an existing Wave folder stops the
+Create. Preview lists the planned Waves in the summary (DomainWaves) and AutomaticWaveDomainWaves.csv.
+
 .PARAMETER Create
 Creates the Wave (Computers.txt, Wave.local.json.txt, wrappers). Without it, only evidence is written.
 
@@ -46,7 +54,7 @@ the inventory files have not changed since, and it is less than 24 hours old. Ot
 is computed again.
 
 .VERSION
-1.2.0
+1.3.0
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
@@ -66,6 +74,7 @@ param(
     [string[]]$ComputerNameContains,
     [string[]]$ComputerNameNotContains,
     [string[]]$AdDomainFilter,
+    [switch]$SplitByAdDomain,
     [switch]$ExcludeIntunePresent,
     [switch]$ExcludeStaleAd,
     [ValidateRange(1, 3650)]
@@ -80,7 +89,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:AutomaticWaveVersion = '1.2.0'
+$script:AutomaticWaveVersion = '1.3.0'
 $script:AutomaticWaveCampaign = 'Windows11Upgrade'
 $script:AutomaticWaveProgressCallback = $ProgressCallback
 
@@ -619,6 +628,7 @@ function New-AutomaticWaveFromPreview {
         [Parameter(Mandatory = $true)][string]$DescriptionBase,
         [Parameter(Mandatory = $true)][string]$EmptySelectionMessage,
         [string]$EvidenceRoot,
+        [switch]$SplitByAdDomain,
         [switch]$NoEvidence
     )
 
@@ -628,7 +638,14 @@ function New-AutomaticWaveFromPreview {
     $filterExcluded = @()
     if (Test-Path -LiteralPath (Join-Path $PreviewPath 'AutomaticWaveExclusions.csv') -PathType Leaf) { $excluded = @(Import-Csv -LiteralPath (Join-Path $PreviewPath 'AutomaticWaveExclusions.csv')) }
     if (Test-Path -LiteralPath (Join-Path $PreviewPath 'AutomaticWaveFilterExclusions.csv') -PathType Leaf) { $filterExcluded = @(Import-Csv -LiteralPath (Join-Path $PreviewPath 'AutomaticWaveFilterExclusions.csv')) }
-    Assert-AutomaticWaveCreatable -SelectedCount $selected.Count -WaveName $WaveName -PackageRoot $PackageRoot -EmptySelectionMessage $EmptySelectionMessage
+    $domainPlans = @()
+    if ($SplitByAdDomain) {
+        $domainPlans = @(Get-AutomaticWaveDomainWavePlan -Selected $selected -BaseWaveName $WaveName)
+        Assert-AutomaticWaveDomainPlanCreatable -Plans $domainPlans -PackageRoot $PackageRoot -EmptySelectionMessage $EmptySelectionMessage
+    }
+    else {
+        Assert-AutomaticWaveCreatable -SelectedCount $selected.Count -WaveName $WaveName -PackageRoot $PackageRoot -EmptySelectionMessage $EmptySelectionMessage
+    }
 
     $evidencePath = ''
     if (-not $NoEvidence) {
@@ -638,35 +655,144 @@ function New-AutomaticWaveFromPreview {
         $evidencePath = Join-Path $EvidenceRoot (Get-Date -Format 'yyyyMMdd-HHmmssfff')
         Publish-AutomaticWaveProgress -Stage 'Copying the preview evidence...' -Detail $evidencePath
         New-SemtDirectory -Path $evidencePath
-        foreach ($file in @(Get-ChildItem -LiteralPath $PreviewPath -Filter '*.csv' -File)) {
+        # The per-domain plan of the Preview is computed again below for this Create.
+        foreach ($file in @(Get-ChildItem -LiteralPath $PreviewPath -Filter '*.csv' -File | Where-Object { $_.Name -ne 'AutomaticWaveDomainWaves.csv' })) {
             Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $evidencePath $file.Name) -Force
         }
     }
 
-    Publish-AutomaticWaveProgress -Stage 'Creating the automatic Wave...' -Detail ("Wave: {0}; selected devices: {1}" -f $WaveName, $selected.Count)
-    $waveComputers = @($selected | Sort-Object ComputerName | Select-Object -ExpandProperty ComputerName)
-    $wave = New-SemtWave -PackageRoot $PackageRoot -Campaign $script:AutomaticWaveCampaign -Name $WaveName -Computers $waveComputers -Source Automatic -Description ('{0}; Selected={1}' -f $DescriptionBase, $selected.Count) -EvidencePath $evidencePath
+    $wavePath = ''
+    $computersPath = ''
+    if ($SplitByAdDomain) {
+        New-AutomaticWaveDomainWaves -Plans $domainPlans -PackageRoot $PackageRoot -DescriptionBase $DescriptionBase -EvidencePath $evidencePath
+        if (-not $NoEvidence) { Export-AutomaticWaveCsv -Path (Join-Path $evidencePath 'AutomaticWaveDomainWaves.csv') -Columns $script:AutomaticWaveDomainWaveColumns -Rows $domainPlans }
+    }
+    else {
+        Publish-AutomaticWaveProgress -Stage 'Creating the automatic Wave...' -Detail ("Wave: {0}; selected devices: {1}" -f $WaveName, $selected.Count)
+        $waveComputers = @($selected | Sort-Object ComputerName | Select-Object -ExpandProperty ComputerName)
+        $wave = New-SemtWave -PackageRoot $PackageRoot -Campaign $script:AutomaticWaveCampaign -Name $WaveName -Computers $waveComputers -Source Automatic -Description ('{0}; Selected={1}' -f $DescriptionBase, $selected.Count) -EvidencePath $evidencePath
+        $wavePath = [string]$wave.Path
+        $computersPath = [string]$wave.ComputersPath
+    }
 
     $values = [ordered]@{}
     foreach ($property in $PreviewSummary.PSObject.Properties) { $values[$property.Name] = $property.Value }
     $values['GeneratedUtc'] = [datetime]::UtcNow.ToString('o')
     $values['WaveCreated'] = $true
     $values['WaveName'] = $WaveName
-    $values['WavePath'] = [string]$wave.Path
-    $values['ComputersPath'] = [string]$wave.ComputersPath
+    $values['WavePath'] = $wavePath
+    $values['ComputersPath'] = $computersPath
+    $values['SplitByAdDomain'] = [bool]$SplitByAdDomain
+    $values['DomainWaves'] = @($domainPlans | Select-Object -Property $script:AutomaticWaveDomainWaveColumns)
     $values['EvidencePath'] = $evidencePath
     $values['PreviewEvidencePath'] = $PreviewPath
     $summary = [pscustomobject]$values
     if (-not $NoEvidence) {
         Write-SemtJsonFileAtomic -Path (Join-Path $evidencePath 'AutomaticWaveSummary.json.txt') -InputObject $summary -Depth 5
     }
-    Publish-AutomaticWaveProgress -Stage 'Automatic Wave created.' -Detail ([string]$wave.Path)
+    Publish-AutomaticWaveProgress -Stage $(if ($SplitByAdDomain) { 'Automatic Waves created.' } else { 'Automatic Wave created.' }) -Detail $(if ($SplitByAdDomain) { @($domainPlans | ForEach-Object { $_.WaveName }) -join ', ' } else { $wavePath })
 
     return [pscustomobject]@{
         Summary = $summary
         SelectedDevices = $selected
         ExcludedDevices = $excluded
         FilterExcludedDevices = $filterExcluded
+    }
+}
+
+$script:AutomaticWaveDomainWaveColumns = @('ADDomain', 'DomainLabel', 'WaveName', 'SelectedDevices', 'WavePath', 'ComputersPath')
+
+function Get-AutomaticWaveDomainWavePlan {
+    <#
+    One Wave per AD domain of the selected computers (-SplitByAdDomain). Each Wave gets the selected
+    computers of its domain, so the union of the Waves is exactly the single-Wave selection. The Wave
+    name is <WaveName>-<domain label>: the first DNS label of the domain in upper case, or the whole
+    domain (dots replaced by -) when two selected domains share that first label. Selected computers
+    without an AD domain value go to <WaveName>-NO-AD-DOMAIN. Names stay within 80 characters (the
+    base name is shortened, never the domain label).
+    #>
+    param(
+        [AllowNull()][object[]]$Selected,
+        [Parameter(Mandatory = $true)][string]$BaseWaveName
+    )
+
+    $groups = @{}
+    foreach ($row in @($Selected)) {
+        if ($null -eq $row) { continue }
+        $domain = ([string](Get-SemtPropertyValue -InputObject $row -Name 'ADDomain' -Default '')).Trim().Trim('.').ToLowerInvariant()
+        if (-not $groups.ContainsKey($domain)) { $groups[$domain] = [System.Collections.Generic.List[object]]::new() }
+        $groups[$domain].Add($row)
+    }
+    $domains = @($groups.Keys | Where-Object { $_ } | Sort-Object)
+    $firstLabelCount = @{}
+    foreach ($domain in $domains) {
+        $first = $domain.Split('.')[0]
+        if ($firstLabelCount.ContainsKey($first)) { $firstLabelCount[$first]++ } else { $firstLabelCount[$first] = 1 }
+    }
+    $ordered = @($domains)
+    if ($groups.ContainsKey('')) { $ordered += '' }
+    $names = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $plans = [System.Collections.Generic.List[object]]::new()
+    foreach ($domain in $ordered) {
+        $label = if (-not $domain) { 'NO-AD-DOMAIN' } elseif ($firstLabelCount[$domain.Split('.')[0]] -gt 1) { $domain } else { $domain.Split('.')[0] }
+        # Folder-safe ASCII label: letters, digits and single hyphens.
+        $label = [regex]::Replace($label.ToUpperInvariant(), '[^A-Z0-9]+', '-').Trim('-')
+        if ($label.Length -gt 40) { $label = $label.Substring(0, 40).Trim('-') }
+        if (-not $label) { $label = 'DOMAIN-{0}' -f ($plans.Count + 1) }
+        $base = $BaseWaveName
+        $maxBase = 80 - 1 - $label.Length
+        if ($base.Length -gt $maxBase) { $base = $base.Substring(0, $maxBase).TrimEnd('-._') }
+        $domainWaveName = '{0}-{1}' -f $base, $label
+        if (-not $names.Add($domainWaveName)) { throw ("SEMT_WAVE_NAME_DUPLICATE: two AD domains give the same Wave name '{0}'. Use a shorter Wave name." -f $domainWaveName) }
+        $computers = @($groups[$domain].ToArray() | Sort-Object ComputerName | ForEach-Object { [string]$_.ComputerName })
+        $plans.Add([pscustomobject]@{
+            ADDomain = $domain
+            DomainLabel = $label
+            WaveName = $domainWaveName
+            SelectedDevices = $computers.Count
+            Computers = $computers
+            WavePath = ''
+            ComputersPath = ''
+        })
+    }
+    return @($plans.ToArray())
+}
+
+function Assert-AutomaticWaveDomainPlanCreatable {
+    <#
+    Checks every Wave of a per-domain plan before the first one is created: an existing Wave folder or
+    an invalid name stops the whole Create and nothing is created.
+    #>
+    param(
+        [AllowNull()][object[]]$Plans,
+        [Parameter(Mandatory = $true)][string]$PackageRoot,
+        [Parameter(Mandatory = $true)][string]$EmptySelectionMessage
+    )
+
+    if (@($Plans).Count -eq 0) { throw $EmptySelectionMessage }
+    foreach ($plan in @($Plans)) {
+        Assert-AutomaticWaveCreatable -SelectedCount $plan.SelectedDevices -WaveName $plan.WaveName -PackageRoot $PackageRoot -EmptySelectionMessage $EmptySelectionMessage
+    }
+}
+
+function New-AutomaticWaveDomainWaves {
+    <#
+    Creates the Waves of a per-domain plan with New-SemtWave (never launched). All of them share the
+    selection evidence of the run; WavePath and ComputersPath are filled in the plan.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Plans,
+        [Parameter(Mandatory = $true)][string]$PackageRoot,
+        [Parameter(Mandatory = $true)][string]$DescriptionBase,
+        [AllowEmptyString()][string]$EvidencePath
+    )
+
+    foreach ($plan in $Plans) {
+        Publish-AutomaticWaveProgress -Stage 'Creating the automatic Wave...' -Detail ("Wave: {0}; AD domain: {1}; selected devices: {2}" -f $plan.WaveName, $(if ($plan.ADDomain) { $plan.ADDomain } else { 'none' }), $plan.SelectedDevices)
+        $description = '{0}; SplitByAdDomain=True; ADDomainWave={1}; Selected={2}' -f $DescriptionBase, $plan.ADDomain, $plan.SelectedDevices
+        $wave = New-SemtWave -PackageRoot $PackageRoot -Campaign $script:AutomaticWaveCampaign -Name $plan.WaveName -Computers @($plan.Computers) -Source Automatic -Description $description -EvidencePath $EvidencePath
+        $plan.WavePath = [string]$wave.Path
+        $plan.ComputersPath = [string]$wave.ComputersPath
     }
 }
 
@@ -724,6 +850,9 @@ if ($ExcludeIntunePresent -and 'Intune' -notin $availableSources) {
 if (@(Get-AutomaticWaveAdDomains -Domains $AdDomainFilter).Count -gt 0 -and 'AD' -notin $availableSources) {
     throw 'AdDomainFilter requires an available AD inventory source.'
 }
+if ($SplitByAdDomain -and 'AD' -notin $availableSources) {
+    throw 'SplitByAdDomain requires the AD inventory source (Source AD or Both).'
+}
 if ($ExcludeStaleAd -and 'AD' -notin $availableSources) {
     throw 'ExcludeStaleAd requires an available AD inventory source.'
 }
@@ -755,7 +884,7 @@ $inventoryFingerprint = Get-AutomaticWaveInventoryFingerprint -Paths @($(if ('AD
 if ($Create -and -not [string]::IsNullOrWhiteSpace($PreviewEvidencePath)) {
     $previewReuse = Get-AutomaticWavePreviewReuse -Path $PreviewEvidencePath -SelectionSignature $selectionSignature -InventoryFingerprint $inventoryFingerprint
     if ($previewReuse.Summary) {
-        New-AutomaticWaveFromPreview -PreviewPath $PreviewEvidencePath -PreviewSummary $previewReuse.Summary -WaveName $safeWaveName -PackageRoot $effectivePackageRoot -DescriptionBase $descriptionBase -EmptySelectionMessage $emptySelectionMessage -EvidenceRoot $EvidenceRoot -NoEvidence:$NoEvidence
+        New-AutomaticWaveFromPreview -PreviewPath $PreviewEvidencePath -PreviewSummary $previewReuse.Summary -WaveName $safeWaveName -PackageRoot $effectivePackageRoot -DescriptionBase $descriptionBase -EmptySelectionMessage $emptySelectionMessage -EvidenceRoot $EvidenceRoot -SplitByAdDomain:$SplitByAdDomain -NoEvidence:$NoEvidence
         return
     }
     Publish-AutomaticWaveProgress -Stage 'Computing the selection again...' -Detail ('The preview cannot be reused: {0}.' -f $previewReuse.Reason)
@@ -933,6 +1062,7 @@ foreach ($key in $allKeys) {
             ADOperatingSystem  = if ($keyAdRecords.Count -gt 0) { [string]$keyAdRecords[0].OperatingSystem } else { '' }
             ADOSVersion        = if ($keyAdRecords.Count -gt 0) { [string]$keyAdRecords[0].OSVersion } else { '' }
             ADEnabled          = if ($keyAdRecords.Count -gt 0) { [string]$keyAdRecords[0].Enabled } else { '' }
+            ADDomain           = if ($adEligible) { [string]$eligibleAd[0].Domain } elseif ($keyAdRecords.Count -gt 0) { [string]$keyAdRecords[0].Domain } else { '' }
             ADLastLogonStale   = $adStale
             IntuneOperatingSystem = if ($null -ne $intuneRecord) { [string]$intuneRecord.OperatingSystem } else { '' }
             IntuneOSVersion    = if ($null -ne $intuneRecord) { [string]$intuneRecord.OSVersion } else { '' }
@@ -967,8 +1097,11 @@ foreach ($key in $allKeys) {
 Publish-AutomaticWaveProgress -Stage 'Applying selection and safety filters...' -Detail ("Selected: {0}; safety exclusions: {1}; filtered out: {2}" -f $selected.Count,$excluded.Count,$filterExcluded.Count)
 $wavePath = ''
 $computersPath = ''
+$domainPlans = @()
+if ($SplitByAdDomain) { $domainPlans = @(Get-AutomaticWaveDomainWavePlan -Selected $selected.ToArray() -BaseWaveName $safeWaveName) }
 if ($Create) {
-    Assert-AutomaticWaveCreatable -SelectedCount $selected.Count -WaveName $safeWaveName -PackageRoot $effectivePackageRoot -EmptySelectionMessage $emptySelectionMessage
+    if ($SplitByAdDomain) { Assert-AutomaticWaveDomainPlanCreatable -Plans $domainPlans -PackageRoot $effectivePackageRoot -EmptySelectionMessage $emptySelectionMessage }
+    else { Assert-AutomaticWaveCreatable -SelectedCount $selected.Count -WaveName $safeWaveName -PackageRoot $effectivePackageRoot -EmptySelectionMessage $emptySelectionMessage }
 }
 
 $evidencePath = ''
@@ -990,7 +1123,7 @@ if (-not $NoEvidence) {
 
     $selectionColumns = @(
         'ComputerKey', 'ComputerName', 'SourceEvidence', 'ADOperatingSystem', 'ADOSVersion',
-        'ADEnabled', 'ADLastLogonStale', 'IntuneOperatingSystem', 'IntuneOSVersion',
+        'ADEnabled', 'ADDomain', 'ADLastLogonStale', 'IntuneOperatingSystem', 'IntuneOSVersion',
         'IntuneManagementState', 'IntuneLastSyncStale', 'SelectionReason'
     )
     $exclusionColumns = @(
@@ -1007,7 +1140,13 @@ if (-not $NoEvidence) {
     Export-AutomaticWaveCsv -Path (Join-Path $evidencePath 'AutomaticWaveFilterExclusions.csv') -Columns $filterExclusionColumns -Rows $filterExcluded.ToArray()
 }
 
-if ($Create) {
+if ($Create -and $SplitByAdDomain) {
+    New-AutomaticWaveDomainWaves -Plans $domainPlans -PackageRoot $effectivePackageRoot -DescriptionBase $descriptionBase -EvidencePath $evidencePath
+}
+if ($SplitByAdDomain -and -not $NoEvidence) {
+    Export-AutomaticWaveCsv -Path (Join-Path $evidencePath 'AutomaticWaveDomainWaves.csv') -Columns $script:AutomaticWaveDomainWaveColumns -Rows $domainPlans
+}
+if ($Create -and -not $SplitByAdDomain) {
     $description = '{0}; Selected={1}' -f $descriptionBase,$selected.Count
     Publish-AutomaticWaveProgress -Stage 'Creating the automatic Wave...' -Detail ("Wave: {0}; selected devices: {1}" -f $safeWaveName,$selected.Count)
     $waveComputers = @($selected | Sort-Object ComputerName | Select-Object -ExpandProperty ComputerName)
@@ -1061,6 +1200,8 @@ $summary = [pscustomobject]@{
     WaveName                   = $safeWaveName
     WavePath                   = $wavePath
     ComputersPath              = $computersPath
+    SplitByAdDomain            = [bool]$SplitByAdDomain
+    DomainWaves                = @($domainPlans | Select-Object -Property $script:AutomaticWaveDomainWaveColumns)
     EvidencePath               = $evidencePath
 }
 
@@ -1069,7 +1210,7 @@ if (-not $NoEvidence) {
     Write-SemtJsonFileAtomic -Path (Join-Path $evidencePath 'AutomaticWaveSummary.json.txt') -InputObject $summary -Depth 5
 }
 
-Publish-AutomaticWaveProgress -Stage $(if ($Create) { 'Automatic Wave created.' } else { 'Automatic Wave preview ready.' }) -Detail $(if ($Create) { $wavePath } else { "Selected devices: $($selected.Count)" })
+Publish-AutomaticWaveProgress -Stage $(if ($Create) { 'Automatic Wave created.' } else { 'Automatic Wave preview ready.' }) -Detail $(if ($Create -and $SplitByAdDomain) { @($domainPlans | ForEach-Object { $_.WaveName }) -join ', ' } elseif ($Create) { $wavePath } elseif ($SplitByAdDomain) { "Selected devices: $($selected.Count); Waves per AD domain: $($domainPlans.Count)" } else { "Selected devices: $($selected.Count)" })
 
 [pscustomobject]@{
     Summary               = $summary

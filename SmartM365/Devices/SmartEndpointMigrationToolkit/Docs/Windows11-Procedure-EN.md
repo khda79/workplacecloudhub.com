@@ -45,7 +45,8 @@ only when no user is connected, **except** when uptime exceeds
 
 - **Automatic Wave** (button under the Campaign, opens its window): refresh the shared AD and Intune inventories, choose the source
   (`Both`, `AD`, `Intune`), the AD domain (the shared inventory covers the whole forest;
-  *(All domains)* by default), prefixes, AD logon age and *Exclude devices present in Intune* if
+  *(All domains)* by default; with it, *Create one Wave per AD domain* creates one Wave per domain
+  named `<Wave name>-<domain>`, Intune-only devices in `-NO-AD-DOMAIN`), prefixes, AD logon age and *Exclude devices present in Intune* if
   needed, optionally click **Preview** to review the selection and exclusions, then **Create Wave**
   (without a Preview, the selection is computed at Create with the same safety exclusions).
 - **New Wave** (button, opens its window): paste the computer names, **Create Wave**.

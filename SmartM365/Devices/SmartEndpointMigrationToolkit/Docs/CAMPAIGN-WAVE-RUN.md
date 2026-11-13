@@ -75,7 +75,13 @@ PowerShell 5.1 with the engine. `Update-WaveCmdWrappers.cmd` regenerates them fo
    always covers every domain of the forest (an export with `-Domain` cannot replace it); the
    **AD domain** list of the Automatic Wave window chooses one domain for the Wave. Computers of
    other domains are filter exclusions `AD_DOMAIN_NOT_MATCHED`; devices without an AD record
-   (Intune only) are `AD_DOMAIN_UNKNOWN`.
+   (Intune only) are `AD_DOMAIN_UNKNOWN`. With *(All domains)*, **Create one Wave per AD domain**
+   (engine parameter `-SplitByAdDomain`) splits the same selection into one Wave per AD domain that
+   has selected computers, named `<Wave name>-<domain label>` (first DNS label in upper case, the
+   whole domain when two domains share it, `NO-AD-DOMAIN` for selected computers without an AD
+   domain such as Intune-only Windows 10 devices). Rules, safety exclusions and evidence are those
+   of one Wave; Preview lists the planned Waves and their counts (`AutomaticWaveDomainWaves.csv`).
+   Every Wave name is checked first: an existing Wave folder stops the Create and nothing is created.
    **Refresh old inventories only** exports only the inventories that are missing, older than
    their limit (AD, Intune, Entra and user licenses: 24 hours) or of unverified provenance: AD alone needs
    no Microsoft Graph sign-in; Intune and Entra share one sign-in. The user license export uses a separate delegated sign-in with `User.Read.All`. Before

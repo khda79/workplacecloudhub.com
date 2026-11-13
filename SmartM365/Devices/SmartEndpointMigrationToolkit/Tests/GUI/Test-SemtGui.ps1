@@ -72,7 +72,7 @@ try {
     foreach ($name in @('CampaignCombo','WaveCombo','WaveModeCombo','LaunchWaveButton','LaunchAllButton','StopAllButton','OpenSinglePcButton','OpenNewWaveButton','OpenAutomaticWaveButton','DeleteWaveButton','RunsGrid','OpenRunReportButton','StopSelectedRunButton','ForceStopSelectedRunButton','OptionsHost','ResetOptionsButton','HeaderLogoImage')) {
         Write-TestResult -Condition ($xaml -match ('x:Name="{0}"' -f $name)) -Message ("main window control present: {0}" -f $name)
     }
-    foreach ($pair in @(@('singlePcXaml',@('SingleComputerText','SingleModeCombo','LaunchSingleButton','SingleRunFolderText','OpenSingleRunFolderButton')),@('newWaveXaml',@('NewWaveNameText','NewWaveComputersText','CreateWaveButton','NewWavePathText','OpenNewWaveComputersButton')),@('automaticWaveXaml',@('AutomaticWaveNameText','AutomaticNamePrefixText','AutomaticNameContainsText','AutomaticNameNotContainsText','AutomaticAdDomainCombo','AutomaticSourceCombo','AutomaticExcludeIntuneCheck','AutomaticExcludeStaleAdCheck','AutomaticLastLogonDaysText','AutomaticPreviewButton','AutomaticCreateButton','AutomaticRefreshInventoryButton','AutomaticRefreshStaleInventoryButton','AutomaticSummaryText','AutomaticEvidencePathText','AutomaticOpenEvidenceButton')))) {
+    foreach ($pair in @(@('singlePcXaml',@('SingleComputerText','SingleModeCombo','LaunchSingleButton','SingleRunFolderText','OpenSingleRunFolderButton')),@('newWaveXaml',@('NewWaveNameText','NewWaveComputersText','CreateWaveButton','NewWavePathText','OpenNewWaveComputersButton')),@('automaticWaveXaml',@('AutomaticWaveNameText','AutomaticNamePrefixText','AutomaticNameContainsText','AutomaticNameNotContainsText','AutomaticAdDomainCombo','AutomaticSplitByDomainCheck','AutomaticSourceCombo','AutomaticExcludeIntuneCheck','AutomaticExcludeStaleAdCheck','AutomaticLastLogonDaysText','AutomaticPreviewButton','AutomaticCreateButton','AutomaticRefreshInventoryButton','AutomaticRefreshStaleInventoryButton','AutomaticSummaryText','AutomaticEvidencePathText','AutomaticOpenEvidenceButton')))) {
         foreach ($name in $pair[1]) { Write-TestResult -Condition ($childXaml[$pair[0]] -match ('x:Name="{0}"' -f $name) -and $xaml -notmatch ('x:Name="{0}"' -f $name)) -Message ("{0} control present only in its window: {1}" -f $pair[0],$name) }
     }
     Test-Step 'all the action card buttons are on one line under the Campaign selector and the status' {
@@ -87,7 +87,7 @@ try {
     Test-Step 'Launch All is labelled as limited to the selected Campaign in its confirmation' { [IO.File]::ReadAllText($guiPath) -match 'Launch All Waves of this Campaign only' }
     Test-Step 'stop states remote endpoints are reported separately' { [IO.File]::ReadAllText($guiPath) -match 'Remote endpoints may continue and must be verified' }
     $guiText = [IO.File]::ReadAllText($guiPath)
-    foreach ($functionName in @('ConvertTo-PowerShellLiteral','Get-AutomaticWaveCommandText','Get-AutomaticFilterSignature','Split-GuiList','Get-GuiRunCommand','Assert-CmdLiteralValue','ConvertTo-CmdArgument','Get-GuiStatePath','New-GuiSelectionFile','Get-InventoryRefreshCommandText','Get-AdInventoryDomains','Get-InventoryRefreshPlan','Get-AutomaticWaveProcessText','Get-AutomaticWaveLastStage','Get-AutomaticWaveResultText','Get-GuiChildWindowMarkup','Test-AutomaticPreviewReusable','Remove-GuiWaveFolder')) {
+    foreach ($functionName in @('ConvertTo-PowerShellLiteral','Get-AutomaticWaveCommandText','Get-AutomaticFilterSignature','Split-GuiList','Get-GuiRunCommand','Assert-CmdLiteralValue','ConvertTo-CmdArgument','Get-GuiStatePath','New-GuiSelectionFile','Get-InventoryRefreshCommandText','Get-AdInventoryDomains','Get-InventoryRefreshPlan','Get-AutomaticWaveProcessText','Get-AutomaticWaveLastStage','Get-AutomaticWaveResultText','Get-GuiChildWindowMarkup','Test-AutomaticPreviewReusable','Test-AutomaticSplitByDomainAvailable','Remove-GuiWaveFolder')) {
         $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
         . ([scriptblock]::Create($definition.Extent.Text))
     }
@@ -268,6 +268,8 @@ try {
         Write-TestResult -Condition ($reuseCreate -match "-Create -PreviewEvidencePath 'C:\\Evidence\\Preview'$" -and $reuseUsed.Count -eq 0 -and (Get-AutomaticWaveCommandText -Campaign $campaign -Filters $filters -EvidenceRoot 'C:\Evidence' -PreviewEvidencePath 'C:\Evidence\Preview') -notmatch 'PreviewEvidencePath') -Message ("{0}: Create passes the previewed evidence to the engine (Preview never does)" -f $campaign)
         $allDomains = $filters.Clone(); $allDomains.AdDomain = ''
         Write-TestResult -Condition ($preview -match "-AdDomainFilter @\('fr\.example'\)" -and (Get-AutomaticWaveCommandText -Campaign $campaign -Filters $allDomains -EvidenceRoot 'C:\Evidence') -notmatch 'AdDomainFilter') -Message ("{0}: AD domain is passed only when a domain is chosen" -f $campaign)
+        $splitDomains = $allDomains.Clone(); $splitDomains.SplitByAdDomain = $true
+        Write-TestResult -Condition ((Get-AutomaticWaveCommandText -Campaign $campaign -Filters $splitDomains -EvidenceRoot 'C:\Evidence' -Create) -match ' -SplitByAdDomain( |$)' -and (Get-AutomaticWaveCommandText -Campaign $campaign -Filters $splitDomains -EvidenceRoot 'C:\Evidence') -match ' -SplitByAdDomain( |$)' -and $create -notmatch 'SplitByAdDomain') -Message ("{0}: one Wave per AD domain is passed only when chosen, for Preview and Create" -f $campaign)
     }
     Test-Step 'filter signature changes when a filter changes (Create needs a matching Preview)' {
         $a = Get-AutomaticFilterSignature -Campaign HybridJoin -Filters $filters
@@ -353,6 +355,14 @@ try {
     Test-Step 'AD domain list is read from the AD inventory (distinct, lower case, sorted, quoted commas)' { (@(Get-AdInventoryDomains -Path $domainCsv) -join ',') -eq 'be.example,fr.example' }
     Set-Content -LiteralPath $domainCsv -Value 'ComputerName,Enabled' -Encoding ASCII
     Test-Step 'AD domain list is empty without the ADDomain column or the file' { @(Get-AdInventoryDomains -Path $domainCsv).Count -eq 0 -and @(Get-AdInventoryDomains -Path (Join-Path $tempRoot 'missing.csv')).Count -eq 0 }
+    Test-Step 'one Wave per AD domain is offered only with (All domains) and the AD inventory' {
+        (Test-AutomaticSplitByDomainAvailable -Campaign HybridJoin -AdDomain '' -Source '') -and (Test-AutomaticSplitByDomainAvailable -Campaign Windows11Upgrade -AdDomain '' -Source 'Both') -and (Test-AutomaticSplitByDomainAvailable -Campaign Windows11Upgrade -AdDomain '' -Source 'AD') -and
+        -not (Test-AutomaticSplitByDomainAvailable -Campaign HybridJoin -AdDomain 'fr.example' -Source '') -and -not (Test-AutomaticSplitByDomainAvailable -Campaign Windows11Upgrade -AdDomain '' -Source 'Intune') -and -not (Test-AutomaticSplitByDomainAvailable -Campaign Prerequisites -AdDomain '' -Source '')
+    }
+    Test-Step 'Preview and Create show the Waves per AD domain' {
+        $splitText = Get-AutomaticWaveResultText -Summary ([pscustomobject]@{ SelectedDevices = 5; ExcludedDevices = 0; FilterExcludedDevices = 0; SplitByAdDomain = $true; DomainWaves = @([pscustomobject]@{ ADDomain = 'be.example'; WaveName = 'WAVE-X-BE'; SelectedDevices = 1 }, [pscustomobject]@{ ADDomain = ''; WaveName = 'WAVE-X-NO-AD-DOMAIN'; SelectedDevices = 4 }) })
+        $splitText -match 'One Wave per AD domain: 2 Wave\(s\)' -and $splitText -match '  - WAVE-X-BE: 1 \(be\.example\)' -and $splitText -match '  - WAVE-X-NO-AD-DOMAIN: 4 \(no AD domain\)' -and (Get-AutomaticWaveResultText -Summary ([pscustomobject]@{ SelectedDevices = 1; ExcludedDevices = 0; FilterExcludedDevices = 0; SplitByAdDomain = $false; DomainWaves = @() })) -notmatch 'AD domain'
+    }
     Test-Step 'Automatic Wave view offers the AD domain choice' { $allXaml -match 'x:Name="AutomaticAdDomainCombo"' -and $guiText -match "AllAdDomainsLabel = '\(All domains\)'" }
     # Preview/Create: the real engine in a hidden process, as started by the GUI (fictional inventories).
     $waitWindow = [string]$ast.Find({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$automaticWaitXaml' }, $true).Right.Expression.Value

@@ -218,6 +218,11 @@ try {
     Assert-Equal $guidExcluded['GUID-FRDATE'] 'ConfirmedByAdObjectGuid' ("a recent sync written in fr-FR ($frSyncText) is not read as MM/dd")
     Assert-Equal $guidPreview.Summary.IntuneConfirmedByAdObjectGuidExcluded 2 'objectGUID exclusions are counted'
     Assert-Equal $guidPreview.Summary.AdObjectGuidMismatchSelected 1 'objectGUID mismatches are counted'
+    # One Wave per AD domain keeps the Intune device-ID exclusions; an inventory without ADDomain gives NO-AD-DOMAIN.
+    try { $guidSplit = & { [Threading.Thread]::CurrentThread.CurrentCulture = [Globalization.CultureInfo]::GetCultureInfo('fr-FR'); & $engine -AdInventoryCsv $guidAdPath -IntuneInventoryCsv $guidIntunePath -EntraInventoryCsv $guidEntraPath -WaveName 'WAVE-AUTO-HJ-OBJECTGUID' -SplitByAdDomain -NoEvidence } }
+    finally { [Threading.Thread]::CurrentThread.CurrentCulture = $savedCulture }
+    Assert-Equal ((@($guidSplit.ExcludedDevices | ForEach-Object { '{0}:{1}' -f $_.ComputerName, $_.IntuneDeviceIdCheck }) | Sort-Object) -join ';') ((@($guidPreview.ExcludedDevices | ForEach-Object { '{0}:{1}' -f $_.ComputerName, $_.IntuneDeviceIdCheck }) | Sort-Object) -join ';') 'split by AD domain keeps the Intune device-ID exclusions'
+    Assert-Equal (@($guidSplit.Summary.DomainWaves | ForEach-Object { '{0}:{1}' -f $_.WaveName, $_.SelectedDevices }) -join ';') ('WAVE-AUTO-HJ-OBJECTGUID-NO-AD-DOMAIN:{0}' -f $guidPreview.Summary.SelectedDevices) 'computers without an AD domain value get the NO-AD-DOMAIN Wave'
 
     # Name and stale filters.
     $filtered = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-FILTERED' -ComputerNamePrefix 'FR-' -ComputerNameContains '-PC' -NoEvidence
@@ -328,6 +333,58 @@ try {
     foreach ($reuseWave in @('WAVE-AUTO-HJ-REUSE', 'WAVE-AUTO-HJ-REUSE-FILTER', 'WAVE-AUTO-HJ-REUSE-INVENTORY')) {
         $reuseWavePath = Join-Path $waveRoot $reuseWave
         if (Test-Path -LiteralPath $reuseWavePath) { Remove-Item -LiteralPath $reuseWavePath -Recurse -Force }
+    }
+
+    # One Wave per AD domain (-SplitByAdDomain): same selection rules and safety exclusions as one Wave,
+    # the union of the domain Waves is the single Wave. The Waves of this block are removed afterwards.
+    $domainArgs = @{ AdInventoryCsv = $adPath; IntuneInventoryCsv = $intunePath; EntraInventoryCsv = $entraPath }
+    $singleDomain = & $engine @domainArgs -WaveName 'WAVE-AUTO-HJ-DOMONE' -Create
+    $splitPreview = & $engine @domainArgs -WaveName 'WAVE-AUTO-HJ-DOM' -SplitByAdDomain
+    Assert-Equal $splitPreview.Summary.SplitByAdDomain $true 'split preview records SplitByAdDomain'
+    Assert-Equal $splitPreview.Summary.SelectedDevices $singleDomain.Summary.SelectedDevices 'split preview selects the same devices as one Wave'
+    Assert-Equal $splitPreview.Summary.ExcludedDevices $singleDomain.Summary.ExcludedDevices 'split preview applies the same safety exclusions'
+    Assert-Equal $splitPreview.Summary.FilterExcludedDevices $singleDomain.Summary.FilterExcludedDevices 'split preview applies the same filters'
+    Assert-Equal (($splitPreview.Summary.ExclusionReasonCounts | ConvertTo-Json -Compress)) (($singleDomain.Summary.ExclusionReasonCounts | ConvertTo-Json -Compress)) 'split preview has the same exclusion reasons'
+    Assert-Equal (@($splitPreview.Summary.DomainWaves | ForEach-Object { '{0}={1}:{2}' -f $_.ADDomain, $_.WaveName, $_.SelectedDevices }) -join ';') 'be.test=WAVE-AUTO-HJ-DOM-BE:1;fr.test=WAVE-AUTO-HJ-DOM-FR:4' 'split preview plans one Wave per AD domain with its count'
+    Assert-True (Test-Path -LiteralPath (Join-Path $splitPreview.Summary.EvidencePath 'AutomaticWaveDomainWaves.csv') -PathType Leaf) 'split preview writes AutomaticWaveDomainWaves.csv'
+    Assert-Equal @(Get-ChildItem -LiteralPath $waveRoot -Directory | Where-Object { $_.Name -like 'WAVE-AUTO-HJ-DOM-*' }).Count 0 'split preview creates no Wave'
+    $splitStages = [System.Collections.Generic.List[string]]::new()
+    $splitCallback = { param($stage, $detail) [void]$splitStages.Add(('{0} {1}' -f $stage, $detail)) }.GetNewClosure()
+    $splitCreated = & $engine @domainArgs -WaveName 'WAVE-AUTO-HJ-DOM' -SplitByAdDomain -Create -PreviewEvidencePath $splitPreview.Summary.EvidencePath -ProgressCallback $splitCallback
+    Assert-True (@($splitStages | Where-Object { $_ -like 'Reusing the previewed selection*' }).Count -eq 1) 'split Create reuses the matching preview'
+    Assert-Equal @($splitCreated.Summary.DomainWaves).Count 2 'split Create creates one Wave per domain'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $waveRoot 'WAVE-AUTO-HJ-DOM'))) 'split Create does not create the base Wave'
+    $domainUnion = @(foreach ($domainWave in @($splitCreated.Summary.DomainWaves)) { Get-Content -LiteralPath $domainWave.ComputersPath } ) | Sort-Object
+    $singleWaveComputers = @(Get-Content -LiteralPath $singleDomain.Summary.ComputersPath) | Sort-Object
+    Assert-Equal ($domainUnion -join ';') ($singleWaveComputers -join ';') 'the union of the domain Waves equals the single Wave'
+    Assert-Equal @($domainUnion).Count @($domainUnion | Sort-Object -Unique).Count 'no computer is in two domain Waves'
+    $frWave = @($splitCreated.Summary.DomainWaves | Where-Object { $_.ADDomain -eq 'fr.test' })[0]
+    Assert-True ([string](Get-Content -LiteralPath (Join-Path $frWave.WavePath 'Wave.local.json.txt') -Raw | ConvertFrom-Json).Description -match 'IntuneIdentityProof=AdObjectGuid,EntraDeviceId; .*ADDomainWave=fr\.test; Selected=4$') 'a domain Wave records its domain and the Intune proof rules'
+    Assert-True (@(Get-Content -LiteralPath $frWave.ComputersPath | Where-Object { $_ -notmatch '\.fr\.test$' }).Count -eq 0) 'a domain Wave contains only computers of its domain'
+    Assert-Equal (Import-Csv -LiteralPath (Join-Path $splitCreated.Summary.EvidencePath 'AutomaticWaveDomainWaves.csv') | Where-Object { $_.WavePath } | Measure-Object).Count 2 'split Create writes the created Wave paths'
+    # Never overwrite: one existing domain Wave stops the whole Create before any Wave is created.
+    Remove-Item -LiteralPath (Join-Path $waveRoot 'WAVE-AUTO-HJ-DOM-BE') -Recurse -Force
+    Assert-Throws { & $engine @domainArgs -WaveName 'WAVE-AUTO-HJ-DOM' -SplitByAdDomain -Create -NoEvidence } 'SEMT_WAVE_EXISTS' 'split Create with an existing domain Wave is refused'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $waveRoot 'WAVE-AUTO-HJ-DOM-BE'))) 'a refused split Create creates no Wave'
+    # Without Preview and with filters: the union still equals the single Wave of the same filters.
+    $filteredSingle = & $engine @domainArgs -WaveName 'WAVE-AUTO-HJ-DOMF' -ComputerNameNotContains 'PC01' -ExcludeStaleAd -NoEvidence
+    $filteredSplit = & $engine @domainArgs -WaveName 'WAVE-AUTO-HJ-DOMF' -ComputerNameNotContains 'PC01' -ExcludeStaleAd -SplitByAdDomain -Create -NoEvidence
+    $filteredUnion = @(foreach ($domainWave in @($filteredSplit.Summary.DomainWaves)) { Get-Content -LiteralPath $domainWave.ComputersPath }) | Sort-Object
+    Assert-Equal ($filteredUnion -join ';') ((@($filteredSingle.SelectedDevices | ForEach-Object { $_.ComputerName }) | Sort-Object) -join ';') 'filtered split Create without Preview keeps the single-Wave selection'
+    Assert-Equal (@($filteredSplit.Summary.DomainWaves | ForEach-Object { $_.WaveName }) -join ';') 'WAVE-AUTO-HJ-DOMF-FR' 'a domain without selected computer gets no Wave'
+    # Labels: a shared first DNS label uses the whole domain; no AD domain value gets NO-AD-DOMAIN; names stay valid.
+    $labelAdPath = Join-Path $dataRoot 'LabelDevicesAD.csv'
+    @(
+        [pscustomobject]@{ ComputerName='LBL-PC01'; ADInventoryPresent=$true; ADDomain='emea.contoso.test'; Enabled=$true; DNSHostName='lbl-pc01.emea.contoso.test'; DistinguishedName='CN=LBL-PC01,DC=emea'; OperatingSystem='Windows 10 Enterprise'; LastLogonTimestampUtc=$now.ToString('o') }
+        [pscustomobject]@{ ComputerName='LBL-PC02'; ADInventoryPresent=$true; ADDomain='EMEA.Fabrikam.test.'; Enabled=$true; DNSHostName='lbl-pc02.emea.fabrikam.test'; DistinguishedName='CN=LBL-PC02,DC=emea'; OperatingSystem='Windows 11 Enterprise'; LastLogonTimestampUtc=$now.ToString('o') }
+        [pscustomobject]@{ ComputerName='LBL-PC03'; ADInventoryPresent=$true; ADDomain=''; Enabled=$true; DNSHostName='lbl-pc03'; DistinguishedName='CN=LBL-PC03'; OperatingSystem='Windows 10 Enterprise'; LastLogonTimestampUtc=$now.ToString('o') }
+    ) | Export-Csv -LiteralPath $labelAdPath -NoTypeInformation -Encoding UTF8
+    $labelSplit = & $engine -AdInventoryCsv $labelAdPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv (Join-Path $dataRoot 'NoEntra.csv') -WaveName 'WAVE-AUTO-HJ-LBL' -SplitByAdDomain -NoEvidence
+    Assert-Equal (@($labelSplit.Summary.DomainWaves | ForEach-Object { $_.WaveName }) -join ';') 'WAVE-AUTO-HJ-LBL-EMEA-CONTOSO-TEST;WAVE-AUTO-HJ-LBL-EMEA-FABRIKAM-TEST;WAVE-AUTO-HJ-LBL-NO-AD-DOMAIN' 'domain labels are unique, upper case and ASCII'
+    $longSplit = & $engine -AdInventoryCsv $labelAdPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv (Join-Path $dataRoot 'NoEntra.csv') -WaveName ('WAVE-' + ('L' * 75)) -SplitByAdDomain -NoEvidence
+    Assert-True (@($longSplit.Summary.DomainWaves | Where-Object { -not (Test-SemtWaveName -Name $_.WaveName) -or $_.WaveName -notmatch '-(EMEA-CONTOSO-TEST|EMEA-FABRIKAM-TEST|NO-AD-DOMAIN)$' }).Count -eq 0) 'long base names are shortened, the domain label is kept'
+    foreach ($domainWaveFolder in @(Get-ChildItem -LiteralPath $waveRoot -Directory | Where-Object { $_.Name -like 'WAVE-AUTO-HJ-DOM*' })) {
+        Remove-Item -LiteralPath $domainWaveFolder.FullName -Recurse -Force
     }
 
     # Update-WaveCmdWrappers restores wrappers and removes obsolete ones.

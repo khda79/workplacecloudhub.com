@@ -47,7 +47,8 @@ DirectSetup et *Allow controlled reboots* désactivé, aucun redémarrage n'est 
 
 - **Automatic Wave** (bouton sous la Campaign, ouvre sa fenêtre) : rafraîchir les inventaires partagés AD et Intune, choisir la source
   (`Both`, `AD`, `Intune`), le domaine AD (l'inventaire partagé couvre toute la forêt ;
-  *(All domains)* par défaut), les préfixes, l'ancienneté de logon AD et, si besoin,
+  *(All domains)* par défaut ; avec lui, *Create one Wave per AD domain* crée une Wave par domaine
+  nommée `<Wave name>-<domaine>`, les postes Intune seuls dans `-NO-AD-DOMAIN`), les préfixes, l'ancienneté de logon AD et, si besoin,
   *Exclude devices present in Intune*, éventuellement cliquer **Preview** pour contrôler la
   sélection et les exclusions, puis **Create Wave** (sans Preview, la sélection est calculée au
   Create avec les mêmes exclusions de sécurité).

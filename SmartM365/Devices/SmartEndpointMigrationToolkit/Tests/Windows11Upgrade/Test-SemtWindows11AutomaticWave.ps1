@@ -307,6 +307,33 @@ try {
         if (Test-Path -LiteralPath $reuseWavePath) { Remove-Item -LiteralPath $reuseWavePath -Recurse -Force }
     }
 
+    # One Wave per AD domain (-SplitByAdDomain): same selection rules and safety exclusions as one Wave,
+    # the union of the domain Waves is the single Wave; Intune-only devices go to NO-AD-DOMAIN.
+    $domainArgs = @{ Source = 'Both'; AdInventoryCsv = $adCsv; IntuneInventoryCsv = $intuneCsv; EvidenceRoot = $evidenceRoot }
+    $singleDomain = & $engine @domainArgs -WaveName 'WAVE-AUTO-W11-DOMONE' -Create
+    $splitPreview = & $engine @domainArgs -WaveName 'WAVE-AUTO-W11-DOM' -SplitByAdDomain
+    Assert-Equal $splitPreview.Summary.SplitByAdDomain $true 'split preview records SplitByAdDomain'
+    Assert-Equal $splitPreview.Summary.SelectedDevices $singleDomain.Summary.SelectedDevices 'split preview selects the same devices as one Wave'
+    Assert-Equal $splitPreview.Summary.ExcludedDevices $singleDomain.Summary.ExcludedDevices 'split preview applies the same safety exclusions'
+    Assert-Equal (@($splitPreview.Summary.DomainWaves | ForEach-Object { '{0}={1}' -f $_.ADDomain, $_.WaveName }) -join ';') 'one.example=WAVE-AUTO-W11-DOM-ONE;=WAVE-AUTO-W11-DOM-NO-AD-DOMAIN' 'split preview plans one Wave per AD domain and one for Intune-only devices'
+    Assert-Equal ((@($splitPreview.Summary.DomainWaves | ForEach-Object { [int]$_.SelectedDevices }) | Measure-Object -Sum).Sum) $singleDomain.Summary.SelectedDevices 'the domain counts add up to the selection'
+    Assert-True (@(Import-Csv -LiteralPath (Join-Path $splitPreview.Summary.EvidencePath 'AutomaticWaveSelection.csv') | Where-Object { $_.SourceEvidence -ne 'Intune' -and $_.ADDomain -ne 'one.example' }).Count -eq 0) 'AutomaticWaveSelection.csv records the AD domain'
+    Assert-Equal @(Get-ChildItem -LiteralPath $waveRoot -Directory | Where-Object { $_.Name -like 'WAVE-AUTO-W11-DOM-*' }).Count 0 'split preview creates no Wave'
+    $splitCreated = & $engine @domainArgs -WaveName 'WAVE-AUTO-W11-DOM' -SplitByAdDomain -Create -PreviewEvidencePath $splitPreview.Summary.EvidencePath
+    $domainUnion = @(foreach ($domainWave in @($splitCreated.Summary.DomainWaves)) { Get-Content -LiteralPath $domainWave.ComputersPath }) | Sort-Object
+    Assert-Equal ($domainUnion -join ';') ((@(Get-Content -LiteralPath $singleDomain.Summary.ComputersPath) | Sort-Object) -join ';') 'the union of the domain Waves equals the single Wave'
+    Assert-Equal @($domainUnion).Count @($domainUnion | Sort-Object -Unique).Count 'no computer is in two domain Waves'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $waveRoot 'WAVE-AUTO-W11-DOM'))) 'split Create does not create the base Wave'
+    Assert-Throws { & $engine @domainArgs -WaveName 'WAVE-AUTO-W11-DOM' -SplitByAdDomain -Create -NoEvidence } 'SEMT_WAVE_EXISTS' 'split Create never overwrites an existing domain Wave'
+    $filteredSingle = & $engine @domainArgs -WaveName 'WAVE-AUTO-W11-DOMF' -ExcludeIntunePresent -NoEvidence
+    $filteredSplit = & $engine @domainArgs -WaveName 'WAVE-AUTO-W11-DOMF' -ExcludeIntunePresent -SplitByAdDomain -Create -NoEvidence
+    $filteredUnion = @(foreach ($domainWave in @($filteredSplit.Summary.DomainWaves)) { Get-Content -LiteralPath $domainWave.ComputersPath }) | Sort-Object
+    Assert-Equal ($filteredUnion -join ';') ((@($filteredSingle.SelectedDevices | ForEach-Object { $_.ComputerName }) | Sort-Object) -join ';') 'filtered split Create without Preview keeps the single-Wave selection'
+    Assert-Throws { & $engine -Source Intune -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -WaveName 'WAVE-AUTO-W11-DOMI' -SplitByAdDomain -NoEvidence } 'SplitByAdDomain requires the AD inventory source' 'SplitByAdDomain requires the AD source'
+    foreach ($domainWaveFolder in @(Get-ChildItem -LiteralPath $waveRoot -Directory | Where-Object { $_.Name -like 'WAVE-AUTO-W11-DOM*' })) {
+        Remove-Item -LiteralPath $domainWaveFolder.FullName -Recurse -Force
+    }
+
     # Default inputs are the shared caches of the package.
     New-Item -ItemType Directory -Path (Join-Path $packageRoot 'Inventory') -Force | Out-Null
     Copy-Item -LiteralPath $adCsv -Destination (Get-SemtSharedInventoryPath -PackageRoot $packageRoot -Kind AD) -Force
