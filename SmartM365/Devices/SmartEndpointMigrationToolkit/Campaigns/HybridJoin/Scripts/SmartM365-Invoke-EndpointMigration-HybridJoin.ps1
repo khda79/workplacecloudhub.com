@@ -97,7 +97,7 @@ Campaign runtime folder. Defaults to C:\ProgramData\WCH\SmartM365\SmartEndpointM
 Attempt identifier supplied by the technician worker. A local run generates one.
 
 .VERSION
-1.0.0
+1.0.1
 
 .EXITCODES
 0 = Success (AzureAdJoined=YES, device auth is healthy, and Intune enrollment is present or was restored)
@@ -142,7 +142,7 @@ if ([string]$PSVersionTable['PSEdition'] -eq 'Core' -or $PSVersionTable['PSVersi
     Write-Output ('FINAL_STATUS=UNSUPPORTED_POWERSHELL_HOST; EXIT_CODE=3; NEXT_ACTION=RUN_WITH_WINDOWS_POWERSHELL_5_1; CORRELATION_ID={0}; DETAIL={1} {2} is not supported; run this script with powershell.exe (Windows PowerShell 5.1).' -f [string]$CorrelationId,[string]$PSVersionTable['PSEdition'],[string]$PSVersionTable['PSVersion'])
     exit 3
 }
-$ScriptVersion = "1.0.0"
+$ScriptVersion = "1.0.1"
 $script:SemtCampaign = "HybridJoin"
 if ($RebootDelaySeconds -lt 60) { $RebootDelaySeconds = 60 }
 if ($StaleCleanupDelaySeconds -lt 0) { $StaleCleanupDelaySeconds = 0 }
@@ -2424,6 +2424,45 @@ function Test-AadKdfV1RejectionMessage {
     return ([string]$Message -match '(?i)AADSTS5000611|Derivation Function version .KDFV1. is invalid')
 }
 
+function Get-RecentAadEnrollmentMfaRequirement {
+    <#
+    Returns the first Microsoft-Windows-AAD/Operational error 1098 logged since the auto-enrollment
+    trigger where Entra ID asks for multi-factor authentication (AADSTS50072/50074/50076/50078/50079)
+    to reach Microsoft Intune Enrollment, or $null. The token for enrollment.manage.microsoft.com then
+    needs an interactive MFA that SYSTEM and the native task cannot give: the wait is useless.
+    #>
+    param([Parameter(Mandatory=$true)][datetime]$Since)
+
+    $logName = "Microsoft-Windows-AAD/Operational"
+    try {
+        $mfaEvent = Get-WinEvent -FilterHashtable @{ LogName=$logName; Id=1098; StartTime=$Since } -ErrorAction Stop |
+            Where-Object { Test-AadEnrollmentMfaMessage -Message $_.Message } |
+            Sort-Object TimeCreated |
+            Select-Object -First 1
+        if ($mfaEvent) {
+            return [PSCustomObject]@{
+                LogName=$logName
+                Id=$mfaEvent.Id
+                RecordId=$mfaEvent.RecordId
+                TimeCreated=$mfaEvent.TimeCreated.ToString("yyyy-MM-dd HH:mm:ss")
+                Code=([regex]::Match([string]$mfaEvent.Message,'AADSTS\d+').Value)
+            }
+        }
+    }
+    catch {
+        if ([string]$_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') {
+            Write-RunLog ("Unable to read {0} for MFA requirements on Intune enrollment: {1}" -f $logName,$_.Exception.Message)
+        }
+    }
+    return $null
+}
+
+function Test-AadEnrollmentMfaMessage {
+    param([AllowNull()][string]$Message)
+    # d4ebce55-015a-49b5-a083-c84d1797ae8c = Microsoft Intune Enrollment.
+    return ([string]$Message -match '(?i)AADSTS500(72|74|76|78|79)\b' -and [string]$Message -match '(?i)d4ebce55-015a-49b5-a083-c84d1797ae8c|enrollment\.manage\.microsoft\.com')
+}
+
 function Get-AutoEnrollmentPolicyState {
     try {
         $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
@@ -3242,6 +3281,7 @@ function Get-NextActionForStatus {
         "INTUNE_ENROLLMENT_PENDING_CONFIRMATION" { return "RECHECK_LATER_INTUNE_ENROLLMENT" }
         "INTUNE_USER_LICENSE_REJECTED" { return "ASSIGN_USER_INTUNE_LICENSE" }
         "AAD_DEVICE_KDF_UPDATE_REQUIRED" { return "INSTALL_WINDOWS_UPDATE_KDFV2" }
+        "INTUNE_ENROLLMENT_MFA_REQUIRED" { return "FIX_CONDITIONAL_ACCESS_MFA_FOR_INTUNE_ENROLLMENT" }
         "INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY" { return "REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN" }
         "INTUNE_TRACE_REMOVE_FAILED" { return "REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN" }
         "INTUNE_ENROLLMENT_STUB_BLOCKING" { return "ENABLE_INTUNE_STUB_REMOVAL_OR_REVIEW" }
@@ -5235,9 +5275,17 @@ try {
                     $intuneAutoEnrollTriggerText = if ($enrollStart.Success) { "Intune auto-enrollment was triggered successfully" } else { "deviceenroller did not report success ({0})" -f $enrollStart.Detail }
                     # Entra ID rejecting the device key (KDFV1) right after a failed trigger: no wait.
                     $kdfRejection = if (-not $enrollStart.Success) { Get-RecentAadKdfV1Rejection -Since $intuneAutoEnrollTriggeredAt } else { $null }
+                    # Conditional Access asking for MFA on Intune Enrollment: diagnostic only, never bypassed.
+                    # Strong evidence only: deviceenroller 0x8018002A and an MFA AADSTS event after the trigger.
+                    # 0x8018002A alone keeps the confirmation wait and its usual status.
+                    $enrollMfaExitCode = (-not $enrollStart.Success -and [string]$enrollStart.ExitCode -eq "-2145910742")
+                    $mfaRequirement = if ($enrollMfaExitCode -and -not $kdfRejection) { Get-RecentAadEnrollmentMfaRequirement -Since $intuneAutoEnrollTriggeredAt } else { $null }
                     $r3 = $null
                     if ($kdfRejection) {
                         Write-RunLog ("Entra ID rejected the device token with AADSTS5000611 (KDFV1) after the trigger; the Intune confirmation wait is skipped. Event {0}, record {1}, time {2}." -f $kdfRejection.Id,$kdfRejection.RecordId,$kdfRejection.TimeCreated)
+                    }
+                    elseif ($mfaRequirement) {
+                        Write-RunLog ("Entra ID asked for MFA ({0}) to reach Microsoft Intune Enrollment after the trigger; the Intune confirmation wait is skipped. Event {1}, record {2}, time {3}." -f $mfaRequirement.Code,$mfaRequirement.Id,$mfaRequirement.RecordId,$mfaRequirement.TimeCreated)
                     }
                     else {
                         Write-ProvisionalRunState `
@@ -5260,6 +5308,7 @@ try {
                     else {
                         # The native EnterpriseMgmt task may also have hit the KDFV1 rejection during the wait.
                         if (-not $kdfRejection) { $kdfRejection = Get-RecentAadKdfV1Rejection -Since $intuneAutoEnrollTriggeredAt }
+                        if ($enrollMfaExitCode -and -not $kdfRejection -and -not $mfaRequirement) { $mfaRequirement = Get-RecentAadEnrollmentMfaRequirement -Since $intuneAutoEnrollTriggeredAt }
                         $licenseFailure = if ($kdfRejection) { $null } else { Get-RecentMdmUserLicenseFailure -Since $intuneAutoEnrollTriggeredAt }
                         if ($kdfRejection) {
                             $status = "AAD_DEVICE_KDF_UPDATE_REQUIRED"
@@ -5268,6 +5317,10 @@ try {
                         elseif ($licenseFailure) {
                             $status = "INTUNE_USER_LICENSE_REJECTED"
                             $dsregStatusErrorMessage = ("Intune rejected the enrollment with a user license fault (UserLicense/0x80180018) after the auto-enrollment trigger: {0} event {1}, record {2}, time {3}. Assign an Intune license to the signed-in user and check the MDM user scope, then rerun the repair. Trigger: {4}." -f $licenseFailure.LogName,$licenseFailure.Id,$licenseFailure.RecordId,$licenseFailure.TimeCreated,$intuneAutoEnrollTriggerText)
+                        }
+                        elseif ($mfaRequirement) {
+                            $status = "INTUNE_ENROLLMENT_MFA_REQUIRED"
+                            $dsregStatusErrorMessage = ("Entra ID asked for multi-factor authentication ({0}) to give the token for Microsoft Intune Enrollment after the auto-enrollment trigger: {1} event {2}, record {3}, time {4}. A Conditional Access policy requires MFA for this user or location and the user PRT has no MFA claim; SYSTEM cannot answer it. Exclude Microsoft Intune Enrollment from that MFA requirement (or require a hybrid-joined device instead), or have the user register MFA and sign in with it, then rerun the repair. Trigger: {5}." -f $mfaRequirement.Code,$mfaRequirement.LogName,$mfaRequirement.Id,$mfaRequirement.RecordId,$mfaRequirement.TimeCreated,$intuneAutoEnrollTriggerText)
                         }
                         else {
                             $status = "INTUNE_ENROLLMENT_PENDING_CONFIRMATION"

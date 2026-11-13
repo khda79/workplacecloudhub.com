@@ -505,6 +505,77 @@ Invoke-CompletedRules -Rows @([pscustomobject]@{ ComputerName = 'PC-R1.contoso.t
         $w11 = Get-SemtRunGuardHistoryPath -Campaign Windows11Upgrade
         $hj -ne $w11 -and $hj -like '*HybridJoin*' -and $w11 -like '*Windows11Upgrade*'
     }
+    # The launcher reads the history before every computer: a read neither locks nor rewrites it.
+    $launcherAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:PackageRoot 'Scripts\SmartM365-Invoke-EndpointMigrationWithPsExec.ps1'), [ref]$null, [ref]$null)
+    . ([scriptblock]::Create($launcherAst.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-RunGuardEntry' }, $true).Extent.Text))
+    $Campaign = 'HybridJoin'
+    $script:CampaignProfile = @{ RunGuardSchemaVersion = 7; Hooks = @{ RunGuardPrune = { param($Entry) [string]$Entry.Keep -eq 'yes' } } }
+    $guardPath = Get-SemtRunGuardHistoryPath -Campaign HybridJoin
+    Write-SemtJsonFileAtomic -Path $guardPath -InputObject ([pscustomobject]@{ SchemaVersion = 7; Entries = @([pscustomobject]@{ ComputerFqdn = 'pc-1.example.test'; Keep = 'yes'; BackoffStatus = 'ADMIN_SHARE_UNREACHABLE' },[pscustomobject]@{ ComputerFqdn = 'pc-2.example.test'; Keep = 'no' }) })
+    (Get-Item -LiteralPath $guardPath).LastWriteTimeUtc = [datetime]'2026-01-01'
+    $guardBytes = [IO.File]::ReadAllBytes($guardPath)
+    Test-Step 'a run guard read returns the retained entry without locking or rewriting the history' {
+        $found = Get-RunGuardEntry -Fqdn 'pc-1.example.test'
+        $found.BackoffStatus -eq 'ADMIN_SHARE_UNREACHABLE' -and $null -eq (Get-RunGuardEntry -Fqdn 'pc-2.example.test') -and $null -eq (Get-RunGuardEntry -Fqdn 'pc-3.example.test') -and
+            (Get-Item -LiteralPath $guardPath).LastWriteTimeUtc -eq [datetime]'2026-01-01' -and [Convert]::ToBase64String([IO.File]::ReadAllBytes($guardPath)) -ceq [Convert]::ToBase64String($guardBytes) -and
+            -not (Test-Path -LiteralPath ('{0}.lock' -f $guardPath))
+    }
+    Test-Step 'an unreadable or other-schema run guard history reads as empty' {
+        Write-SemtJsonFileAtomic -Path $guardPath -InputObject ([pscustomobject]@{ SchemaVersion = 6; Entries = @([pscustomobject]@{ ComputerFqdn = 'pc-1.example.test'; Keep = 'yes' }) })
+        $otherSchema = Get-RunGuardEntry -Fqdn 'pc-1.example.test'
+        [IO.File]::WriteAllText($guardPath, '{ not json')
+        $null -eq $otherSchema -and $null -eq (Get-RunGuardEntry -Fqdn 'pc-1.example.test')
+    }
+    Remove-Item -LiteralPath $guardPath -Force -ErrorAction SilentlyContinue
+    # Two Runs (two processes) update the shared history at the same time: the locked read-modify-write
+    # keeps every entry of both, on top of 1500 existing entries of other Waves.
+    Write-SemtJsonFileAtomic -Path $guardPath -InputObject ([pscustomobject]@{ SchemaVersion = 7; Entries = @(1..1500 | ForEach-Object { [pscustomobject]@{ ComputerFqdn = ('old-{0}.example.test' -f $_); Keep = 'yes' } }) })
+    $guardWriter = {
+        param($ModulePath, $Override, $Prefix, $Count)
+        $env:SEMT_RUNTIME_ROOT_OVERRIDE = $Override
+        Import-Module $ModulePath -MinimumVersion 1.0.0 -Force
+        for ($i = 1; $i -le $Count; $i++) {
+            Invoke-SemtRunGuardHistoryTransaction -Campaign HybridJoin -SchemaVersion 7 -Prune { param($Entry) [string]$Entry.Keep -eq 'yes' } -ArgumentList @(('{0}-{1}.example.test' -f $Prefix,$i)) -Update {
+                param($Entries,$Fqdn)
+                foreach ($entry in @($Entries.ToArray())) { if ([string]$entry.ComputerFqdn -eq $Fqdn) { [void]$Entries.Remove($entry) } }
+                $Entries.Add([pscustomobject]@{ ComputerFqdn = $Fqdn; Keep = 'yes'; State = 'Started' })
+            } | Out-Null
+        }
+        $PID
+    }
+    $guardModulePath = Join-Path $script:PackageRoot 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1'
+    $guardJobs = @(
+        (Start-Job -ScriptBlock $guardWriter -ArgumentList $guardModulePath,$env:SEMT_RUNTIME_ROOT_OVERRIDE,'run-a',40),
+        (Start-Job -ScriptBlock $guardWriter -ArgumentList $guardModulePath,$env:SEMT_RUNTIME_ROOT_OVERRIDE,'run-b',40)
+    )
+    [void](Wait-Job -Job $guardJobs -Timeout 300)
+    $guardPids = @($guardJobs | Receive-Job -ErrorAction SilentlyContinue)
+    $guardJobs | Remove-Job -Force
+    $guardFinal = @((Read-SemtJsonFile -Path $guardPath).Entries)
+    Test-Step 'two concurrent writer processes lose no run guard entry (1500 + 40 + 40)' {
+        @($guardPids | Select-Object -Unique).Count -eq 2 -and @($guardPids | Where-Object { $_ -eq $PID }).Count -eq 0 -and
+            $guardFinal.Count -eq 1580 -and @($guardFinal | Select-Object -ExpandProperty ComputerFqdn -Unique).Count -eq 1580 -and
+            @($guardFinal | Where-Object { $_.ComputerFqdn -like 'run-a-*' }).Count -eq 40 -and @($guardFinal | Where-Object { $_.ComputerFqdn -like 'run-b-*' }).Count -eq 40
+    }
+    Remove-Item -LiteralPath $guardPath -Force -ErrorAction SilentlyContinue
+    if ($PSVersionTable.PSEdition -eq 'Desktop') {
+        # Windows PowerShell 5.1 makes DateTime values only from "\/Date(...)\/" strings: other files skip the
+        # per-property date walk, which took about 10 s on a 6000-entry run guard history.
+        & $module { $script:SemtTestDateWalks = 0; $script:SemtTestOriginalDateWalk = ${function:ConvertTo-SemtJsonDateText}; Set-Item -Path function:script:ConvertTo-SemtJsonDateText -Value { param($Value) $script:SemtTestDateWalks++; & $script:SemtTestOriginalDateWalk -Value $Value } }
+        try {
+            $isoPath = Join-Path $tempRoot 'iso-dates.json.txt'
+            Write-SemtJsonFileAtomic -Path $isoPath -InputObject ([pscustomobject]@{ When = '2026-11-13T12:00:00.0000000Z'; Items = @([pscustomobject]@{ At = '2026-11-13T13:00:00.0000000Z' }) })
+            $iso = Read-SemtJsonFile -Path $isoPath
+            $isoWalks = & $module { $script:SemtTestDateWalks }
+            $msPath = Join-Path $tempRoot 'ms-dates.json.txt'
+            [IO.File]::WriteAllText($msPath, '{"When":"\/Date(1700000000000)\/","Name":"x"}')
+            $ms = Read-SemtJsonFile -Path $msPath
+            $msWalks = & $module { $script:SemtTestDateWalks }
+            Test-Step 'Windows PowerShell 5.1 reads JSON without the date walk when no \/Date()\/ value is present' { $isoWalks -eq 0 -and $iso.When -is [string] -and $iso.When -eq '2026-11-13T12:00:00.0000000Z' -and $iso.Items[0].At -eq '2026-11-13T13:00:00.0000000Z' }
+            Test-Step 'Windows PowerShell 5.1 still turns \/Date()\/ values into round-trip UTC text' { $msWalks -gt 0 -and $ms.When -is [string] -and $ms.When -eq '2023-11-14T22:13:20.0000000Z' -and $ms.Name -eq 'x' }
+        }
+        finally { & $module { Set-Item -Path function:script:ConvertTo-SemtJsonDateText -Value $script:SemtTestOriginalDateWalk } }
+    }
     #endregion
 
     #region Worker contract and correlation

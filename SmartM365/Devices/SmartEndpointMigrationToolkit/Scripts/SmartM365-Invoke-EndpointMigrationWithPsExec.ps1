@@ -47,7 +47,7 @@
     Resolves options, rules and component integrity, writes nothing on targets and exits.
 
 .VERSION
-    1.0.2
+    1.0.3
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -73,7 +73,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:LauncherVersion = '1.0.2'
+$script:LauncherVersion = '1.0.3'
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected argument(s): {0}. Pass options with -Option @{{ Name = Value }} and PsExec with -PsExecPath." -f ($UnexpectedArguments -join ' '))
@@ -439,13 +439,18 @@ function Start-WorkerJobWithRetry {
 }
 
 function Get-RunGuardEntry {
+    # Read only: no lock and no rewrite of the whole history (it is replaced atomically by writers).
+    # Updates still go through the locked transaction, which also prunes expired entries.
     param([string]$Fqdn)
-    $found = @{}
-    Invoke-SemtRunGuardHistoryTransaction -Campaign $Campaign -SchemaVersion $script:CampaignProfile.RunGuardSchemaVersion -Prune $script:CampaignProfile.Hooks.RunGuardPrune -ArgumentList @($Fqdn,$found) -Update {
-        param($Entries,$LockedFqdn,$FoundRef)
-        foreach ($entry in $Entries) { if ([string]$entry.ComputerFqdn -eq $LockedFqdn) { $FoundRef['Value'] = $entry; break } }
-    } | Out-Null
-    if ($found.ContainsKey('Value')) { return $found['Value'] }
+    # An unreadable history counts as empty, as in the transaction (the next update rewrites it).
+    $history = try { Read-SemtJsonFile -Path (Get-SemtRunGuardHistoryPath -Campaign $Campaign) } catch { $null }
+    if (-not $history -or [int](Get-SemtPropertyValue -InputObject $history -Name 'SchemaVersion' -Default 0) -ne $script:CampaignProfile.RunGuardSchemaVersion) { return $null }
+    foreach ($entry in @($history.Entries)) {
+        if ($null -ne $entry -and [string]$entry.ComputerFqdn -eq $Fqdn) {
+            if (& $script:CampaignProfile.Hooks.RunGuardPrune $entry) { return $entry }
+            return $null
+        }
+    }
     return $null
 }
 

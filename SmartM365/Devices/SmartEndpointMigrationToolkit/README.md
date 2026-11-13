@@ -239,7 +239,14 @@ in `Microsoft-Windows-AAD/Operational`), Windows lacks the cumulative update tha
 enrollment can succeed: the status is `AAD_DEVICE_KDF_UPDATE_REQUIRED` (NextAction
 `INSTALL_WINDOWS_UPDATE_KDFV2`), without the confirmation wait when the rejection follows a failed
 trigger. Install the latest cumulative update (or upgrade Windows), have the user sign out and in
-again, then rerun the repair. When the tool
+again, then rerun the repair. When Entra ID asks for multi-factor authentication to reach Microsoft
+Intune Enrollment (`AADSTS50072`/`50074`/`50076`/`50078`/`50079` for app
+`d4ebce55-015a-49b5-a083-c84d1797ae8c` in event 1098; `deviceenroller.exe` then returns `0x8018002A`),
+SYSTEM cannot answer the prompt: the status is `INTUNE_ENROLLMENT_MFA_REQUIRED` (NextAction
+`FIX_CONDITIONAL_ACCESS_MFA_FOR_INTUNE_ENROLLMENT`), without the confirmation wait when the prompt
+follows a failed trigger. Exclude Microsoft Intune Enrollment from that Conditional Access MFA
+requirement (or require a hybrid-joined device instead), or have the user register MFA and sign in
+with it, then rerun the repair. When the tool
 returns `0x8018000A` (already enrolled) but the only local Intune traces are incomplete stubs left by
 an interrupted enrollment (`EnrollmentType` 6, empty `ProviderID`, `fooUser@` UPN, no OMA-DM account
 or tasks), the stub blocks every new attempt: the status is `INTUNE_ENROLLMENT_STUB_BLOCKING` at once,

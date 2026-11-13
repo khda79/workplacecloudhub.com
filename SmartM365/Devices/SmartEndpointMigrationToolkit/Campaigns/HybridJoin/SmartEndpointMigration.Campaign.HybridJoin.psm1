@@ -127,7 +127,8 @@ function Get-HybridJoinCooldownHours {
         $exponent = [math]::Min(5, [math]::Max(0, [math]::Max($BackoffCount, $CycleNumber) - 1))
         return ([math]::Min(360, 15 * [math]::Pow(2, $exponent)) / 60.0)
     }
-    if ($normalized -match '(USER|INTERACTIVE|PRT|LOGON|SESSION_REMOTE|LOCAL_INTERACTIVE)') { return 24.0 }
+    # Conditional Access MFA on Intune Enrollment needs an admin or user action, like a missing license.
+    if ($normalized -match '(USER|INTERACTIVE|PRT|LOGON|SESSION_REMOTE|LOCAL_INTERACTIVE|MFA_REQUIRED)') { return 24.0 }
     if ($normalized -match '(RUN_GUARD|ENDPOINT_RUN_ACTIVE|PENDING_CONFIRMATION|REBOOT_TRIGGERED|WAITING_FOR_AAD_CONNECT|WAITING_POST_LEAVE)') { return 12.0 }
     if ($normalized -in @('ENROLLED_DETECTED_POST_CYCLE','ENROLLED_CONFIRMED_IN_CYCLE','ENROLLED_CONFIRMED_BY_CLOUD_IDENTITY')) { return 168.0 }
     return [double][math]::Max(1, $DefaultHours)
@@ -136,8 +137,22 @@ function Get-HybridJoinCooldownHours {
 function Test-HybridJoinRunGuardEntryRetained {
     param($Entry)
 
-    $retention = ConvertTo-SemtUtcDateTime -Value (Get-SemtPropertyValue -InputObject $Entry -Name 'RetentionUtc' -Default (Get-SemtPropertyValue -InputObject $Entry -Name 'ExpiresUtc' -Default ''))
-    return ($null -ne $retention -and $retention -gt (Get-Date).ToUniversalTime())
+    # Called for every entry of the history on every update: plain property reads and one parse, no
+    # advanced-function calls (they made a 3000-entry prune take about 2 s in Windows PowerShell 5.1).
+    if ($null -eq $Entry) { return $false }
+    if ($Entry -is [System.Collections.IDictionary]) {
+        $value = if ($Entry.Contains('RetentionUtc')) { $Entry['RetentionUtc'] } elseif ($Entry.Contains('ExpiresUtc')) { $Entry['ExpiresUtc'] } else { $null }
+    }
+    else {
+        $property = $Entry.PSObject.Properties['RetentionUtc']
+        if (-not $property) { $property = $Entry.PSObject.Properties['ExpiresUtc'] }
+        $value = if ($property) { $property.Value } else { $null }
+    }
+    if ($null -eq $value) { return $false }
+    if ($value -is [datetime]) { return (([datetime]$value).ToUniversalTime() -gt [datetime]::UtcNow) }
+    $parsed = [datetime]::MinValue
+    if (-not [datetime]::TryParse(([string]$value).Trim(), [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$parsed)) { return $false }
+    return ($parsed.ToUniversalTime() -gt [datetime]::UtcNow)
 }
 
 function Get-HybridJoinRunGuardDecision {

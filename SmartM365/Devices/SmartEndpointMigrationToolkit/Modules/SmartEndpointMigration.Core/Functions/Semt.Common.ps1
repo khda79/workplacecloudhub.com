@@ -318,6 +318,7 @@ function ConvertTo-SemtJsonDateText {
 #endregion
 
 $script:SemtJsonDateKindSupported = (Get-Command -Name ConvertFrom-Json).Parameters.ContainsKey('DateKind')
+$script:SemtJsonOnlyMsDates = ($PSVersionTable.PSEdition -ne 'Core')
 
 function Read-SemtJsonFile {
     [CmdletBinding()]
@@ -342,6 +343,9 @@ function Read-SemtJsonFile {
             # PowerShell 7 converts ISO dates to DateTime; keep them as text so the UTC round-trip
             # values used by reservations and PID start-time checks stay exact (as on 5.1).
             if ($script:SemtJsonDateKindSupported) { return ($raw | ConvertFrom-Json -DateKind String -ErrorAction Stop) }
+            # Windows PowerShell 5.1 only makes DateTime values from "\/Date(...)\/" strings: without one,
+            # nothing to convert, and the walk over every property costs seconds on large files.
+            if ($script:SemtJsonOnlyMsDates -and $raw.IndexOf('Date(', [System.StringComparison]::Ordinal) -lt 0) { return ($raw | ConvertFrom-Json -ErrorAction Stop) }
             return (ConvertTo-SemtJsonDateText -Value ($raw | ConvertFrom-Json -ErrorAction Stop))
         }
         catch [System.IO.IOException] {

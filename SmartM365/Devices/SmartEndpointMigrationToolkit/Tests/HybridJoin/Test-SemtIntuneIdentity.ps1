@@ -29,6 +29,24 @@ $module = Get-Module SmartEndpointMigration.Campaign.HybridJoin
     if (Test-HybridJoinAlreadyEnrolled ([pscustomobject]@{ IntuneConfirmationState='Confirmed'; Status='GPUPDATE_TIMEOUT' })) { throw 'A failed run was archived.' }
     if (Test-HybridJoinAlreadyEnrolled ([pscustomobject]@{ IntuneConfirmationState='Confirmed'; Status='ENROLLED_DETECTED_POST_CYCLE'; UserLicensePreflightState='NoAssignedLicense' })) { throw 'An unlicensed device was archived.' }
     Write-Host 'PASS: name-only result is not archived'
+    # Run guard retention (called for every history entry on every update): same answers as before the fast path.
+    $future = [datetime]::UtcNow.AddDays(2).ToString('o'); $past = [datetime]::UtcNow.AddMinutes(-1).ToString('o')
+    $retained = @(
+        (Test-HybridJoinRunGuardEntryRetained ([pscustomobject]@{ RetentionUtc=$future; ExpiresUtc=$past })),
+        (Test-HybridJoinRunGuardEntryRetained ([pscustomobject]@{ ExpiresUtc=$future })),
+        (Test-HybridJoinRunGuardEntryRetained @{ RetentionUtc=$future }),
+        (Test-HybridJoinRunGuardEntryRetained ([pscustomobject]@{ RetentionUtc=[datetime]::UtcNow.AddHours(1) })),
+        (Test-HybridJoinRunGuardEntryRetained ([pscustomobject]@{ RetentionUtc=('2099-01-01T00:00:00+02:00') }))
+    )
+    $dropped = @(
+        (Test-HybridJoinRunGuardEntryRetained ([pscustomobject]@{ RetentionUtc=$past; ExpiresUtc=$future })),
+        (Test-HybridJoinRunGuardEntryRetained ([pscustomobject]@{ RetentionUtc=''; ExpiresUtc=$future })),
+        (Test-HybridJoinRunGuardEntryRetained ([pscustomobject]@{ RetentionUtc='not a date' })),
+        (Test-HybridJoinRunGuardEntryRetained ([pscustomobject]@{ ComputerFqdn='pc' })),
+        (Test-HybridJoinRunGuardEntryRetained $null)
+    )
+    if (@($retained | Where-Object { $_ -ne $true }).Count -or @($dropped | Where-Object { $_ -ne $false }).Count) { throw ("Run guard retention changed: retained={0}; dropped={1}" -f ($retained -join ','),($dropped -join ',')) }
+    Write-Host 'PASS: run guard retention keeps only entries whose RetentionUtc (or ExpiresUtc) is in the future'
 }
 
 # Preflight never treats missing or ambiguous evidence as a license absence.
@@ -366,6 +384,42 @@ if ($null -ne (Get-RecentAadKdfV1Rejection -Since ([datetime]'2026-11-06 09:58:0
 Remove-Item Function:\Get-WinEvent
 if ($hjEndpointText -notmatch '"AAD_DEVICE_KDF_UPDATE_REQUIRED" \{ return "INSTALL_WINDOWS_UPDATE_KDFV2" \}' -or $hjEndpointText -notmatch '\$kdfRejection = if \(-not \$enrollStart\.Success\) \{ Get-RecentAadKdfV1Rejection' -or $hjEndpointText -notmatch 'if \(\$r3 -and \$r3\.Success\)' -or $hjEndpointText -notmatch '\$status = "AAD_DEVICE_KDF_UPDATE_REQUIRED"') { throw 'Endpoint does not report the KDFV1 rejection as a review status without the confirmation wait.' }
 Write-Host 'PASS: an AADSTS5000611 KDFV1 rejection is a review status, without the Intune confirmation wait'
+
+# Conditional Access asking for MFA on Microsoft Intune Enrollment (AADSTS50076/50078/50079 seen in the field):
+# a review status at once, no 25-minute confirmation wait.
+foreach ($name in @('Test-AadEnrollmentMfaMessage','Get-RecentAadEnrollmentMfaRequirement')) {
+    $definition=$ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name },$true)
+    if (-not $definition) { throw "Endpoint function missing: $name" }
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+$mfaMessage = "Error: 0xCAA2000C The request requires user interaction. Code: interaction_required Description: AADSTS50079: Due to a configuration change made by your administrator, or because you moved to a new location, you must enroll in multi-factor authentication to access 'd4ebce55-015a-49b5-a083-c84d1797ae8c'. Trace ID: x"
+foreach ($code in @('50072','50074','50076','50078','50079')) {
+    if (-not (Test-AadEnrollmentMfaMessage -Message ($mfaMessage -replace 'AADSTS50079',('AADSTS' + $code)))) { throw "AADSTS$code on Intune Enrollment was not recognised." }
+}
+foreach ($other in @(($mfaMessage -replace 'd4ebce55-015a-49b5-a083-c84d1797ae8c','f2d19332-a09d-48c8-a53b-c49ae5502dfc'),($mfaMessage -replace 'AADSTS50079','AADSTS500790'),$kdfMessage,'',$null)) {
+    if (Test-AadEnrollmentMfaMessage -Message $other) { throw "Another AAD error was taken for an Intune Enrollment MFA requirement: $other" }
+}
+$script:FakeAadEvents = @(
+    [pscustomobject]@{ Id=1098; RecordId=21; TimeCreated=[datetime]'2026-11-13 13:05:03'; Message=$mfaMessage },
+    [pscustomobject]@{ Id=1098; RecordId=22; TimeCreated=[datetime]'2026-11-13 13:06:29'; Message='Error: 0xCAA90014 Server WS-Trust response reported fault exception' },
+    [pscustomobject]@{ Id=1098; RecordId=23; TimeCreated=[datetime]'2026-11-13 13:06:29'; Message=($mfaMessage -replace 'AADSTS50079','AADSTS50076') }
+)
+function Get-WinEvent { param($FilterHashtable,$ErrorAction) if ($FilterHashtable.LogName -ne 'Microsoft-Windows-AAD/Operational' -or $FilterHashtable.Id -ne 1098 -or -not ($FilterHashtable.StartTime -is [datetime])) { throw 'Unexpected event query.' }; @($script:FakeAadEvents | Where-Object { $_.TimeCreated -ge $FilterHashtable.StartTime }) }
+$mfaFound = Get-RecentAadEnrollmentMfaRequirement -Since ([datetime]'2026-11-13 13:06:28')
+if (-not $mfaFound -or $mfaFound.RecordId -ne 23 -or $mfaFound.Code -ne 'AADSTS50076') { throw 'The MFA requirement logged after the trigger was not returned with its code.' }
+if ($null -ne (Get-RecentAadEnrollmentMfaRequirement -Since ([datetime]'2026-11-13 13:07:00'))) { throw 'An MFA requirement older than the trigger was counted.' }
+Remove-Item Function:\Get-WinEvent
+if ($hjEndpointText -notmatch '"INTUNE_ENROLLMENT_MFA_REQUIRED" \{ return "FIX_CONDITIONAL_ACCESS_MFA_FOR_INTUNE_ENROLLMENT" \}' -or $hjEndpointText -notmatch '\$mfaRequirement = if \(\$enrollMfaExitCode -and -not \$kdfRejection\) \{ Get-RecentAadEnrollmentMfaRequirement -Since \$intuneAutoEnrollTriggeredAt \}' -or $hjEndpointText -notmatch '(?s)elseif \(\$mfaRequirement\) \{\s+Write-RunLog' -or $hjEndpointText -notmatch '\$status = "INTUNE_ENROLLMENT_MFA_REQUIRED"') { throw 'Endpoint does not report the Intune Enrollment MFA requirement as a review status without the confirmation wait.' }
+# Strong evidence only: the MFA event counts with deviceenroller 0x8018002A, in both lookups; 0x8018002A alone keeps the wait.
+if ($hjEndpointText -notmatch '\$enrollMfaExitCode = \(-not \$enrollStart\.Success -and \[string\]\$enrollStart\.ExitCode -eq "-2145910742"\)' -or $hjEndpointText -notmatch 'if \(\$enrollMfaExitCode -and -not \$kdfRejection -and -not \$mfaRequirement\) \{ \$mfaRequirement = Get-RecentAadEnrollmentMfaRequirement' -or ([regex]::Matches($hjEndpointText,'Get-RecentAadEnrollmentMfaRequirement -Since')).Count -ne 2) { throw 'The MFA status is not limited to deviceenroller 0x8018002A plus an MFA event.' }
+# Never a bypass: no other token or credential is tried after the MFA prompt.
+$mfaBranch = [regex]::Match($hjEndpointText,'(?s)elseif \(\$mfaRequirement\) \{\s+\$status = "INTUNE_ENROLLMENT_MFA_REQUIRED".{0,1200}?\n\s+\}').Value
+if (-not $mfaBranch -or $mfaBranch -match 'deviceenroller|Invoke-|Start-') { throw 'The MFA status branch does more than report.' }
+# A long back-off, as for a missing license: no relaunch every 25 minutes.
+if ((& $module { Get-HybridJoinCooldownHours -Status 'INTUNE_ENROLLMENT_MFA_REQUIRED' -BackoffCount 3 -CycleNumber 3 -DefaultHours 12 }) -ne 24.0 -or (& $module { Get-HybridJoinCooldownHours -Status 'INTUNE_USER_LICENSE_REJECTED' }) -ne 24.0) { throw 'INTUNE_ENROLLMENT_MFA_REQUIRED does not wait 24 hours before the next try.' }
+# The wait is skipped only on that event: the retry loop runs when neither KDFV1 nor MFA was seen.
+if ($hjEndpointText -notmatch '(?s)elseif \(\$mfaRequirement\) \{.{0,400}\}\s+else \{\s+Write-ProvisionalRunState') { throw 'The Intune confirmation wait is no longer the default after a failed trigger.' }
+Write-Host 'PASS: an MFA requirement on Microsoft Intune Enrollment is a review status, without the Intune confirmation wait'
 
 # Enrollment backups: reg.exe export cannot write past MAX_PATH (260), which blocked every stub removal.
 $backupNameDefinition=$ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-EnrollmentRegistryBackupFileName' },$true)
