@@ -438,7 +438,7 @@ try {
         'Get-OrchestratorExternalDependencyStatus -Job $job -DependencyName',
         'PipelineBatchId',
         'Set-OrchestratorPipelineJobStatus',
-        'Send-OrchestratorRuntimeUpdateEmail -Candidate $candidate',
+        'Send-OrchestratorRuntimeUpdateEmailBounded -Candidate $candidate',
         "if (`$reason -in @('due', 'forced'))"
     )) {
         Assert-True ($source.Contains($requiredHook)) "Orchestrator pipeline hook is missing: $requiredHook"

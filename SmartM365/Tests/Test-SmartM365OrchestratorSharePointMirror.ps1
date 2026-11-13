@@ -267,7 +267,7 @@ try {
     Set-Content -LiteralPath $newPath -Value '{"New":"changed before planned recycle"}' -Encoding utf8
     & $mirrorModule { param($Call) $script:Uploads.Clear(); $script:Logs.Clear(); $script:OrchestratorStopReason = 'RuntimeUpdate'; & $Call } $finalScript
     $recycleLogs = @(& $mirrorModule { $script:Logs.ToArray() })
-    Assert-True -Condition ((& $mirrorModule { $script:Uploads.Count }) -eq 0 -and @($recycleLogs | Where-Object { $_ -like '*deferred to the next orchestrator instance*' }).Count -eq 1) -Message 'A planned recycle did not defer the operational mirror.'
+    Assert-True -Condition ((& $mirrorModule { $script:Uploads.Count }) -eq 0 -and @($recycleLogs | Where-Object { $_ -like '*uploads deferred during planned recycle*' }).Count -eq 1) -Message 'A planned recycle did not defer all SharePoint uploads.'
     & $mirrorModule { param($Call) $script:OrchestratorStopReason = 'Stopped'; & $Call } $finalScript
     Assert-True -Condition ((& $mirrorModule { $script:Uploads.Count }) -eq 1) -Message 'The change deferred by a planned recycle was not mirrored by the next finalization.'
 

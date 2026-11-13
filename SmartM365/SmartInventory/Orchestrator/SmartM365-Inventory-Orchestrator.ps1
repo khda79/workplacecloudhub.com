@@ -110,7 +110,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.88
+1.5.91
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -123,7 +123,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.90
+    Version : 1.5.91
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
@@ -160,7 +160,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.90"
+$ScriptVersion = "1.5.91"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -781,6 +781,15 @@ function Invoke-OrchestratorMailHtmlUploads {
     }
 }
 
+function Save-OrchestratorDeferredSharePointUploads {
+    # Called before releasing the resident lock: the next instance must not race this state write.
+    if ($script:State -isnot [hashtable]) { return }
+    $previous = if ($script:State.ContainsKey('DeferredSharePointUploads')) { @($script:State.DeferredSharePointUploads) } else { @() }
+    $paths = @((Get-OrchestratorLogPath -Date (Get-Date)), $script:Settings.OrchestratorRunsCsvPath, (Get-JobRunsCsvPath), $script:Settings.StatePath, $script:Settings.HeartbeatPath) + @($global:SmartM365MailHtmlFiles)
+    $script:State.DeferredSharePointUploads = @($previous + $paths | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)
+    Save-OrchestratorState
+}
+
 function Invoke-OrchestratorPeriodicSharePointUpload {
     param(
         [Parameter(Mandatory = $true)][datetime]$Now,
@@ -788,6 +797,13 @@ function Invoke-OrchestratorPeriodicSharePointUpload {
         [switch]$Force,
         [switch]$SkipMirror
     )
+
+    # A planned recycle must finish promptly even when each Graph upload times out.
+    # Files stay on the shared storage; ordinary periodic uploads resume after restart.
+    if ($SkipMirror) {
+        Write-OrchestratorLog -Message 'SharePoint uploads deferred during planned recycle; local files remain available.'
+        return
+    }
 
     # Scheduling bypass is independent of forcing unchanged files to upload again.
     if (-not $RunNow -and -not $Force) {
@@ -815,10 +831,31 @@ function Invoke-OrchestratorPeriodicSharePointUpload {
         }
     }
 
-    if ($SkipMirror) {
-        Write-OrchestratorLog -Message 'SharePoint operational mirror deferred to the next orchestrator instance (planned recycle).'
-        return
+    # Process at most one artifact left by an earlier instance per periodic pass.
+    # Keep a failed or missing path in durable state so it is not mistaken for delivery.
+    if ($script:State -is [hashtable] -and $script:State.ContainsKey('DeferredSharePointUploads')) {
+        $deferred = @($script:State.DeferredSharePointUploads | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+        if ($deferred.Count) {
+            $path = [string]$deferred[0]
+            $logRoot = [IO.Path]::GetFullPath([string]$script:Settings.OrchestratorLogFolderPath).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+            $dataRoot = [IO.Path]::GetFullPath([string]$script:Settings.SharedDataFolderPath).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+            $fullPath = [IO.Path]::GetFullPath($path)
+            if (-not ($fullPath.StartsWith($logRoot, [StringComparison]::OrdinalIgnoreCase) -or $fullPath.StartsWith($dataRoot, [StringComparison]::OrdinalIgnoreCase)) -or [IO.Path]::GetExtension($fullPath) -notin @('.htm','.html','.log','.csv','.json','.txt')) {
+                Write-OrchestratorLog -Level ERROR -Message 'Deferred SharePoint path is invalid or outside orchestrator folders; it was not uploaded.'
+                if ($deferred.Count -gt 1) { $script:State.DeferredSharePointUploads = @(@($deferred | Select-Object -Skip 1) + $path); Save-OrchestratorState }
+            }
+            elseif (Invoke-OrchestratorSharePointUpload -LocalFilePath $fullPath -Reason $(if ([IO.Path]::GetExtension($fullPath) -in @('.htm','.html')) { 'deferred mail HTML copy' } else { 'deferred orchestrator artifact' })) {
+                $script:State.DeferredSharePointUploads = @($deferred | Select-Object -Skip 1)
+                Save-OrchestratorState
+            }
+            elseif ($deferred.Count -gt 1) {
+                # One missing or unavailable file must not starve the remaining artifacts.
+                $script:State.DeferredSharePointUploads = @(@($deferred | Select-Object -Skip 1) + $path)
+                Save-OrchestratorState
+            }
+        }
     }
+
     Invoke-OrchestratorSharePointMirror -Force:$Force
 }
 
@@ -3917,6 +3954,30 @@ function Send-OrchestratorRuntimeUpdateEmail {
     return $sent
 }
 
+function Send-OrchestratorRuntimeUpdateEmailBounded {
+    # The shared Core deadline bounds Graph token, send and retry waits together.
+    # SMTP has no equivalent deadline in the shared helper; do not hold a recycle on it.
+    param([Parameter(Mandatory)]$Candidate, [datetime]$DetectedAt = (Get-Date))
+    if ([string]$script:Settings.SendMailMode -ne 'Graph') {
+        Write-OrchestratorLog -Level WARN -Message 'Runtime update email skipped: a bounded notification is unavailable for this mail mode; the recycle continues.'
+        return $false
+    }
+    $command = Get-Command Send-SmartM365Mail -ErrorAction SilentlyContinue
+    $module = if ($command) { $command.Module } else { $null }
+    if ($null -eq $module -or $module.Name -ne 'SmartM365.Core') {
+        Write-OrchestratorLog -Level WARN -Message 'Runtime update email skipped: the bounded Graph mail helper is unavailable; the recycle continues.'
+        return $false
+    }
+    $previous = & $module { Get-Variable -Name SmartM365NetworkDeadline -Scope Script -ValueOnly -ErrorAction SilentlyContinue }
+    $deadline = [pscustomobject]@{ ExpiresAtUtc=[datetime]::UtcNow.AddSeconds(15); Label='Runtime update notification'; Minutes=0.25 }
+    if ($null -ne $previous -and $previous.ExpiresAtUtc -lt $deadline.ExpiresAtUtc) { $deadline = $previous }
+    try {
+        & $module { param($value) $script:SmartM365NetworkDeadline = $value } $deadline
+        return [bool](Send-OrchestratorRuntimeUpdateEmail -Candidate $Candidate -DetectedAt $DetectedAt)
+    }
+    finally { & $module { param($value) $script:SmartM365NetworkDeadline = $value } $previous }
+}
+
 function Test-OrchestratorRuntimeUpdate {
     param([datetime]$Now = (Get-Date))
 
@@ -4003,7 +4064,7 @@ function Test-OrchestratorRuntimeUpdate {
 
     Write-OrchestratorLog -Message ("Validated runtime update is stable and signed. Recycling cleanly so Task Scheduler can start it. Orchestrator {0} -> {1}; SmartM365.Core {2} -> {3}. No detached inventory job will be stopped." -f $script:RuntimeUpdateBaseline.ScriptVersion, $candidate.ScriptVersion, $script:RuntimeUpdateBaseline.CoreVersion, $candidate.CoreVersion)
     if ($script:Settings.SendRuntimeUpdateEmail) {
-        if (-not (Send-OrchestratorRuntimeUpdateEmail -Candidate $candidate -DetectedAt $Now)) {
+        if (-not (Send-OrchestratorRuntimeUpdateEmailBounded -Candidate $candidate -DetectedAt $Now)) {
             Write-OrchestratorLog -Message 'The runtime update notification email could not be sent; the validated clean recycle continues.' -Level WARN
         }
     }
@@ -9200,6 +9261,9 @@ finally {
 
     if ($null -ne $script:State -and -not $DryRun) {
         try { Save-OrchestratorState } catch { }
+    }
+    if ($null -ne $script:State -and -not $DryRun -and (Test-OrchestratorPlannedRecycle)) {
+        try { Save-OrchestratorDeferredSharePointUploads } catch { Write-OrchestratorLog -Level WARN -Message ("Deferred SharePoint list could not be saved: {0}" -f $_.Exception.Message) }
     }
     Exit-OrchestratorLock
     $runStatus = 'Failed'

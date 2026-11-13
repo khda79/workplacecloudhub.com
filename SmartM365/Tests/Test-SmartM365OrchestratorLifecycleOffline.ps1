@@ -193,6 +193,17 @@ try {
         Resume-Case
         Assert-Case ($script:RunningJobs.ContainsKey('Synthetic') -and -not $script:RunningJobs.Synthetic.TimeoutRequested) 'Legacy state compatibility changed.'
     }
+    Test-LifecycleCase 'Planned recycle re-adopts a live child and records its later completion once' {
+        $script:Manifest.JobsByName.Synthetic.TimeoutMinutes=60
+        Save-OrchestratorState
+        Resume-Case
+        Update-RunningJobs $script:Now
+        Assert-Case ($script:RunningJobs.ContainsKey('Synthetic') -and $script:Kills -eq 0 -and $script:Released -eq 0 -and $script:Rows.Count -eq 0) 'Recycle stopped or prematurely finalized the running child.'
+        $script:Process.HasExited=$true
+        Update-RunningJobs ($script:Now.AddSeconds(60))
+        Update-RunningJobs ($script:Now.AddSeconds(120))
+        Assert-Case ($script:State.Jobs.Synthetic.LastStatus -eq 'Success' -and $script:Kills -eq 0 -and $script:Released -eq 1 -and $script:Rows.Count -eq 1) 'Re-adopted child did not complete successfully exactly once.'
+    }
     Test-LifecycleCase 'Legacy missing process remains Interrupted' {
         Save-OrchestratorState
         $script:Adopt=$false
