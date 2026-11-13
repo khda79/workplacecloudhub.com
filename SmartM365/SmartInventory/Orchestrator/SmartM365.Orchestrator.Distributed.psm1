@@ -1,7 +1,7 @@
 ﻿Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 
-$script:DistributedModuleVersion = '1.1.24'
+$script:DistributedModuleVersion = '1.1.25'
 
 function Resolve-DistributedJsonPath {
     param([Parameter(Mandatory)][string]$Path)
@@ -1129,7 +1129,23 @@ function Get-SmartM365OrchestratorElectionPlan {
     $orderedGroups = @($groups | Sort-Object @{ Expression = 'LoadMinutesPerDay'; Descending = $true }, GroupKey)
     foreach ($group in $orderedGroups) {
         if (@($group.Candidates).Count -eq 0) {
-            $unassigned += [pscustomobject]@{ GroupKey = $group.GroupKey; Jobs = $group.Jobs; Reason = 'No live active server satisfies every required capability, Graph application role and server job policy.' }
+            $diagnostics = @(
+                foreach ($serverName in @($capabilitiesByServer.Keys | Sort-Object)) {
+                    $serverCapability = $capabilitiesByServer[$serverName]
+                    $probeTime = if ($serverCapability.PSObject.Properties['GeneratedAtUtc']) { [string]$serverCapability.GeneratedAtUtc } else { 'unknown' }
+                    $results = if ($serverCapability.PSObject.Properties['Results']) { @($serverCapability.Results) } else { @() }
+                    foreach ($requiredName in @($group.RequiredCapabilities | Where-Object { $_ -and $_ -notin @($serverCapability.ReadyCapabilities) })) {
+                        $probe = @($results | Where-Object { $_.Name -eq $requiredName -and -not $_.Ready } | Select-Object -First 1)
+                        if ($probe.Count -gt 0) {
+                            '{0}: {1} unavailable (probe {2} UTC): {3}' -f $serverName, $requiredName, $probeTime, $probe[0].Detail
+                        }
+                        else { '{0}: {1} unavailable (probe {2} UTC)' -f $serverName, $requiredName, $probeTime }
+                    }
+                }
+            )
+            $reason = 'No live active server satisfies every required capability, Graph application role and server job policy.'
+            if ($diagnostics.Count -gt 0) { $reason += ' ' + ($diagnostics -join '; ') }
+            $unassigned += [pscustomobject]@{ GroupKey = $group.GroupKey; Jobs = $group.Jobs; Reason = $reason }
             continue
         }
         if ([string]::IsNullOrWhiteSpace([string]$group.PreservedOwner)) { continue }

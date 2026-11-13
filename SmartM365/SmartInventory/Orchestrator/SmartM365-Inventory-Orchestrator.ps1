@@ -123,7 +123,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.87
+    Version : 1.5.89
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
@@ -160,7 +160,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.88"
+$ScriptVersion = "1.5.89"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -5704,8 +5704,9 @@ function Update-OrchestratorServerCapabilities {
 
     if (-not $script:Settings.DistributedSchedulingEnabled) { return }
     $nowUtc = [datetime]::UtcNow
+    $refreshMinutes = if ($script:CapabilityFailureRetryMinutes -gt 0) { [math]::Min($script:Settings.CapabilityRefreshMinutes, $script:CapabilityFailureRetryMinutes) } else { $script:Settings.CapabilityRefreshMinutes }
     if (-not $ForceRefresh -and $script:LastCapabilityRefreshUtc -ne [datetime]::MinValue -and
-        $nowUtc -lt $script:LastCapabilityRefreshUtc.AddMinutes($script:Settings.CapabilityRefreshMinutes)) { return }
+        $nowUtc -lt $script:LastCapabilityRefreshUtc.AddMinutes($refreshMinutes)) { return }
 
     $script:LastCapabilityRefreshUtc = $nowUtc
     try {
@@ -5727,6 +5728,15 @@ function Update-OrchestratorServerCapabilities {
         $capabilities | Add-Member -NotePropertyName ServerState -NotePropertyValue (Get-OrchestratorLocalServerState) -Force
         # Launch-time prerequisite blocks stay applied until their own re-check passes.
         $script:ServerCapabilitiesBase = $capabilities
+        # Retry a failed capability used by an enabled elected job sooner, without
+        # declaring it ready until a real probe succeeds. Missing components are not transient.
+        $required = @($script:Manifest.OrderedJobs | Where-Object { $_.Enabled -and $_.AssignmentMode -eq 'Elected' } | ForEach-Object { @($_.RequiredCapabilities) } | Where-Object { $_ } | Sort-Object -Unique)
+        $failed = @($capabilities.Results | Where-Object { -not $_.Ready -and -not $_.ComponentMissing -and $_.Name -in $required })
+        if ($failed.Count -gt 0) {
+            $script:CapabilityFailureRetryMinutes = if ($script:CapabilityFailureRetryMinutes -le 0) { 10 } else { [math]::Min(30, $script:CapabilityFailureRetryMinutes + 10) }
+            Write-OrchestratorLog -Message ("Required capability probe failed ({0}); retry in {1} minutes." -f (($failed.Name) -join ', '), $script:CapabilityFailureRetryMinutes) -Level WARN
+        }
+        else { $script:CapabilityFailureRetryMinutes = 0 }
         Publish-OrchestratorEffectiveCapability
         $readyText = if (@($script:ServerCapabilities.ReadyCapabilities).Count -gt 0) { @($script:ServerCapabilities.ReadyCapabilities) -join ', ' } else { 'none' }
         $jobPolicyText = if ($null -ne $localJobPolicy) { 'only jobs requiring ' + (@($localJobPolicy.OnlyJobsRequiring) -join ', ') } else { 'none' }
@@ -5745,6 +5755,7 @@ function Update-OrchestratorServerCapabilities {
     catch {
         $script:ServerCapabilities = $null
         $script:ServerCapabilitiesBase = $null
+        $script:CapabilityFailureRetryMinutes = if ($script:CapabilityFailureRetryMinutes -le 0) { 10 } else { [math]::Min(30, $script:CapabilityFailureRetryMinutes + 10) }
         Write-OrchestratorLog -Message ("Automatic capability detection failed; elected jobs fail closed: {0}" -f $_.Exception.Message) -Level ERROR
     }
 }
@@ -6234,7 +6245,7 @@ function Get-OrchestratorElectionPlanAssignmentSignature {
     }
     if ($Plan.PSObject.Properties['UnassignedGroups']) {
         foreach ($group in @($Plan.UnassignedGroups | Sort-Object GroupKey)) {
-            $parts.Add(("U|{0}|{1}" -f [string]$group.GroupKey, [string]$group.Reason))
+            $parts.Add(("U|{0}" -f [string]$group.GroupKey))
         }
     }
     return $parts -join "`n"
@@ -8413,6 +8424,7 @@ $script:SharedElectionPlanReadFailed = $false
 $script:LiveCapabilityCache = @{}
 $script:ElectedOwnershipSince = @{}
 $script:LastCapabilityRefreshUtc = [datetime]::MinValue
+$script:CapabilityFailureRetryMinutes = 0
 $script:LastElectionPlanRefreshUtc = [datetime]::MinValue
 $script:ElectionRebalanceRequested = $false
 $script:CentralClusterHash = ''

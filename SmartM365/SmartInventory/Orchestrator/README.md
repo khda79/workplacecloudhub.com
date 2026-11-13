@@ -623,6 +623,10 @@ Before launching an elected occurrence, the owner must create its shared claim w
   - Resident lock: acquisition and stale recovery use an exclusive guard handle; uncertainty refuses acquisition with exit code 3. See the re-adoption and resident lock safety section.
   - Per job: a job still running at its next occurrence is not relaunched; the occurrence is marked `Skipped` with a warning in the log and the summary.
 
+### Capability recovery after transient failures
+
+When a read-only probe fails for a capability required by an enabled elected job, the resident retries capability discovery after 10, 20, then at most 30 minutes, capped by the configured normal refresh interval. Missing components are excluded from this expedited retry. A successful probe restores the normal interval; election still requires a successful current capability document. An unassigned group's reason includes the affected servers, missing required capabilities, probe timestamps and available probe details. A plan reason change alone does not count as an assignment change. Scheduled jobs continue to follow their configured missed-run and dependency timeout policies.
+
 ### Pinned FreshSuccess dependencies (1.5.51)
 
 The scheduled gate, external pipeline-dependency gate and GUI readiness use the same read-only check for `Pinned` producers under `FreshSuccess`. The producer must have exactly one explicit owner. Its shared heartbeat must be recent, running and state-persistence healthy; its latest job state must be `Success` or `CompletedWithWarnings` within the schedule-derived freshness window. Running jobs, pending retries, concurrency leases, failed/unknown/latest stale results, invalid timestamps and missing/unreadable state keep the consumer waiting. A previous receipt or cached success cannot bypass this check, including when the consumer is elected on another server. This does not change `LatestOccurrence`, elected ownership, disabled/manual-job handling or schedules. Failed pinned results wait for recovery rather than being converted into success by `ContinueOnError`.
