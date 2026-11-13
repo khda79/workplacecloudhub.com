@@ -211,6 +211,7 @@ function script:Invoke-SmartM365DemoProfileAction {
         '^(SaveWaveOptionsButton|InheritWaveOptionsButton)$' { if ($Name -eq 'InheritWaveOptionsButton') { Update-SemtDemoCampaign }; Write-SmartM365DemoActivity ($Name + ' simulated. Wave.local.json.txt was not written.'); return $true }
         '^(AutomaticOpenEvidenceButton|OpenWaveFolderButton|OpenRunFolderButton|OpenSingleRunFolderButton)$' { [void](Show-SmartM365DemoDetail -Title 'Fictional evidence' -Text $c.AutomaticSummaryText.Text); return $true }
         '^(SaveOptionsButton|ResetOptionsButton|RefreshWrappersButton)$' { if ($Name -eq 'ResetOptionsButton') { Update-SemtDemoCampaign }; Write-SmartM365DemoActivity ($Name + ' simulated. No configuration file was written.'); return $true }
+        '^CloseGuiButton$' { Write-SmartM365DemoActivity 'Close simulated: the real GUI shows a waiting window, looks for active Runs and asks before closing (same path as the window X). The demo stays open.'; return $true }
         '^HeaderLogoLink$' { return $true }
     }
     return $false

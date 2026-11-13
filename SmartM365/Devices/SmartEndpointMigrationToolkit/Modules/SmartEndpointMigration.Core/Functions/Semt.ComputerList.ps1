@@ -40,8 +40,10 @@ function Get-SemtComputerList {
     $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
     $result = New-Object System.Collections.Generic.List[string]
     foreach ($line in @(Get-Content -LiteralPath $Path -ErrorAction Stop)) {
-        $name = ConvertTo-SemtComputerName -Line $line
-        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        # Same normalization as ConvertTo-SemtComputerName, inlined: one advanced-function call per
+        # line made the Wave list (GUI Campaign change) slow for Waves of a thousand computers.
+        $name = ([string]$line).Trim().Trim([char]34).Trim().TrimEnd('.')
+        if ([string]::IsNullOrWhiteSpace($name) -or $name.StartsWith('#')) { continue }
         if ($seen.Add($name)) { $result.Add($name) }
     }
     return @($result.ToArray())

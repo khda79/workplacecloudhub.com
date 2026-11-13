@@ -77,7 +77,7 @@ try {
     }
     Test-Step 'all the action card buttons are on one line under the Campaign selector and the status' {
         $bar = [regex]::Match($xaml, '(?s)<Grid Grid\.Row="1" Grid\.ColumnSpan="3" x:Name="ActionButtonBar".*?\n                </Grid>').Value
-        $xaml -match '(?s)x:Name="CampaignCombo".*?x:Name="StatusText".*?x:Name="ActionButtonBar".*?x:Name="MainTabs"' -and $bar -match '(?s)x:Name="OpenSinglePcButton" Content="Single PC".*?x:Name="OpenNewWaveButton" Content="New Wave".*?x:Name="OpenAutomaticWaveButton" Content="Automatic Wave".*?x:Name="RefreshButton".*?x:Name="StopAllButton".*?x:Name="LaunchAllButton"'
+        $xaml -match '(?s)x:Name="CampaignCombo".*?x:Name="StatusText".*?x:Name="ActionButtonBar".*?x:Name="MainTabs"' -and $bar -match '(?s)x:Name="OpenSinglePcButton" Content="Single PC".*?x:Name="OpenNewWaveButton" Content="New Wave".*?x:Name="OpenAutomaticWaveButton" Content="Automatic Wave".*?x:Name="RefreshButton".*?x:Name="StopAllButton".*?x:Name="LaunchAllButton".*?x:Name="CloseGuiButton" Content="Close"'
     }
     Test-Step 'the tabs Single PC, New Wave and Automatic Wave are removed (Waves, Runs, Options remain)' { $mainTabs = @([regex]::Matches($xaml, '(?m)^            <TabItem x:Name="(?<Name>[A-Za-z]+)" Header="(?<Header>[^"]+)"') | ForEach-Object { $_.Groups['Header'].Value }); ($mainTabs -join ',') -eq 'Waves,Runs,Options' -and $xaml -notmatch 'SinglePcTab|NewWaveTab|AutomaticWaveTab' }
     Test-Step 'no control name is used twice across the GUI windows' { $names = @([regex]::Matches($allXaml, 'x:Name="(?<Name>[A-Za-z][A-Za-z0-9_]*)"') | ForEach-Object { $_.Groups['Name'].Value } | Where-Object { $_ -ne 'TabBorder' }); @($names | Group-Object | Where-Object { $_.Count -gt 1 }).Count -eq 0 }
@@ -123,6 +123,75 @@ try {
     }
     Test-Step 'Create without a matching Preview states that the selection is computed now with the same safety exclusions' { $guiText -match 'No Preview matches these filters: the selection is computed now with the same rules and safety exclusions' -and $guiText -match 'Show-AutomaticWaveWait -Create:\$Create -ReusePreview:\$reusePreview' }
     Import-Module (Join-Path $packageRoot 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -MinimumVersion 1.0.0 -Force
+    # Active Run detection (used when closing): only <Runs>\<Campaign>\<Wave>\<RunId>\State is listed.
+    $activeRunsRoot = Join-Path $tempRoot 'ActiveRunsDetection'
+    $selfStart = (Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')
+    $activeRunFiles = [ordered]@{
+        'HybridJoin\WAVE-A\RUN-1\State' = @{ Campaign = 'HybridJoin'; WaveName = 'WAVE-A'; RunId = 'RUN-1'; Status = 'Running'; ProcessId = $PID; ProcessStartUtc = $selfStart }
+        'Windows11Upgrade\_SinglePC\RUN-2\State' = @{ Campaign = 'Windows11Upgrade'; WaveName = '_SinglePC'; RunId = 'RUN-2'; Status = 'Running'; ProcessId = $PID; ProcessStartUtc = $selfStart }
+        'HybridJoin\WAVE-A\RUN-0\State' = @{ Campaign = 'HybridJoin'; WaveName = 'WAVE-A'; RunId = 'RUN-0'; Status = 'Running'; ProcessId = $PID; ProcessStartUtc = '2001-01-01T00:00:00.0000000Z' }
+        'HybridJoin\WAVE-A\RUN-1\Logs\Deep\Copy\State' = @{ Campaign = 'HybridJoin'; WaveName = 'WAVE-A'; RunId = 'COPY'; Status = 'Running'; ProcessId = $PID; ProcessStartUtc = $selfStart }
+    }
+    foreach ($relative in $activeRunFiles.Keys) {
+        $folder = Join-Path $activeRunsRoot $relative
+        New-Item -ItemType Directory -Path $folder -Force | Out-Null
+        $record = $activeRunFiles[$relative]
+        foreach ($field in 'SignalPath','ReportPath','UpdatedUtc') { $record[$field] = '' }
+        [IO.File]::WriteAllText((Join-Path $folder ('ActiveRun_{0}.json.txt' -f $PID)), ([pscustomobject]$record | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+    }
+    Test-Step 'active Run detection reads only the Run State folders (Wave and Single PC), flags stale PIDs, ignores copies deeper in a Run' {
+        $found = @(Get-SemtActiveRuns -RunsRoot $activeRunsRoot)
+        $alive = @($found | Where-Object { $_.Alive } | ForEach-Object { $_.RunId } | Sort-Object)
+        $found.Count -eq 3 -and ($alive -join ',') -eq 'RUN-1,RUN-2' -and @($found | Where-Object { $_.RunId -eq 'RUN-0' -and $_.Status -eq 'Stale' }).Count -eq 1
+    }
+    # Every layout written by a Run (Wave, Single PC, names with [ ]), 2 Campaigns, several Waves, past
+    # Runs, Archives and the Automatic Wave evidence folder: same files as the former -Recurse scan.
+    $equivalenceRoot = Join-Path $tempRoot 'ActiveRunsEquivalence'
+    $layout = @(
+        @('HybridJoin','WAVE-HJ-DE','20261113-090000-A',$true), @('HybridJoin','WAVE-HJ-DE','20261112-090000-B',$false), @('HybridJoin','WAVE-[FR] 1','20261113-091000-C',$true),
+        @('HybridJoin','_SinglePC','20261113-092000-D',$true), @('Windows11Upgrade','WAVE-W11-PILOT','20261113-093000-E',$true), @('Windows11Upgrade','WAVE-W11-PILOT','20261110-093000-F',$false),
+        @('Windows11Upgrade','_SinglePC','20261113-094000-G',$true), @('Windows11Upgrade','WAVE-W11-EMPTY','20261113-095000-H',$false)
+    )
+    foreach ($item in $layout) {
+        $runFolder = [IO.Path]::Combine($equivalenceRoot, $item[0], $item[1], $item[2])
+        foreach ($sub in 'State','Logs\PC-0001','Reports') { [void][IO.Directory]::CreateDirectory([IO.Path]::Combine($runFolder, $sub)) }
+        [IO.File]::WriteAllText([IO.Path]::Combine($runFolder, 'Logs\PC-0001', 'worker.log'), 'x')
+        if ($item[3]) { [IO.File]::WriteAllText([IO.Path]::Combine($runFolder, 'State', 'ActiveRun_4242.json.txt'), (@{ Campaign = $item[0]; WaveName = $item[1]; RunId = $item[2]; Status = 'Running'; ProcessId = 0; SignalPath = ''; ReportPath = ''; UpdatedUtc = '' } | ConvertTo-Json), [Text.UTF8Encoding]::new($false)) }
+    }
+    [void][IO.Directory]::CreateDirectory([IO.Path]::Combine($equivalenceRoot, 'HybridJoin', 'WAVE-HJ-DE', 'Archives'))
+    [IO.File]::WriteAllText([IO.Path]::Combine($equivalenceRoot, 'HybridJoin', 'WAVE-HJ-DE', 'Archives', '20261001-090000.zip'), 'x')
+    [void][IO.Directory]::CreateDirectory([IO.Path]::Combine($equivalenceRoot, '_AutomaticWave', '20261113-080000', 'Evidence'))
+    $recursePaths = @(Get-ChildItem -LiteralPath $equivalenceRoot -Recurse -Filter 'ActiveRun_*.json.txt' -File | ForEach-Object { $_.FullName } | Sort-Object)
+    Test-Step 'active Run detection finds exactly the files of the former -Recurse scan (2 Campaigns, Waves, Single PC, [ ] names)' {
+        $fastPaths = @(Get-SemtActiveRuns -RunsRoot $equivalenceRoot | ForEach-Object { $_.StatePath } | Sort-Object)
+        $recursePaths.Count -eq 5 -and ($fastPaths -join '|') -eq ($recursePaths -join '|')
+    }
+    Test-Step 'active Run detection with -Campaign matches the former scan filtered on that Campaign' {
+        $ok = $true
+        foreach ($campaignName in 'HybridJoin','Windows11Upgrade') {
+            $fast = @(Get-SemtActiveRuns -RunsRoot $equivalenceRoot -Campaign $campaignName | ForEach-Object { $_.StatePath } | Sort-Object)
+            $expected = @($recursePaths | Where-Object { $_ -like ('{0}\{1}\*' -f $equivalenceRoot,$campaignName) })
+            if ($fast.Count -eq 0 -or ($fast -join '|') -ne ($expected -join '|')) { $ok = $false }
+        }
+        $ok
+    }
+    # Campaign change: RunHistory read once per refresh; the guards still read the active Runs at the click.
+    Test-Step 'Campaign change and Refresh read RunHistory once (Get-GuiRecentRuns), the Wave and Runs views reuse it' {
+        ([regex]::Matches($guiText, 'Get-SemtRuns ')).Count -eq 1 -and $guiText -match '(?s)function Invoke-GuiViewRefresh \{.*?\[void\]\(Get-GuiRecentRuns\)\s*\$script:RefreshUsesRunCache = \$true\s*try \{\s*Update-WaveList -SelectName \$SelectName\s*Update-RunsView\s*Update-AutomaticView\s*\}\s*finally \{ \$script:RefreshUsesRunCache = \$false \}' -and $guiText -match '(?s)function Switch-Campaign \{.*?Invoke-GuiViewRefresh\s*Add-Status' -and $guiText -match 'RefreshButton\.Add_Click\(\{ try \{ [^\n]*Invoke-GuiViewRefresh -SelectName \$name'
+    }
+    Test-Step 'Launch, Delete, Launch All, Stop and Close guards read the active Runs at the click (never the refresh cache)' {
+        $guards = [regex]::Matches($guiText, 'Get-SemtActiveRuns -RunsRoot \(Get-SemtStorageRoot -PackageRoot \$script:PackageRoot -Kind Runs\)').Count
+        $guards -ge 7 -and $guiText -notmatch 'RecentRuns[^\n]*Get-SemtActiveRuns'
+    }
+    $listPath = Join-Path $tempRoot 'ComputerListEquivalence.txt'
+    [IO.File]::WriteAllLines($listPath, [string[]]@('PC-1','  pc-1  ','"PC-2"',' "PC-3." ','PC-4.contoso.example.','# comment','   ','','"#PC-5"','PC-6...','""','PC-7'))
+    Test-Step 'computer list keeps the ConvertTo-SemtComputerName normalization (quotes, dots, comments, case-insensitive duplicates)' {
+        $expected = New-Object System.Collections.Generic.List[string]
+        $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($line in [IO.File]::ReadAllLines($listPath)) { $name = ConvertTo-SemtComputerName -Line $line; if (-not [string]::IsNullOrWhiteSpace($name) -and $seen.Add($name)) { $expected.Add($name) } }
+        ((Get-SemtComputerList -Path $listPath) -join '|') -eq ($expected -join '|') -and $expected.Count -eq 6
+    }
+    Test-Step 'active Run detection keeps the Campaign filter and accepts a missing Runs folder' { (@(Get-SemtActiveRuns -RunsRoot $activeRunsRoot -Campaign Windows11Upgrade | ForEach-Object { $_.RunId }) -join ',') -eq 'RUN-2' -and @(Get-SemtActiveRuns -RunsRoot (Join-Path $tempRoot 'NoRuns')).Count -eq 0 }
     # Wave options tab (replaces the "Wave options" button): Options first, then Activity; editors read and
     # write Wave.local.json.txt with inheritance. A fictional Wave in a temporary folder; nothing is launched.
     Test-Step 'Waves view: Options tab first (selected), then Activity; no Wave options button' {
@@ -287,6 +356,13 @@ try {
     Test-Step 'Automatic Wave view offers the AD domain choice' { $allXaml -match 'x:Name="AutomaticAdDomainCombo"' -and $guiText -match "AllAdDomainsLabel = '\(All domains\)'" }
     # Preview/Create: the real engine in a hidden process, as started by the GUI (fictional inventories).
     $waitWindow = [string]$ast.Find({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$automaticWaitXaml' }, $true).Right.Expression.Value
+    # Close: the button and the window X share one path; a waiting window covers the detection.
+    $closeWaitWindow = [string]$ast.Find({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$closeWaitXaml' }, $true).Right.Expression.Value
+    $closingHandler = [regex]::Match($guiText, '(?s)\$window\.Add_Closing\(\{.*?\n\}\)').Value
+    Test-Step 'Close button only closes the window, so it runs the same Closing handler as the window X' { $guiText -match '\$controls\.CloseGuiButton\.Add_Click\(\{ \$window\.Close\(\) \}\)' -and ([regex]::Matches($guiText, '\$window\.Add_Closing\(')).Count -eq 1 }
+    Test-Step 'close waiting window: "Please wait...", indeterminate progress, no button' { $closeWaitWindow -match 'Text="Please wait\.\.\."' -and $closeWaitWindow -match 'IsIndeterminate="True"' -and $closeWaitWindow -notmatch '<Button' }
+    Test-Step 'Closing shows the waiting window first and closes it before the Active Runs question' { $closingHandler -match '(?s)^\$window\.Add_Closing\(\{\s*param\(\$eventSource,\$routedEventArgs\)\s*\$closeWait = Show-GuiCloseWait.*?Get-SemtActiveRuns.*?Close-GuiCloseWait -Wait \$closeWait; \$closeWait = \$null.*?''Active Runs''.*?finally \{ Close-GuiCloseWait -Wait \$closeWait \}' }
+    Test-Step 'Closing closes the waiting window before the inventory refresh question too' { $closingHandler -match '(?s)Test-InventoryRefreshRunning\) \{\s*Close-GuiCloseWait -Wait \$closeWait; \$closeWait = \$null\s*\$choice = \[System\.Windows\.MessageBox\]::Show\(\$window, "The shared inventory refresh' }
     Test-Step 'Preview and Create show a waiting window with progress and the engine stage' { $waitWindow -match 'IsIndeterminate="True"' -and $waitWindow -match 'x:Name="AutomaticWaitStageText"' -and $guiText -match 'Show-AutomaticWaveWait -Create:\$Create' }
     Test-Step 'a successful Preview keeps its evidence; Create passes it to the engine only when it matches the filters' { $guiText -match "AutomaticPreviewEvidence = \[string\]\(Get-SemtPropertyValue -InputObject \`$summary -Name 'EvidencePath'\)" -and $guiText -match '-PreviewEvidencePath \$\(if \(\$reusePreview\) \{ \$script:AutomaticPreviewEvidence \}' -and $guiText -match '\$reusePreview = \(\$Create -and \(Test-AutomaticPreviewReusable -Signature \$signature -PreviewSignature \$script:AutomaticPreviewSignature -PreviewEvidence \$script:AutomaticPreviewEvidence\)\)' }
     Test-Step 'Preview and Create end with a message (counts; Create states the Wave is not launched)' { $guiText -match "'Preview', 'OK', 'Information'" -and $guiText -match "The Wave was NOT launched\." -and $guiText -match "'Create Wave', 'OK', 'Information'" }
@@ -407,6 +483,34 @@ $popup = [Windows.Markup.XamlReader]::Load([System.Xml.XmlReader]::Create([Syste
 '@ | Set-Content -LiteralPath $popupScript -Encoding ASCII
     $popupCheck = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $popupScript -Gui $guiPath 2>&1 | ForEach-Object { [string]$_ })
     Test-Step 'inventory refresh window loads under Windows PowerShell 5.1 STA' { ($popupCheck -join "`n") -match 'POPUP=True' }
+    $closeScript = Join-Path $tempRoot 'close-check.ps1'
+    @'
+param($Gui)
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName PresentationFramework
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Gui, [ref]$null, [ref]$null)
+function Get-Literal([string]$Name) { [string]$ast.Find({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq ('$' + $Name) }, $true).Right.Expression.Value }
+$wait = [Windows.Markup.XamlReader]::Load([System.Xml.XmlReader]::Create([System.IO.StringReader]::new((Get-Literal 'closeWaitXaml'))))
+$wait.Show()
+'WAIT=' + ($wait.IsVisible -and $wait.FindName('CloseWaitTitleText').Text -eq 'Please wait...')
+$wait.Close()
+$main = [Windows.Markup.XamlReader]::Load([System.Xml.XmlReader]::Create([System.IO.StringReader]::new((Get-Literal 'xaml'))))
+$main.Width = $main.MinWidth; $main.Height = $main.MinHeight; $main.WindowStartupLocation = 'Manual'; $main.Left = -20000; $main.ShowActivated = $false
+$main.Show(); $main.UpdateLayout()
+$root = $main.Content
+foreach ($name in 'LaunchAllButton','CloseGuiButton') {
+    $button = $main.FindName($name)
+    $box = $button.TransformToAncestor($root).TransformBounds([Windows.Rect]::new(0, 0, $button.ActualWidth, $button.ActualHeight))
+    'BUTTON={0};VISIBLE={1}' -f $name,($button.ActualWidth -gt 40 -and $box.Right -le ($root.ActualWidth + 0.5))
+}
+$launch = $main.FindName('LaunchAllButton'); $close = $main.FindName('CloseGuiButton')
+'ORDER=' + ($close.TransformToAncestor($root).Transform([Windows.Point]::new(0,0)).X -gt $launch.TransformToAncestor($root).Transform([Windows.Point]::new(0,0)).X)
+'STYLE=' + ($null -eq $close.ReadLocalValue([Windows.FrameworkElement]::StyleProperty) -or $close.ReadLocalValue([Windows.FrameworkElement]::StyleProperty) -eq [Windows.DependencyProperty]::UnsetValue)
+$main.Close()
+'@ | Set-Content -LiteralPath $closeScript -Encoding ASCII
+    $closeCheck = (@(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $closeScript -Gui $guiPath 2>&1 | ForEach-Object { [string]$_ })) -join "`n"
+    Test-Step 'close waiting window loads and shows under Windows PowerShell 5.1 STA' { $closeCheck -match 'WAIT=True' }
+    Test-Step 'Close button is right of Launch All Waves, with the default bar style, visible at the minimum window size' { $closeCheck -match 'BUTTON=LaunchAllButton;VISIBLE=True' -and $closeCheck -match 'BUTTON=CloseGuiButton;VISIBLE=True' -and $closeCheck -match 'ORDER=True' -and $closeCheck -match 'STYLE=True' }
     Test-Step 'GUI -ValidateOnly writes no GUI state file' { @(Get-ChildItem -LiteralPath (Join-Path $packageRoot 'Config') -Filter 'GuiState.*' -File).Count -eq 0 }
     $demoScript = Join-Path $tempRoot 'demo-check.ps1'
     @'
@@ -418,7 +522,7 @@ $state = . $Gui -Demo -ValidateOnly
 $state.Controls.CampaignCombo.SelectedIndex = 1
 'CAMPAIGN=' + $state.Data.Campaign + ';OPTIONS2=' + $state.Data.Editors.Count
 'WINDOWS=' + (@($state.Data.SemtWindows.Keys) -join ',')
-foreach ($name in 'OpenSinglePcButton','OpenNewWaveButton','OpenAutomaticWaveButton','DeleteWaveButton','LaunchWaveButton','LaunchAllButton','LaunchSingleButton','CreateWaveButton','AutomaticPreviewButton','AutomaticCreateButton','StopAllButton','ForceStopSelectedRunButton','OpenRunReportButton','ResetOptionsButton','RefreshButton') {
+foreach ($name in 'OpenSinglePcButton','OpenNewWaveButton','OpenAutomaticWaveButton','DeleteWaveButton','LaunchWaveButton','LaunchAllButton','LaunchSingleButton','CreateWaveButton','AutomaticPreviewButton','AutomaticCreateButton','StopAllButton','ForceStopSelectedRunButton','OpenRunReportButton','ResetOptionsButton','RefreshButton','CloseGuiButton') {
     $state.Controls[$name].RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
 }
 'FAILED=' + @($state.Activity | Where-Object { $_ -match 'Demo action failed' }).Count
@@ -427,6 +531,7 @@ foreach ($name in 'SinglePcCloseButton','NewWaveCloseButton','AutomaticWaveClose
 'CLOSED=' + @($state.Activity | Where-Object { $_ -match '(Single PC|New Wave|Automatic Wave) window closed' }).Count
 'OPENED=' + @($state.Activity | Where-Object { $_ -match '(Single PC|New Wave|Automatic Wave) window opened' }).Count
 'NOLAUNCH=' + (@($state.Activity | Where-Object { $_ -match 'No launcher, PsExec, worker' }).Count -gt 0)
+'DEMOCLOSE=' + (@($state.Activity | Where-Object { $_ -match 'Close simulated' }).Count -eq 1)
 $state.Window.Close()
 '@ | Set-Content -LiteralPath $demoScript -Encoding ASCII
     $demo = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $demoScript -Gui $guiPath 2>&1 | ForEach-Object { [string]$_ })
@@ -437,7 +542,13 @@ $state.Window.Close()
     Test-Step 'every demo action completes without error' { $demoText -match 'FAILED=0' }
     Test-Step 'demo report is generated in the demo temp folder only' { $demoText -match 'OUTPUT=.*SmartM365-Demo.*Run-Report-DEMO\.html' }
     Test-Step 'demo states that nothing was launched' { $demoText -match 'NOLAUNCH=True' }
+    Test-Step 'demo Close button is simulated and keeps the demo open' { $demoText -match 'DEMOCLOSE=True' }
     Test-Step 'demo wrote no Wave, Run or configuration into the package' { @(Get-ChildItem -LiteralPath (Join-Path $packageRoot 'Waves') -Directory -Recurse | Where-Object { $_.Parent.Name -in @('HybridJoin','Windows11Upgrade') }).Count -eq 0 -and @(Get-ChildItem -LiteralPath (Join-Path $packageRoot 'Config') -Filter '*.local.json.txt' -File).Count -eq 0 }
+    # Real start (not the demo) of the temp package copy: the window renders, the Close button runs
+    # the close path of the window X (waiting window, active Run detection) and the GUI exits.
+    $smoke = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $guiPath -SmokeTest 2>&1 | ForEach-Object { [string]$_ })
+    $smokeText = $smoke -join "`n"
+    Test-Step 'GUI -SmokeTest starts the real window and the Close button closes it through the waiting window' { $LASTEXITCODE -eq 0 -and $smokeText -match 'SmokeTest: GUI 1\.1\.0 rendered and closed by the Close button; campaign=HybridJoin; waves=\d+; closeWaitShown=1; activeRuns=0\.' }
     #endregion
 }
 catch {

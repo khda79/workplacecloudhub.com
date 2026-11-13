@@ -24,7 +24,11 @@ param(
     [ValidateSet('Overview','Issues','Completed')][string]$DemoScenario = 'Overview',
     [string]$DemoView = '',
     [ValidateRange(1000,3840)][int]$DemoWindowWidth = 1500,
-    [ValidateRange(650,2160)][int]$DemoWindowHeight = 950
+    [ValidateRange(650,2160)][int]$DemoWindowHeight = 950,
+    # Real start of the window (not the demo): once rendered it clicks Close, which runs the same
+    # close path as the window X (waiting window, active Run detection), then prints one
+    # "SmokeTest:" line. Active Runs are only counted, never stopped. Use a temp package copy.
+    [switch]$SmokeTest
 )
 
 if ($Demo) {
@@ -46,6 +50,8 @@ $script:CategoryOrder = @('Mode','Actions','Setup','Safety','Schedule','Parallel
 $script:InheritChoiceLabel = '(inherit)'
 $script:InventoryRefresh = $null
 $script:GuiClosing = $false
+$script:RecentRuns = $null
+$script:RefreshUsesRunCache = $false
 $script:AllAdDomainsLabel = '(All domains)'
 $script:AdDomains = @()
 $script:AdDomainStamp = $null
@@ -622,6 +628,7 @@ $xaml = @'
                         <Button x:Name="RefreshButton" Content="Refresh"/>
                         <Button x:Name="StopAllButton" Content="Stop running Waves" Background="#FFF4E5" Foreground="#9A3412" BorderBrush="#FDBA74" MinWidth="150"/>
                         <Button x:Name="LaunchAllButton" Content="Launch All Waves" Style="{StaticResource PrimaryButtonStyle}" MinWidth="150"/>
+                        <Button x:Name="CloseGuiButton" Content="Close" MinWidth="110" ToolTip="Close the GUI (same checks as the window X: active Runs are reported before closing)."/>
                     </StackPanel>
                 </Grid>
             </Grid>
@@ -1272,7 +1279,7 @@ function Update-WaveView {
     catch { $source = 'Wave.local.json.txt unreadable' }
     $controls.WaveSourceText.Text = $source
     $controls.WaveWrappersText.Text = if ($wave.WrappersReady) { 'Ready' } else { 'Missing: ' + $wave.MissingWrappers }
-    $last = @(Get-SemtRuns -PackageRoot $script:PackageRoot -Campaign $script:CurrentCampaign -Last 200 | Where-Object { $_.WaveName -eq $wave.Name } | Select-Object -First 1)
+    $last = @(Get-GuiRecentRuns -Cached:$script:RefreshUsesRunCache | Where-Object { $_.WaveName -eq $wave.Name } | Select-Object -First 1)
     $controls.WaveLastRunText.Text = if ($last.Count -gt 0) { '{0} ({1})' -f $last[0].Status,$last[0].UpdatedUtc } else { 'Never' }
     $controls.LaunchWaveButton.IsEnabled = [bool]$wave.Launchable
     $controls.DeleteWaveButton.IsEnabled = $true
@@ -1345,8 +1352,34 @@ function Update-WaveList {
     $controls.WaveCombo.IsEnabled = ($script:Waves.Count -gt 0)
 }
 
+function Get-GuiRecentRuns {
+    <#
+    Last 200 Runs of the current Campaign (RunHistory files). -Cached reuses the list read at the
+    start of the same Campaign change or Refresh, so the Wave view and the Runs view do not read
+    every RunHistory file twice. Guards never use it: they read the active Runs at the click.
+    #>
+    param([switch]$Cached)
+    if ($Cached -and $null -ne $script:RecentRuns -and $script:RecentRuns.Campaign -eq $script:CurrentCampaign) { return @($script:RecentRuns.Runs) }
+    $runs = @(Get-SemtRuns -PackageRoot $script:PackageRoot -Campaign $script:CurrentCampaign -Last 200)
+    $script:RecentRuns = [pscustomobject]@{ Campaign = $script:CurrentCampaign; Runs = $runs }
+    return $runs
+}
+
+function Invoke-GuiViewRefresh {
+    # Campaign change and Refresh: RunHistory read once, then the Wave, Runs and Automatic views.
+    param([string]$SelectName)
+    [void](Get-GuiRecentRuns)
+    $script:RefreshUsesRunCache = $true
+    try {
+        Update-WaveList -SelectName $SelectName
+        Update-RunsView
+        Update-AutomaticView
+    }
+    finally { $script:RefreshUsesRunCache = $false }
+}
+
 function Update-RunsView {
-    $runs = @(Get-SemtRuns -PackageRoot $script:PackageRoot -Campaign $script:CurrentCampaign -Last 100)
+    $runs = @(Get-GuiRecentRuns -Cached:$script:RefreshUsesRunCache | Select-Object -First 100)
     $controls.RunsGrid.ItemsSource = $runs
     $active = @(Get-SemtActiveRuns -RunsRoot (Get-SemtStorageRoot -PackageRoot $script:PackageRoot -Kind Runs) -Campaign $script:CurrentCampaign | Where-Object { $_.Alive })
     $controls.ActiveRunsText.Text = if ($active.Count -eq 0) { 'No Run of this Campaign is active on this technician computer.' } else { '{0} active Run(s): {1}' -f $active.Count,((@($active) | ForEach-Object { '{0} [{1}]' -f $_.WaveName,$_.Status }) -join ', ') }
@@ -1440,9 +1473,7 @@ function Switch-Campaign {
     $values = Get-GuiInitialOptionValues -Catalog $script:Catalog -Campaign $new
     $script:Editors = Add-SemtGuiOptionControls -OptionsHost $controls.OptionsHost -Catalog $script:Catalog -Campaign $new -Values $values
     $controls.OptionsCampaignText.Text = 'Options - {0}' -f $script:CampaignTitles[$new]
-    Update-WaveList
-    Update-RunsView
-    Update-AutomaticView
+    Invoke-GuiViewRefresh
     Add-Status -Message ('Campaign selected: {0}. Options and selections are kept separately for each Campaign.' -f $script:CampaignTitles[$new])
 }
 
@@ -1615,6 +1646,45 @@ function Show-AutomaticWaveWait {
     return [pscustomobject]@{ Window = $wait; StageText = $wait.FindName('AutomaticWaitStageText') }
 }
 
+$closeWaitXaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Smart Endpoint Migration Toolkit" Width="380" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" WindowStyle="ToolWindow" ShowActivated="True">
+    <StackPanel Margin="18">
+        <TextBlock x:Name="CloseWaitTitleText" Text="Please wait..." FontSize="14" FontWeight="SemiBold"/>
+        <TextBlock x:Name="CloseWaitHintText" Text="Checking for active Runs before closing." Margin="0,6,0,12" TextWrapping="Wrap" Foreground="#5A6B7B"/>
+        <ProgressBar IsIndeterminate="True" Height="10"/>
+    </StackPanel>
+</Window>
+'@
+$script:CloseWaitShownCount = 0
+
+function Show-GuiCloseWait {
+    <#
+    Non-modal waiting window without button, shown as soon as the GUI is asked to close (window X
+    or Close button) while it saves its state and looks for active Runs. It is closed before any
+    question is asked. Never blocks the close: returns $null when it cannot be shown.
+    #>
+    if (-not $window.IsVisible) { return $null }
+    try {
+        $wait = [Windows.Markup.XamlReader]::Load([System.Xml.XmlReader]::Create([System.IO.StringReader]::new($closeWaitXaml)))
+        $wait.Owner = $window
+        $wait.Show()
+        # The detection runs on this (UI) thread: let the window render before it starts.
+        $wait.Dispatcher.Invoke([Action]{ }, [System.Windows.Threading.DispatcherPriority]::Background)
+        $script:CloseWaitShownCount++
+        return $wait
+    }
+    catch { return $null }
+}
+
+function Close-GuiCloseWait {
+    param([AllowNull()]$Wait)
+    if ($null -eq $Wait) { return }
+    try { $Wait.Close() } catch { }
+}
+
 $inventoryRefreshXaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -1778,7 +1848,7 @@ $controls.WaveCombo.Add_SelectionChanged({
     $script:SelectedWave = if ($index -ge 0 -and $index -lt $script:Waves.Count) { $script:Waves[$index] } else { $null }
     try { Update-WaveView } catch { Show-GuiError $_.Exception.Message }
 })
-$controls.RefreshButton.Add_Click({ try { $name = if ($script:SelectedWave) { $script:SelectedWave.Name } else { '' }; Update-WaveList -SelectName $name; Update-RunsView; Update-AutomaticView; Add-Status -Message 'Refreshed.' } catch { Show-GuiError $_.Exception.Message } })
+$controls.RefreshButton.Add_Click({ try { $name = if ($script:SelectedWave) { $script:SelectedWave.Name } else { '' }; Invoke-GuiViewRefresh -SelectName $name; Add-Status -Message 'Refreshed.' } catch { Show-GuiError $_.Exception.Message } })
 $controls.LaunchWaveButton.Add_Click({
     try {
         $wave = $script:SelectedWave
@@ -1946,21 +2016,31 @@ $controls.ResetOptionsButton.Add_Click({
     }
     catch { Show-GuiError $_.Exception.Message }
 })
+# The window X and the Close button share this close path.
 $window.Add_Closing({
     param($eventSource,$routedEventArgs)
-    [void](Save-CurrentCampaignState -Quiet)
-    if (Test-InventoryRefreshRunning) {
-        $choice = [System.Windows.MessageBox]::Show($window, "The shared inventory refresh is still running in the background.`n`nYes: stop it, then close.`nNo: close and let it finish (its log stays in the Runs folder).`nCancel: keep the GUI open.", 'Inventory refresh', 'YesNoCancel', 'Warning')
-        if ($choice -eq [System.Windows.MessageBoxResult]::Cancel) { $routedEventArgs.Cancel = $true; return }
-        if ($choice -eq [System.Windows.MessageBoxResult]::Yes) { Stop-InventoryRefresh }
+    $closeWait = Show-GuiCloseWait
+    try {
+        [void](Save-CurrentCampaignState -Quiet)
+        if (Test-InventoryRefreshRunning) {
+            Close-GuiCloseWait -Wait $closeWait; $closeWait = $null
+            $choice = [System.Windows.MessageBox]::Show($window, "The shared inventory refresh is still running in the background.`n`nYes: stop it, then close.`nNo: close and let it finish (its log stays in the Runs folder).`nCancel: keep the GUI open.", 'Inventory refresh', 'YesNoCancel', 'Warning')
+            if ($choice -eq [System.Windows.MessageBoxResult]::Cancel) { $routedEventArgs.Cancel = $true; return }
+            if ($choice -eq [System.Windows.MessageBoxResult]::Yes) { Stop-InventoryRefresh }
+            $closeWait = Show-GuiCloseWait
+        }
+        $script:GuiClosing = $true
+        $active = @(Get-SemtActiveRuns -RunsRoot (Get-SemtStorageRoot -PackageRoot $script:PackageRoot -Kind Runs) | Where-Object { $_.Alive })
+        $script:CloseActiveRunCount = $active.Count
+        Close-GuiCloseWait -Wait $closeWait; $closeWait = $null
+        if ($active.Count -eq 0 -or $SmokeTest) { return }
+        $choice = [System.Windows.MessageBox]::Show($window, ("{0} Run(s) are still active.`n`nYes: request a controlled stop, then close.`nNo: close and leave them running.`nCancel: keep the GUI open." -f $active.Count), 'Active Runs', 'YesNoCancel', 'Warning')
+        if ($choice -eq [System.Windows.MessageBoxResult]::Cancel) { $script:GuiClosing = $false; $routedEventArgs.Cancel = $true; return }
+        if ($choice -eq [System.Windows.MessageBoxResult]::Yes) { foreach ($run in $active) { try { [void](Request-SemtRunStop -ActiveRun $run) } catch { } } }
     }
-    $script:GuiClosing = $true
-    $active = @(Get-SemtActiveRuns -RunsRoot (Get-SemtStorageRoot -PackageRoot $script:PackageRoot -Kind Runs) | Where-Object { $_.Alive })
-    if ($active.Count -eq 0) { return }
-    $choice = [System.Windows.MessageBox]::Show($window, ("{0} Run(s) are still active.`n`nYes: request a controlled stop, then close.`nNo: close and leave them running.`nCancel: keep the GUI open." -f $active.Count), 'Active Runs', 'YesNoCancel', 'Warning')
-    if ($choice -eq [System.Windows.MessageBoxResult]::Cancel) { $script:GuiClosing = $false; $routedEventArgs.Cancel = $true; return }
-    if ($choice -eq [System.Windows.MessageBoxResult]::Yes) { foreach ($run in $active) { try { [void](Request-SemtRunStop -ActiveRun $run) } catch { } } }
+    finally { Close-GuiCloseWait -Wait $closeWait }
 })
+$controls.CloseGuiButton.Add_Click({ $window.Close() })
 
 #endregion
 
@@ -1975,14 +2055,23 @@ if ($ValidateOnly) {
     return
 }
 
+$script:CloseActiveRunCount = -1
 $window.Add_ContentRendered({
     if ($splash -and (Get-Command -Name Close-SmartM365GuiSplash -ErrorAction SilentlyContinue)) { Close-SmartM365GuiSplash -Splash $splash }
+    if ($SmokeTest) {
+        # Click Close once the window is idle: same path as the window X.
+        [void]$window.Dispatcher.BeginInvoke([Action]{ $controls.CloseGuiButton.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent)) }, [System.Windows.Threading.DispatcherPriority]::ApplicationIdle)
+        return
+    }
     if (Get-Command -Name Start-SmartM365GuiUpdateCheck -ErrorAction SilentlyContinue) {
         try { $script:UpdateCheckTimer = Start-SmartM365GuiUpdateCheck -Owner $window -ManifestPath (Join-Path $PSScriptRoot 'SmartM365.GuiUpdateCheck.psd1') -AppRoot $script:PackageRoot -OnStatus { param([string]$Message,[string]$Title) Add-Status -Title $Title -Message $Message } } catch { }
     }
 })
 if (Get-Command -Name Set-SmartM365WpfWindowVisible -ErrorAction SilentlyContinue) { $window.Add_SourceInitialized({ Set-SmartM365WpfWindowVisible -Window $window }) }
 [void]$window.ShowDialog()
+if ($SmokeTest) {
+    Write-Output ('SmokeTest: GUI {0} rendered and closed by the Close button; campaign={1}; waves={2}; closeWaitShown={3}; activeRuns={4}.' -f $script:GuiVersion,$script:CurrentCampaign,@($script:Waves).Count,$script:CloseWaitShownCount,$script:CloseActiveRunCount)
+}
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

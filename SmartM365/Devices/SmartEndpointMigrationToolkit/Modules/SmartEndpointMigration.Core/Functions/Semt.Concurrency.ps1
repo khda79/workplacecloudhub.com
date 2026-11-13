@@ -169,9 +169,41 @@ function Get-SemtActiveRuns {
 
     $rows = New-Object System.Collections.Generic.List[object]
     if (-not (Test-Path -LiteralPath $RunsRoot -PathType Container)) { return @() }
-    foreach ($file in @(Get-ChildItem -LiteralPath $RunsRoot -Recurse -Filter 'ActiveRun_*.json.txt' -File -ErrorAction SilentlyContinue)) {
+    # A Run writes its state file only in <Runs>\<Campaign>\<Wave or _SinglePC>\<RunId>\State
+    # (New-SemtRunContext, New-SemtEphemeralWave). Only that depth is listed: a recursive scan
+    # also walked every Logs, Reports and evidence folder of every past Run, which took long on
+    # a large (synced) Runs folder and delayed the GUI. A folder that cannot be listed is scanned
+    # recursively as before, so an unreadable level never hides an active Run. .NET paths are
+    # literal (Wave names with [ ] are safe).
+    $statePaths = New-Object System.Collections.Generic.List[string]
+    $addRecursive = {
+        param([string]$Folder)
+        foreach ($file in @(Get-ChildItem -LiteralPath $Folder -Recurse -Filter 'ActiveRun_*.json.txt' -File -ErrorAction SilentlyContinue)) { $statePaths.Add($file.FullName) }
+    }
+    $campaignFolders = @()
+    if (-not [string]::IsNullOrWhiteSpace($Campaign)) {
+        $campaignFolder = [System.IO.Path]::Combine($RunsRoot, $Campaign)
+        if ([System.IO.Directory]::Exists($campaignFolder)) { $campaignFolders = @($campaignFolder) }
+    }
+    else {
+        try { $campaignFolders = @([System.IO.Directory]::GetDirectories($RunsRoot)) } catch { & $addRecursive $RunsRoot }
+    }
+    foreach ($campaignFolder in $campaignFolders) {
+        $waveFolders = @()
+        try { $waveFolders = @([System.IO.Directory]::GetDirectories($campaignFolder)) } catch { & $addRecursive $campaignFolder; continue }
+        foreach ($waveFolder in $waveFolders) {
+            $runFolders = @()
+            try { $runFolders = @([System.IO.Directory]::GetDirectories($waveFolder)) } catch { & $addRecursive $waveFolder; continue }
+            foreach ($runFolder in $runFolders) {
+                $stateFolder = [System.IO.Path]::Combine($runFolder, 'State')
+                if (-not [System.IO.Directory]::Exists($stateFolder)) { continue }
+                try { foreach ($path in [System.IO.Directory]::GetFiles($stateFolder, 'ActiveRun_*.json.txt')) { $statePaths.Add($path) } } catch { & $addRecursive $stateFolder }
+            }
+        }
+    }
+    foreach ($statePath in $statePaths) {
         $data = $null
-        try { $data = Read-SemtJsonFile -Path $file.FullName } catch { $data = $null }
+        try { $data = Read-SemtJsonFile -Path $statePath } catch { $data = $null }
         if (-not $data) { continue }
         if (-not [string]::IsNullOrWhiteSpace($Campaign) -and [string]$data.Campaign -ne $Campaign) { continue }
         $alive = Test-SemtProcessAlive -ProcessId ([int]$data.ProcessId) -ExpectedStartUtc ([string](Get-SemtPropertyValue -InputObject $data -Name 'ProcessStartUtc' -Default ''))
@@ -184,7 +216,7 @@ function Get-SemtActiveRuns {
             Alive = [bool]$alive
             SignalPath = [string]$data.SignalPath
             ReportPath = [string]$data.ReportPath
-            StatePath = $file.FullName
+            StatePath = $statePath
             UpdatedUtc = [string]$data.UpdatedUtc
         })
     }

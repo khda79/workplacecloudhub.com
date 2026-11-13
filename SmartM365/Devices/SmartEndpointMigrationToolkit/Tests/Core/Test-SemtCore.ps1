@@ -224,6 +224,23 @@ try {
         $listed = @(Get-SemtComputerList -Path $wave.ComputersPath)
         $listed -notcontains '# comment' -and @($listed | Where-Object { $_ -ieq 'PC-0001' }).Count -eq 1 -and $listed -contains 'PC-0002'
     }
+    # Get-SemtComputerList inlines ConvertTo-SemtComputerName (speed): same names, same order as the
+    # former per-line call, on UTF-8 (BOM) and UTF-16 (BOM) files.
+    $accent = [string][char]0x00C9; $cyrillic = [string][char]0x0416 + [char]0x0444
+    $varied = [string[]]@('PC-0001.contoso.example', 'pc-0001', "`tPC-0002  ", '   ', '', '# comment', "  `t# indented comment", '"PC-0003"', ' "PC-0004." ', 'PC-0005...', 'PC-0002', 'pc-0002.CONTOSO.example.', ('PC-' + $accent + 'TE'), ('pc-' + $accent.ToLowerInvariant() + 'te'), ('SRV-' + $cyrillic), '\\PC-0006', '\\pc-0006', '""', '"#PC-0007"', 'PC-0008;x', 'PC-0001.contoso.example')
+    Test-Step 'computer list normalization is identical to ConvertTo-SemtComputerName per line, order included (FQDN, case, tabs, BOM, comments, duplicates, non-ASCII, \\ prefix)' {
+        $ok = $true
+        foreach ($encoding in @([Text.UTF8Encoding]::new($true), [Text.UnicodeEncoding]::new($false, $true))) {
+            $listPath = Join-Path $tempRoot ('ComputerListEquivalence-{0}.txt' -f $encoding.WebName)
+            [IO.File]::WriteAllLines($listPath, $varied, $encoding)
+            $expected = New-Object System.Collections.Generic.List[string]
+            $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($line in @(Get-Content -LiteralPath $listPath)) { $name = ConvertTo-SemtComputerName -Line $line; if (-not [string]::IsNullOrWhiteSpace($name) -and $seen.Add($name)) { $expected.Add($name) } }
+            $actual = @(Get-SemtComputerList -Path $listPath)
+            if ($expected.Count -ne 11 -or ($actual -join '|') -cne ($expected -join '|')) { $ok = $false }
+        }
+        $ok
+    }
     Test-Step 'short-name key matches FQDN and short name (used for target and run guard correlation)' { $fqdn = 'pc-0001.contoso.example'; $short = 'PC-0001'; (Get-SemtComputerKey -ComputerName $fqdn) -eq (Get-SemtComputerKey -ComputerName $short) }
     Test-Throws 'existing Wave is never overwritten' { New-SemtWave -PackageRoot $packageCopy -Campaign HybridJoin -Name 'WAVE-TEST-01' -Computers @('PC-9') -Source Manual } 'exist'
     Test-Throws 'invalid Wave name is rejected' { New-SemtWave -PackageRoot $packageCopy -Campaign HybridJoin -Name 'bad name&' -Computers @('PC-9') -Source Manual } '.'

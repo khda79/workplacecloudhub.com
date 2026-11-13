@@ -102,7 +102,9 @@ Preview is optional and **Create Wave** is always available: it reuses the Previ
 filters, otherwise it computes the selection at Create with the same rules and safety exclusions;
 Create never launches. The Prerequisites Campaign has no Automatic Wave (button hidden).
 **Launch All Waves** launches the launchable Waves of the selected Campaign only, one every
-5 seconds, after one confirmation.
+5 seconds, after one confirmation. **Close** (right of Launch All Waves) follows the same path as
+the window X: a waiting window appears at once while the GUI looks for active Runs, then the
+Active Runs question (controlled stop, leave running, or keep the GUI open) is asked if any.
 
 Without the GUI, every Wave folder contains:
 
