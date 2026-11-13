@@ -11,6 +11,8 @@ entry point SmartInventory.cmd. For one version, every legacy name stays as a on
 - LaunchersByOrchestrator\Request-<Job>.cmd: "SmartInventory.cmd <Job> -Request", and
   Request-SmartM365-OrchestratorJob.cmd: "SmartInventory.cmd -Request <Job[,Job...]>".
 Job aliases are generated for every non-manual job of the template, as the former launchers were.
+The Windows 11 endpoint collector and interactive task uninstaller are standalone launchers,
+not generated catalog aliases. They are checked but never rewritten or removed here.
 
 With -Check the script writes nothing: it validates the catalog (scripts, parameters by AST,
 execution, includes, tokens) and compares the aliases with the folders; it exits 1 on any
@@ -20,7 +22,7 @@ difference (used by the offline tests).
 Validates and compares without writing.
 
 .VERSION
-1.2.0
+1.2.1
 #>
 #requires -Version 7.2
 [CmdletBinding()]
@@ -64,6 +66,32 @@ foreach ($entry in @($catalog.Entries | Where-Object { $_.Kind -eq 'Job' } | Sor
 }
 $expected['LaunchersByOrchestrator\Request-SmartM365-OrchestratorJob.cmd'] = Get-AliasContent -RelativePath 'LaunchersByOrchestrator\Request-SmartM365-OrchestratorJob.cmd' -Arguments '-Request'
 
+# These entry points intentionally bypass the catalog: the first is an endpoint-side
+# collector, the second invokes an interactive Windows PowerShell 5.1 uninstaller.
+# Treat them as owned source files, not as obsolete generated aliases.
+$standalone = [ordered]@{
+    'Launchers\OnPremises\Start-SmartM365-Windows11-HardwareReadiness-Inventory.cmd' = @{
+        Script = 'EndpointInventory\Windows11Readiness\SmartM365-Endpoint-Windows11Readiness-Inventory.ps1'
+        Pattern = 'SmartM365-Endpoint-Windows11Readiness-Inventory\.ps1"\s+%\*'
+    }
+    'Launchers\Orchestrator\Start-SmartM365-Inventory-OrchestratorScheduledTask-Uninstaller.cmd' = @{
+        Script = 'Orchestrator\Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1'
+        Pattern = 'Install-SmartM365-Inventory-OrchestratorScheduledTask\.ps1"\s+-UninstallInteractive\s+%\*'
+    }
+}
+foreach ($relative in $standalone.Keys) {
+    $path = Join-Path $smartInventoryRoot $relative
+    $target = Join-Path $smartInventoryRoot $standalone[$relative].Script
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { $differences.Add("standalone missing: $relative") }
+    elseif ([IO.File]::ReadAllText($path) -notmatch $standalone[$relative].Pattern) { $differences.Add("standalone invalid: $relative") }
+    if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { $differences.Add("standalone target missing: $($standalone[$relative].Script)") }
+}
+# Refuse any generation when these source launchers or their targets are invalid.
+if (-not $Check -and @($differences | Where-Object { $_ -like 'standalone *' }).Count -gt 0) {
+    $differences | Where-Object { $_ -like 'standalone *' } | ForEach-Object { Write-Output $_ }
+    exit 1
+}
+
 $existing = @()
 foreach ($folder in @('Launchers', 'LaunchersByOrchestrator')) {
     $path = Join-Path $smartInventoryRoot $folder
@@ -78,7 +106,7 @@ foreach ($relative in $expected.Keys) {
         [IO.File]::WriteAllText($path, $expected[$relative], [Text.Encoding]::ASCII)
     }
 }
-foreach ($relative in @($existing | Where-Object { -not $expected.Contains($_) })) {
+foreach ($relative in @($existing | Where-Object { -not $expected.Contains($_) -and -not $standalone.Contains($_) })) {
     $differences.Add("obsolete: $relative")
     if (-not $Check) { Remove-Item -LiteralPath (Join-Path $smartInventoryRoot $relative) -Force }
 }

@@ -178,11 +178,21 @@ try {
     # Jobs added after the freeze get the Start/Request aliases of New-SmartM365-OrchestratorJobLaunchers.ps1, not a reference entry.
     $referenced = @{}
     foreach ($record in $reference) { $referenced[$record.Launcher.ToLowerInvariant()] = $true }
+    # Standalone entry points are not catalog aliases and must survive alias regeneration.
+    $standalone = @{
+        'launchers\onpremises\start-smartm365-windows11-hardwarereadiness-inventory.cmd' = 'SmartM365-Endpoint-Windows11Readiness-Inventory\.ps1"\s+%\*'
+        'launchers\orchestrator\start-smartm365-inventory-orchestratorscheduledtask-uninstaller.cmd' = 'Install-SmartM365-Inventory-OrchestratorScheduledTask\.ps1"\s+-UninstallInteractive\s+%\*'
+    }
+    foreach ($relative in $standalone.Keys) {
+        $path = Join-Path $inventoryRoot $relative
+        Assert-True ((Test-Path -LiteralPath $path -PathType Leaf) -and ([IO.File]::ReadAllText($path) -match $standalone[$relative])) "Standalone launcher missing or invalid: $relative"
+    }
     $jobNames = @($catalog.Entries | Where-Object { $_.Kind -eq 'Job' } | ForEach-Object { $_.Name })
     $newJobAliases = 0
     foreach ($aliasFile in $aliasFiles) {
         $relative = $aliasFile.FullName.Substring($inventoryRoot.Length + 1)
         if ($referenced.ContainsKey($relative.ToLowerInvariant())) { continue }
+        if ($standalone.ContainsKey($relative.ToLowerInvariant())) { continue }
         $match = [regex]::Match($relative, '^(?:Launchers\\Jobs\\Start-(?<Job>[A-Za-z0-9._-]+)|LaunchersByOrchestrator\\Request-(?<Job>[A-Za-z0-9._-]+))\.cmd$')
         Assert-True ($match.Success -and $jobNames -ccontains $match.Groups['Job'].Value) "Only the aliases of the legacy names and of the catalog jobs may remain: $relative"
         $lines = @([IO.File]::ReadAllLines($aliasFile.FullName) | Where-Object { $_.Trim() })
@@ -191,7 +201,7 @@ try {
         Assert-True ($lines.Count -eq 1 -and $lines[0] -ceq ($prefix + ' ' + $arguments + ' %*')) "${relative}: alias must be '$prefix $arguments %*', found '$($lines -join ' | ')'."
         $newJobAliases++
     }
-    Assert-True ($aliasFiles.Count -eq $reference.Count + $newJobAliases) "Only the aliases of the legacy names and of the catalog jobs may remain ($($aliasFiles.Count) .cmd files)."
+    Assert-True ($aliasFiles.Count -eq $reference.Count + $newJobAliases + $standalone.Count) "Unexpected launcher files ($($aliasFiles.Count) .cmd files)."
 
     # Menu: every entry once, jobs first, then manual launches, then the orchestrator entries.
     $menu = @(Get-SmartM365InventoryMenu -Catalog $catalog)
