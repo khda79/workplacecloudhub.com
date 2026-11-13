@@ -731,21 +731,23 @@ function Request-SmartM365OrchestratorRebalance {
 
 function Get-SmartM365OrchestratorHistory {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$SharedDataFolderPath, [datetime]$From = (Get-Date).AddDays(-7), [datetime]$To = (Get-Date), [string]$Server = '', [string]$JobName = '', [string]$Status = '')
+    param([Parameter(Mandatory)][string]$SharedDataFolderPath, [datetime]$From = (Get-Date).AddDays(-7), [datetime]$To = (Get-Date), [string]$Server = '', [string]$JobName = '', [string]$Status = '', [switch]$RequireComplete)
     $result = [Collections.Generic.List[object]]::new()
-    if (-not (Test-Path $SharedDataFolderPath)) { return @() }
+    $ioAction = if ($RequireComplete) { 'Stop' } else { 'SilentlyContinue' }
+    if (-not (Test-Path -LiteralPath $SharedDataFolderPath -ErrorAction $ioAction)) { if ($RequireComplete) { throw 'Shared orchestrator history root is unavailable.' }; return @() }
     # The CSV is named when a run is recorded; allow one extra day for clock differences.
     $earliestFileDate = if ($From.Date -gt [datetime]::MinValue.AddDays(1)) { $From.Date.AddDays(-1) } else { [datetime]::MinValue }
-    foreach ($serverFolder in @(Get-ChildItem $SharedDataFolderPath -Directory -ErrorAction SilentlyContinue)) {
+    foreach ($serverFolder in @(Get-ChildItem $SharedDataFolderPath -Directory -ErrorAction $ioAction)) {
         if ($Server -and $serverFolder.Name -ine $Server) { continue }
-        $jobRunsFolder = Join-Path $serverFolder.FullName 'JobRuns'; if (-not (Test-Path $jobRunsFolder)) { continue }
-        foreach ($csv in @(Get-ChildItem $jobRunsFolder -Filter 'Orchestrator_JobRuns_*.csv' -File -ErrorAction SilentlyContinue)) {
+        $jobRunsFolder = Join-Path $serverFolder.FullName 'JobRuns'; if (-not (Test-Path $jobRunsFolder -ErrorAction $ioAction)) { continue }
+        foreach ($csv in @(Get-ChildItem $jobRunsFolder -Filter 'Orchestrator_JobRuns_*.csv' -File -ErrorAction $ioAction)) {
             $fileDateMatch = [regex]::Match($csv.BaseName, '^Orchestrator_JobRuns_(\d{8})$', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
             if ($fileDateMatch.Success) {
                 $fileDate = [datetime]::MinValue
                 if ([datetime]::TryParseExact($fileDateMatch.Groups[1].Value, 'yyyyMMdd', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$fileDate) -and $fileDate -lt $earliestFileDate) { continue }
             }
-            foreach ($row in @(Import-Csv $csv.FullName -ErrorAction SilentlyContinue)) {
+            foreach ($row in @(Import-Csv $csv.FullName -ErrorAction $ioAction)) {
+                if ($RequireComplete -and (-not $row.PSObject.Properties['JobName'] -or -not $row.PSObject.Properties['Status'] -or -not $row.PSObject.Properties['ScheduledTime'] -or -not $row.PSObject.Properties['StartTime'])) { throw "Incomplete history schema in $($csv.Name)." }
                 $start = [datetime]::MinValue
                 $hasStart = [datetime]::TryParse([string]$row.StartTime, [ref]$start)
                 $eventTime = $start
@@ -753,7 +755,7 @@ function Get-SmartM365OrchestratorHistory {
                     # Skipped and blocked occurrences have no process start. Keep their actual
                     # StartTime empty, but include them in the history by scheduled time.
                     if (-not [datetime]::TryParse([string]$row.ScheduledTime, [ref]$eventTime) -and
-                        -not [datetime]::TryParse([string]$row.EndTime, [ref]$eventTime)) { continue }
+                        -not [datetime]::TryParse([string]$row.EndTime, [ref]$eventTime)) { if ($RequireComplete) { throw "History row has no readable event time in $($csv.Name)." }; continue }
                 }
                 if ($eventTime -lt $From -or $eventTime -gt $To) { continue }; if ($JobName -and $row.JobName -ine $JobName) { continue }; if ($Status -and $row.Status -ine $Status) { continue }
                 # Display helpers (GUI 1.6.31): scheduled occurrence in local time and duration in minutes.

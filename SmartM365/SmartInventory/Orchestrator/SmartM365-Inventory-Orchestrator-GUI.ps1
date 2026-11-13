@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.39
+1.6.40
 #>
 [CmdletBinding()]
 param(
@@ -69,7 +69,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 }
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.39'
+$script:AppVersion = '1.6.40'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -442,6 +442,8 @@ $xaml = @'
                                     <TextBox x:Name="MaintenanceReasonBox" Width="300" MaxLength="1000" ToolTip="Required to enable maintenance. Does not publish the configuration draft."/>
                                     <Button x:Name="EnableMaintenanceButton" Content="Enable maintenance" Background="#FFF4CE" IsEnabled="False"/>
                                     <Button x:Name="DisableMaintenanceButton" Content="Disable maintenance" IsEnabled="False"/>
+                                    <Button x:Name="CancelPendingWorkButton" Content="Cancel pending work" ToolTip="Cancel existing pending work and wait for future schedules. Running jobs continue."/>
+                                    <Button x:Name="RecoverJobsButton" Content="Recover jobs" ToolTip="Preview and request recovery for selected or blocked jobs and their dependencies."/>
                                 </StackPanel>
                             </Grid>
                             <DataGrid x:Name="OperationsServersGrid" Grid.Row="1">
@@ -1462,7 +1464,7 @@ $script:SmartInventoryRoot = Split-Path -Path $PSScriptRoot -Parent
 if ($ValidateOnly) {
     $validationWindow = ConvertFrom-OrchestratorGuiXaml -Text $xaml
     foreach ($controlName in @('MainTabs', 'PlanningGrid', 'JobArgumentsBox', 'HistoryGrid', 'ServersGrid', 'VersionsGrid', 'PublishButton', 'RebalanceButton', 'RequestPrepareButton', 'ApplyJobButton', 'ApplyServerButton', 'ServerActiveCheck', 'TestServerButton', 'TestServerAsServiceAccountButton', 'ServerTestHintText', 'RollbackButton', 'DaysPanel', 'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck',
-        'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'JobStopReasonBox', 'StopRunningJobButton', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
+        'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'JobStopReasonBox', 'StopRunningJobButton', 'OperationsPendingGrid', 'CancelPendingWorkButton', 'RecoverJobsButton', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
         'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
         'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancellationProgressText', 'CancelRequestButton', 'CancelAllRequestsButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
         'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton', 'AdminMailStatusText', 'AdminMailToggleButton',
@@ -1949,7 +1951,8 @@ function Refresh-MaintenanceView {
         $script:Controls.DisableMaintenanceButton.IsEnabled = $control.Enabled
         $stateText = if ($control.Enabled) { if ($applied) { 'ACTIVE' } elseif ($activationReady) { "ACTIVE ($offlineCount offline server(s) apply it on return)" } else { 'ACTIVATION REQUESTED' } }
             elseif ($applied) { 'INACTIVE' } elseif ($activationReady) { "INACTIVE ($offlineCount offline server(s))" } else { 'ACKNOWLEDGEMENT PENDING' }
-        $script:Controls.MaintenanceBannerText.Text = "Maintenance: $stateText | revision $($control.Revision) | scheduled launches only; manual Pipeline requests remain available"
+        $maintenanceScope = if ($control.PSObject.Properties['PendingWorkReset'] -and $control.PendingWorkReset) { 'pending-work reset: scheduled, pipeline and forced launches paused' } else { 'scheduled launches only; manual Pipeline requests remain available' }
+        $script:Controls.MaintenanceBannerText.Text = "Maintenance: $stateText | revision $($control.Revision) | $maintenanceScope"
         # Normal scheduling is not a problem: neutral when inactive, amber only while it pauses or is in transition.
         Set-GuiMaintenanceBannerStyle -Level $(if (-not $control.Enabled -and $activationReady) { 'Normal' } else { 'Attention' })
         $running = 0
@@ -2039,6 +2042,47 @@ function Get-GuiCancellationWork {
             }
         }
         try {
+            if ($InputData.PSObject.Properties['Kind'] -and $InputData.Kind -eq 'RecoveryWork') {
+                if ($InputData.Phase -eq 'Validate') {
+                    $Progress.Message = 'Checking recovery candidates and server protocols...'
+                    $previewSinceUtc = [datetime]::UtcNow
+                    $cluster = (Read-SmartM365JsonDocument -Path (Join-Path $InputData.Root 'Config/Orchestrator-Cluster.json')).Document
+                    $control = Get-SmartM365OrchestratorMaintenanceState -SharedDataFolderPath $InputData.Root
+                    if ($control.Enabled) { throw 'Recovery cannot be submitted while maintenance is active.' }
+                    $null = Assert-SmartM365PendingWorkResetReady -SharedDataFolderPath $InputData.Root -Tenant $InputData.Tenant -Control $control -RequireRecoveryGuard
+                    $operations = Get-SmartM365OrchestratorOperations -SharedDataFolderPath $InputData.Root -ClusterDocument $cluster
+                    $jobsPath = Get-SmartM365JsonReadPath -Path (Join-Path $InputData.Root 'Config/Orchestrator-Jobs.json') -Optional
+                    if (-not $jobsPath) { throw 'Published jobs configuration is unavailable.' }
+                    $jobs = (Read-SmartM365JsonDocument -Path $jobsPath).Document
+                    $planPath = Get-SmartM365JsonReadPath -Path (Join-Path $InputData.Root 'Election/Orchestrator-ElectionPlan.json') -Optional
+                    $plan = if ($planPath) { (Read-SmartM365JsonDocument -Path $planPath).Document } else { $null }
+                    if ($InputData.All) {
+                        $history = @(Get-SmartM365OrchestratorHistory -SharedDataFolderPath $InputData.Root -From (Get-Date).AddDays(-8) -RequireComplete)
+                        $preview = Get-SmartM365OrchestratorRecoveryPreview -JobsDocument $jobs -Operations $operations -Plan $plan -History $history -AllBlocked
+                    }
+                    else { $preview = Get-SmartM365OrchestratorRecoveryPreview -JobsDocument $jobs -Operations $operations -Plan $plan -JobName @($InputData.JobNames) }
+                    return [pscustomobject]@{ Phase='RecoveryValidate'; Preview=$preview; JobsPath=$jobsPath; ManifestHash=(Get-FileHash -LiteralPath $jobsPath -Algorithm SHA256).Hash; PreviewSinceUtc=$previewSinceUtc }
+                }
+                $Progress.Message = 'Recording recovery request under the launch gate...'
+                $result = New-SmartM365OrchestratorRecoveryRequest -SharedDataFolderPath $InputData.Root -JobsPath $InputData.JobsPath -Tenant $InputData.Tenant -JobName @($InputData.JobNames) -ExpectedManifestHash $InputData.ManifestHash -PreviewSinceUtc $InputData.PreviewSinceUtc
+                return [pscustomobject]@{ Phase='RecoveryPublish'; Result=$result }
+            }
+            if ($InputData.PSObject.Properties['Kind'] -and $InputData.Kind -eq 'PendingWork') {
+                if ($InputData.Phase -eq 'Validate') {
+                    $Progress.Message = 'Checking servers and pending work...'
+                    $cluster = (Read-SmartM365JsonDocument -Path (Join-Path $InputData.Root 'Config/Orchestrator-Cluster.json')).Document
+                    $control = Get-SmartM365OrchestratorMaintenanceState -SharedDataFolderPath $InputData.Root
+                    if ($control.Enabled) { throw 'Maintenance is already active; do not replace an existing maintenance session.' }
+                    $null = Assert-SmartM365PendingWorkResetReady -SharedDataFolderPath $InputData.Root -Tenant $InputData.Tenant -Control $control
+                    $operations = Get-SmartM365OrchestratorOperations -SharedDataFolderPath $InputData.Root -ClusterDocument $cluster
+                    $runs = @(Get-SmartM365OrchestratorActivePipelineRuns -SharedDataFolderPath $InputData.Root)
+                    return [pscustomobject]@{ Phase='PendingWorkValidate'; Revision=[long]$control.Revision; Pending=@($operations.Pending); Running=@($operations.Running); BatchIds=@($runs | ForEach-Object BatchId); Windows=@($control.CatchUpWindows).Count }
+                }
+                $Progress.Message = 'Coordinating pending-work cancellation...'
+                $reportProgress = { param($message) $Progress.Message = $message }.GetNewClosure()
+                $result = Invoke-SmartM365CancelPendingWork -SharedDataFolderPath $InputData.Root -Tenant $InputData.Tenant -ExpectedRevision $InputData.Revision -Reason $InputData.Reason -OnProgress $reportProgress
+                return [pscustomobject]@{ Phase='PendingWorkPublish'; Result=$result }
+            }
             if ($InputData.Phase -eq 'Validate') {
                 $Progress.Message = 'Reading active requests and checking cancellation readiness...'
                 $runs = @()
@@ -2079,7 +2123,7 @@ function Set-GuiCancellationBusy {
     $script:CancellationBusy = $Busy
     $names = @('RefreshButton','RebalanceButton','PublishButton','HistoryRefreshButton',
         'RequestRunButton','RequestPrepareButton','EnableMaintenanceButton','DisableMaintenanceButton','RollbackButton',
-        'CancelRequestButton','CancelAllRequestsButton','CancellationReasonBox')
+        'CancelRequestButton','CancelAllRequestsButton','CancellationReasonBox','CancelPendingWorkButton','RecoverJobsButton')
     if ($Busy) {
         $script:CancellationUiState = @{}
         foreach ($name in $names) {
@@ -2131,6 +2175,53 @@ function Stop-AllPipelineRequests {
     Start-GuiPipelineCancellation -All
 }
 
+function Start-GuiCancelPendingWork {
+    if ($script:CancellationBusy -or $script:RequestSubmitBusy) { throw 'Another request or cancellation is in progress.' }
+    $reason = $script:Controls.MaintenanceReasonBox.Text.Trim()
+    if (-not $reason) { throw 'Enter a reason in the Operations reason box.' }
+    $workerFolder = Split-Path $managementModulePath -Parent
+    $script:CancellationContext.Input = [pscustomobject]@{
+        Kind='PendingWork'; Phase='Validate'; Root=$script:SharedDataFolderPath; Tenant=$Tenant; Reason=$reason; Revision=[long]-1; LogPath=$script:GuiLogPath
+        ModulePaths=@($managementModulePath, (Join-Path $workerFolder 'SmartM365.Orchestrator.Pipeline.psm1'),
+            (Join-Path $workerFolder 'SmartM365.Orchestrator.Maintenance.psm1'), (Join-Path $workerFolder 'SmartM365.Orchestrator.Insights.psm1'),
+            (Join-Path $workerFolder 'SmartM365.Orchestrator.PendingWork.psm1'))
+    }
+    Set-GuiCancellationBusy $true
+    $script:CancellationContext.Progress.Message = 'Starting pending-work checks...'
+    $script:CancellationContext.Progress.LogError = ''
+    try {
+        if (-not (Start-SmartM365OrchestratorGuiWorker -Context $script:CancellationContext -Work (Get-GuiCancellationWork) -InputObject $script:CancellationContext.Input)) { throw 'A cancellation worker is already active.' }
+    }
+    catch { Set-GuiCancellationBusy $false; throw }
+}
+
+function Start-GuiRecoveryWork {
+    if ($script:CancellationBusy -or $script:RequestSubmitBusy) { throw 'Another request or cancellation is in progress.' }
+    $choice = $script:OrchestratorDialog.Show("Recover selected jobs or all blocked jobs?`n`nYES: selected pending jobs, or the selected Planning job.`nNO: all pending jobs and terminal dependency blocks from the last eight days.`nCANCEL: do nothing.", 'Recover jobs', 'YesNoCancel', 'Question')
+    if ($choice -eq 'Cancel') { return }
+    $all = $choice -eq 'No'
+    $names = @()
+    if (-not $all) {
+        $names = @($script:Controls.OperationsPendingGrid.SelectedItems | ForEach-Object { [string]$_.Job } | Where-Object { $_ } | Sort-Object -Unique)
+        if (-not $names.Count -and $script:Controls.PlanningGrid.SelectedItem) { $names = @([string]$script:Controls.PlanningGrid.SelectedItem.Name) }
+        if (-not $names.Count) { throw 'Select at least one pending job, or select a job in Planning.' }
+    }
+    $workerFolder = Split-Path $managementModulePath -Parent
+    $script:CancellationContext.Input = [pscustomobject]@{
+        Kind='RecoveryWork'; Phase='Validate'; Root=$script:SharedDataFolderPath; Tenant=$Tenant; All=$all; JobNames=$names; JobsPath=''; ManifestHash=''; PreviewSinceUtc=[datetime]::MinValue; LogPath=$script:GuiLogPath
+        ModulePaths=@($managementModulePath, (Join-Path $workerFolder 'SmartM365.Orchestrator.Pipeline.psm1'),
+            (Join-Path $workerFolder 'SmartM365.Orchestrator.Maintenance.psm1'), (Join-Path $workerFolder 'SmartM365.Orchestrator.Insights.psm1'),
+            (Join-Path $workerFolder 'SmartM365.Orchestrator.PendingWork.psm1'))
+    }
+    Set-GuiCancellationBusy $true
+    $script:CancellationContext.Progress.Message='Starting recovery checks...'
+    $script:CancellationContext.Progress.LogError=''
+    try {
+        if (-not (Start-SmartM365OrchestratorGuiWorker -Context $script:CancellationContext -Work (Get-GuiCancellationWork) -InputObject $script:CancellationContext.Input)) { throw 'A recovery worker is already active.' }
+    }
+    catch { Set-GuiCancellationBusy $false; throw }
+}
+
 function Show-GuiCancellationError {
     param([string]$Message)
     Write-GuiActivity -Message $Message -Level ERROR -DisplayOnly
@@ -2141,14 +2232,61 @@ function Receive-GuiPipelineCancellation {
     if (-not $script:CancellationBusy) { return }
     $context = $script:CancellationContext
     $script:Controls.CancellationProgressText.Text = '{0} ({1:N0}s)' -f $context.Progress.Message, $context.Clock.Elapsed.TotalSeconds
+    if ($context.Input.PSObject.Properties['Kind'] -and $context.Input.Kind -in @('PendingWork','RecoveryWork')) { $script:Controls.StatusText.Text = $script:Controls.CancellationProgressText.Text }
     $received = Receive-SmartM365OrchestratorGuiWorker -Context $context
     if ($null -eq $received) { return }
     $continue = $false
+    $refreshAfter = $false
     try {
         if ($received.Error) { throw $received.Error }
         if ($received.Output.Count -ne 1) { throw 'Cancellation worker returned an invalid result; review live request state before retrying.' }
         $result = $received.Output[0]
-        if ($result.Phase -eq 'Validate') {
+        if ($result.Phase -eq 'RecoveryValidate') {
+            $context.Input.JobNames = @($result.Preview.RequestedJobs)
+            $context.Input.JobsPath = [string]$result.JobsPath
+            $context.Input.ManifestHash = [string]$result.ManifestHash
+            $context.Input.PreviewSinceUtc = $result.PreviewSinceUtc
+            $rows = @($result.Preview.Jobs | ForEach-Object { '{0}{1}{2}{3}' -f $_.Name, $(if ($_.IncludedAsDependency) { ' (dependency)' } else { '' }), $(if ($_.Running) { ' - already running' } else { '' }), $(if ($_.OwnerUnavailable) { ' - no elected owner' } else { '' }) })
+            $message = "Request recovery for these jobs and enabled dependencies?`n`n$($rows -join "`n")`n`nAlready running jobs, pending retries and jobs that complete after this preview are left alone. If a requested job depends on such work, submission is refused: let that work finish, then refresh and retry. Jobs without an owner wait for one; recovery dependency waits have no automatic time limit and can be cancelled in Requests. Normal dependency, capability and concurrency checks remain active. Automatic occurrences for these jobs are fenced while recovery is pending.`n`nThe preview uses the published configuration and, for all blocked jobs, the last eight days of history. Direct launches outside the orchestrator are not fenced."
+            if (Confirm-PipelineCancellation -Message $message -Title 'Recover jobs') {
+                $context.Input.Phase='Publish'
+                $context.Progress.Message='Recording recovery request...'
+                $continue=Start-SmartM365OrchestratorGuiWorker -Context $context -Work (Get-GuiCancellationWork) -InputObject $context.Input
+                if (-not $continue) { throw 'Recovery worker could not start.' }
+            } else { $script:Controls.StatusText.Text='Recovery declined; no request published.' }
+        }
+        elseif ($result.Phase -eq 'RecoveryPublish') {
+            $refreshAfter=$true
+            $activeText = if (@($result.Result.AlreadyActive).Count) { "`n`nAlready running, retrying or completed since the preview and left alone: $(@($result.Result.AlreadyActive) -join ', ')." } else { '' }
+            if ($result.Result.Submitted) {
+                $script:Controls.StatusText.Text="Recovery request recorded: $($result.Result.BatchId)."
+                $message="Recovery request recorded: $($result.Result.BatchId).`nJobs: $($result.Result.TotalCount). Queue position: $($result.Result.QueuePosition).`n`nFollow progress or cancel it in Operations > Requests.$activeText"
+            } else {
+                $script:Controls.StatusText.Text='No new recovery request: the selected work is already active.'
+                $message="No new request was recorded because the selected work is already active.$activeText"
+            }
+            Write-GuiActivity -Level SUCCESS -Message $script:Controls.StatusText.Text
+            $script:OrchestratorDialog.Show($message, 'Recover jobs', 'OK', 'Information') | Out-Null
+        }
+        elseif ($result.Phase -eq 'PendingWorkValidate') {
+            $context.Input.Revision = $result.Revision
+            $pendingNames = @($result.Pending | ForEach-Object Job | Sort-Object -Unique)
+            $runningNames = @($result.Running | ForEach-Object Job | Sort-Object -Unique)
+            $message = "Cancel pending scheduled work and active request queues?`n`nPending jobs: $($pendingNames.Count) ($($pendingNames -join ', '))`nActive requests: $(@($result.BatchIds).Count)`nPrior catch-up windows: $($result.Windows)`nRunning jobs continuing: $($runningNames.Count) ($($runningNames -join ', '))`n`nAll due automatic occurrences through resume will be skipped. Future schedules remain enabled. Requests present when cancellation is processed are included; later requests are not. No running collector is stopped.`n`nReason: $($context.Input.Reason)"
+            if (Confirm-PipelineCancellation -Message $message -Title 'Cancel pending work') {
+                $context.Input.Phase = 'Publish'
+                $context.Progress.Message = 'Pausing scheduled launches...'
+                $continue = Start-SmartM365OrchestratorGuiWorker -Context $context -Work (Get-GuiCancellationWork) -InputObject $context.Input
+                if (-not $continue) { throw 'Cancellation worker could not start.' }
+            } else { $script:Controls.StatusText.Text = 'Cancellation declined; no changes published.' }
+        }
+        elseif ($result.Phase -eq 'PendingWorkPublish') {
+            $refreshAfter = $true
+            $script:Controls.StatusText.Text = "Pending work cancelled; future schedules resumed (revision $($result.Result.Revision))."
+            Write-GuiActivity -Level SUCCESS -Message $script:Controls.StatusText.Text
+            $script:OrchestratorDialog.Show("Pending work cancelled. Running jobs continue. Future schedules resume after $($result.Result.ResumeAfterUtc).`n`nCancelled requests: $(@($result.Result.CancelledRequests).Count).", 'Pending work cancelled', 'OK', 'Information') | Out-Null
+        }
+        elseif ($result.Phase -eq 'Validate') {
             $context.Input.BatchIds = @($result.BatchIds)
             $context.Progress.Message = 'Awaiting confirmation...'
             $title = if ($context.Input.All) { 'Cancel All remaining Jobs' } else { 'Cancel remaining jobs' }
@@ -2174,10 +2312,19 @@ function Receive-GuiPipelineCancellation {
     }
     catch {
         $problem = $_
+        if ($context.Input.PSObject.Properties['Kind'] -and $context.Input.Kind -in @('PendingWork','RecoveryWork')) { $refreshAfter = $true }
         $script:Controls.CancellationProgressText.Text = 'Cancellation operation failed; review live request state before retrying.'
-        Show-GuiCancellationError -Message $problem.Exception.Message
+        if ($context.Input.PSObject.Properties['Kind'] -and $context.Input.Kind -eq 'RecoveryWork') {
+            $script:Controls.StatusText.Text='Recovery outcome may be uncertain; inspect Requests before trying again.'
+            $script:OrchestratorDialog.Show("$($problem.Exception.Message)`n`nThe outcome may be uncertain. Inspect Operations > Requests before trying again.", 'Recovery failed', 'OK', 'Error') | Out-Null
+        } else { Show-GuiCancellationError -Message $problem.Exception.Message }
     }
-    finally { if (-not $continue) { Set-GuiCancellationBusy $false } }
+    finally {
+        if (-not $continue) {
+            Set-GuiCancellationBusy $false
+            if ($refreshAfter) { try { Start-GuiRefresh -Mode Live } catch { Write-GuiException -Context 'Post-cancellation refresh failed' -ErrorRecord $_ } }
+        }
+    }
 }
 
 function Invoke-AutoRefresh {
@@ -3606,7 +3753,7 @@ foreach ($name in @(
     'ExportCsvButton', 'ExportHtmlButton', 'HistoryGrid', 'ServersGrid', 'NewServerBox', 'AddServerButton', 'RemoveServerButton',
     'SelectedServerText', 'ServerActiveCheck', 'ServerWeightBox', 'ServerPolicyCombo', 'ApplyServerButton', 'TestServerButton', 'TestServerAsServiceAccountButton', 'ServerTestHintText', 'VersionsGrid', 'RollbackButton',
     'ConfigurationTabs', 'ConfigurationSettingsTab', 'ConfigurationServersTab', 'FooterText', 'VersionText',
-    'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'JobStopReasonBox', 'StopRunningJobButton', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
+    'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'JobStopReasonBox', 'StopRunningJobButton', 'OperationsPendingGrid', 'CancelPendingWorkButton', 'RecoverJobsButton', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
     'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
     'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancellationProgressText', 'CancelRequestButton', 'CancelAllRequestsButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
     'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton', 'AdminMailStatusText', 'AdminMailToggleButton',
@@ -3779,6 +3926,14 @@ $script:Controls.EnableMaintenanceButton.Add_Click({
 $script:Controls.DisableMaintenanceButton.Add_Click({
     try { Set-GuiMaintenance -Enabled $false }
     catch { Write-GuiException -Context 'Disable maintenance failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Maintenance', 'OK', 'Error') | Out-Null; Refresh-MaintenanceView }
+})
+$script:Controls.CancelPendingWorkButton.Add_Click({
+    try { Start-GuiCancelPendingWork }
+    catch { Write-GuiException -Context 'Pending-work cancellation failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Cancel pending work', 'OK', 'Error') | Out-Null }
+})
+$script:Controls.RecoverJobsButton.Add_Click({
+    try { Start-GuiRecoveryWork }
+    catch { Write-GuiException -Context 'Recovery request failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Recover jobs', 'OK', 'Error') | Out-Null }
 })
 $script:Controls.AdminMailToggleButton.Add_Click({
     try {

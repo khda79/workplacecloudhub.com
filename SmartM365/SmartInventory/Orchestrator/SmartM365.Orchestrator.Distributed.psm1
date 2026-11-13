@@ -1,7 +1,7 @@
 ﻿Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 
-$script:DistributedModuleVersion = '1.1.25'
+$script:DistributedModuleVersion = '1.1.26'
 
 function Resolve-DistributedJsonPath {
     param([Parameter(Mandatory)][string]$Path)
@@ -289,13 +289,33 @@ for ($index = 0; $index -lt $Checks.Count; $index++) {
 }
 '@
 
+function Invoke-CapabilityProbeProgress {
+    param([scriptblock]$OnProgress)
+    if ($null -eq $OnProgress) { return }
+    try { & $OnProgress | Out-Null }
+    catch { Write-Verbose ("Capability probe progress callback failed: {0}" -f $_.Exception.Message) }
+}
+
+function Wait-CapabilityProbeProcess {
+    param([Parameter(Mandatory)]$Process, [int]$TimeoutSeconds, [scriptblock]$OnProgress)
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $limit = [math]::Max(1, $TimeoutSeconds) * 1000
+    do {
+        Invoke-CapabilityProbeProgress -OnProgress $OnProgress
+        $remaining = [int][math]::Max(0, $limit - $timer.ElapsedMilliseconds)
+        if ($remaining -le 0) { return $Process.HasExited }
+        if ($Process.WaitForExit([math]::Min(1000, $remaining))) { return $true }
+    } while ($true)
+}
+
 function Test-SmartM365OrchestratorPathAccess {
     <# Checks folders or files with a hard time limit: an unreachable share must not stall a scheduler tick. #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Checks,
         [string]$ServerName = $env:COMPUTERNAME,
-        [int]$TimeoutSeconds = 10
+        [int]$TimeoutSeconds = 10,
+        [scriptblock]$OnProgress = $null
     )
 
     if ($Checks.Count -eq 0) { return @() }
@@ -305,7 +325,14 @@ function Test-SmartM365OrchestratorPathAccess {
     try {
         $null = $powerShell.AddScript($script:PathAccessProbeScript).AddArgument(@($Checks)).AddArgument((ConvertTo-SafeFileName $ServerName)).AddArgument($results)
         $async = $powerShell.BeginInvoke()
-        $completed = $async.AsyncWaitHandle.WaitOne([math]::Max(1, $TimeoutSeconds) * 1000)
+        $timer = [Diagnostics.Stopwatch]::StartNew()
+        $limit = [math]::Max(1, $TimeoutSeconds) * 1000
+        do {
+            Invoke-CapabilityProbeProgress -OnProgress $OnProgress
+            $remaining = [int][math]::Max(0, $limit - $timer.ElapsedMilliseconds)
+            if ($remaining -le 0) { break }
+            $completed = $async.AsyncWaitHandle.WaitOne([math]::Min(1000, $remaining))
+        } while (-not $completed)
         if ($completed) { try { $null = $powerShell.EndInvoke($async) } catch { Write-Verbose ("Path access probe ended with an error: {0}" -f $_.Exception.Message) } }
     }
     finally {
@@ -568,7 +595,8 @@ function Invoke-IsolatedCapabilityProbe {
         [Parameter(Mandatory = $true)][string]$EnginePath,
         [Parameter(Mandatory = $true)][string]$ScriptText,
         [hashtable]$Environment = @{},
-        [int]$TimeoutSeconds = 90
+        [int]$TimeoutSeconds = 90,
+        [scriptblock]$OnProgress = $null
     )
 
     if (-not (Test-Path -LiteralPath $EnginePath -PathType Leaf)) {
@@ -595,7 +623,7 @@ function Invoke-IsolatedCapabilityProbe {
         }
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit([math]::Max(1, $TimeoutSeconds) * 1000)) {
+        if (-not (Wait-CapabilityProbeProcess -Process $process -TimeoutSeconds $TimeoutSeconds -OnProgress $OnProgress)) {
             try { $process.Kill($true) } catch { Write-Verbose ("Probe process kill failed: {0}" -f $_.Exception.Message) }
             return [pscustomobject]@{ Name = $Name; Ready = $false; Roles = @(); Detail = "Read-only probe timed out after $TimeoutSeconds seconds." }
         }
@@ -663,7 +691,8 @@ function Get-PythonCapabilityResult {
     <# Python 3.10+ for WorkplaceEvidence-Prepare, from the version printed by the command itself (read-only, bounded). #>
     param(
         [Parameter(Mandatory = $true)][string]$Command,
-        [int]$TimeoutSeconds = 30
+        [int]$TimeoutSeconds = 30,
+        [scriptblock]$OnProgress = $null
     )
 
     $python = Get-Command -Name $Command -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -681,7 +710,7 @@ function Get-PythonCapabilityResult {
         if (-not $process.Start()) { throw "Could not start $($python.Source)." }
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit([math]::Max(1, $TimeoutSeconds) * 1000)) {
+        if (-not (Wait-CapabilityProbeProcess -Process $process -TimeoutSeconds $TimeoutSeconds -OnProgress $OnProgress)) {
             try { $process.Kill($true) } catch { Write-Verbose ("Python probe kill failed: {0}" -f $_.Exception.Message) }
             return Get-CapabilityProbeResult -Name 'Python' -Ready $false -Detail ("{0} did not answer within {1} seconds." -f $python.Source, $TimeoutSeconds)
         }
@@ -724,9 +753,11 @@ function Get-SmartM365OrchestratorServerCapability {
         [int]$PathTimeoutSeconds = 10,
         [int]$CertificateExpiryWarningDays = 0,
         # Blank: PreparedPythonCommand of the WorkplaceEvidence-Prepare configuration, else python.
-        [string]$PythonCommand = ''
+        [string]$PythonCommand = '',
+        [scriptblock]$OnProgress = $null
     )
 
+    Invoke-CapabilityProbeProgress -OnProgress $OnProgress
     $generatedAtUtc = [datetime]::UtcNow
     $certificate = Get-CertificateReadiness -Thumbprint $CertificateThumbprint -ExpiryWarningDays $CertificateExpiryWarningDays -NowUtc $generatedAtUtc
     $results = [System.Collections.Generic.List[object]]::new()
@@ -738,7 +769,7 @@ function Get-SmartM365OrchestratorServerCapability {
         [System.IO.File]::WriteAllText($probePath, $generatedAtUtc.ToString('o'), [System.Text.UTF8Encoding]::new($false))
         Remove-Item -LiteralPath $probePath -Force -ErrorAction Stop
         # Tenant data roots (DATA-ALL, DATA-LAST, LOG-ALL) can live on other shares than the election folder.
-        $dataFailures = @(Test-SmartM365OrchestratorPathAccess -Checks $DataPathChecks -ServerName $ServerName -TimeoutSeconds $PathTimeoutSeconds | Where-Object { -not $_.Ready })
+        $dataFailures = @(Test-SmartM365OrchestratorPathAccess -Checks $DataPathChecks -ServerName $ServerName -TimeoutSeconds $PathTimeoutSeconds -OnProgress $OnProgress | Where-Object { -not $_.Ready })
         if ($dataFailures.Count -gt 0) {
             $detail = ($dataFailures | ForEach-Object { "{0} ({1}, {2}) is not accessible: {3}" -f $_.Name, $_.Path, $_.Access, $_.Detail }) -join ' '
             $results.Add((Get-CapabilityProbeResult -Name 'SharedRuntime' -Ready $false -Detail $detail))
@@ -811,7 +842,7 @@ catch { $result = @{ Ready = $false; Roles = @(); Detail = $_.Exception.Message 
 finally { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
 "SMARTM365_CAPABILITY_JSON:$($result | ConvertTo-Json -Compress -Depth 5)"
 '@
-        $results.Add((Invoke-IsolatedCapabilityProbe -Name 'Graph' -EnginePath $pwshPath -ScriptText $graphScript -Environment $environment -TimeoutSeconds $ProbeTimeoutSeconds))
+        $results.Add((Invoke-IsolatedCapabilityProbe -Name 'Graph' -EnginePath $pwshPath -ScriptText $graphScript -Environment $environment -TimeoutSeconds $ProbeTimeoutSeconds -OnProgress $OnProgress))
 
         $exoScript = $cloudProbeRetry + @'
 $ErrorActionPreference = 'Stop'
@@ -827,7 +858,7 @@ catch { $result = @{ Ready = $false; Roles = @(); Detail = $_.Exception.Message 
 finally { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue }
 "SMARTM365_CAPABILITY_JSON:$($result | ConvertTo-Json -Compress -Depth 5)"
 '@
-        $results.Add((Invoke-IsolatedCapabilityProbe -Name 'EXO' -EnginePath $pwshPath -ScriptText $exoScript -Environment $environment -TimeoutSeconds $ProbeTimeoutSeconds))
+        $results.Add((Invoke-IsolatedCapabilityProbe -Name 'EXO' -EnginePath $pwshPath -ScriptText $exoScript -Environment $environment -TimeoutSeconds $ProbeTimeoutSeconds -OnProgress $OnProgress))
 
         $adScript = @'
 $ErrorActionPreference = 'Stop'
@@ -839,7 +870,7 @@ try {
 catch { $result = @{ Ready = $false; Roles = @(); Detail = $_.Exception.Message } }
 "SMARTM365_CAPABILITY_JSON:$($result | ConvertTo-Json -Compress -Depth 5)"
 '@
-        $results.Add((Invoke-IsolatedCapabilityProbe -Name 'AD' -EnginePath $windowsPowerShellPath -ScriptText $adScript -TimeoutSeconds $ProbeTimeoutSeconds))
+        $results.Add((Invoke-IsolatedCapabilityProbe -Name 'AD' -EnginePath $windowsPowerShellPath -ScriptText $adScript -TimeoutSeconds $ProbeTimeoutSeconds -OnProgress $OnProgress))
 
         $exchangeScript = @'
 $ErrorActionPreference = 'Stop'
@@ -852,7 +883,7 @@ try {
 catch { $result = @{ Ready = $false; Roles = @(); Detail = $_.Exception.Message } }
 "SMARTM365_CAPABILITY_JSON:$($result | ConvertTo-Json -Compress -Depth 5)"
 '@
-        $results.Add((Invoke-IsolatedCapabilityProbe -Name 'ExchangeOnPrem' -EnginePath $windowsPowerShellPath -ScriptText $exchangeScript -TimeoutSeconds $ProbeTimeoutSeconds))
+        $results.Add((Invoke-IsolatedCapabilityProbe -Name 'ExchangeOnPrem' -EnginePath $windowsPowerShellPath -ScriptText $exchangeScript -TimeoutSeconds $ProbeTimeoutSeconds -OnProgress $OnProgress))
 
         # Same snap-in and read-only farm call as the SharePoint on-premises collectors.
         $sharePointScript = @'
@@ -866,7 +897,7 @@ try {
 catch { $result = @{ Ready = $false; Roles = @(); Detail = $_.Exception.Message } }
 "SMARTM365_CAPABILITY_JSON:$($result | ConvertTo-Json -Compress -Depth 5)"
 '@
-        $results.Add((Invoke-IsolatedCapabilityProbe -Name 'SharePointOnPrem' -EnginePath $windowsPowerShellPath -ScriptText $sharePointScript -TimeoutSeconds $ProbeTimeoutSeconds))
+        $results.Add((Invoke-IsolatedCapabilityProbe -Name 'SharePointOnPrem' -EnginePath $windowsPowerShellPath -ScriptText $sharePointScript -TimeoutSeconds $ProbeTimeoutSeconds -OnProgress $OnProgress))
 
         $teamsScript = @'
 $ErrorActionPreference = 'Stop'
@@ -891,7 +922,7 @@ finally {
 }
 "SMARTM365_CAPABILITY_JSON:$($result | ConvertTo-Json -Compress -Depth 5)"
 '@
-        $results.Add((Invoke-IsolatedCapabilityProbe -Name 'TeamsPowerShell' -EnginePath $pwshPath -ScriptText $teamsScript -Environment $environment -TimeoutSeconds $ProbeTimeoutSeconds))
+        $results.Add((Invoke-IsolatedCapabilityProbe -Name 'TeamsPowerShell' -EnginePath $pwshPath -ScriptText $teamsScript -Environment $environment -TimeoutSeconds $ProbeTimeoutSeconds -OnProgress $OnProgress))
 
         # The probe has no Adaxes service name: it checks that the collector module loads in PowerShell 7.
         $adaxesScript = @'
@@ -905,18 +936,19 @@ try {
 catch { $result = @{ Ready = $false; Roles = @(); Detail = $_.Exception.Message } }
 "SMARTM365_CAPABILITY_JSON:$($result | ConvertTo-Json -Compress -Depth 5)"
 '@
-        $results.Add((Invoke-IsolatedCapabilityProbe -Name 'Adaxes' -EnginePath $pwshPath -ScriptText $adaxesScript -TimeoutSeconds $ProbeTimeoutSeconds))
+        $results.Add((Invoke-IsolatedCapabilityProbe -Name 'Adaxes' -EnginePath $pwshPath -ScriptText $adaxesScript -TimeoutSeconds $ProbeTimeoutSeconds -OnProgress $OnProgress))
     }
 
     # Python is checked the same way in both modes: the command only prints its version.
     try {
         $pythonCommandToProbe = if ([string]::IsNullOrWhiteSpace($PythonCommand)) { Get-SmartM365OrchestratorPythonCommand } else { $PythonCommand.Trim() }
-        $results.Add((Get-PythonCapabilityResult -Command $pythonCommandToProbe -TimeoutSeconds ([math]::Min(30, [math]::Max(1, $ProbeTimeoutSeconds)))))
+        $results.Add((Get-PythonCapabilityResult -Command $pythonCommandToProbe -TimeoutSeconds ([math]::Min(30, [math]::Max(1, $ProbeTimeoutSeconds))) -OnProgress $OnProgress))
     }
     catch {
         $results.Add((Get-CapabilityProbeResult -Name 'Python' -Ready $false -Detail ("WorkplaceEvidence-Prepare configuration could not be read for PreparedPythonCommand: {0}" -f $_.Exception.Message)))
     }
 
+    Invoke-CapabilityProbeProgress -OnProgress $OnProgress
     foreach ($result in $results) { $result | Add-Member -NotePropertyName ComponentMissing -NotePropertyValue (Test-SmartM365OrchestratorCapabilityComponentMissing -Result $result) -Force }
     $readyCapabilities = @($results | Where-Object Ready | ForEach-Object Name | Sort-Object -Unique)
     $graphResult = $results | Where-Object Name -eq 'Graph' | Select-Object -First 1

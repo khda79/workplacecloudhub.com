@@ -3,7 +3,7 @@
 .SYNOPSIS
 Exercises the two pilot demos with WPF events and forbidden operational commands.
 .VERSION
-1.0.9
+1.0.10
 .NOTES
 Run RebootManager on PS5.1 or PS7; Orchestrator requires PS7.
 #>
@@ -11,6 +11,8 @@ Run RebootManager on PS5.1 or PS7; Orchestrator requires PS7.
 param(
     [ValidateSet('RebootManager','Orchestrator')][string]$Application='RebootManager',
     [string]$PreviewFolder='',
+    [ValidateRange(1180,3840)][int]$DemoWindowWidth=1500,
+    [ValidateRange(700,2160)][int]$DemoWindowHeight=900,
     [switch]$InteractiveSmoke
 )
 $ErrorActionPreference='Stop'
@@ -118,7 +120,7 @@ try {
         $script:Window.Close()
     } else {
         if($PSVersionTable.PSVersion.Major -lt 7){throw 'Orchestrator requires PowerShell 7.'}
-        $result=. (Join-Path $orchestratorFolder 'SmartM365-Inventory-Orchestrator-GUI.ps1') -Demo -ValidateOnly -Tenant 'DO-NOT-LOAD' -SharedDataFolderPath 'Z:\DO-NOT-READ' -GuiLogFolderPath 'Z:\DO-NOT-WRITE'
+        $result=. (Join-Path $orchestratorFolder 'SmartM365-Inventory-Orchestrator-GUI.ps1') -Demo -ValidateOnly -DemoWindowWidth $DemoWindowWidth -DemoWindowHeight $DemoWindowHeight -Tenant 'DO-NOT-LOAD' -SharedDataFolderPath 'Z:\DO-NOT-READ' -GuiLogFolderPath 'Z:\DO-NOT-WRITE'
         $s=$script:OrchestratorDemo; $c=$s.Controls
         $catalog=Get-Content -LiteralPath (Join-Path $orchestratorFolder 'Orchestrator-Jobs.json.template') -Raw|ConvertFrom-Json
         $expectedJobs=$catalog.Jobs.Count
@@ -208,6 +210,9 @@ try {
         Assert-Demo ($s.Data.Requests.Count -eq 2) 'Request simulation failed.'
         Invoke-DemoClick $c.CancelAllRequestsButton
         Assert-Demo (@($s.Data.Requests | Where-Object Pending -GT 0).Count -eq 0) 'Cancellation simulation failed.'
+        $runningBefore=@($s.Data.Running).Count
+        Invoke-DemoClick $c.CancelPendingWorkButton
+        Assert-Demo (@($s.Data.Pending).Count -eq 0 -and @($s.Data.Running).Count -eq $runningBefore) 'Pending-work cancellation must preserve running sample jobs.'
         Invoke-DemoClick $c.StopRunningJobButton
         Assert-Demo ($s.Data.Running.Count -eq 1) 'Stop simulation failed.'
         Invoke-DemoClick $c.PublishButton

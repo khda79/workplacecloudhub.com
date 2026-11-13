@@ -51,6 +51,8 @@ function Assert-MaintenanceState {
     if (-not $Document.PSObject.Properties['CatchUpAll']) { $Document | Add-Member NoteProperty CatchUpAll $false }
     if (-not $Document.PSObject.Properties['CatchUpJobs']) { $Document | Add-Member NoteProperty CatchUpJobs @() }
     if (-not $Document.PSObject.Properties['CatchUpWindows']) { $Document | Add-Member NoteProperty CatchUpWindows @() }
+    if (-not $Document.PSObject.Properties['PendingWorkReset']) { $Document | Add-Member NoteProperty PendingWorkReset $false }
+    if ($Document.PendingWorkReset -isnot [bool] -or ($Document.PendingWorkReset -and -not $Document.Enabled)) { throw 'Pending-work reset flag is invalid.' }
     if ($Document.CatchUpAll -isnot [bool]) { throw 'Maintenance catch-up choice must be Boolean.' }
     if ($null -eq $Document.CatchUpJobs -or $Document.CatchUpJobs -isnot [array]) { throw 'Maintenance catch-up jobs must be an array.' }
     if ($null -eq $Document.CatchUpWindows -or $Document.CatchUpWindows -isnot [array]) { throw 'Maintenance catch-up windows must be an array.' }
@@ -247,7 +249,9 @@ function Set-SmartM365OrchestratorMaintenance {
     param([Parameter(Mandatory)][string]$SharedDataFolderPath,
         [Parameter(Mandatory)][bool]$Enabled, [Parameter(Mandatory)][long]$ExpectedRevision,
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Reason,
-        [switch]$CatchUpMissedOccurrences)
+        [switch]$CatchUpMissedOccurrences,
+        [switch]$DiscardPendingCatchUp,
+        [switch]$PendingWorkReset)
     if ([string]::IsNullOrWhiteSpace($Reason) -or $Reason.Length -gt 1000) { throw 'Enter a maintenance reason (1 to 1000 characters).' }
     $paths = Get-SmartM365OrchestratorMaintenancePaths $SharedDataFolderPath
     $gate = Enter-SmartM365OrchestratorMaintenanceGate $SharedDataFolderPath
@@ -255,8 +259,27 @@ function Set-SmartM365OrchestratorMaintenance {
         # Initialization belongs to resident orchestrators, never to a GUI write.
         $current = Get-SmartM365OrchestratorMaintenanceState $SharedDataFolderPath
         if ($current.Revision -ne $ExpectedRevision) { throw 'Maintenance changed in another session. Refresh before changing it.' }
-        if ($current.Enabled -eq $Enabled) { return $current }
-        if ($Enabled -and $CatchUpMissedOccurrences) { throw 'Catch-up can only be selected when maintenance is disabled.' }
+        if ($current.Enabled -eq $Enabled) {
+            if ($DiscardPendingCatchUp -or $PendingWorkReset) { throw 'A pending-work reset requires a new maintenance transition.' }
+            return $current
+        }
+        if ($Enabled -and ($CatchUpMissedOccurrences -or $DiscardPendingCatchUp)) { throw 'Catch-up options are only available when maintenance is disabled.' }
+        if ($CatchUpMissedOccurrences -and $DiscardPendingCatchUp) { throw 'Catch-up and discarding pending catch-up cannot be combined.' }
+        if ($PendingWorkReset -and -not $Enabled) { throw 'Pending-work reset can only be enabled with maintenance.' }
+        if ($DiscardPendingCatchUp) {
+            if (-not $current.PendingWorkReset) { throw 'Discarding pending catch-up requires a pending-work reset pause.' }
+            $cluster = (Read-SmartM365JsonDocument -Path (Join-Path $SharedDataFolderPath 'Config/Orchestrator-Cluster.json')).Document
+            $servers = @(Get-SmartM365OrchestratorMaintenanceReadiness $SharedDataFolderPath $cluster $current)
+            if ($servers.Count -eq 0 -or @($servers | Where-Object Status -ne 'Applied').Count -gt 0) {
+                throw 'Every expected server must be online and acknowledge maintenance before discarding pending catch-up.'
+            }
+            foreach ($server in $servers) {
+                $heartbeat = (Read-SmartM365JsonDocument -Path (Join-Path $SharedDataFolderPath "$($server.Server)/Orchestrator-Heartbeat.json")).Document
+                if (-not $heartbeat.PSObject.Properties['MaintenanceResetProtocol'] -or [int]$heartbeat.MaintenanceResetProtocol -ne 1) {
+                    throw "Server $($server.Server) does not support pending-work reset; update all residents first."
+                }
+            }
+        }
         $catchUpJobs = @()
         if (-not $Enabled -and $CatchUpMissedOccurrences) {
             $cluster = (Read-SmartM365JsonDocument -Path (Join-Path $SharedDataFolderPath 'Config/Orchestrator-Cluster.json')).Document
@@ -286,6 +309,13 @@ function Set-SmartM365OrchestratorMaintenance {
             if (-not (Test-SmartM365OrchestratorMaintenanceActivationReady -Servers $servers)) {
                 throw 'Every expected server must be online, maintenance-compatible and acknowledge the current revision before activation (an offline server whose last heartbeat advertises maintenance protocol 1 is accepted; at least one server must be online).'
             }
+            if ($PendingWorkReset) {
+                if (@($servers | Where-Object Status -ne 'Applied').Count) { throw 'Every expected server must be online and acknowledge maintenance before a pending-work reset.' }
+                foreach ($server in $servers) {
+                    $heartbeat = (Read-SmartM365JsonDocument -Path (Join-Path $SharedDataFolderPath "$($server.Server)/Orchestrator-Heartbeat.json")).Document
+                    if (-not $heartbeat.PSObject.Properties['MaintenanceResetProtocol'] -or [int]$heartbeat.MaintenanceResetProtocol -ne 1) { throw "Server $($server.Server) does not support pending-work reset." }
+                }
+            }
         }
         $now = [datetime]::UtcNow.ToString('o')
         $actor = [Environment]::UserName
@@ -297,6 +327,21 @@ function Set-SmartM365OrchestratorMaintenance {
             CatchUpFromUtc=if ($Enabled) { $now } elseif ($current.CatchUpFromUtc) { $current.CatchUpFromUtc } else { $current.ChangedAtUtc }
             CatchUpAll=if ($Enabled) { $false } else { [bool]$CatchUpMissedOccurrences }
             CatchUpJobs=@(); CatchUpWindows=@($current.CatchUpWindows)
+            PendingWorkReset=[bool]($Enabled -and $PendingWorkReset)
+        }
+        if ($DiscardPendingCatchUp) {
+            # Preserve the exact prior control as an audit receipt before changing it.
+            $resetAuditFolder = Join-Path $SharedDataFolderPath 'Audit/Orchestrator-MaintenanceReset'
+            $null = New-Item -ItemType Directory -Path $resetAuditFolder -Force -ErrorAction Stop
+            $receiptPath = Join-Path $resetAuditFolder ('{0}-{1}.json.txt' -f $desired.Revision, [guid]::NewGuid().ToString('N'))
+            $receipt = [pscustomobject]@{ Revision=$desired.Revision; RequestedAtUtc=$now; RequestedBy=$actor; Reason=$Reason.Trim(); PreviousControl=$current }
+            $receiptBytes = [Text.UTF8Encoding]::new($false).GetBytes(($receipt | ConvertTo-Json -Depth 15))
+            $null = Write-SmartM365JsonBytesAtomically -Path $receiptPath -Bytes $receiptBytes -ExpectedSHA256 ABSENT -Validate {
+                param($document)
+                if (-not $document.PSObject.Properties['PreviousControl']) { throw 'Reset receipt is missing the previous control.' }
+                Assert-MaintenanceState $document.PreviousControl
+            }
+            $desired.CatchUpWindows = @()
         }
         if (-not $Enabled -and $CatchUpMissedOccurrences) {
             $desired.CatchUpJobs = @($catchUpJobs)
@@ -393,6 +438,7 @@ function Test-SmartM365OrchestratorMaintenanceLaunch {
     param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][ValidateSet('due','retry','pipeline','forced','pipeline-retry','maintenance-catch-up')][string]$Origin,
         [Parameter(Mandatory)][datetime]$Occurrence)
     Assert-MaintenanceState $State
+    if ($State.Enabled -and $State.PendingWorkReset) { return $false }
     if ($Origin -in @('pipeline','forced','pipeline-retry')) { return $true }
     if ($State.Enabled) { return $false }
     if ($Origin -eq 'maintenance-catch-up') {

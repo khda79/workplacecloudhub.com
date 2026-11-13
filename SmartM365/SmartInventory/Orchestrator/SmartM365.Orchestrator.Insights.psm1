@@ -489,6 +489,81 @@ function Get-SmartM365OrchestratorRecentPipelineRuns {
     $rows
 }
 
+function Get-SmartM365OrchestratorRecoveryPreview {
+    <# Read-only preview. Submission and cancellation are separate operations. #>
+    [CmdletBinding(DefaultParameterSetName = 'Selected')]
+    param(
+        [Parameter(Mandatory)]$JobsDocument,
+        [Parameter(Mandatory)]$Operations,
+        [AllowNull()]$Plan = $null,
+        [AllowEmptyCollection()][object[]]$History = @(),
+        [Parameter(Mandatory, ParameterSetName = 'Selected')][string[]]$JobName,
+        [Parameter(Mandatory, ParameterSetName = 'Blocked')][switch]$AllBlocked
+    )
+    $pending = @(Get-InsightsProperty $Operations 'Pending' @())
+    if ($AllBlocked) {
+        if (-not $PSBoundParameters.ContainsKey('History')) { throw 'A complete recent history snapshot is required to enumerate all blocked jobs.' }
+        $servers = @(Get-InsightsProperty $Operations 'Servers' @())
+        if (-not $servers.Count) { throw 'Cannot enumerate all blocked jobs without a complete server snapshot.' }
+        $unavailable = @($servers | Where-Object { $mode=[string](Get-InsightsProperty $_ 'Mode' ''); $mode -notin @('Active','Inactive') -or ($mode -eq 'Active' -and [string](Get-InsightsProperty $_ 'State' '') -ne 'Online') })
+        if ($unavailable.Count) { throw 'Cannot enumerate all blocked jobs while an active server is not Online.' }
+        $stale = @($pending | Where-Object { [string](Get-InsightsProperty $_ 'ServerState' '') -ne 'Online' })
+        if ($stale.Count) { throw 'Cannot enumerate all blocked jobs while a pending job is reported by a non-Online server; refresh its heartbeat first.' }
+        # History must be the complete bounded snapshot supplied by the caller, newest first.
+        # Only the latest event per job can identify a terminal dependency block.
+        $latestByJob = @{}
+        foreach ($row in @($History)) {
+            $historyName = [string](Get-InsightsProperty $row 'JobName' '')
+            if ($historyName -and -not $latestByJob.ContainsKey($historyName)) { $latestByJob[$historyName] = $row }
+        }
+        $terminalNames = @($latestByJob.Keys | Where-Object { [string](Get-InsightsProperty $latestByJob[$_] 'Status' '') -in @('BlockedDependencyTimeout', 'BlockedDependencyFailed', 'BlockedPrerequisite') })
+        $names = @(@($pending | ForEach-Object { [string](Get-InsightsProperty $_ 'Job' '') }) + $terminalNames | Where-Object { $_ } | Sort-Object -Unique)
+        $runnable = @($JobsDocument.Jobs | Where-Object { [bool](Get-InsightsProperty $_ 'Enabled' $false) -and [string](Get-InsightsProperty $_ 'AssignmentMode' '') -ne 'Manual' } | ForEach-Object { [string]$_.Name })
+        $names = @($names | Where-Object { $_ -in $runnable })
+    }
+    else { $names = @($JobName | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique) }
+    if (-not $names.Count) { throw 'No jobs selected for recovery.' }
+    $selection = Get-SmartM365OrchestratorPipelineSelection -JobsDocument $JobsDocument -JobName $names -IncludeDependencies
+    $assignments = @(Get-InsightsProperty $Plan 'Assignments' @())
+    $running = @(Get-InsightsProperty $Operations 'Running' @())
+    $jobs = @(foreach ($job in $selection.SelectedJobs) {
+        $owner = @($assignments | Where-Object { [string]$_.JobName -eq [string]$job.Name } | Select-Object -First 1)
+        $active = @($running | Where-Object { [string](Get-InsightsProperty $_ 'Job' '') -eq [string]$job.Name })
+        [pscustomobject]@{
+            Name = [string]$job.Name; DependsOn = @($job.DependsOn); IncludedAsDependency = [bool]$job.IncludedAsDependency
+            Owner = if ($owner.Count) { [string]$owner[0].OwnerServer } else { '' }
+            OwnerUnavailable = ([string]$job.AssignmentMode -eq 'Elected' -and -not $owner.Count)
+            Running = [bool]$active.Count
+        }
+    })
+    [pscustomobject]@{ RequestedJobs = $names; Jobs = $jobs; Selection = $selection; IgnoredDependencies = @($selection.IgnoredDependencies) }
+}
+
+function Get-SmartM365OrchestratorCancelPendingPreview {
+    <# Read-only snapshot for confirmation; no control is published. #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Operations,
+        [AllowEmptyCollection()][object[]]$Requests = @()
+    )
+    $servers = @(Get-InsightsProperty $Operations 'Servers' @())
+    if (-not $servers.Count) { throw 'A complete server snapshot is required.' }
+    $unavailable = @($servers | Where-Object { [string](Get-InsightsProperty $_ 'Mode' '') -eq 'Active' -and ([string](Get-InsightsProperty $_ 'State' '') -ne 'Online' -or [string](Get-InsightsProperty $_ 'StatePersistence' '') -ne 'OK') })
+    if ($unavailable.Count) { throw 'All active servers must be Online with healthy state persistence to preview cancellation.' }
+    $maintenance = Get-InsightsProperty $Operations 'Maintenance' $null
+    if ($null -eq $maintenance -or [string](Get-InsightsProperty $Operations 'MaintenanceError' '')) { throw 'Maintenance state is unavailable.' }
+    if ([bool](Get-InsightsProperty $maintenance 'Enabled' $false)) { throw 'Maintenance is already active; do not replace an existing maintenance session.' }
+    $revision = [long](Get-InsightsProperty $maintenance 'Revision' -1)
+    if ($revision -lt 0) { throw 'Maintenance revision is unavailable.' }
+    [pscustomobject]@{
+        Running = @(Get-InsightsProperty $Operations 'Running' @())
+        Pending = @(Get-InsightsProperty $Operations 'Pending' @())
+        ActiveRequests = @($Requests | Where-Object { [string](Get-InsightsProperty $_ 'Status' '') -in @('Running', 'Queued', 'Cancelling') })
+        CatchUpWindows = @(Get-InsightsProperty $maintenance 'CatchUpWindows' @())
+        MaintenanceRevision = $revision
+    }
+}
+
 function New-SmartM365OrchestratorJobRunRequest {
     <# Same contract as SmartM365-Inventory-Pipeline.ps1 -Job ... -Collect -NoWait, on the published configuration. #>
     [CmdletBinding()]
@@ -1165,7 +1240,7 @@ function ConvertTo-InsightsSwiTimeText {
 Export-ModuleMember -Function @(
     'Get-SmartM365OrchestratorScheduleOccurrences', 'Get-SmartM365OrchestratorExpectedMaxAgeHours', 'Get-SmartM365OrchestratorRecentRuns',
     'Get-SmartM365OrchestratorJobHealth', 'Get-SmartM365OrchestratorDependents', 'Get-SmartM365OrchestratorDependencyReadiness',
-    'Get-SmartM365OrchestratorOperations', 'Get-SmartM365OrchestratorServerMetrics', 'Get-SmartM365OrchestratorRecentPipelineRuns', 'New-SmartM365OrchestratorJobRunRequest',
+    'Get-SmartM365OrchestratorOperations', 'Get-SmartM365OrchestratorServerMetrics', 'Get-SmartM365OrchestratorRecentPipelineRuns', 'Get-SmartM365OrchestratorRecoveryPreview', 'Get-SmartM365OrchestratorCancelPendingPreview', 'New-SmartM365OrchestratorJobRunRequest',
     'Get-SmartM365OrchestratorLogEventCategory', 'Get-SmartM365OrchestratorLogEvents', 'Select-SmartM365OrchestratorLogEvents',
     'Get-SmartM365OrchestratorDashboard', 'Get-SmartM365OrchestratorDashboardData',
     'Get-SmartM365OrchestratorScriptVersion', 'Get-SmartM365OrchestratorLatestFolderPath', 'Get-SmartM365OrchestratorSwiValidity',

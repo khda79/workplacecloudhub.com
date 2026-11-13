@@ -123,7 +123,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.89
+    Version : 1.5.90
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
@@ -160,7 +160,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.89"
+$ScriptVersion = "1.5.90"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -2826,8 +2826,10 @@ function Write-OrchestratorHeartbeat {
         StatePersistenceLastError = [string]$script:StatePersistenceLastError
         MaintenanceProtocol = 1
         MaintenanceCatchUpProtocol = 1
+        MaintenanceResetProtocol = 1
         PipelineCancellationProtocol = 1
         PipelineQueueProtocol = 1
+        RecoveryGuardProtocol = 2
         JobStopProtocol = 1
         MaintenanceHealthy = [bool]$script:MaintenanceHealthy
         MaintenanceRevision = if ($null -ne $script:MaintenanceControl) { $script:MaintenanceControl.Revision } else { -1 }
@@ -4217,6 +4219,14 @@ function Test-ProcessMatchesRecord {
     return $process
 }
 
+function Update-OrchestratorRecoveryScheduleCursor {
+    param([Parameter(Mandatory)][hashtable]$State, [AllowNull()]$LatestDue)
+    $previousDue = ConvertFrom-StateTime -Text ([string]$State.LastScheduledOccurrence)
+    if ($null -ne $latestDue -and ($null -eq $previousDue -or $latestDue -gt $previousDue)) {
+        $State.LastScheduledOccurrence = ConvertTo-StateTime -Value $latestDue
+    }
+}
+
 function Start-InventoryJob {
     param(
         [Parameter(Mandatory = $true)]$Job,
@@ -4226,7 +4236,8 @@ function Start-InventoryJob {
         [string]$ConcurrencyLeasePath = '',
         [string]$ConcurrencyLeaseId = '',
         [string]$PipelineBatchId = '',
-        [string]$PipelineStatusPath = ''
+        [string]$PipelineStatusPath = '',
+        [switch]$RecoveryRun
     )
 
     $state = Get-JobState -JobName $Job.Name
@@ -4250,6 +4261,8 @@ function Start-InventoryJob {
         $launchJob | Add-Member -NotePropertyName LaunchEngine -NotePropertyValue $true -Force
     }
     $startTime = Get-Date
+    # Resolve before process creation: a malformed schedule must not leave a live untracked process.
+    $recoveryDue = if ($RecoveryRun) { Get-LatestPastOccurrence -Job $Job -Now $startTime } else { $null }
     $logFolder = $script:Settings.JobLogFolderPath
     if (-not (Test-Path -LiteralPath $logFolder)) { New-Item -ItemType Directory -Path $logFolder -Force | Out-Null }
     $logPath = Join-Path -Path $logFolder -ChildPath ("Job-{0}_{1}_{2}.log" -f $Job.Name, $env:COMPUTERNAME, $startTime.ToString('yyyyMMdd_HHmmss'))
@@ -4258,7 +4271,7 @@ function Start-InventoryJob {
 
     if (-not (Test-Path -LiteralPath $scriptFullPath)) {
         Write-OrchestratorLog -Message ("Job {0}: script not found: {1}" -f $Job.Name, $scriptFullPath) -Level ERROR
-        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId; PipelineBatchId = $PipelineBatchId; PipelineStatusPath = $PipelineStatusPath }
+        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId; PipelineBatchId = $PipelineBatchId; PipelineStatusPath = $PipelineStatusPath; RecoveryRun = [bool]$RecoveryRun }
         Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime $startTime -ErrorText ("Script not found: {0}" -f $scriptFullPath)
         return
     }
@@ -4267,14 +4280,14 @@ function Start-InventoryJob {
     if ($useEngine -and [IO.Path]::GetFullPath($scriptFullPath) -ine $launchDefinition.ScriptPath) {
         $mismatch = "Catalog script {0} differs from the manifest ScriptPath {1}; launch refused so that the validated script is the one that runs." -f $launchDefinition.ScriptPath, $scriptFullPath
         Write-OrchestratorLog -Message ("Job {0}: {1}" -f $Job.Name, $mismatch) -Level ERROR
-        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId; PipelineBatchId = $PipelineBatchId; PipelineStatusPath = $PipelineStatusPath }
+        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId; PipelineBatchId = $PipelineBatchId; PipelineStatusPath = $PipelineStatusPath; RecoveryRun = [bool]$RecoveryRun }
         Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime $startTime -ErrorText $mismatch
         return
     }
 
     if ($useLauncher -and -not (Test-Path -LiteralPath $launcherFullPath)) {
         Write-OrchestratorLog -Message ("Job {0}: launcher not found: {1}" -f $Job.Name, $launcherFullPath) -Level ERROR
-        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId; PipelineBatchId = $PipelineBatchId; PipelineStatusPath = $PipelineStatusPath }
+        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId; PipelineBatchId = $PipelineBatchId; PipelineStatusPath = $PipelineStatusPath; RecoveryRun = [bool]$RecoveryRun }
         Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime $startTime -ErrorText ("Launcher not found: {0}" -f $launcherFullPath)
         return
     }
@@ -4283,7 +4296,7 @@ function Start-InventoryJob {
         Write-OrchestratorLog -Message ("Job {0}: launch rejected by Authenticode validation. {1}" -f $Job.Name, $authenticodeResult.Summary) -Level ERROR
         $rejectLine = "[{0}] {1} rejected job {2}: AuthenticodeRejected. {3}" -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $ScriptName, $Job.Name, $authenticodeResult.Summary
         try { [System.IO.File]::WriteAllText($logPath, $rejectLine + [Environment]::NewLine) } catch { }
-        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId; PipelineBatchId = $PipelineBatchId; PipelineStatusPath = $PipelineStatusPath }
+        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId; PipelineBatchId = $PipelineBatchId; PipelineStatusPath = $PipelineStatusPath; RecoveryRun = [bool]$RecoveryRun }
         Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime (Get-Date) -ErrorText ("AuthenticodeRejected: {0}" -f $authenticodeResult.Summary)
         return
     }
@@ -4317,7 +4330,7 @@ function Start-InventoryJob {
         }
         catch {
             Write-OrchestratorLog -Message ("Job {0}: unable to validate supported parameters: {1}" -f $Job.Name, $_.Exception.Message) -Level ERROR
-            $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId; PipelineBatchId = $PipelineBatchId; PipelineStatusPath = $PipelineStatusPath }
+            $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId; PipelineBatchId = $PipelineBatchId; PipelineStatusPath = $PipelineStatusPath; RecoveryRun = [bool]$RecoveryRun }
             Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime (Get-Date) -ErrorText $_.Exception.Message
             return
         }
@@ -4402,11 +4415,15 @@ function Start-InventoryJob {
     try { [System.IO.File]::WriteAllLines($logPath, $headerLines, [System.Text.UTF8Encoding]::new($false)) } catch { }
 
     try {
+        if ($RecoveryRun -and $null -ne $recoveryDue) {
+            Set-SmartM365OrchestratorRecoveryScheduleReceipt -SharedDataFolderPath $script:Settings.SharedDataFolderPath -Tenant $Tenant -JobName $Job.Name -BatchId $PipelineBatchId -CoveredThrough $recoveryDue
+            $recoveryDue = (Get-SmartM365OrchestratorRecoveryScheduleReceipt -SharedDataFolderPath $script:Settings.SharedDataFolderPath -Tenant $Tenant -JobName $Job.Name).CoveredThroughUtc.ToLocalTime()
+        }
         $process = Start-Process -FilePath $engine.Path -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encodedCommand) -WindowStyle Hidden -PassThru
     }
     catch {
         Write-OrchestratorLog -Message ("Job {0}: failed to start child process: {1}" -f $Job.Name, $_.Exception.Message) -Level ERROR
-        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId; PipelineBatchId = $PipelineBatchId; PipelineStatusPath = $PipelineStatusPath }
+        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = $logPath; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId; PipelineBatchId = $PipelineBatchId; PipelineStatusPath = $PipelineStatusPath; RecoveryRun = [bool]$RecoveryRun }
         Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime (Get-Date) -ErrorText $_.Exception.Message
         return
     }
@@ -4430,6 +4447,7 @@ function Start-InventoryJob {
         ConcurrencyLeaseId = $ConcurrencyLeaseId
         PipelineBatchId = $PipelineBatchId
         PipelineStatusPath = $PipelineStatusPath
+        RecoveryRun = [bool]$RecoveryRun
     }
     $state.Running = @{
         Pid = $process.Id
@@ -4446,6 +4464,7 @@ function Start-InventoryJob {
         ConcurrencyLeaseId = $ConcurrencyLeaseId
         PipelineBatchId = $PipelineBatchId
         PipelineStatusPath = $PipelineStatusPath
+        RecoveryRun = [bool]$RecoveryRun
     }
     if (-not [string]::IsNullOrWhiteSpace($ClaimPath)) {
         try {
@@ -4456,6 +4475,10 @@ function Start-InventoryJob {
         }
     }
     $state.LastRunStart = ConvertTo-StateTime -Value $processStart
+    if ($RecoveryRun) {
+        # This real launch replaces the currently due occurrence, not future schedules.
+        Update-OrchestratorRecoveryScheduleCursor -State $state -LatestDue $recoveryDue
+    }
     $state.LastStatus = 'Running'
     $state.RetryCount = $Attempt
     $state.PendingRetry = $null
@@ -4579,6 +4602,7 @@ function Complete-JobRun {
             ScheduledOccurrence = ConvertTo-StateTime -Value ([datetime]$RunInfo.Occurrence)
             PipelineBatchId = if ($RunInfo.ContainsKey('PipelineBatchId')) { [string]$RunInfo.PipelineBatchId } else { '' }
             PipelineStatusPath = if ($RunInfo.ContainsKey('PipelineStatusPath')) { [string]$RunInfo.PipelineStatusPath } else { '' }
+            Recovery = $RunInfo.ContainsKey('RecoveryRun') -and [bool]$RunInfo.RecoveryRun
         }
         $retryScheduled = $true
     }
@@ -5106,6 +5130,7 @@ function Restore-RunningJobs {
             ConcurrencyLeaseId = if ($record.ContainsKey('ConcurrencyLeaseId')) { [string]$record.ConcurrencyLeaseId } else { '' }
             PipelineBatchId = if ($record.ContainsKey('PipelineBatchId')) { [string]$record.PipelineBatchId } else { '' }
             PipelineStatusPath = if ($record.ContainsKey('PipelineStatusPath')) { [string]$record.PipelineStatusPath } else { '' }
+            RecoveryRun = $record.ContainsKey('RecoveryRun') -and [bool]$record.RecoveryRun
             StallAlertSent = $record.ContainsKey('StallAlertSent') -and [bool]$record.StallAlertSent
             # Needed by the operator stop identity check; missing before 1.5.72, so every stop of a
             # re-adopted job was deferred as a start-time mismatch.
@@ -5431,6 +5456,7 @@ function Update-OrchestratorPipelineRequests {
         }
     }
     $activatedUtc = if ([string]::IsNullOrWhiteSpace($activatedText)) { $createdUtc } else { [datetime]::Parse($activatedText, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime() }
+    $recoveryRun = $run.Request.PSObject.Properties['RecoveryProtocol'] -and [int]$run.Request.RecoveryProtocol -eq 1
     foreach ($jobStatus in @($run.Jobs)) {
         if ($jobStatus.Status -notin @('Pending', 'RetryScheduled')) { continue }
         $name = [string]$jobStatus.JobName
@@ -5454,6 +5480,7 @@ function Update-OrchestratorPipelineRequests {
             ActivatedAtUtc = $activatedUtc
             StatusPath = [string]$jobStatus.Path
             Attempt = [int]$jobStatus.Attempt
+            Recovery = [bool]$recoveryRun
         }
     }
     $script:PipelinePending = $pending
@@ -5721,7 +5748,8 @@ function Update-OrchestratorServerCapabilities {
             -ProbeTimeoutSeconds $script:Settings.CapabilityProbeTimeoutSeconds `
             -DataPathChecks @(Get-OrchestratorTenantDataPathCheck) `
             -PathTimeoutSeconds $script:Settings.PrerequisitePathTimeoutSeconds `
-            -CertificateExpiryWarningDays $script:Settings.CertificateExpiryWarningDays
+            -CertificateExpiryWarningDays $script:Settings.CertificateExpiryWarningDays `
+            -OnProgress { Update-OrchestratorHeartbeatDuringLongOperation }
         $capabilities | Add-Member -NotePropertyName ElectionWeight -NotePropertyValue $script:Settings.ElectionWeight -Force
         $localJobPolicy = if ($script:Settings.ServerJobPolicies.ContainsKey($env:COMPUTERNAME)) { $script:Settings.ServerJobPolicies[$env:COMPUTERNAME] } else { $null }
         $capabilities | Add-Member -NotePropertyName ServerJobPolicy -NotePropertyValue $localJobPolicy -Force
@@ -6561,7 +6589,7 @@ function Update-OrchestratorMaintenance {
                 param($transition)
                 $action=if($transition.Enabled){'enabled'}else{'disabled'}
                 $summary=[ordered]@{Tenant=$Tenant;Revision=$transition.Revision;ChangedAtUtc=$transition.ChangedAtUtc;ChangedBy=$transition.ChangedBy;Server=$transition.ChangedFromServer;Reason=$transition.Reason}
-                $body=New-SmartM365EmailBody -Title "Orchestrator maintenance $action" -Category 'SmartInventory maintenance' -Message 'Scheduled launches are controlled by maintenance; manual Pipeline requests remain available.' -SummaryData $summary
+                $body=New-SmartM365EmailBody -Title "Orchestrator maintenance $action" -Category 'SmartInventory maintenance' -Message 'Maintenance controls job launches; review Operations for the current launch policy.' -SummaryData $summary
                 Send-OrchestratorMail -Subject "Orchestrator maintenance $action" -HtmlBody $body -MailPurpose Maintenance
             }
             if($notification.Sent -gt 0){Write-OrchestratorLog -Message ("Maintenance notification(s) sent: {0}." -f $notification.Sent)}
@@ -6925,7 +6953,7 @@ function Write-OrchestratorRetryOffer {
         OccurrenceUtc = (ConvertFrom-StateTime -Text ([string]$PendingRetry.ScheduledOccurrence)).ToUniversalTime().ToString('o')
         Attempt = [int]$PendingRetry.Attempt; NotBeforeUtc = (ConvertFrom-StateTime -Text ([string]$PendingRetry.NotBefore)).ToUniversalTime().ToString('o')
         ClaimPath = $ClaimPath; PipelineBatchId = [string]$PendingRetry.PipelineBatchId; PipelineStatusPath = [string]$PendingRetry.PipelineStatusPath
-        CreatedAtUtc = [datetime]::UtcNow.ToString('o')
+        CreatedAtUtc = [datetime]::UtcNow.ToString('o'); Recovery = $PendingRetry.ContainsKey('Recovery') -and [bool]$PendingRetry.Recovery
     }
     $path = Get-OrchestratorRetryOfferPath -JobName $JobName
     [void](New-Item -ItemType Directory -Path (Split-Path -Path $path -Parent) -Force -ErrorAction Stop)
@@ -6995,6 +7023,15 @@ function Invoke-RetryHandoffAdoption {
         $notBeforeTime = ConvertTo-OrchestratorUtcTime -Value $offer.NotBeforeUtc
         if ($null -eq $occurrenceTime -or $null -eq $notBeforeTime) { continue }
         $occurrenceUtc = $occurrenceTime.UtcDateTime
+        # A maintenance resume may have discarded the scheduled retry on its original
+        # owner. Do not re-adopt the same old offer on another server afterwards.
+        $isPipelineRetry = -not [string]::IsNullOrWhiteSpace([string]$offer.PipelineBatchId)
+        if (-not $isPipelineRetry -and $null -ne $script:MaintenanceControl -and
+            $script:MaintenanceControl.PSObject.Properties['ResumeAfterUtc'] -and $script:MaintenanceControl.ResumeAfterUtc) {
+            $resumeCutoff = ConvertTo-OrchestratorUtcTime -Value $script:MaintenanceControl.ResumeAfterUtc
+            if ($null -eq $resumeCutoff) { continue }
+            if ($occurrenceTime.UtcDateTime -le $resumeCutoff.UtcDateTime) { continue }
+        }
         $claimRecord = $null
         try { $claimRecord = Get-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $script:Settings.ElectionClaimsPath -JobName $name -Occurrence $occurrenceUtc }
         catch { continue }
@@ -7013,7 +7050,6 @@ function Invoke-RetryHandoffAdoption {
         if ($null -ne $state.PendingRetry) { continue }
         $notBeforeUtc = $notBeforeTime.UtcDateTime
         if ($Now.ToUniversalTime() -lt $notBeforeUtc) { continue }
-        $isPipelineRetry = -not [string]::IsNullOrWhiteSpace([string]$offer.PipelineBatchId)
         if ($null -ne $script:MaintenanceControl -and $script:MaintenanceControl.Enabled -and -not $isPipelineRetry) { continue }
         if (-not (Test-OrchestratorRetryHandoffEligible -Job $job)) { continue }
         $state.PendingRetry = @{
@@ -7022,6 +7058,7 @@ function Invoke-RetryHandoffAdoption {
             ScheduledOccurrence = ConvertTo-StateTime -Value $occurrenceUtc
             PipelineBatchId = [string]$offer.PipelineBatchId
             PipelineStatusPath = [string]$offer.PipelineStatusPath
+            Recovery = $offer.PSObject.Properties['Recovery'] -and [bool]$offer.Recovery
             HandoffFrom = [string]$offer.FailedServer
             HandoffOfferId = [string]$offer.OfferId
         }
@@ -7125,6 +7162,7 @@ function Invoke-LaunchPhase {
                         Occurrence = $occurrence
                         CreatedAtUtc = $occurrence.ToUniversalTime()
                         StatusPath = if ($state.PendingRetry.ContainsKey('PipelineStatusPath')) { [string]$state.PendingRetry.PipelineStatusPath } else { '' }
+                        Recovery = $state.PendingRetry.ContainsKey('Recovery') -and [bool]$state.PendingRetry.Recovery
                     }
                 }
             }
@@ -7226,6 +7264,7 @@ function Invoke-LaunchPhase {
             if ($pipelineDeferred) {
                 $dependencyWaitTimeout = [int]$job.DependencyWaitTimeoutMinutes
                 if ($dependencyWaitTimeout -le 0) { $dependencyWaitTimeout = [int]$script:Settings.DependencyWaitTimeoutMinutes }
+                if ($pipelineInfo.ContainsKey('Recovery') -and $pipelineInfo.Recovery) { $dependencyWaitTimeout = 0 }
                 $waitMinutes = [int]([datetime]::UtcNow - (Get-OrchestratorPipelineWaitStartUtc -PipelineInfo $pipelineInfo)).TotalMinutes
                 if ($dependencyWaitTimeout -gt 0 -and $waitMinutes -ge $dependencyWaitTimeout) {
                     $script:PipelineWaitState.Remove($name)
@@ -7369,6 +7408,30 @@ function Invoke-LaunchPhase {
             $launchControl = Get-SmartM365OrchestratorMaintenanceState -SharedDataFolderPath $script:Settings.SharedDataFolderPath
             $launchOrigin = if ($isPipeline) { 'pipeline' } else { $reason }
             if (-not (Test-SmartM365OrchestratorMaintenanceLaunch -State $launchControl -Origin $launchOrigin -Occurrence $occurrence)) { continue }
+            if (-not $isPipeline) {
+                try { $recoveryReserved = Test-SmartM365OrchestratorRecoveryReservation -SharedDataFolderPath $script:Settings.SharedDataFolderPath -JobName $name -Tenant $Tenant -OnProgress { Update-OrchestratorHeartbeatDuringLongOperation } }
+                catch {
+                    Write-OrchestratorRuntimeUpdateWarning -Key ("recovery-reservation:{0}" -f $name) -Message ("Job {0}: recovery reservations could not be checked; launch deferred: {1}" -f $name, $_.Exception.Message) -Now $Now
+                    continue
+                }
+                if ($recoveryReserved) {
+                    Write-OrchestratorRuntimeUpdateWarning -Level INFO -Key ("recovery-reserved:{0}" -f $name) -Message ("Job {0}: scheduled or forced launch waits for its recovery request." -f $name) -Now $Now
+                    continue
+                }
+                if ($reason -in @('due', 'maintenance-catch-up')) {
+                    try { $receipt = Get-SmartM365OrchestratorRecoveryScheduleReceipt -SharedDataFolderPath $script:Settings.SharedDataFolderPath -Tenant $Tenant -JobName $name }
+                    catch {
+                        Write-OrchestratorRuntimeUpdateWarning -Key ("recovery-receipt:{0}" -f $name) -Message ("Job {0}: recovery schedule receipt unavailable; launch deferred: {1}" -f $name, $_.Exception.Message) -Now $Now
+                        continue
+                    }
+                    if ($null -ne $receipt -and $occurrence.ToUniversalTime() -le $receipt.CoveredThroughUtc) {
+                        if ($reason -eq 'maintenance-catch-up') { Complete-MaintenanceCatchUpOccurrence -State $state -Occurrence $occurrence; Save-OrchestratorState }
+                        else { Set-OccurrenceSkipped -JobName $name -Occurrence $occurrence -Reason ("recovery attempt admitted by request {0}; see request history for outcome" -f $receipt.BatchId) }
+                        Clear-DependencyWaitLog -JobName $name
+                        continue
+                    }
+                }
+            }
             $maintenanceValidated = $true
 
             if ($isPipeline) {
@@ -7496,7 +7559,7 @@ function Invoke-LaunchPhase {
         $pipelineStatusPath = if ($isPipeline) { [string]$pipelineInfo.StatusPath } else { '' }
         if ($isPipeline) {
             $pipelineGuard.LaunchAttempted = $true
-            Start-InventoryJob -Job $job -Occurrence $occurrence -Attempt $attempt -ClaimPath $claimPath -ConcurrencyLeasePath $concurrencyLeasePath -ConcurrencyLeaseId $concurrencyLeaseId -PipelineBatchId $pipelineBatchId -PipelineStatusPath $pipelineStatusPath
+            Start-InventoryJob -Job $job -Occurrence $occurrence -Attempt $attempt -ClaimPath $claimPath -ConcurrencyLeasePath $concurrencyLeasePath -ConcurrencyLeaseId $concurrencyLeaseId -PipelineBatchId $pipelineBatchId -PipelineStatusPath $pipelineStatusPath -RecoveryRun:($pipelineInfo.ContainsKey('Recovery') -and $pipelineInfo.Recovery)
         }
         else {
             Start-InventoryJob -Job $job -Occurrence $occurrence -Attempt $attempt -ClaimPath $claimPath -ConcurrencyLeasePath $concurrencyLeasePath -ConcurrencyLeaseId $concurrencyLeaseId

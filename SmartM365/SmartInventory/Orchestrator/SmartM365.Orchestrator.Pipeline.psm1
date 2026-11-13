@@ -60,6 +60,36 @@ function Get-SmartM365OrchestratorPipelineJobStatusPath {
     }
 }
 
+function Get-SmartM365OrchestratorRecoveryScheduleReceipt {
+    # Caller holds the cluster launch gate. This is an admission receipt, never success evidence.
+    param([Parameter(Mandatory)][string]$SharedDataFolderPath, [Parameter(Mandatory)][string]$Tenant, [Parameter(Mandatory)][string]$JobName)
+    if ($JobName -notmatch '^[A-Za-z0-9._-]+$' -or $JobName -in @('.','..')) { throw 'Invalid recovery job name.' }
+    $null = Get-Item -LiteralPath $SharedDataFolderPath -ErrorAction Stop
+    $path = Join-Path (Join-Path $SharedDataFolderPath 'RecoveryScheduleReceipts') ($JobName + '.json')
+    $readPath = Get-SmartM365JsonReadPath -Path $path -Optional
+    if (-not $readPath) { return $null }
+    $receipt = Read-SmartM365OrchestratorPipelineJson -Path $readPath
+    $cutoff = [datetimeoffset]::MinValue
+    if ([int]$receipt.SchemaVersion -ne 1 -or [string]$receipt.Tenant -cne $Tenant -or [string]$receipt.JobName -ine $JobName -or
+        -not [datetimeoffset]::TryParse((ConvertTo-SmartM365OrchestratorPipelineTimestampText $receipt.CoveredThroughUtc), [ref]$cutoff)) { throw "Invalid recovery schedule receipt for $JobName." }
+    return [pscustomobject]@{ CoveredThroughUtc = $cutoff.UtcDateTime; BatchId = [string]$receipt.BatchId }
+}
+
+function Set-SmartM365OrchestratorRecoveryScheduleReceipt {
+    # Write before starting the child under the launch gate. A crash between the write and
+    # process creation conservatively consumes the old occurrence; it never fabricates success.
+    param([Parameter(Mandatory)][string]$SharedDataFolderPath, [Parameter(Mandatory)][string]$Tenant, [Parameter(Mandatory)][string]$JobName,
+        [Parameter(Mandatory)][string]$BatchId, [Parameter(Mandatory)][datetime]$CoveredThrough)
+    $existing = Get-SmartM365OrchestratorRecoveryScheduleReceipt -SharedDataFolderPath $SharedDataFolderPath -Tenant $Tenant -JobName $JobName
+    # Retries of one recovery retain its original cutoff, even across the next schedule.
+    if ($null -ne $existing -and $existing.BatchId -eq $BatchId) { return }
+    if ($null -ne $existing -and $existing.CoveredThroughUtc -ge $CoveredThrough.ToUniversalTime()) { return }
+    $folder = Join-Path $SharedDataFolderPath 'RecoveryScheduleReceipts'
+    $null = New-Item -ItemType Directory -Path $folder -Force -ErrorAction Stop
+    $path = Join-Path $folder ($JobName + '.json')
+    Write-SmartM365OrchestratorPipelineJsonAtomically -Path $path -Document ([ordered]@{ SchemaVersion=1; Tenant=$Tenant; JobName=$JobName; BatchId=$BatchId; CoveredThroughUtc=$CoveredThrough.ToUniversalTime().ToString('o'); RecordedAtUtc=[datetime]::UtcNow.ToString('o') })
+}
+
 function Enter-SmartM365OrchestratorPipelineLock {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -313,23 +343,25 @@ function Get-SmartM365OrchestratorActivePipelineRuns {
     param(
         [Parameter(Mandatory)][string]$SharedDataFolderPath,
         # Called before each request is read, so a slow share does not starve the heartbeat.
-        [scriptblock]$OnProgress
+        [scriptblock]$OnProgress,
+        [switch]$IncludeIncomplete
     )
 
     $paths = Get-SmartM365OrchestratorPipelinePaths -SharedDataFolderPath $SharedDataFolderPath
-    if (-not (Test-Path -LiteralPath $paths.RootPath -PathType Container)) { return @() }
+    if (-not (Test-Path -LiteralPath $paths.RootPath -PathType Container -ErrorAction Stop)) { return @() }
     $cachePrefix = [IO.Path]::GetFullPath($paths.RootPath).TrimEnd('\', '/') + '|'
     $active = @(
-        foreach ($folder in @(Get-ChildItem -LiteralPath $paths.RootPath -Directory -ErrorAction SilentlyContinue | Sort-Object Name)) {
+        foreach ($folder in @(Get-ChildItem -LiteralPath $paths.RootPath -Directory -ErrorAction Stop | Sort-Object Name)) {
             if ($script:PipelineTerminalBatches.Contains($cachePrefix + $folder.Name)) { continue }
             if ($OnProgress) { & $OnProgress }
             $requestPath = (Get-SmartM365OrchestratorPipelinePaths -SharedDataFolderPath $SharedDataFolderPath -BatchId $folder.Name).RequestPath
             if (-not (Test-Path -LiteralPath $requestPath -PathType Leaf)) { continue }
             try {
                 $status = Get-SmartM365OrchestratorPipelineRunStatus -SharedDataFolderPath $SharedDataFolderPath -BatchId $folder.Name
-                if (-not $status.IsTerminal) { $status }
-                elseif (@($status.Jobs | Where-Object Status -eq 'MissingStatus').Count -eq 0) {
-                    # A missing status file may be a transient share error: such a request is re-read.
+                $incomplete = @($status.Jobs | Where-Object Status -eq 'MissingStatus').Count -gt 0
+                if (-not $status.IsTerminal -or ($incomplete -and ($IncludeIncomplete -or $status.Request.PSObject.Properties['RecoveryProtocol']))) { $status }
+                elseif (-not $incomplete) {
+                    # Only complete terminal requests are cached; missing statuses are re-read.
                     [void]$script:PipelineTerminalBatches.Add($cachePrefix + $folder.Name)
                 }
             }
@@ -347,6 +379,21 @@ function Get-SmartM365OrchestratorActivePipelineRuns {
         if ($index -gt 0 -and $ordered[$index].OverallStatus -eq 'Running') { $ordered[$index].OverallStatus = 'Queued' }
     }
     $ordered
+}
+
+function Test-SmartM365OrchestratorRecoveryReservation {
+    <# Caller holds the shared maintenance launch gate. Unreadable shared state fails closed. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$SharedDataFolderPath, [Parameter(Mandatory)][string]$JobName,
+        [Parameter(Mandatory)][string]$Tenant, [scriptblock]$OnProgress)
+    $null = Get-Item -LiteralPath $SharedDataFolderPath -ErrorAction Stop
+    foreach ($run in @(Get-SmartM365OrchestratorActivePipelineRuns -SharedDataFolderPath $SharedDataFolderPath -OnProgress $OnProgress -IncludeIncomplete)) {
+        if (-not $run.Request.PSObject.Properties['RecoveryProtocol']) { continue }
+        if (($run.Request.RecoveryProtocol -isnot [int] -and $run.Request.RecoveryProtocol -isnot [long]) -or [int]$run.Request.RecoveryProtocol -ne 1) { throw 'Unsupported recovery reservation protocol.' }
+        if ([string]$run.Tenant -ne $Tenant) { throw 'Recovery reservation tenant mismatch.' }
+        if (@($run.Jobs | Where-Object { [string]$_.JobName -eq $JobName -and ($_.Status -eq 'MissingStatus' -or $_.Status -notin $script:PipelineTerminalStatuses) }).Count) { return $true }
+    }
+    return $false
 }
 
 function Get-SmartM365OrchestratorPipelineQueueReadiness {
@@ -413,6 +460,7 @@ function New-SmartM365OrchestratorPipelineRequest {
         [Parameter(Mandatory)][string]$ManifestHash,
         [string]$RequestedBy = '',
         [string]$RequestedFrom = '',
+        [switch]$Recovery,
         [ValidateRange(1, 50)][int]$MaxActiveRequests = 5,
         [int]$LockTimeoutSeconds = 15
     )
@@ -422,7 +470,7 @@ function New-SmartM365OrchestratorPipelineRequest {
     if (-not (Test-Path -LiteralPath $basePaths.RootPath)) { New-Item -ItemType Directory -Path $basePaths.RootPath -Force | Out-Null }
     $lock = Enter-SmartM365OrchestratorPipelineLock -Path $basePaths.SubmissionLockPath -TimeoutSeconds $LockTimeoutSeconds
     try {
-        $active = @(Get-SmartM365OrchestratorActivePipelineRuns -SharedDataFolderPath $SharedDataFolderPath)
+        $active = @(Get-SmartM365OrchestratorActivePipelineRuns -SharedDataFolderPath $SharedDataFolderPath -IncludeIncomplete)
         $createdUtc = [datetime]::UtcNow
         if ($active.Count -gt 0) {
             $head = $active[0]
@@ -435,10 +483,15 @@ function New-SmartM365OrchestratorPipelineRequest {
             }
             $requestedNames = @($Selection.SelectedJobs | ForEach-Object { ([string]$_.Name).ToUpperInvariant() } | Sort-Object -Unique) -join '|'
             foreach ($run in $active) {
-                if ($run.CancellationRequested) { continue }
                 $runNames = @($run.Jobs | ForEach-Object { ([string]$_.JobName).ToUpperInvariant() } | Sort-Object -Unique) -join '|'
-                if ($runNames -ceq $requestedNames) {
+                if (-not $run.CancellationRequested -and $runNames -ceq $requestedNames) {
                     throw "An identical pipeline request is already $(if ($run.QueuePosition -eq 0) { 'running' } else { 'queued' }): $($run.BatchId)."
+                }
+                $existingRecovery = $run.PSObject.Properties['Request'] -and $null -ne $run.Request -and $run.Request.PSObject.Properties['RecoveryProtocol'] -and [int]$run.Request.RecoveryProtocol -eq 1
+                if ($Recovery -or $existingRecovery) {
+                    $requestedSet = @($Selection.SelectedJobs | ForEach-Object { [string]$_.Name })
+                    $overlap = @($run.Jobs | Where-Object { ($_.Status -eq 'MissingStatus' -or $_.Status -notin $script:PipelineTerminalStatuses) -and [string]$_.JobName -in $requestedSet })
+                    if ($overlap.Count) { throw "A recovery request overlaps active request $($run.BatchId): $(@($overlap.JobName) -join ', ')." }
                 }
             }
             # Queue order follows CreatedAtUtc: never sort before an existing request on clock skew.
@@ -461,6 +514,9 @@ function New-SmartM365OrchestratorPipelineRequest {
             RequestedFrom = $RequestedFrom
             ManifestHash = $ManifestHash
             SelectedJobs = @($Selection.SelectedJobs)
+        }
+        if ($Recovery) {
+            $request | Add-Member -NotePropertyName RecoveryProtocol -NotePropertyValue 1
         }
 
         foreach ($job in @($Selection.SelectedJobs)) {
@@ -814,6 +870,9 @@ Export-ModuleMember -Function @(
     'Get-SmartM365OrchestratorPipelineSelection',
     'Get-SmartM365OrchestratorPipelineRunStatus',
     'Get-SmartM365OrchestratorActivePipelineRuns',
+    'Get-SmartM365OrchestratorRecoveryScheduleReceipt',
+    'Set-SmartM365OrchestratorRecoveryScheduleReceipt',
+    'Test-SmartM365OrchestratorRecoveryReservation',
     'Get-SmartM365OrchestratorPipelineQueueReadiness',
     'Set-SmartM365OrchestratorPipelineActivation',
     'New-SmartM365OrchestratorPipelineRequest',

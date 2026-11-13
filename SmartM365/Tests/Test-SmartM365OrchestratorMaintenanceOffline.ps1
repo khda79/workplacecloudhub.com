@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline maintenance, scheduler admission and GUI contract tests using synthetic shared data.
 .VERSION
-1.0.9
+1.0.10
 #>
 [CmdletBinding()]
 param([string]$Tenant = 'test')
@@ -167,6 +167,9 @@ try {
         $script:PipelinePending=@{};$script:MaintenanceControl=$Active
         function script:Clear-DependencyWaitLog {param($JobName)}
         # This suite isolates maintenance; cancellation admission has its own synthetic suite.
+        $script:Reserved=$false
+        function script:Test-SmartM365OrchestratorRecoveryReservation {param($SharedDataFolderPath,$JobName,$Tenant,$OnProgress) $script:Reserved}
+        function script:Get-SmartM365OrchestratorRecoveryScheduleReceipt {param($SharedDataFolderPath,$JobName,$Tenant) $null}
         function script:Test-SmartM365OrchestratorPipelineCancellation {param($SharedDataFolderPath,$BatchId) $false}
         function script:Enter-SmartM365OrchestratorPipelineLaunchGuard {param($SharedDataFolderPath,$BatchId,$JobName) [pscustomobject]@{Allowed=$true;Lock=$null;LaunchAttempted=$false}}
         function script:Exit-SmartM365OrchestratorPipelineLaunchGuard {param($Guard)}
@@ -203,9 +206,27 @@ try {
         Invoke-LaunchPhase (Get-Date); $raced=$script:Starts; $raceLeases=$script:LeaseCalls - $before
         $script:MaintenanceControl=$Active
         $snapshot=@(Get-OrchestratorPendingJobSnapshot (Get-Date))
+        $script:Reserved=$true; $script:ForcedPending=@('ManualRetry'); $before=$script:LeaseCalls
+        Invoke-LaunchPhase (Get-Date); $reservedStarts=$script:Starts; $reservedLeases=$script:LeaseCalls-$before
+        $script:Reserved=$false
         $script:ForcedPending=@('ManualRetry');$script:ThrowStart=$true;$startError=''
         try { Invoke-LaunchPhase (Get-Date) } catch { $startError=$_.Exception.Message }
-        [pscustomobject]@{Automatic=$automatic;Retry=$retry;Manual=$manual;Batch=$batch;PipelineRetry=$pipelineRetry;Waiting=$waiting;Ready=$ready;Raced=$raced;RaceLeases=$raceLeases;Snapshot=$snapshot;StartError=$startError}
+        # Exercise the actual launch phase as a newly elected owner after an admitted recovery.
+        $script:MaintenanceControl=$OldControl; $script:ForcedPending=@(); $script:ThrowStart=$false
+        $script:ReceiptForTest=[pscustomobject]@{CoveredThroughUtc=[datetime]::UtcNow.AddMinutes(1);BatchId='failed-recovery'}
+        function script:Get-SmartM365OrchestratorMaintenanceState {param($SharedDataFolderPath) $OldControl}
+        function script:Get-SmartM365OrchestratorRecoveryScheduleReceipt {param($SharedDataFolderPath,$JobName,$Tenant) $script:ReceiptForTest}
+        function script:Set-OccurrenceSkipped {param($JobName,$Occurrence,$Reason) $script:ReceiptSkipped=$Reason}
+        $script:ReceiptSkipped=''; $beforeStarts=$script:Starts; $beforeLeases=$script:LeaseCalls
+        Invoke-LaunchPhase (Get-Date)
+        $receiptStarts=$script:Starts-$beforeStarts; $receiptLeases=$script:LeaseCalls-$beforeLeases; $receiptSkipped=$script:ReceiptSkipped
+        # A later schedule remains eligible.
+        $script:ReceiptForTest.CoveredThroughUtc=[datetime]::UtcNow.AddDays(-1)
+        Invoke-LaunchPhase (Get-Date); $futureStarts=$script:Starts-$beforeStarts
+        function script:Get-SmartM365OrchestratorMaintenanceState {param($SharedDataFolderPath) SmartM365.Orchestrator.Maintenance\Get-SmartM365OrchestratorMaintenanceState -SharedDataFolderPath $SharedDataFolderPath }
+        $script:MaintenanceControl=$Active
+        function script:Get-SmartM365OrchestratorRecoveryScheduleReceipt {param($SharedDataFolderPath,$JobName,$Tenant) $null}
+        [pscustomobject]@{Automatic=$automatic;Retry=$retry;Manual=$manual;Batch=$batch;PipelineRetry=$pipelineRetry;Waiting=$waiting;Ready=$ready;Raced=$raced;RaceLeases=$raceLeases;Snapshot=$snapshot;ReservedStarts=$reservedStarts;ReservedLeases=$reservedLeases;StartError=$startError;ReceiptStarts=$receiptStarts;ReceiptLeases=$receiptLeases;ReceiptSkipped=$receiptSkipped;FutureStarts=$futureStarts}
     } $again $resumed
     Assert-Case ($launchResults.Automatic -eq 0 -and $launchResults.Retry -eq 0) 'Real launch phase started an automatic run/retry.'
     Assert-Case ($launchResults.Manual -eq 1 -and $launchResults.Batch -eq 'synthetic') 'Manual request was trapped behind scheduled retry.'
@@ -213,7 +234,10 @@ try {
     Assert-Case ($launchResults.Waiting -eq 2 -and $launchResults.Ready -eq 3) 'Maintenance bypassed dependencies or blocked their success.'
     Assert-Case ($launchResults.Raced -eq 3 -and $launchResults.RaceLeases -eq 0) 'Activation race acquired a lease or started a process.'
     Assert-Case ($launchResults.Snapshot.Count -eq 1 -and $launchResults.Snapshot[0].Reason -eq 'Maintenance') 'Snapshot reports overdue instead of deliberate suspension.'
+    Assert-Case ($launchResults.ReservedStarts -eq 3 -and $launchResults.ReservedLeases -eq 0) 'An existing recovery reservation did not fence the competing launch.'
     Assert-Case ($launchResults.StartError -eq 'Synthetic launch failure') 'Launch exception was swallowed by maintenance wrapper.'
+    Assert-Case ($launchResults.ReceiptStarts -eq 0 -and $launchResults.ReceiptLeases -eq 0 -and $launchResults.ReceiptSkipped -match 'failed-recovery') 'A prior recovery admission did not fence the old scheduled occurrence.'
+    Assert-Case ($launchResults.FutureStarts -eq 1) 'A later scheduled occurrence was incorrectly fenced.'
     $gate=Enter-SmartM365OrchestratorMaintenanceGate $root -TimeoutSeconds 0; $gate.Dispose()
     Assert-Case $true 'Gate was not released after launch exception.'
     Assert-Throws { Set-SmartM365OrchestratorMaintenance $root $false 3 'Catch-up without upgraded peers' -CatchUpMissedOccurrences } '*Every expected server*support catch-up*'

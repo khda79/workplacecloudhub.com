@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.4.14
+1.4.16
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
@@ -295,7 +295,7 @@ function New-OrchestratorDemoConfiguration {
     $tenant.Thumb = 'DEMO000000000000000000000000000000000000'; $tenant.Thumbprint = 'DEMO000000000000000000000000000000000000'
     $tenant.OrgDomain = 'contoso.onmicrosoft.com'; $tenant.ErrorMailTo = 'it-alerts@contoso.example'; $tenant.To = 'it-reports@contoso.example'
     $tenant.From = 'smartm365@contoso.example'; $tenant.MailSendAccessPolicyGroup = 'smartm365-mailsend@contoso.example'
-    $tenant.TeamsAlertsWebhookUrl = 'https://contoso.example/demo-webhook/alerts'; $tenant.EnableSharePointUpload = $true
+    $tenant.EnableSharePointUpload = $true
     $tenant.PSObject.Properties.Remove('RemoteRoutingDomain')
     $tenant | Add-Member -NotePropertyName 'LegacyReportFolder' -NotePropertyValue 'D:\Reports (sample key not in the template)'
     $mail = $mailTemplate | ConvertTo-Json -Depth 20 | ConvertFrom-Json
@@ -405,6 +405,25 @@ function Invoke-OrchestratorDemoAction {
         'ExportCsvButton' { [void](Export-OrchestratorDemoHistory -Format Csv); return }
         'EnableMaintenanceButton' { $d.Maintenance=$true }
         'DisableMaintenanceButton' { $d.Maintenance=$false }
+        'CancelPendingWorkButton' {
+            $d.Pending=@()
+            foreach($request in @($d.Requests)) {
+                foreach($row in @($request.Rows)) { if($row.Status -in @('Pending','RetryScheduled')) { $row.Status='Cancelled'; $row.Detail='Cancelled in demo memory.'; $request.Cancelled++ } }
+                if($request.Status -in @('Running','Queued','Cancelling','Pending')) {
+                    $request.Pending=@($request.Rows | Where-Object Status -in @('Running','Starting')).Count
+                    $request.Status=if($request.Pending){'Cancelling'}else{'Cancelled'}
+                }
+            }
+            Write-OrchestratorDemoActivity 'Sample pending work cancelled; sample running jobs continue.'
+        }
+        'RecoverJobsButton' {
+            $names=@($d.Pending | ForEach-Object Job | Where-Object { $_ -notin @($d.Running | ForEach-Object Job) } | Sort-Object -Unique)
+            if($names.Count){
+                $d.Sequence++
+                $d.Requests=@([pscustomobject]@{BatchId=('DEMO-RECOVERY-{0:000}' -f $d.Sequence);Selection='Recovery';Created='2026-10-18 09:30';Status='Pending';Jobs=$names.Count;Pending=$names.Count;Failed=0;Cancelled=0;RequestedBy='demo.operator@contoso.example';Rows=@($names | ForEach-Object {[pscustomobject]@{JobName=$_;Status='Pending';OwnerServer='';UpdatedAtUtc='2026-10-18 07:30';Detail='Simulated recovery only.'}})})+@($d.Requests)
+            }
+            Write-OrchestratorDemoActivity 'Sample recovery requested; sample running jobs continue.'
+        }
         'ApplyJobButton' {
             $job=$c.PlanningGrid.SelectedItem; if(-not $job){return}
             $times=@($c.TimesBox.Text -split ',' | ForEach-Object {$_.Trim()})
@@ -573,7 +592,7 @@ function Invoke-OrchestratorDemo {
     $c.RequestsGrid.Add_SelectionChanged({$c=$script:OrchestratorDemo.Controls;$row=$c.RequestsGrid.SelectedItem;$c.RequestJobsGrid.ItemsSource=if($row){@($row.Rows)}else{@()}})
     $c.AssignmentCombo.Add_SelectionChanged({$c=$script:OrchestratorDemo.Controls;$c.PinnedServerCombo.IsEnabled=($c.AssignmentCombo.SelectedItem.Content -eq 'Pinned')})
     $c.ScheduleTypeCombo.Add_SelectionChanged({$c=$script:OrchestratorDemo.Controls;$c.DaysPanel.IsEnabled=($c.ScheduleTypeCombo.SelectedItem.Content -eq 'Weekly')})
-    foreach($name in @('RefreshButton','RebalanceButton','PublishButton','ApplyJobButton','ApplyServerButton','HistoryRefreshButton','ExportHtmlButton','ExportCsvButton','Failures24hButton','EnableMaintenanceButton','DisableMaintenanceButton','StopRunningJobButton','RequestRunButton','RequestPrepareButton','CancelRequestButton','CancelAllRequestsButton','AddServerButton','RemoveServerButton','RollbackButton')){
+    foreach($name in @('RefreshButton','RebalanceButton','PublishButton','ApplyJobButton','ApplyServerButton','HistoryRefreshButton','ExportHtmlButton','ExportCsvButton','Failures24hButton','EnableMaintenanceButton','DisableMaintenanceButton','CancelPendingWorkButton','RecoverJobsButton','StopRunningJobButton','RequestRunButton','RequestPrepareButton','CancelRequestButton','CancelAllRequestsButton','AddServerButton','RemoveServerButton','RollbackButton')){
         $c[$name].Tag=$name
         $c[$name].Add_Click({param($demoControl)try{Invoke-OrchestratorDemoAction -Action ([string]$demoControl.Tag)}catch{Write-OrchestratorDemoActivity $_.Exception.Message}})
     }

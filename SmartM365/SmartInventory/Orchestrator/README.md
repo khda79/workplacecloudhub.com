@@ -70,6 +70,18 @@ an active one.
 
 ## Cancel remaining pipeline jobs
 
+### Cancel pending work and resume future schedules
+
+In **Operations > Live**, enter a reason and select **Cancel pending work**. The preview lists the current pending jobs, active requests, catch-up windows and running jobs. On confirmation the GUI temporarily enables a reset-specific maintenance pause, which blocks scheduled, pipeline and forced launches, waits for every expected resident to acknowledge it, cancels the active pipeline requests, records the previous maintenance control in an audit receipt and resumes without the pending catch-up windows. Running collectors are never stopped. Future schedules continue after the resume cutoff; new requests submitted after the cancellation snapshot are outside its preview. All expected residents must be online, persist state successfully and advertise maintenance reset and pipeline cancellation protocols. If a step fails after maintenance was enabled, the GUI reports that the actual maintenance state must be checked before resuming; already published cancellations remain effective.
+
+### Recover jobs
+
+In **Operations > Live**, select **Recover jobs** and choose the selected jobs or all blocked jobs. The latter includes pending work and the latest dependency or prerequisite blocks found in the last eight days of readable history. The preview includes enabled dependencies, running jobs and jobs without an elected owner. Confirming creates an auditable request in **Operations > Requests**; a job without an eligible owner waits, and recovery dependency waits have no fixed timeout. Existing capability, concurrency, dependency and retry checks still apply.
+
+All expected residents must be online and advertise recovery guard protocol 2 and the maintenance reset protocol; update the GUI, modules and all resident orchestrators together. Submission requires the published jobs configuration to match the preview and the preview to be less than 15 minutes old. Under the shared launch gate, running jobs, pending retries, active leases and jobs that completed since the preview are excluded. If another requested job depends on excluded work, submission is refused: let it finish, refresh and retry. Overlapping active requests are refused, and automatic orchestrator launches are fenced while the recovery request reserves the job. Direct launches outside the orchestrator are not fenced.
+
+Immediately before starting a recovery child, the owner writes a durable shared schedule receipt under the launch gate. All owners use it to suppress the old scheduled occurrence, even after an unsuccessful attempt or ownership change; retries retain the original cutoff and future schedules remain eligible. The receipt is admission evidence, not a successful result, and does not satisfy dependencies. If the receipt cannot be written or read, the affected launch is refused. A crash between recording the receipt and starting the child can conservatively suppress an occurrence that never started; check request history and explicitly recover it if necessary.
+
 Orchestrator **1.5.41**, Pipeline CLI **1.2.0** and GUI **1.3.2** support cooperative
 cancellation. In **Requests**, select an active batch, enter a reason and choose
 **Cancel remaining jobs**. Confirm the batch before publication. This is independent
@@ -626,6 +638,8 @@ Before launching an elected occurrence, the owner must create its shared claim w
 ### Capability recovery after transient failures
 
 When a read-only probe fails for a capability required by an enabled elected job, the resident retries capability discovery after 10, 20, then at most 30 minutes, capped by the configured normal refresh interval. Missing components are excluded from this expedited retry. A successful probe restores the normal interval; election still requires a successful current capability document. An unassigned group's reason includes the affected servers, missing required capabilities, probe timestamps and available probe details. A plan reason change alone does not count as an assignment change. Scheduled jobs continue to follow their configured missed-run and dependency timeout policies.
+
+During bounded read-only capability process and tenant-path probes, the resident periodically publishes its normal heartbeat, including its current lifecycle and job state. Probe timeouts and failed capability results remain unchanged. A heartbeat is not evidence that a cloud service is available, and the scheduler still waits for the synchronous probe pass to finish before launching other jobs.
 
 ### Pinned FreshSuccess dependencies (1.5.51)
 

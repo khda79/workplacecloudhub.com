@@ -3,7 +3,7 @@
 Offline test of the retry handoff: an elected job that failed on SRV-A is retried by a free,
 eligible server, and exactly one server runs the retry.
 .VERSION
-1.0.1
+1.0.2
 .NOTES
 Real Distributed module claims in a temporary folder; the orchestrator offer and adoption
 functions run in one module instance per simulated server. No tenant initialization,
@@ -139,6 +139,9 @@ try {
     $null = New-FailedOccurrence $serverA $occurrence3 $now.AddMinutes(-3) ''
     Invoke-As 'SRV-M' $serverM { param($n) Invoke-RetryHandoffAdoption -Now $n } @($later)
     Check ($null -eq (& $serverM { (Get-JobState -JobName 'Graph-Job').PendingRetry })) 'Maintenance must keep a scheduled retry from being adopted.'
+    & $serverM { param($cutoff) $script:MaintenanceControl = [pscustomobject]@{ Enabled = $false; ResumeAfterUtc = $cutoff.ToString('o') } } $now.ToUniversalTime()
+    Invoke-As 'SRV-M' $serverM { param($n) Invoke-RetryHandoffAdoption -Now $n } @($later)
+    Check ($null -eq (& $serverM { (Get-JobState -JobName 'Graph-Job').PendingRetry })) 'A scheduled retry discarded by maintenance must not be re-adopted after resume.'
 }
 finally {
     $env:COMPUTERNAME = $originalComputer
