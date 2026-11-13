@@ -577,6 +577,54 @@ Invoke-CompletedRules -Rows @([pscustomobject]@{ ComputerName = 'PC-R1.contoso.t
     # The shared AD inventory always covers the forest; the refusal happens before any AD query.
     $adExport = Join-Path $script:PackageRoot 'Scripts\SmartM365-EndpointMigration-Export-ADDevicesCsv.ps1'
     Test-Throws 'a single-domain AD export never writes the shared AD inventory' { & $adExport -Domain 'contoso.test' -ForceRefresh } 'SEMT_SHARED_AD_INVENTORY_DOMAIN_SCOPED'
+    # A Wave-scoped AD export queries batches of names per domain, never one query per computer.
+    $fakeAdRoot = Join-Path $tempRoot 'FakeAdModules'
+    $fakeAdModule = Join-Path $fakeAdRoot 'ActiveDirectory'
+    New-Item -ItemType Directory -Path $fakeAdModule -Force | Out-Null
+    $fakeAdCalls = Join-Path $tempRoot 'fake-ad-calls.txt'
+    Set-Content -LiteralPath (Join-Path $fakeAdModule 'ActiveDirectory.psm1') -Encoding ASCII -Value @(
+        'function Get-ADForest { [pscustomobject]@{ Domains = @(''dom1.test'',''dom2.test'') } }',
+        'function Get-ADComputer {',
+        '    [CmdletBinding()] param([string]$LDAPFilter,[string]$Filter,[string]$Server,[string[]]$Properties)',
+        ('    Add-Content -LiteralPath ''{0}'' -Value (''{{0}}|{{1}}|{{2}}'' -f $Server,[bool]$LDAPFilter,[bool]$Filter)' -f $fakeAdCalls),
+        '    if ($LDAPFilter -and $env:SEMT_FAKE_AD_FAIL -in @(''Batch'',''All'') -and $Server -eq ''dom1.test'' -and $LDAPFilter -like ''*(name=PC-001)*'') { throw ''fake batch timeout'' }',
+        '    if ($Filter -and $env:SEMT_FAKE_AD_FAIL -eq ''All'') { throw ''fake domain controller unreachable'' }',
+        '    $names = if ($LDAPFilter) { @([regex]::Matches($LDAPFilter, ''\(name=([^)]*)\)'') | ForEach-Object { $_.Groups[1].Value -replace ''\\28'',''('' -replace ''\\29'','')'' -replace ''\\2a'',''*'' -replace ''\\5c'',''\'' }) } else { @([regex]::Match($Filter, ''Name -eq ''''((?:[^'''']|'''''''')*)'''''').Groups[1].Value -replace '''''''','''''''') }',
+        '    if ($Server -eq ''dom1.test'' -and ($LDAPFilter + $Filter) -match ''PC-DNS[.]dom1[.]test'') { [pscustomobject]@{ Name = ''PC-RENAMED''; DNSHostName = ''pc-dns.dom1.test''; Enabled = $true; ObjectGUID = [guid]''00000000-0000-0000-0000-000000000777''; OperatingSystem = ''Windows''; OperatingSystemVersion = ''10.0''; LastLogonTimestamp = 133000000000000777; DistinguishedName = ''CN=PC-RENAMED,DC=test'' } }',
+        '    foreach ($name in $names) {',
+        '        $number = 0',
+        '        if ($name -eq ''PC(X)'') { $number = 999; $inDomain = ''dom2.test'' } elseif ([int]::TryParse(($name -replace ''^PC-'',''''), [ref]$number) -and $number -ge 1 -and $number -le 250) { $inDomain = if ($number -le 150) { ''dom1.test'' } else { ''dom2.test'' } } else { $inDomain = '''' }',
+        '        if ($inDomain -eq $Server) { [pscustomobject]@{ Name = $name; DNSHostName = (''{0}.{1}'' -f $name,$Server); Enabled = $true; ObjectGUID = [guid](''00000000-0000-0000-0000-{0:D12}'' -f $number); OperatingSystem = ''Windows''; OperatingSystemVersion = ''10.0''; LastLogonTimestamp = (133000000000000000 + $number); DistinguishedName = (''CN={0},DC=test'' -f $name) } }',
+        '    }',
+        '}')
+    $adScope = Join-Path $tempRoot 'AdScope.txt'
+    Set-Content -LiteralPath $adScope -Encoding ASCII -Value (@(1..250 | ForEach-Object { 'PC-{0:D3}' -f $_ }) + @('PC-MISSING','PC(X)','PC-DNS.dom1.test'))
+    $runFakeAdExport = {
+        param([string]$Mode,[string]$CsvPath)
+        # A failing exporter writes to stderr: it is captured as output, not raised here.
+        $ErrorActionPreference = 'Continue'
+        $savedAdModulePath = $env:PSModulePath
+        $savedFail = $env:SEMT_FAKE_AD_FAIL
+        Remove-Item -LiteralPath $fakeAdCalls -ErrorAction SilentlyContinue
+        try {
+            $env:PSModulePath = $fakeAdRoot + ';' + $env:PSModulePath
+            $env:SEMT_FAKE_AD_FAIL = $Mode
+            $output = @(& (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -ExecutionPolicy Bypass -File $adExport -ComputerListPath $adScope -OutputPath $CsvPath -ForceRefresh 2>&1)
+            [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($output -join "`n"); Calls = @(Get-Content -LiteralPath $fakeAdCalls -ErrorAction SilentlyContinue) }
+        }
+        finally { $env:PSModulePath = $savedAdModulePath; $env:SEMT_FAKE_AD_FAIL = $savedFail }
+    }
+    $adBatchCsv = Join-Path $tempRoot 'DevicesAD_Batch.csv'
+    $adBatch = & $runFakeAdExport '' $adBatchCsv
+    $adRows = @(Import-Csv -LiteralPath $adBatchCsv -ErrorAction SilentlyContinue)
+    Test-Step 'Wave-scoped AD export uses LDAP batches of 100 names per domain (3 + 2 queries for 253 computers)' { $adBatch.Calls.Count -eq 5 -and @($adBatch.Calls | Where-Object { $_ -notlike '*|True|False' }).Count -eq 0 -and @($adBatch.Calls | Where-Object { $_ -like 'dom1.test|*' }).Count -eq 3 -and $adBatch.Output -match 'Selected AD lookup: 253 computer\(s\), 252 found; 5 batch query\(ies\), 0 per-computer fallback' }
+    Test-Step 'Wave-scoped AD export keeps the first domain match, escapes names and reports absent computers' { $adRows.Count -eq 253 -and @($adRows | Where-Object { $_.ComputerName -eq 'PC-DNS' -and $_.Name -eq 'PC-RENAMED' -and $_.ADInventoryPresent -eq 'True' -and $_.ADDomain -eq 'dom1.test' }).Count -eq 1 -and @($adRows | Where-Object { $_.ComputerName -eq 'PC-200' -and $_.ADDomain -eq 'dom2.test' }).Count -eq 1 -and @($adRows | Where-Object { $_.ComputerName -eq 'PC(X)' -and $_.ADInventoryPresent -eq 'True' }).Count -eq 1 -and @($adRows | Where-Object { $_.ComputerName -eq 'PC-MISSING' -and $_.ADInventoryPresent -eq 'False' }).Count -eq 1 }
+    $adFallbackCsv = Join-Path $tempRoot 'DevicesAD_Fallback.csv'
+    $adFallback = & $runFakeAdExport 'Batch' $adFallbackCsv
+    Test-Step 'a failed AD batch is retried one computer at a time and gives the same CSV' { $adFallback.ExitCode -eq 0 -and @($adFallback.Calls | Where-Object { $_ -like 'dom1.test|False|True' }).Count -eq 100 -and $adFallback.Output -match 'WARN: AD batch query failed in dom1\.test \(batch offset 0, 100 computer' -and (Test-Path -LiteralPath $adFallbackCsv) -and [IO.File]::ReadAllText($adFallbackCsv) -ceq [IO.File]::ReadAllText($adBatchCsv) }
+    $adFailedCsv = Join-Path $tempRoot 'DevicesAD_Failed.csv'
+    $adFailed = & $runFakeAdExport 'All' $adFailedCsv
+    Test-Step 'an AD lookup that still fails stops the export instead of reporting computers absent, naming the domain, batch and computer' { $adFailed.ExitCode -ne 0 -and -not (Test-Path -LiteralPath $adFailedCsv) -and $adFailed.Output -match 'AD lookup failed in dom1\.test \(batch offset 0, 100 computer\(s\)\) for PC\(X\): fake domain controller unreachable' }
     $engineText = [IO.File]::ReadAllText((Join-Path $script:PackageRoot 'Scripts\SmartM365-Invoke-EndpointMigrationWithPsExec.ps1'))
     # Graph module installed by PowerShellGet in a folder missing from PSModulePath (redirected Documents).
     $fakeModules = Join-Path $tempRoot 'Redirected Documents\WindowsPowerShell\Modules'

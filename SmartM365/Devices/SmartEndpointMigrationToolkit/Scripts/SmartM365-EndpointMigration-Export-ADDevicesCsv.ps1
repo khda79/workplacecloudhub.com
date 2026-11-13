@@ -19,7 +19,9 @@ Provenance: copied from SmartM365/Devices/Windows11UpgradeToolkit/Scripts/SmartM
 Destination CSV path. Defaults to the shared cache for unscoped exports, or DevicesAD.csv next to -ComputerListPath.
 
 .PARAMETER ComputerListPath
-Computers.txt path. When provided, only those AD computers are queried.
+Computers.txt path. When provided, only those AD computers are queried, by batches of
+100 names per LDAP query and domain (one query per computer took about an hour for a
+1,500-computer Wave).
 
 .PARAMETER Domain
 Optional AD domain/controller passed to Get-ADComputer -Server. Refused for the shared cache.
@@ -29,7 +31,7 @@ When omitted, all domains in the current AD forest are exported.
 Regenerates the shared cache even when it is less than 12 hours old.
 
 .VERSION
-1.1.0
+1.2.0
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
@@ -46,7 +48,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.1.0"
+$ScriptVersion = "1.2.0"
+$AdQueryBatchSize = 100
 $AdInventoryFreshnessHours = 24
 
 function Write-Host {
@@ -141,6 +144,23 @@ function Get-ComputerList {
         } |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_.ComputerName) } |
         Sort-Object ComputerName -Unique)
+}
+
+function ConvertTo-LdapFilterValue {
+    # RFC 4515 escaping: a computer name never changes the structure of the LDAP filter.
+    param([Parameter(Mandatory=$true)][string]$Value)
+
+    return ($Value -replace '[\\]', '\5c' -replace '\*', '\2a' -replace '\(', '\28' -replace '\)', '\29' -replace "`0", '\00')
+}
+
+function New-AdComputerBatchFilter {
+    # Same match as one query per computer: Name equals the short name, or DNSHostName equals the requested name.
+    param([Parameter(Mandatory=$true)][object[]]$Computers)
+
+    $clauses = foreach ($computer in $Computers) {
+        '(name={0})(dNSHostName={1})' -f (ConvertTo-LdapFilterValue -Value $computer.ComputerName),(ConvertTo-LdapFilterValue -Value $computer.RequestedComputerName)
+    }
+    return ('(|{0})' -f ($clauses -join ''))
 }
 
 function ConvertTo-AdFilterStringLiteral {
@@ -255,27 +275,53 @@ function New-MissingAdExportRow {
 
 $export = if ($requestedComputers.Count -gt 0) {
     $foundByComputer = @{}
+    $selectedWatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $batchQueries = 0
+    $fallbackQueries = 0
     foreach ($domainTarget in $domainTargets) {
-        Write-Host ("Reading selected AD computers from domain: {0}" -f $domainTarget.DNSRoot) -ForegroundColor DarkCyan
-        foreach ($requestedComputer in $requestedComputers) {
-            # Only the first match is kept, so a computer already found is not queried in the next domains.
-            if ($foundByComputer.ContainsKey($requestedComputer.ComputerName)) { continue }
-            $nameLiteral = ConvertTo-AdFilterStringLiteral -Value $requestedComputer.ComputerName
-            $requestedLiteral = ConvertTo-AdFilterStringLiteral -Value $requestedComputer.RequestedComputerName
-            $queryParams = @{
-                Filter = ("Name -eq {0} -or DNSHostName -eq {1}" -f $nameLiteral,$requestedLiteral)
-                Server = $domainTarget.Server
-                Properties = $commonProperties
+        # Only the first match is kept, so a computer already found is not queried in the next domains.
+        $pending = @($requestedComputers | Where-Object { -not $foundByComputer.ContainsKey($_.ComputerName) })
+        if ($pending.Count -eq 0) { continue }
+        Write-Host ("Reading {0} selected AD computer(s) from domain: {1}" -f $pending.Count,$domainTarget.DNSRoot) -ForegroundColor DarkCyan
+        for ($offset = 0; $offset -lt $pending.Count; $offset += $AdQueryBatchSize) {
+            $batch = @($pending[$offset..([Math]::Min($offset + $AdQueryBatchSize, $pending.Count) - 1)])
+            $computers = @()
+            try {
+                $batchQueries++
+                $computers = @(Get-ADComputer -LDAPFilter (New-AdComputerBatchFilter -Computers $batch) -Server $domainTarget.Server -Properties $commonProperties -ErrorAction Stop)
+            }
+            catch {
+                # A failed batch (timeout, unreachable domain controller) is retried one computer at a
+                # time; a computer that still fails stops the export: it is never reported as absent.
+                Write-Host ("WARN: AD batch query failed in {0} (batch offset {1}, {2} computer(s)); retrying one computer at a time: {3}" -f $domainTarget.DNSRoot,$offset,$batch.Count,$_.Exception.Message) -ForegroundColor Yellow
+                $computers = foreach ($requestedComputer in $batch) {
+                    $fallbackQueries++
+                    $filter = "Name -eq {0} -or DNSHostName -eq {1}" -f (ConvertTo-AdFilterStringLiteral -Value $requestedComputer.ComputerName),(ConvertTo-AdFilterStringLiteral -Value $requestedComputer.RequestedComputerName)
+                    try { @(Get-ADComputer -Filter $filter -Server $domainTarget.Server -Properties $commonProperties -ErrorAction Stop) }
+                    catch { throw ("AD lookup failed in {0} (batch offset {1}, {2} computer(s)) for {3}: {4}" -f $domainTarget.DNSRoot,$offset,$batch.Count,$requestedComputer.RequestedComputerName,$_.Exception.Message) }
+                }
+                $computers = @($computers)
             }
 
-            foreach ($computer in @(Get-ADComputer @queryParams)) {
-                $key = Convert-ToComputerName -Name $computer.Name
-                if (-not [string]::IsNullOrWhiteSpace($key) -and -not $foundByComputer.ContainsKey($key)) {
-                    $foundByComputer[$key] = (New-AdExportRow -Computer $computer -DomainTarget $domainTarget)
+            # Each object is assigned to the requested computers it matches: Name equals the short
+            # name, or DNSHostName equals the requested name (an object whose Name differs keeps its
+            # AD Name column and takes the requested ComputerName).
+            foreach ($computer in $computers) {
+                $nameKey = Convert-ToComputerName -Name $computer.Name
+                $dnsHostName = [string]$computer.DNSHostName
+                foreach ($requestedComputer in $batch) {
+                    if ($foundByComputer.ContainsKey($requestedComputer.ComputerName)) { continue }
+                    $byName = (-not [string]::IsNullOrWhiteSpace($nameKey) -and $requestedComputer.ComputerName -eq $nameKey)
+                    $byDns = (-not [string]::IsNullOrWhiteSpace($dnsHostName) -and $requestedComputer.RequestedComputerName -ieq $dnsHostName)
+                    if (-not ($byName -or $byDns)) { continue }
+                    $row = New-AdExportRow -Computer $computer -DomainTarget $domainTarget
+                    $row.ComputerName = $requestedComputer.ComputerName
+                    $foundByComputer[$requestedComputer.ComputerName] = $row
                 }
             }
         }
     }
+    Write-Host ("Selected AD lookup: {0} computer(s), {1} found; {2} batch query(ies), {3} per-computer fallback query(ies); {4:N1} s" -f $requestedComputers.Count,$foundByComputer.Count,$batchQueries,$fallbackQueries,$selectedWatch.Elapsed.TotalSeconds) -ForegroundColor DarkCyan
 
     foreach ($requestedComputer in $requestedComputers) {
         if ($foundByComputer.ContainsKey($requestedComputer.ComputerName)) {
