@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 <#
 .SYNOPSIS
     Packaging engines for Smart IntunePackager.
@@ -19,7 +19,7 @@
     same contract.
 
 .VERSION
-    1.0.1
+    1.0.3
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -34,6 +34,61 @@ $script:IpOfficialToolUrlPattern = '^https://(raw\.githubusercontent\.com/micros
 $script:IpMicrosoftRootPattern = '^CN=Microsoft Root Certificate Authority( 2010| 2011)?,'
 
 #region Engine registry
+
+function Test-WchDemoAssetPath {
+    param([string]$Path)
+    $name=$Path.Replace('\','/')
+    return $name -match '(?i)(^|/)DemoAssets(/|$)|(^|/)[^/]*demo[-_ ]?assets[^/]*\.(zip|nupkg|7z|rar|tar|tgz|gz|intunewin)$'
+}
+
+function Assert-WchNoDemoAssets {
+    [CmdletBinding()]
+    param([Parameter(Mandatory=$true)][string[]]$Path)
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $budget=@{Entries=0;Bytes=[long]0}
+    function Read-WchReleaseArchive {
+        param([IO.Stream]$Stream,[string]$Name,[int]$Depth)
+        if($Depth -gt 8){throw "Release archive nesting limit exceeded: $Name"}
+        $zip=[IO.Compression.ZipArchive]::new($Stream,[IO.Compression.ZipArchiveMode]::Read,$true)
+        try {
+            foreach($entry in $zip.Entries){
+                $budget.Entries++;$budget.Bytes+=$entry.Length
+                if($budget.Entries -gt 100000 -or $budget.Bytes -gt 536870912){throw "Release archive inspection limit exceeded: $Name"}
+                if(Test-WchDemoAssetPath $entry.FullName){throw "DemoAssets are local-only: $Name!$($entry.FullName)"}
+                if($entry.Name){
+                    $content=$entry.Open();$memory=$null
+                    try {
+                        $head=New-Object byte[] 4;$read=$content.Read($head,0,4)
+                        $magic=$read -eq 4 -and $head[0] -eq 80 -and $head[1] -eq 75 -and (($head[2] -eq 3 -and $head[3] -eq 4) -or ($head[2] -eq 5 -and $head[3] -eq 6) -or ($head[2] -eq 7 -and $head[3] -eq 8))
+                        if($magic -or $entry.FullName -match '(?i)\.(zip|nupkg)$'){
+                            $memory=[IO.MemoryStream]::new();$memory.Write($head,0,$read);$content.CopyTo($memory);$memory.Position=0
+                            Read-WchReleaseArchive $memory ($Name+'!'+$entry.FullName) ($Depth+1)
+                        }
+                    }finally{$content.Dispose();if($memory){$memory.Dispose()}}
+                }
+            }
+        }finally{$zip.Dispose()}
+    }
+    foreach($inputPath in $Path){
+        if(Test-WchDemoAssetPath $inputPath){throw "DemoAssets are local-only: $inputPath"}
+        $item=Get-Item -LiteralPath $inputPath -Force -ErrorAction Stop
+        $pending=[Collections.Generic.Stack[IO.FileSystemInfo]]::new();$pending.Push($item)
+        while($pending.Count){
+            $file=$pending.Pop()
+            if(Test-WchDemoAssetPath $file.FullName){throw "DemoAssets are local-only: $($file.FullName)"}
+            if($file.Attributes -band [IO.FileAttributes]::ReparsePoint){throw "Release input must not be a reparse point: $($file.FullName)"}
+            if($file.PSIsContainer){foreach($child in @(Get-ChildItem -LiteralPath $file.FullName -Force -ErrorAction Stop)){$pending.Push($child)}}else{
+                $stream=[IO.File]::OpenRead($file.FullName)
+                try {
+                    $head=New-Object byte[] 4;$read=$stream.Read($head,0,4);$stream.Position=0
+                    $magic=$read -eq 4 -and $head[0] -eq 80 -and $head[1] -eq 75 -and (($head[2] -eq 3 -and $head[3] -eq 4) -or ($head[2] -eq 5 -and $head[3] -eq 6) -or ($head[2] -eq 7 -and $head[3] -eq 8))
+                    if($magic -or $file.Extension -match '(?i)^\.(zip|nupkg)$'){Read-WchReleaseArchive $stream $file.FullName 0}
+                }finally{$stream.Dispose()}
+            }
+        }
+    }
+}
 
 function Register-IpPackagingEngine {
     [CmdletBinding()]
@@ -102,6 +157,7 @@ function Test-IpPackageBuildRequest {
     elseif ($SourceFolder -and (Test-Path -LiteralPath $SourceFolder -PathType Container) -and (Test-IpPathIsUnder -Path $OutputFolder -Parent $SourceFolder)) {
         $errors.Add('Output folder must not be the source folder or one of its subfolders.')
     }
+    if(-not [string]::IsNullOrWhiteSpace($SourceFolder) -and (Test-Path -LiteralPath $SourceFolder -PathType Container)){try{Assert-WchNoDemoAssets -Path $SourceFolder}catch{$errors.Add($_.Exception.Message)}}
     return [string[]]$errors.ToArray()
 }
 
@@ -298,6 +354,7 @@ function Invoke-IpIntuneWinAppUtil {
         [ValidateRange(1, 1440)][int]$TimeoutMinutes = 120
     )
 
+    Assert-WchNoDemoAssets -Path $SourceFolder
     $expected = Join-Path -Path $OutputFolder -ChildPath ([IO.Path]::GetFileNameWithoutExtension($SetupFile) + '.intunewin')
     if (Test-Path -LiteralPath $expected) { Remove-Item -LiteralPath $expected -Force }
 
@@ -410,8 +467,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAib3lv3ISexBsG
-# 0YtQ36u3w6c2iZt+lgD5L1+sgvYCqaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBtQywi5m8BKRiz
+# vD4xr+7ClF97VfM/cZ7zTvjBa/GczaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -544,31 +601,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKhwkB2CN00moCaSG55MVj0fnETp2bj+8GU44SlesFn8MA0GCSqG
-# SIb3DQEBAQUABIIBgBcbpRU74uBnrx130n6TrCwfwlQwoaf2madcGcAmchyZYktO
-# IFp2WAPZsU8S6iBJ2jWLR19RPx9JAMrU0R36MWoYSUM+nhJexWYMiepKVrSuxhbY
-# FgS1mmu4ck1su86pBab2/OQDvYfOZKGvmN1ntvo1afYi7GHo+sVxgrMMN9cWgu6G
-# 0AzwJ752Rm8aF+8uc88iOKDYFRsfxzII8tSvixGtQ4dx+IQgoTSFHCZ6rXSDQhq0
-# cvjY2r5+M2rsAoFppA8xeX01h/RCwjyHDjiONknmI7G1KyzADGoTNhUPqopucw4z
-# DzrXhK2c5XlF9eP6NVGwDje1f30Q7JJA8W55bM75QVKJ4v7DTIpLCGvZrm9i4AAH
-# AlEpzYMJSrBvdpHnEveIWfhWm7GseaFmwr/V6zRammaeIOlLeefhgnX13zrqI1B3
-# DZYUYC7Xeqx1wNaoI+2q1yCi3bIoX7XFb6GVQ+ZOIkfRZ+vR4yhO6mXM+xCvWDiF
-# KNHWk37hjX+7Zh5KFaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIG4Hpd4JV+TRuOb+6jt1fBIirExGX/8EC6KVG+YhuSYyMA0GCSqG
+# SIb3DQEBAQUABIIBgF6+UODQvB9l2N9Eip2lJcGMS9M+vdbiVvv8cUO92tjZbuF3
+# 0/zARsiVQr5cgkPHJupHNDn7737jPMtuC7ng6L3NEsQOaoShFNl2+NdIOkhe1erw
+# lu6c+i+yDb1PytSBh7BpPD7g5iU5H9BJEoX45WeYgJUSzyh1K9JVZ5gS0N5x9LHA
+# ETaYJH8ZGcrZNmlk5p78wL4mGo1Bt40MSUycb28rD2lNj5VhHZVgbRgU4PEWWfut
+# o2deqqonaXnhDTrocCZ9MN/6TbBDHOBz5KHKcy8/yDrR95mJXCnCL0q+orM6pyhc
+# KCmdEjLeCVs3TF+yqEV8lPWlRZFhWves41phG4HAxHBjmI5SSzQD0Drnt8Gvs3Oi
+# QYBSTBpF24EHyXPgHEywWZfpI2IvQX7gzZzI1RiNAq+WL57jo9NMWYJcjd+hz6A4
+# GThLqlfPRgpRGYQ6fnmEniXl9B3ye/0eckjEY4iz6uzNFkVaidM+YO8O9KSQ6iYt
+# vEBNaQXWf1n8NrBYv6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgxMjQ5
-# MzVaMC8GCSqGSIb3DQEJBDEiBCCr9PtDIjU1vUnpzfC2HLCMhE7nOcsp3lhG//Zx
-# BZK7NzANBgkqhkiG9w0BAQEFAASCAgC2dlgW5S2++AOrTckeXrY9tFvOWNkaH/9q
-# 7dc0WeKa2LfbpZ5QRVX7QOPN/zHHNAuFh1YHGKjgA585rKT19LamXOn/BzNVRQzn
-# 0jQv8G0mHijhlvXhyJsdSPGM4/smU6t8aDXm0jt1pCXR320RxMfCVDDTn+FbNNEm
-# 9kZ+ix6JndBctG7GPki5Ukanjbr9l2XqkHoxB+AFdO9WXiWaadhgRhpr1JtoCjrU
-# 7OvAaiBPo/K0Ksaeca9ATiG/SJy4ySVNuMJ5V+CnyHM/AV8mf2MScSJmwcTfZr5R
-# TtxcPquvhmx/sv62iCB6ib2u0mFJBoSHCaIE+DybBKURE0dyO9nvUiayGv1ZDtuu
-# MamoGxqXM4WbSOjGO3mCSuI72LXIkumXOxN+WE6Ngj/0J9TGz2yxXt6JC0tSo//V
-# UEG50kNzpWNfvIvqPmP+BOemIR4B9v+cDR91fDJ8RKO2mItPlusUZc9BlkySR69J
-# pCiqijjkwrvC3jB88374hfmkTSFbDrrS0K6QcXqFIOpNGQLjNOs1U7xjOBnPnKcI
-# CguVAcyecgL9s/Y07SVhaDGhhA4AIGWI7hsmf9b4vQIRmv6tUmXWMAQY4EpL8x6H
-# IM/kMHDFouk/i+KxkUl7baWu0IYe6xMU7gNvDldDWyhub9lCfPgUFljH567hF4/0
-# pi4i2lMaKw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTMxMDE1
+# NTJaMC8GCSqGSIb3DQEJBDEiBCBQ4C+/G63StKcwRxrcFJLbsdKvyW5sx+STVxtZ
+# UApFQDANBgkqhkiG9w0BAQEFAASCAgBjU0whNH2pXWeqTdvUe/iw6I7B0oX6MIEe
+# pmSAcng9vz66VVw1PA1N8O/Mr7r7ZQXL7ZhPDUT+9mMGfCOmWJHMw56ZC1F0sKd5
+# yCfrY5eHaMtBrmTGFGwiEoAkFr5A+kMgxHhEa8ldyOQoDu6cMAcmQgcuritlHGtZ
+# sQ8nokyg7Z9LUxRKstnibpCajYzREdISOKCjqOHRXTlC8fNfycIGekNqgHrIKigZ
+# 46Xpl02oSN3mZ8lemXpUtZ4uhEenZHu6q4P6ApP0wRAjKMeHoYObtLIL0ADmzVUl
+# IjcUN3GhGD7Ly4BfDTDGwSr37guTamccJez4A/Mb4cDhmcYTMxBRtwdoUfbgCSuy
+# 4rrq1rTVw9HZWjTYEWMJgvhL+ZnczkJ7NhDwP+/D6VS4wM4G6RM4gN3pIBmUnyS4
+# KQzIt4S40J2AtL1waQUsvilI5KUyHiBU2akDP9kkXansEKo0aSbARP4mz7l8mXNF
+# 1Bsstg+JHu0fO+qRvxasfuZdR3JG2WSiPmouh5PQeA3bBE6uERfVuuNwSA7YaLMu
+# rz0RYpTtCBkyYwhMDEheK3nczQYpKVR7Pi/AegsOALV6+gf5VRJxqRjersWvkTgz
+# qlRemkKPT5EJDnqy1Pp1Yf9aCQvFzKdgfBWqQaYAdmnYPoSQ++zGssfz5szQqcqH
+# n677zVVKbA==
 # SIG # End signature block

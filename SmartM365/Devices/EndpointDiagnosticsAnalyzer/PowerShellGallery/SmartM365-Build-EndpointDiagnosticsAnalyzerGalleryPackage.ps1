@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validates or packages the complete application runtime, including offline demo dependencies.
 .VERSION
-1.0.1
+1.0.3
 #>
 [CmdletBinding()]
 param(
@@ -15,6 +15,62 @@ param(
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+
+function Test-WchDemoAssetPath {
+    param([string]$Path)
+    $name=$Path.Replace('\','/')
+    return $name -match '(?i)(^|/)DemoAssets(/|$)|(^|/)[^/]*demo[-_ ]?assets[^/]*\.(zip|nupkg|7z|rar|tar|tgz|gz|intunewin)$'
+}
+
+function Assert-WchNoDemoAssets {
+    [CmdletBinding()]
+    param([Parameter(Mandatory=$true)][string[]]$Path)
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $budget=@{Entries=0;Bytes=[long]0}
+    function Read-WchReleaseArchive {
+        param([IO.Stream]$Stream,[string]$Name,[int]$Depth)
+        if($Depth -gt 8){throw "Release archive nesting limit exceeded: $Name"}
+        $zip=[IO.Compression.ZipArchive]::new($Stream,[IO.Compression.ZipArchiveMode]::Read,$true)
+        try {
+            foreach($entry in $zip.Entries){
+                $budget.Entries++;$budget.Bytes+=$entry.Length
+                if($budget.Entries -gt 100000 -or $budget.Bytes -gt 536870912){throw "Release archive inspection limit exceeded: $Name"}
+                if(Test-WchDemoAssetPath $entry.FullName){throw "DemoAssets are local-only: $Name!$($entry.FullName)"}
+                if($entry.Name){
+                    $content=$entry.Open();$memory=$null
+                    try {
+                        $head=New-Object byte[] 4;$read=$content.Read($head,0,4)
+                        $magic=$read -eq 4 -and $head[0] -eq 80 -and $head[1] -eq 75 -and (($head[2] -eq 3 -and $head[3] -eq 4) -or ($head[2] -eq 5 -and $head[3] -eq 6) -or ($head[2] -eq 7 -and $head[3] -eq 8))
+                        if($magic -or $entry.FullName -match '(?i)\.(zip|nupkg)$'){
+                            $memory=[IO.MemoryStream]::new();$memory.Write($head,0,$read);$content.CopyTo($memory);$memory.Position=0
+                            Read-WchReleaseArchive $memory ($Name+'!'+$entry.FullName) ($Depth+1)
+                        }
+                    }finally{$content.Dispose();if($memory){$memory.Dispose()}}
+                }
+            }
+        }finally{$zip.Dispose()}
+    }
+    foreach($inputPath in $Path){
+        if(Test-WchDemoAssetPath $inputPath){throw "DemoAssets are local-only: $inputPath"}
+        $item=Get-Item -LiteralPath $inputPath -Force -ErrorAction Stop
+        $pending=[Collections.Generic.Stack[IO.FileSystemInfo]]::new();$pending.Push($item)
+        while($pending.Count){
+            $file=$pending.Pop()
+            if(Test-WchDemoAssetPath $file.FullName){throw "DemoAssets are local-only: $($file.FullName)"}
+            if($file.Attributes -band [IO.FileAttributes]::ReparsePoint){throw "Release input must not be a reparse point: $($file.FullName)"}
+            if($file.PSIsContainer){foreach($child in @(Get-ChildItem -LiteralPath $file.FullName -Force -ErrorAction Stop)){$pending.Push($child)}}else{
+                $stream=[IO.File]::OpenRead($file.FullName)
+                try {
+                    $head=New-Object byte[] 4;$read=$stream.Read($head,0,4);$stream.Position=0
+                    $magic=$read -eq 4 -and $head[0] -eq 80 -and $head[1] -eq 75 -and (($head[2] -eq 3 -and $head[3] -eq 4) -or ($head[2] -eq 5 -and $head[3] -eq 6) -or ($head[2] -eq 7 -and $head[3] -eq 8))
+                    if($magic -or $file.Extension -match '(?i)^\.(zip|nupkg)$'){Read-WchReleaseArchive $stream $file.FullName 0}
+                }finally{$stream.Dispose()}
+            }
+        }
+    }
+}
+
 function Assert-SedaSyntax([string]$Path){$errors=$null;[void][Management.Automation.PSParser]::Tokenize((Get-Content $Path -Raw),[ref]$errors);if($errors.Count){throw "PowerShell syntax failed: $Path"}}
 function Assert-SedaSignature([string]$Path,[string]$Thumbprint){$s=Get-AuthenticodeSignature $Path;$actual=if($s.SignerCertificate){$s.SignerCertificate.Thumbprint.Replace(' ','').ToUpperInvariant()}else{''};if($s.Status-ne'Valid'-or$actual-ne$Thumbprint.Replace(' ','').ToUpperInvariant()){throw "Authenticode validation failed: $Path; status=$($s.Status); signer=$actual"}}
 $moduleRoot=Join-Path $PSScriptRoot 'Module';$manifestPath=Join-Path $moduleRoot 'SmartM365.EndpointDiagnosticsAnalyzer.psd1';$manifest=Test-ModuleManifest $manifestPath;$prerelease=[string]$manifest.PrivateData.PSData['Prerelease'];$packageVersion=if($prerelease){"$($manifest.Version)-$prerelease"}else{[string]$manifest.Version}
@@ -22,6 +78,7 @@ $version=Get-Content (Join-Path $SourceRoot 'SmartM365-EndpointDiagnosticsAnalyz
 $packagePath=Join-Path (Join-Path $OutputRoot $manifest.Name) ([string]$manifest.Version);$fullOutput=[IO.Path]::GetFullPath($OutputRoot).TrimEnd('\')+'\';if(-not[IO.Path]::GetFullPath($packagePath).StartsWith($fullOutput,[StringComparison]::OrdinalIgnoreCase)){throw 'Unsafe output path'};if(Test-Path $packagePath){if(-not$Force){throw "Build target exists: $packagePath"};Remove-Item $packagePath -Recurse -Force};New-Item -ItemType Directory $packagePath -Force|Out-Null
 $moduleFiles=@('SmartM365.EndpointDiagnosticsAnalyzer.psd1','SmartM365.EndpointDiagnosticsAnalyzer.psm1');$runtimeFiles=@('SmartM365-EndpointDiagnosticsAnalyzer.version.json.txt','SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1','SmartM365.GuiDemo.ps1','SmartM365.GuiDemo.Reports.ps1','SmartM365-EndpointDiagnosticsAnalyzer-Demo.ps1','Start-SmartM365-EndpointDiagnosticsAnalyzer-Demo.cmd','HardwareReadiness.ps1','SmartM365.GuiSplash.ps1','Start-SmartM365-EndpointDiagnosticsAnalyzer-GUI.cmd','WorkplaceCloudHub-lockup-WPF.png','WorkplaceCloudHub.ico');$deployFiles=@('SmartM365-EndpointDiagnosticsAnalyzer-Install.ps1','SmartM365-EndpointDiagnosticsAnalyzer-Uninstall.ps1','SmartM365-EndpointDiagnosticsAnalyzer-Detection.ps1')
 foreach($file in $moduleFiles){Copy-Item (Join-Path $moduleRoot $file) (Join-Path $packagePath $file) -Force};foreach($file in $runtimeFiles){$dest=Join-Path (Join-Path $packagePath 'Runtime') $file;New-Item -ItemType Directory (Split-Path -Parent $dest) -Force|Out-Null;Copy-Item (Join-Path $SourceRoot $file) $dest -Force};foreach($file in $deployFiles){$dest=Join-Path (Join-Path $packagePath 'Runtime\Deploy') $file;New-Item -ItemType Directory (Split-Path -Parent $dest) -Force|Out-Null;Copy-Item (Join-Path (Join-Path $SourceRoot 'Deploy') $file) $dest -Force}
+Assert-WchNoDemoAssets -Path $packagePath
 $files=@(Get-ChildItem $packagePath -Recurse -File);$ps=@($files|Where-Object{$_.Extension-in'.ps1','.psm1','.psd1'});foreach($file in $ps){Assert-SedaSyntax $file.FullName;if(-not$SkipAuthenticodeValidation){Assert-SedaSignature $file.FullName $ExpectedSignerThumbprint}};[void](Test-ModuleManifest (Join-Path $packagePath 'SmartM365.EndpointDiagnosticsAnalyzer.psd1'))
 $hashes=[ordered]@{}
 foreach($name in $runtimeFiles | Where-Object { $_ -ne 'SmartM365-EndpointDiagnosticsAnalyzer.version.json.txt' }){$hashes[$name]=(Get-FileHash -LiteralPath (Join-Path (Join-Path $packagePath 'Runtime') $name)).Hash}
@@ -32,8 +89,8 @@ $version | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path (Join-P
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJ7WcVQbF91/rp
-# TXDfg32NaOmtTQ2Yw49pmDXAMaQDb6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD7WrykOK6SCeW0
+# cKTXek4rzgbd9E1+r0sty1GNUbj4HaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -166,31 +223,31 @@ $version | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path (Join-P
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILPMyJ6aB6/Ohsy+I30tWlcv2skn+9GoNJEPqEVqeqtWMA0GCSqG
-# SIb3DQEBAQUABIIBgIAFraNYWg1EwHsIG6yPlcUOVc+yZVrtBJdDF4/Negz9NHMR
-# X5J/T9vbPCE9iUxfNQISs+s0/9XfVF3bNaD2VswpMCpoAvT0DkWlk2s0PM1xIXFe
-# Tm1ORZLLWc/7h08BJabwFq7J+KuDQ6ol4BvW685fprBLGsbhhBsdD+ZWT/LuCAet
-# /BURT3nGFVXJLSIqTKyq9E2C0SMkRJSOcDingRAtYkUlqTPkKnPfCXy8gEYlaNAU
-# BhojRJI26G6irYhOZTBGok3H/MAetgcyKz9Kdbwc4Q5UiEiq0gj7ugqAvL31WC60
-# PoWFpxgXQxqDnuJQ0p9rgLL4dB+Q3of4Tz5UnPbF1au95h5/lTmbevs3GpActZdC
-# 08oit1I0Ojq/nhXthweQudx79Os53ieCcSBTLnQyHsoEEZkZ53JpW7QnKJxYp68E
-# qGMrHVAW9DrTVdVhtAYBYZ69S0Cypd/UFFq7KjRYSQ9hSn2r9EiFG3y4jyuJK0bi
-# SzzC3ziGRYTHHD2AEqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICDc42gbcQRLsb/vg5qIeywxFC1RYHA+5X1Qebk7YqFWMA0GCSqG
+# SIb3DQEBAQUABIIBgDno8q59JVtyyu3Rwi2USm16QZZdhHfzNOk8KWRBwW80Fz9v
+# ar7tP3m+voZhnKqrMXmz1T+KmC/X5HJQugyha9BMbz+vTZ1YFeOSnOeRnvBrwNYE
+# yoc7HAfjytU0jaBx+EUSvYOHeGPAuaC7wZZirrEa8G+fOoO2nReeLNSGRl4QEziZ
+# dV4BTCKwFEcbkURd0uHTQ2aJ9UXxBoz+05FyGCy9wyBewVNR1SbziBYiCXf0p8dG
+# jah7cA+5+lJe49veJt8ab+ILsVR1iQrbFvCDM2Ug600Azp3l+kAUgxrE+uE46qwT
+# SxZFGVWA1qIMG4g4d8SQHiGXUzltTnU8GLYv8PqnD31q7VyzKHDSTBgu3E2gXvPu
+# mglh4sO/DPpnOPAi7PKUK1NueENhEPbZiXghV+hWnFdDqEfiN2t5Xt2HKBvJPYTR
+# rBC6eyH9KoFmKWbDA1aF4JHXEBKS4xxiRr4pVjw63tdTH9rStQIp1+LKaQRMVNGI
+# DqXxrWiV28ALpGr/1aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMjQw
-# MDdaMC8GCSqGSIb3DQEJBDEiBCBJleV2SEsfzJ0tH6l80go/TES6Xie4zEUPdllT
-# Yq9E6zANBgkqhkiG9w0BAQEFAASCAgBTtuN/qmlxNWijNhthCRkKxV7IogB8qdxr
-# VuTQFwrr2MFMyINLv96f7bcaxM6vRmU9B/C8PlIQ9qFHtBe1s6c2WKCyTYNQiR7O
-# lD6/+X2QHOTtJKvTC6J2yj58KH+qj4bxo5AqwgG3DcUA52f7cZ7obb99AjrBuDES
-# p8WKIq7f+CQn6JH8WCGAlYQsjqVB5bETobEk8OqhZm1A2vFUmdVXrYGyjIy2vw7/
-# l1DqNXOjDt1/vcDFJcBLxw2k3do44F8KHlkHlzcRf34mjy8ZlZxAVaBXllpCs0+I
-# 224KNBojaeHwmJK3A3TH7Hd99lv0FEa7X9gHKg9B7XthnYnhpYIfo6PC9/A/dF+J
-# HeIZGXausVuO4fmdvuPHWqWHynIDt4yjwtZQyvMzTLIzLDepwVE4toVuRhcTtCoI
-# qPZR4ZuN58NIQuZTCfN+JhD8MKcbjw7AK4Ya9P30r5/xkqSICQFJcNgw8iAeVl2D
-# uae15j0bZ9xRiyhCPW/FuJQ3sgWIomqGd8H+w1NWo6nnfu8UVBBeyZ+/2OA0Wpz7
-# fdZV00uipjtlbIuSk1/TYwC3BJftRasq0kUspR4wU0ZnG6XIqNhEX/O6IqzhPwO4
-# +b/mldx+q22FrjVeI8oosqMRVMO9OVCBJAlRv6ocPgdk4z8DSlL2jDgXtZ9fenvG
-# auUePXOoFQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTMxMDE1
+# NTFaMC8GCSqGSIb3DQEJBDEiBCCnHCIap+pq7k3F7Q7hVtPExf9XWhy/PrMPHM5X
+# ZbD/JTANBgkqhkiG9w0BAQEFAASCAgAEqIb/m2pKu/TdjsL1sZ0jR3e6k0hRv2Tu
+# q6vU8e7KPIu82olLzrhixCYtJWX1dtDkvB3XDYVvTD1WS1BELIuieAL4Gom3HUUq
+# 9MgHkm+EiQIfeE9k0fnaFS0E+9z0v7xF7lAIypi+6Sj/cGRUqCGnLD/L517By7ux
+# A1UFlS8adS9IT44U2D7h5r02Kdwu4+mOs2U5HfR3jscb51e1OIf3wLG45AIkR/8G
+# zQnlqkaFgI37wYIFMEpB25tGOxzUchiQQfSSbIt3ZHBkWjZX6XhX5ioxli8PmtNY
+# RLyAmTeubxslvR+A76Ag0XbIL7G06+ynkk/TFHypeKI2jYj6DlKS3bInnslWxxF8
+# gxPaTRY2MRzCbTgvA4ZCgRwYcMTcySm1yAhGzfOzPiycSwmds0GLpOHFVFsSvXj4
+# PZIlj/Yd5BmZe91LHLfHAN62ysnCZQba3mOKRiVC2Pedvb88Uw0v61mCzrNEqE+0
+# pTvoXSCg8Cm7lCweEaKwyuLia/vovgXhHRtnwCLvZME6xzWbXwbOpdDXLvOAwGXP
+# BsVguNkBHUGh6GoPqYZYlJo3UugEzWkR3S9G0GDtXipMUUxG7M+7X7KxTPFNxq15
+# U4mxsJfpuHkd69A/e+OhH+B4MKQDF8V2JPcE3uPWVlBRf3XwrtAZYbB9z/LmkRYi
+# dQ3iL/AQyg==
 # SIG # End signature block

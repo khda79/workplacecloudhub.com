@@ -1,4 +1,7 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
+<# .VERSION
+1.0.2
+#>
 
 <#
 .SYNOPSIS
@@ -19,6 +22,62 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+
+function Test-WchDemoAssetPath {
+    param([string]$Path)
+    $name=$Path.Replace('\','/')
+    return $name -match '(?i)(^|/)DemoAssets(/|$)|(^|/)[^/]*demo[-_ ]?assets[^/]*\.(zip|nupkg|7z|rar|tar|tgz|gz|intunewin)$'
+}
+
+function Assert-WchNoDemoAssets {
+    [CmdletBinding()]
+    param([Parameter(Mandatory=$true)][string[]]$Path)
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $budget=@{Entries=0;Bytes=[long]0}
+    function Read-WchReleaseArchive {
+        param([IO.Stream]$Stream,[string]$Name,[int]$Depth)
+        if($Depth -gt 8){throw "Release archive nesting limit exceeded: $Name"}
+        $zip=[IO.Compression.ZipArchive]::new($Stream,[IO.Compression.ZipArchiveMode]::Read,$true)
+        try {
+            foreach($entry in $zip.Entries){
+                $budget.Entries++;$budget.Bytes+=$entry.Length
+                if($budget.Entries -gt 100000 -or $budget.Bytes -gt 536870912){throw "Release archive inspection limit exceeded: $Name"}
+                if(Test-WchDemoAssetPath $entry.FullName){throw "DemoAssets are local-only: $Name!$($entry.FullName)"}
+                if($entry.Name){
+                    $content=$entry.Open();$memory=$null
+                    try {
+                        $head=New-Object byte[] 4;$read=$content.Read($head,0,4)
+                        $magic=$read -eq 4 -and $head[0] -eq 80 -and $head[1] -eq 75 -and (($head[2] -eq 3 -and $head[3] -eq 4) -or ($head[2] -eq 5 -and $head[3] -eq 6) -or ($head[2] -eq 7 -and $head[3] -eq 8))
+                        if($magic -or $entry.FullName -match '(?i)\.(zip|nupkg)$'){
+                            $memory=[IO.MemoryStream]::new();$memory.Write($head,0,$read);$content.CopyTo($memory);$memory.Position=0
+                            Read-WchReleaseArchive $memory ($Name+'!'+$entry.FullName) ($Depth+1)
+                        }
+                    }finally{$content.Dispose();if($memory){$memory.Dispose()}}
+                }
+            }
+        }finally{$zip.Dispose()}
+    }
+    foreach($inputPath in $Path){
+        if(Test-WchDemoAssetPath $inputPath){throw "DemoAssets are local-only: $inputPath"}
+        $item=Get-Item -LiteralPath $inputPath -Force -ErrorAction Stop
+        $pending=[Collections.Generic.Stack[IO.FileSystemInfo]]::new();$pending.Push($item)
+        while($pending.Count){
+            $file=$pending.Pop()
+            if(Test-WchDemoAssetPath $file.FullName){throw "DemoAssets are local-only: $($file.FullName)"}
+            if($file.Attributes -band [IO.FileAttributes]::ReparsePoint){throw "Release input must not be a reparse point: $($file.FullName)"}
+            if($file.PSIsContainer){foreach($child in @(Get-ChildItem -LiteralPath $file.FullName -Force -ErrorAction Stop)){$pending.Push($child)}}else{
+                $stream=[IO.File]::OpenRead($file.FullName)
+                try {
+                    $head=New-Object byte[] 4;$read=$stream.Read($head,0,4);$stream.Position=0
+                    $magic=$read -eq 4 -and $head[0] -eq 80 -and $head[1] -eq 75 -and (($head[2] -eq 3 -and $head[3] -eq 4) -or ($head[2] -eq 5 -and $head[3] -eq 6) -or ($head[2] -eq 7 -and $head[3] -eq 8))
+                    if($magic -or $file.Extension -match '(?i)^\.(zip|nupkg)$'){Read-WchReleaseArchive $stream $file.FullName 0}
+                }finally{$stream.Dispose()}
+            }
+        }
+    }
+}
 
 function Assert-SafeChildPath {
     param(
@@ -172,6 +231,7 @@ function New-ForwardSlashZip {
 
     Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
+    Assert-WchNoDemoAssets -Path $SourceRoot
     $resolvedSource = [IO.Path]::GetFullPath($SourceRoot).TrimEnd('\', '/')
     $zip = [IO.Compression.ZipFile]::Open($DestinationPath, [IO.Compression.ZipArchiveMode]::Create)
     try {
@@ -284,8 +344,8 @@ if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf)) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA682BB4H4sVRA7
-# PeIwWUCuMO3r3B2jkcnLSqL4YJpTH6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDA81lYiJxNo3s4
+# rZAgzw43pAC1Ke0EtVumVQnQ/oTTR6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -418,31 +478,31 @@ if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf)) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMK1u0329obyRljyn7Mun5snoY1pqQHrtNXoY3+hXITlMA0GCSqG
-# SIb3DQEBAQUABIIBgKTeUMTLSqYYu34Y9krBPurc3aa9tXi6Rghtg86A8ti2nQ9U
-# 1AmIv5LhyGnBJo2cK2fC9orZfPzb6dN9hW6Uw9pY4NSXEYGVTCmFkTEc9c5bxoJY
-# VWwnHmDV20+6DuF/04lx3tcrxFRfzyJKSY58919QXbasfDnR9woudNyKy+wKW5Ng
-# Gl+xY7S/910DeEomUBxg6sVu1WOO/N24Juloza/S/FJf2rBWi2Wc83mvLJSmw0oz
-# +Lw5WPr9Mlm1HKQrs1p5HKCgnnn/F55kybBXlnpL8NPsSN77NMvFxgOt0AAKoJr1
-# d1Yas9DZuJJOAx/ebw2oZHEwSOm2Zje+QGf+NPCxoYbrMddHXye8qJVNqFMxqZhb
-# VGT4vksMWTyyQId+aesN/2nIor/WEETR4PBbxBMpQCuxqJ65yGbuMlM/jc+fB8Gj
-# ZS+8Rn2alaXxVvvKbFOWtGxKw+9lQYgixrsWk4zLyzGBwlB74xpqmeUUMP25FAnR
-# 1XXH3FDTb0gN8qdDGqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJxtKm7dYOlCgRllQVkx4Lcy6m1HCxj1ehUWFUZEuSLHMA0GCSqG
+# SIb3DQEBAQUABIIBgJy5E2ecqOai/5jA3AyZkCloBHYoYElkDwmJqPrHe0paiVys
+# TbAozrm8L8hjNNvV54EmMmLau18QNLT3bxRIOPxUyy2gXKffSe/jicwCvV1YBE6A
+# MCgVeIcarhNWcCJ3mG3ndNilkEWks+dynOSwMhyAvMzUU9qRwXSYkb0Yz9sKDCCI
+# /xkoITdss6sBn02j6HqvU/xK/gD4UvZNpX7+Y9WFbL14h1S71O010Ub1QCJdokoc
+# QSX7GxHunblvxax6tnq30knUJcfGOdEywNi8yMmf4c9yWm9Dz5bXcAcGCY0eiiQR
+# j+bMuL5SJtAzB4K6Fzry0KEUd5K17WVsyJTX4SqvKeRzAO0AWNQQzD92NW6hCebZ
+# yfskHfvWo1cMIYNMD0pjj3sY2KbqdvgsKT4Qm18Z5hS3pmKmO7IWhwx9/Lt5Tnv4
+# XwdAHqPQVHbfmWGbP9cU34AwYhO1xmO04LsNT3U+LyCUd/Fd3mxH7wmyDoGtalWm
+# 9/iyic+G7Bzsr53tXaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMjQy
-# MjJaMC8GCSqGSIb3DQEJBDEiBCC3KAdtqhYLb+rdEVR1K/d18dDgiz1n+888gHwv
-# KWB8XDANBgkqhkiG9w0BAQEFAASCAgA1k3HwMdVUpPz4EzV0/zSvJBfDEw67iQo9
-# rpykXSaDa6cQG/oojeP2z0Ou0fz86Lq9OlH/nXnfNrgsWxaPjlbi+SKDCgQIepiP
-# NsGxvgI0DKlQLN/MhOnRVEnu0dqu7Xl6yuIm23uEHSEl6iXoCMosZ2KxdrNOyTM9
-# 60Ev5Z7eHxG3qcUOa+k3htMMDJZ5lvJlQBdPtWhCnRosn9Pbrd4pCEnMkFAH+B1T
-# Wl5qSl/62ILWt/sTNWp+XNTD2ZIkk6+1+f1xg8q1J6HOY+7Fv+UgkMJriIyYXkqH
-# Oke6Fxo/X3Ul1FXXdCyli/kwikTIY1D9qUbQ8G2xBwtHzjjTLwTLLAa4Zax9KVqn
-# Nt2au29qgKiKBeXy9W6ena76Wdqzy0BSTRegDn+0sErcG7GpIV0GGeTU2oVhQoYG
-# 3rxucLIP0uBlD3MxW3PzKGNpvf0Fmw04MJX0hgzrPeIXNCN0GkHcad3PAZQVpyT/
-# TDwXAkmM/fBKy/6hivCemW9y4GmcAc9a03OxJKna0r8GDjGVMutIkq49anK859XK
-# FbAbslYDs8GwwQ2LlEhBRx5nqJabdTzZf+63cO4RDSC1XSCKggNzLShEB7S5bNNc
-# vK/2KJqGBp1QXC+AhOIhkIOSHTPuKKqItSmm8OJwBntkjn2Idb2Kyom9QFuA7aD1
-# 3Fh3Nb/qaQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTMxMDE1
+# NTFaMC8GCSqGSIb3DQEJBDEiBCC9R2aO3tE+5Z1d7Tbd6U1TEqqz/w6/pIQ0lD7l
+# p0RZmzANBgkqhkiG9w0BAQEFAASCAgAkFScjwlKt0SGG65AgEx3cCQwaoj6iaT5N
+# Gmyb2tVtwy9uW7mdv88gEMutjzA/wcWMP5DZ7ZqPkvbpN8N5tLxu40/BIqfBHeXD
+# +RJe8E2eNXQZ5F/Ok0wikssVoItq8mw5Lksvuj1HA4igTVNRx5Vk40JqohSNurEX
+# z77S6Sw4ch/BJz1i5pkdSLDqB8Kv9fGfB0SgomxJdrx/irdYsTx3q+YNKDtblUKl
+# o1h8rnbqaCiS/zTdY8mcaQyPBCx13ooG1PQxTz2p/5dvd+gfZVEvOZV4l1fdIjhu
+# PDfVCZrOTAsXByDgtOyHQ5SJWspgqQFqbFtE2SOhlDLG8U8ut+EEfjSiG+Nc6P9G
+# oKrCqrKi+1n2qjam4p96wDbw5af1306m6ro3+ocMRs8LOlyjQZgok1JMiwRPR24x
+# jbwlkBvJj9buSuap1zzUZsAGC7q/p87teGwymF3N7Cf8Sq376OdfDw6iDmDV1WKk
+# mfAe9DKDACWzsq2E8QvnMS9/7BYn1bHtRoP4oOCx+uJfJctL/YOaXVfX+4P0dtHA
+# kvUiR7ItawRDtEFpVKdq0s2E9C9LlBlup09u7ot0793p547eNfzkCqz4tnV9gPm9
+# cxUPjJL6+qbh5IleIPQV5/ykpLNBh1vVcqujFXqajhWd90kz8nDAlaRs3ZQFQ6qx
+# 1LNOqY1JJw==
 # SIG # End signature block

@@ -1,11 +1,13 @@
 """Build a local, source-only release candidate from an explicit Git file list."""
-__version__ = "1.0.7"
+__version__ = "1.0.9"
 import argparse
 import hashlib
 import json
 from pathlib import Path
 import subprocess
 import zipfile
+import io
+import re
 
 PROJECT = Path(__file__).resolve().parents[1]
 REPO = PROJECT.parents[1]
@@ -14,6 +16,31 @@ VERSION = '1.0.80'
 ROOT_FILES = ['LICENSE', 'NOTICE', 'Install-WorkplaceCloudHub-CodeSigningCertificate.cmd',
               'Install-WorkplaceCloudHub-CodeSigningCertificate.ps1',
               'Certificates/workplacecloudhub.com-CodeSigning-D70ECB7B00377EBFB76B304C08DFC6620584E114.cer']
+
+
+def is_demoassets_path(path):
+    value = str(path).replace('\\', '/')
+    return bool(re.search(r'(?i)(^|/)DemoAssets(/|$)|(^|/)[^/]*demo[-_ ]?assets[^/]*\.(zip|nupkg|7z|rar|tar|tgz|gz|intunewin)$', value))
+
+
+def assert_no_demoassets_archive(data, name, depth=0, budget=None):
+    if budget is None:
+        budget = [0, 0]
+    if depth > 8:
+        raise ValueError(f'Release archive nesting limit exceeded: {name}')
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        for entry in archive.infolist():
+            budget[0] += 1
+            budget[1] += entry.file_size
+            if budget[0] > 100000 or budget[1] > 536870912:
+                raise ValueError(f'Release archive inspection limit exceeded: {name}')
+            if is_demoassets_path(entry.filename):
+                raise ValueError(f'DemoAssets are local-only: {name}!{entry.filename}')
+            if not entry.is_dir():
+                with archive.open(entry) as stream:
+                    head = stream.read(4)
+                    if entry.filename.lower().endswith(('.zip', '.nupkg')) or head in (b'PK\x03\x04', b'PK\x05\x06', b'PK\x07\x08'):
+                        assert_no_demoassets_archive(head+stream.read(), name+'!'+entry.filename, depth+1, budget)
 
 
 def main():
@@ -35,7 +62,11 @@ def main():
         raise SystemExit('Release inputs must be clean and committed before packaging.')
     records = []
     excluded_workspace_markers = []
+    excluded_demoassets = []
     for relative in sorted(files):
+        if is_demoassets_path(relative):
+            excluded_demoassets.append(relative)
+            continue
         path = REPO / relative
         product_relative = relative.removeprefix(PREFIX)
         if relative.startswith(PREFIX):
@@ -56,9 +87,12 @@ def main():
         if path.is_symlink() or not path.is_file():
             raise SystemExit(f'Invalid input: {relative}')
         data = path.read_bytes()
+        if path.suffix.lower() in ('.zip', '.nupkg') or data[:4] in (b'PK\x03\x04', b'PK\x05\x06', b'PK\x07\x08'):
+            assert_no_demoassets_archive(data, relative)
         records.append({'path': relative, 'sha256': hashlib.sha256(data).hexdigest().upper(), 'bytes': len(data)})
     manifest = {'product': 'Smart SharePoint Migration Toolkit', 'version': VERSION, 'status': 'release-build',
                 'excludedWorkspaceMarkers': len(excluded_workspace_markers),
+                'excludedDemoAssets': len(excluded_demoassets),
                 'baseCommit': subprocess.check_output(['git', '-C', str(REPO), 'rev-parse', 'HEAD'], text=True).strip(),
                 'includesUncommittedChanges': bool(subprocess.check_output(
                     ['git', '-C', str(REPO), 'status', '--porcelain', '--untracked-files=all', '--', PREFIX, *ROOT_FILES], text=True).strip()),
@@ -72,6 +106,7 @@ def main():
         assert bundle.testzip() is None
         for record in records:
             assert hashlib.sha256(bundle.read(record['path'])).hexdigest().upper() == record['sha256']
+    assert_no_demoassets_archive(archive.read_bytes(), archive.name)
     digest = hashlib.sha256(archive.read_bytes()).hexdigest().upper()
     archive.with_suffix('.sha256').write_text(f'{digest}  {archive.name}\n', encoding='ascii')
     archive.with_suffix('.manifest.json').write_bytes(manifest_bytes)

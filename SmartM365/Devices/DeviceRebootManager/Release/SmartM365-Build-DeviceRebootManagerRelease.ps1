@@ -27,7 +27,7 @@ This script never publishes to GitHub, PowerShell Gallery, or Microsoft Intune.
     -IntuneWinPath C:\Temp\SmartM365-DeviceRebootManager-0.1.1.intunewin `
     -OutputRoot C:\Temp\DeviceRebootManager-Release
 .VERSION
-1.1.0
+1.1.2
 #>
 
 [CmdletBinding()]
@@ -44,6 +44,62 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+
+function Test-WchDemoAssetPath {
+    param([string]$Path)
+    $name=$Path.Replace('\','/')
+    return $name -match '(?i)(^|/)DemoAssets(/|$)|(^|/)[^/]*demo[-_ ]?assets[^/]*\.(zip|nupkg|7z|rar|tar|tgz|gz|intunewin)$'
+}
+
+function Assert-WchNoDemoAssets {
+    [CmdletBinding()]
+    param([Parameter(Mandatory=$true)][string[]]$Path)
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $budget=@{Entries=0;Bytes=[long]0}
+    function Read-WchReleaseArchive {
+        param([IO.Stream]$Stream,[string]$Name,[int]$Depth)
+        if($Depth -gt 8){throw "Release archive nesting limit exceeded: $Name"}
+        $zip=[IO.Compression.ZipArchive]::new($Stream,[IO.Compression.ZipArchiveMode]::Read,$true)
+        try {
+            foreach($entry in $zip.Entries){
+                $budget.Entries++;$budget.Bytes+=$entry.Length
+                if($budget.Entries -gt 100000 -or $budget.Bytes -gt 536870912){throw "Release archive inspection limit exceeded: $Name"}
+                if(Test-WchDemoAssetPath $entry.FullName){throw "DemoAssets are local-only: $Name!$($entry.FullName)"}
+                if($entry.Name){
+                    $content=$entry.Open();$memory=$null
+                    try {
+                        $head=New-Object byte[] 4;$read=$content.Read($head,0,4)
+                        $magic=$read -eq 4 -and $head[0] -eq 80 -and $head[1] -eq 75 -and (($head[2] -eq 3 -and $head[3] -eq 4) -or ($head[2] -eq 5 -and $head[3] -eq 6) -or ($head[2] -eq 7 -and $head[3] -eq 8))
+                        if($magic -or $entry.FullName -match '(?i)\.(zip|nupkg)$'){
+                            $memory=[IO.MemoryStream]::new();$memory.Write($head,0,$read);$content.CopyTo($memory);$memory.Position=0
+                            Read-WchReleaseArchive $memory ($Name+'!'+$entry.FullName) ($Depth+1)
+                        }
+                    }finally{$content.Dispose();if($memory){$memory.Dispose()}}
+                }
+            }
+        }finally{$zip.Dispose()}
+    }
+    foreach($inputPath in $Path){
+        if(Test-WchDemoAssetPath $inputPath){throw "DemoAssets are local-only: $inputPath"}
+        $item=Get-Item -LiteralPath $inputPath -Force -ErrorAction Stop
+        $pending=[Collections.Generic.Stack[IO.FileSystemInfo]]::new();$pending.Push($item)
+        while($pending.Count){
+            $file=$pending.Pop()
+            if(Test-WchDemoAssetPath $file.FullName){throw "DemoAssets are local-only: $($file.FullName)"}
+            if($file.Attributes -band [IO.FileAttributes]::ReparsePoint){throw "Release input must not be a reparse point: $($file.FullName)"}
+            if($file.PSIsContainer){foreach($child in @(Get-ChildItem -LiteralPath $file.FullName -Force -ErrorAction Stop)){$pending.Push($child)}}else{
+                $stream=[IO.File]::OpenRead($file.FullName)
+                try {
+                    $head=New-Object byte[] 4;$read=$stream.Read($head,0,4);$stream.Position=0
+                    $magic=$read -eq 4 -and $head[0] -eq 80 -and $head[1] -eq 75 -and (($head[2] -eq 3 -and $head[3] -eq 4) -or ($head[2] -eq 5 -and $head[3] -eq 6) -or ($head[2] -eq 7 -and $head[3] -eq 8))
+                    if($magic -or $file.Extension -match '(?i)^\.(zip|nupkg)$'){Read-WchReleaseArchive $stream $file.FullName 0}
+                }finally{$stream.Dispose()}
+            }
+        }
+    }
+}
 
 if ([string]::IsNullOrWhiteSpace($SourceRoot)) {
     $SourceRoot = Split-Path -Path $PSScriptRoot -Parent
@@ -377,6 +433,7 @@ function New-ForwardSlashZip {
 
     Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
+    Assert-WchNoDemoAssets -Path $SourceRoot
     $resolvedSource = [IO.Path]::GetFullPath($SourceRoot).TrimEnd('\', '/')
     $rootName = [IO.Path]::GetFileName($resolvedSource)
     $zip = [IO.Compression.ZipFile]::Open($DestinationPath, [IO.Compression.ZipArchiveMode]::Create)
@@ -791,8 +848,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAjOGJlEo59oo3Z
-# Z3tRmpg+nioj7StdDJErLSaDjm77YqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAM+NAxSAPQHlGh
+# Z0KWkFQetofeUsJ2gQFV0tSKa8o/gqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -925,31 +982,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMiB0dSpwqcyOz4rKbDLIXfjAwtWl4MEtP4a0bdhBQx2MA0GCSqG
-# SIb3DQEBAQUABIIBgDVSe0b1xd0WkXaOe8C55iIIa5TeK1ovj0aAi3OeTGLAblN+
-# SUDSYtGMSKRaIFv8AmfirqXWwucE8laKkUfaVKN0ZVUlUYL0OJkn3oq7WiYIiq+e
-# +V8nGCElz5Yi97rcqANhgUb8Jx/9SAq3xFwTgf1zEusgRU136bhYZi9/nr0DSpIJ
-# xvCDBgyJ9aOUuUxMqvgyRBVKblsPN2rsE/g5QUGE+35jQlKAGIdBjeEcag7R9qXw
-# QATOOAUYPB7H5kKfUsuxIscD5gMz4oNap6NLVEcH996tQnkr7AqxM5lUle0DvB0y
-# SuhXAlVbzczaum5+xJ602oN4r+yiQrk5NngQXobROZH3K7X0C+T2Ee2cI5eO/wWZ
-# qe5ELb2XrRr7ax4x2IIC+8V8OTL5lSlrUcK2EAL9wPxfVx0av6crc/6KzHGvop4c
-# MD2JteGSAwKPohn/MJp+HPdLvLGKhyLfk4AS62olXtJ2w9jRKJDtG1UiCs/PrpwO
-# R/caxVrek6VjGodMeqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPFSRKo7uokTv23ccRp88Hgh50LiINVAoDsjX+GC690lMA0GCSqG
+# SIb3DQEBAQUABIIBgBVgng/uE8bEHkV72/59ztXFsDqYw3YZEN9FY0DExb5OuV/+
+# qNzbMr8xBb7HVRI60dJ6N2dY7yeyHZaCXWhi6d7hoQhjnObJjLkT8XSdZmvnKq0m
+# 4DB7GfLBcARuaC2aIvTHynEIrZy4NPFXHWDVjJkypecna7jmRlK4i/eMtIedpAJW
+# fZGug3WGN/5dO1D3meEozfQ16rfCGNg8rKzgQ8BR1EAINlPWfGsBfynf1GowH4ec
+# 2POW95Yjv1ZnrwKfCCDTQ5HWYKTZlMLfdwZHYQPOSTVmP2iqRx6i4C5HQBNnaRcT
+# zN1E6N47FsyUP5myApKuZt3zBUEdk1IJH6sNFO4eKcsqPpHw5VKASWRyvlYHsB67
+# 0RpkGcjspk1+K7RYu8W7rxY4DGmdqa3y1ddwt4bUgHLHJSFYueQdWjszQSiWzi0v
+# Epm4boSVJ5aVN5RZqfgwVHtz/+/EKv5gkga4n4eaq5uTdKMderjfi/rDeFT1VKrl
+# lRC3yDtuy7yu9bYvAqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMjQy
-# MjNaMC8GCSqGSIb3DQEJBDEiBCBeP2HTmEABMwgIVZs6WWxLp5cd9gKU3Mi3joEq
-# 72hVMDANBgkqhkiG9w0BAQEFAASCAgB+5DyRiG/32MWaTxCgTpIAQABxF7BMeLvR
-# zM3Z1Ka1FZxxWgNDnRSLSH1/o7omLdMgxCWl0SHj/OMifHpcw1Sm1zEwPgA3uCms
-# Qti1qANIR2DgiseSHcKHsJzPqLDjgrq9BECanmGGdzZ/G8J/Bi4ixhBRQ5PaVyyi
-# +g3yZV6MBtPZfAfAYdXEsm35qjs/bRqAitQB/H0obQ95EfITwW/xHl/ak/ihD388
-# v9yrTqrpGXwolWVmHCfH2X4qsOzLLNqlnGJ9NJ5skXH/CFT9l+mV7Q5MEhVy3+O8
-# gsvjKmDq6p44hN8I3waRCMSggD4vkOmyrTr5Bj6gP8Q+R+1NMsDGNhz/2RTeZoQ+
-# gjCN6JOxiVweoMrBIok8F9W0iq4NS/hKSHcuwiI1O2ZKbzxCsUGdeWnttuRuoNG/
-# 1WQQhktOzZUcwhlbCCLgTONpd+PCXVVjGVUv7c4fmW91FRDA64ldYFDnp6E2wPPJ
-# 8nqIanWWa5yZI+o+A1HZ6QdACi8d0/SehuwAgeL7rbgj+gc+vjiOujIbQRuw6gAO
-# 8zD/0eBqhABD5GLoVCkEnYZk1alZz5vyYgk2Zt+nXr+BZ4uyqWyOysLpUQ0j77ry
-# wqk8oK06PVaTqnnc47BAOruDGbKB0BLrsDpQ5wUJpaGF8wU4WB24NIUMKEyv9rto
-# 59htPGc7bg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTMxMDE1
+# NTFaMC8GCSqGSIb3DQEJBDEiBCDffrSjoFs3V9UKyd/yK1YNgdLfC7y98D0QRyFY
+# Sy/KWTANBgkqhkiG9w0BAQEFAASCAgCxqeg13z829GuqwHf8b4p5ws+KW610AX/w
+# JoDXeZXF5YEQLL2RqLmYs5Gy9v8nYzlIrhC7oQNI9L3pOoxl5yf5d+b83Bo5h+Ne
+# 6iSIQc7ju/I2d/hYAhkcY+Y66WrwH1a1Pm8aopHFZ0L84fjRWx5U3Jxi2k4Cxd8r
+# fLakPnd+HxgiTLA0Su6r3dEqapfKdhXk6/NlyySi1ZL4j54qAasB6Y3/+5Z/rXXJ
+# kaMeKqye/rUmLLohlyzXiaVr6fSKYYDvHoAGwOCQShWmeNy/qy/icL90uSOwvDa8
+# Meblz8Wf2ZTrzYZVPWqk5+X+iRHPg+iol9Ks2ZdrPiptC3LZ6ztNyoBnRKHsg66M
+# Ll+OG06AHCsmiL6SnkLCDXliVu30KQRhdFeYwFZPDX9vftVQLhiO2xCqk0l4o/jH
+# eTQseRxZIZfP4HpXvQBioFwGRx48nvIudS9sm0aFWXnz9g9nZfJreiT5EciafDpj
+# waFYNa35PyjRZ6/RDstAqM1JlwHF4laainf+rRQjTiZNWHoH3q+F8oxF2UX/pWsY
+# Lo5QTup45sZ/l5piAPXqNzIzPNg2oCH2Lt6YuwVDwHaKhr4IQ5bqMwc3Qr86dlq1
+# 7LqyivuOidKOWlkzbVXJ8xpt2T+2LB3Qa35X0ENUc97/OpSGBdsgTBAU1o/XOkGf
+# 3QKkOV5Asw==
 # SIG # End signature block
