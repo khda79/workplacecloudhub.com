@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validates or packages the complete application runtime, including offline demo dependencies.
 .VERSION
-1.0.2
+1.0.3
 #>
 
 [CmdletBinding()]
@@ -40,7 +40,7 @@ try {
 
     $guiPath = Join-Path $applicationRoot 'SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1'
     $guiContent = Get-Content -LiteralPath $guiPath -Raw
-    Assert-True ($guiContent -match "AppVersion = '0\.3\.2'") 'GUI version is not aligned.'
+    Assert-True ($guiContent -match "AppVersion = '1\.0\.0'") 'GUI version is not aligned with the current 1.0.0 release.'
     Assert-True ($guiContent -match 'LocalDataRoot = Join-Path .*LOCALAPPDATA.*SmartM365\\EndpointDiagnosticsAnalyzer') 'Local data root is not under LocalAppData.'
     Assert-True ($guiContent -match 'api_key_dpapi') 'DPAPI-backed AI configuration is missing.'
     Assert-True ($guiContent -notmatch 'api_key\s*=\s*\$Config\.ApiKey') 'Plaintext AI key persistence is present.'
@@ -57,7 +57,7 @@ try {
     Assert-True ($scheduledTaskReferences.Count -eq 0) 'The application package must not create scheduled tasks.'
 
     $builder = Join-Path $applicationRoot 'PowerShellGallery\SmartM365-Build-EndpointDiagnosticsAnalyzerGalleryPackage.ps1'
-    $build = & $builder -OutputRoot $galleryRoot -Force -SkipAuthenticodeValidation:$SkipAuthenticodeValidation
+    $build = & $builder -SourceRoot $applicationRoot -OutputRoot $galleryRoot -Force -SkipAuthenticodeValidation:$SkipAuthenticodeValidation
     Assert-True ([bool]$build.Ready) 'Gallery build is not ready.'
     Assert-True ([string]$build.PackageVersion -eq [string]$version.PackageVersion) 'Gallery build version mismatch.'
 
@@ -162,8 +162,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC/IrvlNR/SHwMo
-# /iAbVXI5jfPz98aG48VV1VxX2Yhx66CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCx/KbMBabu9gxb
+# gXpTY+Yqp+j3+KdaaCJZ/aDzEOs9wKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -296,31 +296,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIECS2s/N4fuwkf17J0XB21Zobp2yIk60Lmx4ztoHgQ7HMA0GCSqG
-# SIb3DQEBAQUABIIBgKSfPcQ0jjYqIhBTJn3tNlVvTEfnW9aAIxtA0CU/pBziBTP6
-# IFXrm+bChLaR+vhD17HaKQYAwiCnkrkjcBaTiaRPEVQnTHwrTsFLjs/OZ4KMWFga
-# qb/eH2/j4dH4N9uTFiGPhpYX27dyvD9Yw/mj7+feH/fo0B0l4f6BsZrD1N+vJaKN
-# KdPjESy4PV0hESylCF4piXr5PLfS/sZ1nF8UoyDBv+Zv57snlCa3jPy0lbtg1cFU
-# jf/t1ZjcvlF/q4BE0fgu270RzQYkidNgHo57+j3gnFo8CLweQDpyoC1dS7rYR1y6
-# Nfdk7Pxp+1XUWrpnRLsIY3NYNP5Z6Xa/Yv5zC8wyxZGvtL2/HELjKzXZ7LL7G/Js
-# xlNwY7ArOCJWJkt/VO5ucUP/HwqNTm9gYcgkAUFPZhqtTJhJ+il2eYrnYog1dCTg
-# q1k7l4HHSVSps8IY5ujhfuuORfycs505d3XwYzq2DdLiMYwIVr221quEdE8y84HE
-# fHVIl1p+X+Nmind43KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICGQWefiTINTgD4Qsn2u9rCxCVq1KPnip2Q0vGHSaIfiMA0GCSqG
+# SIb3DQEBAQUABIIBgHppuyZm6++hBiw03BX0aGETMtSQwYxCY8lqU8IvUQUjumtY
+# XAATWmJCAyb/LlisNUWZk/iLuIzhHaYSXd6oKOmqXSbI3bQWU4cLvmHpg7/J8qJu
+# TQ12IwZF+tYRa1mmbvq/mK4+Ak5YFzl3jtGpkxukgjPUPYqC+VY+37C4yYUxrr3u
+# 6qLvgwb57mcfYpI/5QqO2a5kfq6CL3Qw62v8A2UoRCnhgjyXOpVnoJdi2x8Nwi68
+# hAAsk4hiqNdwqwwPOWUX5+X43snecnA0E0JDtWS2cGvbz/llZetMwd8NL+J3maU9
+# d1NQJgUAALJ5MkPX9vVhOGRbgCoNc6KQshqJXoJlC/0Tv1OqHlhWQpyg6MF8RuTc
+# CwuZqKcaVEODZexGig+3kvQuPXoO6EWZm56WZdWQLZTfY5dCE0OlAj+zMKuSUshG
+# cHx8OVTm0IFRWtrmQXoWF0j/aNCDkxS9d3X6J6eYC6Fr34/Fl/2+9l0PnS2HqyhB
+# /Bzs9nzPoPw+7rQzhqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxODAy
-# MTNaMC8GCSqGSIb3DQEJBDEiBCBrRLodPGFCuau0Pl+bQXKKDFEsfEDUf/IeNday
-# esjhmjANBgkqhkiG9w0BAQEFAASCAgBBN7nzIcwDkdgjJKMQ/dIR9scpEFqfgAF1
-# ButyzZ6wE/tTmTaDtHSMIdLR5y34lgM0Nxw0gZOPDCftw06gbM3zK5wqdaSl61Oq
-# dOTc6U0qcG3kIoW+hVMuX4vCHVl/xZCVPvYFKwSALH59LS6d7bEKuLQMUH16QDAb
-# arc2ESDNbV0OAmtNSSnnrvYI0vXON30IVpUTcPuKytuyDeLMpnSQ3ARFr9ncpMud
-# m8i4Gk4aGDfg+giMz3gh+oeRwwEADV3a00XK9b0Xdau2dbB+Rl+Y1GZSFhoKlwT0
-# pcZSUJS3j3pqT6pU46sQhF0pLgPYTrGmzNix/Xdblqw9oWPZyyDFGJnBL7VVe++y
-# 8+IiFp/BSFP7Jz9OiU/9YemF9VuWg//GuxgpXJ2cD/2y0Aronjbe+6NLT6tjpqsP
-# 73yjKRHXpI1EWq3QW9XGxuYRci1ETOsoiWNvxCeQMiyMprfi8vC70DpNr7YjNwix
-# HUnwBLZFZtJIFPHrYJ0qCBRK6rsnIthf+DjtVdo9iUCcQ6Y6nJxQ1wdkJL8XmJaN
-# 6PKlFy6Nw5lAAhXTy+AojR0hdexNe0Ty/O0GpDEFhgrKD9ZplsTQ+/HSIdoNl+kq
-# BqutCRNvTGCGiwgePZL5oBv/3XMmxqI9FE3vuzaUkHBqvGH2J5UW8hNsEl62iL59
-# o33YFkB/tA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTMxMDQz
+# MzRaMC8GCSqGSIb3DQEJBDEiBCBgCPMcVoqxsWKQVgKukFxZdGqbpSGMyuCUDFVg
+# T6exXjANBgkqhkiG9w0BAQEFAASCAgBlTajSxeGFiOl0Ei3vHjmYJhOc7Fgu0NXH
+# cVoNTDpnHnW2Ex6KVHYzzp/mjmfxzVUuH6MJ3c0b1a7qWStGq0Xnu9H4xeogFgC1
+# fA7rH0QUbNb3Sg792b6Zl/iRTwmAT9fcNpD+tXVPB6svOFZojSNqdrFXIHOOiTou
+# 3FT1kny8r7A9t89PCGjoCOxQ12yWvR7cxs6oqSzZmjI1W42gTCEwqMzOYjDmSiLy
+# dPx06HLu3DnORlzD8ZHKeqnW1wcUyokLgYoCkSPrru/SKqKMApJeyVlPNMAlfKaC
+# w9YC7p3NURWJiUm+olVku7xwaLk+ytgRKZiNsyTuPiW7U6tH1wTsohovyemjQMl6
+# YIw+8bNyNmE/FCX0fA2JqAqemujQEeTZb5beK4cDW0onR5+D4HtZeZJaPX+lnq4U
+# ZbUvR2aGpS54Fv6MzCKvbPtXBtHv3eXwFFsdYBxonWnunqdTCjr/Yd99gauM86MH
+# euOjikJnBwS2VPsMnBNWDUVKnxyuyU/2H53KGQ4cs6KrV8Xm9EJU/xiIBqEHvn0R
+# b+uQwrDNJRDczSFTEnuSCePCpXiTVQ7dxqE/sA68wCKxZS3psrM/Szv0eucPh3td
+# ZyxJ1QJkgd9MrflDzUG0DbXn6n1y5ekjtfbo1fcCUpoXU5fSsHnNNJoUJHB8q93H
+# 5phPCLVu8g==
 # SIG # End signature block
