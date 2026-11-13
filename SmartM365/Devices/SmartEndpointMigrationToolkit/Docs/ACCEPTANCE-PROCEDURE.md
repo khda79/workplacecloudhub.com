@@ -57,7 +57,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Tests\Core\Test-SemtProgramFolde
 - [ ] `Start-SmartEndpointMigrationToolkit-Demo.cmd` : 3 onglets (Waves, Runs, Options) et les
       3 fenêtres Single PC, New Wave, Automatic Wave, les deux Campaigns, options réelles, actions
       simulées, aucune exécution.
-- [ ] `Start-SmartEndpointMigrationToolkit-GUI.cmd` : splash, en-tête, version 1.1.1, contrôle
+- [ ] `Start-SmartEndpointMigrationToolkit-GUI.cmd` : splash, en-tête, version 1.1.2, contrôle
       de mise à jour silencieux.
 - [ ] Changer de Campaign : options, Waves et Runs propres à chaque Campaign ; les choix sont
       retrouvés à la réouverture.

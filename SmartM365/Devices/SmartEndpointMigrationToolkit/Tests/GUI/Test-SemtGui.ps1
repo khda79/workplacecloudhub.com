@@ -326,7 +326,8 @@ try {
     $hjPlan = @(Get-InventoryRefreshPlan -Campaign HybridJoin)
     $w11Plan = @(Get-InventoryRefreshPlan -Campaign Windows11Upgrade)
     Test-Step 'inventory refresh runs AD and Graph streams with one Graph export each' { ($hjPlan.Name -join ',') -eq 'AD,Graph' -and ($w11Plan.Name -join ',') -eq 'AD,Graph' -and @($hjPlan[1].Exports).Count -eq 1 -and @($w11Plan[1].Exports).Count -eq 1 }
-    Test-Step 'HybridJoin Graph stream exports Intune, Entra and user licenses on one sign-in; Windows 11 exports Intune only' { $hjPlan[1].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1' -and (@($hjPlan[1].Exports[0].Arguments) -contains '-IncludeUserLicenses') -and $w11Plan[1].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1' }
+    Test-Step 'HybridJoin Graph stream exports Intune, Entra and user licenses on one sign-in; Windows 11 refreshes Intune through the combined exporter without user licenses' { $hjPlan[1].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1' -and (@($hjPlan[1].Exports[0].Arguments) -contains '-IncludeUserLicenses') -and $w11Plan[1].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1' -and -not (@($w11Plan[1].Exports[0].Arguments) -contains '-IncludeUserLicenses') }
+    Test-Step 'no refresh plan starts the Intune exporter alone (it re-asked for an interactive sign-in in the hidden window)' { $standalone = 0; foreach ($campaign in @('HybridJoin','Windows11Upgrade')) { foreach ($kinds in @(@('Intune'),@('AD','Intune'),@('Intune','Entra'),@('Intune','Users'),@('AD','Intune','Entra','Users'))) { foreach ($stream in @(Get-InventoryRefreshPlan -Campaign $campaign -Kinds $kinds)) { $standalone += @($stream.Exports | Where-Object { $_.Script -eq 'SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1' }).Count } } }; $standalone -eq 0 }
     $usersOnly = @(Get-InventoryRefreshPlan -Campaign HybridJoin -Kinds Users)
     $entraUsers = @(Get-InventoryRefreshPlan -Campaign HybridJoin -Kinds Entra,Users)
     Test-Step 'old inventories only: users alone run the license exporter; users with a device inventory share its sign-in' { @($usersOnly[0].Exports).Count -eq 1 -and $usersOnly[0].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-UserLicensesCsv.ps1' -and @($entraUsers[0].Exports).Count -eq 1 -and $entraUsers[0].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1' -and (@($entraUsers[0].Exports[0].Arguments) -contains '-IncludeUserLicenses') }
@@ -338,8 +339,8 @@ try {
     $intuneOnly = @(Get-InventoryRefreshPlan -Campaign HybridJoin -Kinds Intune)
     $graphBoth = @(Get-InventoryRefreshPlan -Campaign HybridJoin -Kinds Intune,Entra)
     $w11Intune = @(Get-InventoryRefreshPlan -Campaign Windows11Upgrade -Kinds Intune,Entra)
-    Test-Step 'old inventories only: AD alone runs no Graph sign-in; one Graph inventory runs its own exporter' { ($adOnly.Name -join ',') -eq 'AD' -and ($entraOnly.Name -join ',') -eq 'Graph' -and $entraOnly[0].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-EntraDevicesCsv.ps1' -and $intuneOnly[0].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1' }
-    Test-Step 'old inventories only: Intune and Entra share one sign-in; Windows 11 ignores Entra' { $graphBoth.Count -eq 1 -and $graphBoth[0].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1' -and $w11Intune.Count -eq 1 -and $w11Intune[0].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1' -and @(Get-InventoryRefreshPlan -Campaign Windows11Upgrade -Kinds Entra).Count -eq 0 }
+    Test-Step 'old inventories only: AD alone runs no Graph sign-in; one Graph inventory runs its own exporter' { ($adOnly.Name -join ',') -eq 'AD' -and ($entraOnly.Name -join ',') -eq 'Graph' -and $entraOnly[0].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-EntraDevicesCsv.ps1' -and $intuneOnly[0].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1' }
+    Test-Step 'old inventories only: Intune and Entra share one sign-in; Windows 11 ignores Entra' { $graphBoth.Count -eq 1 -and $graphBoth[0].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1' -and $w11Intune.Count -eq 1 -and $w11Intune[0].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1' -and @(Get-InventoryRefreshPlan -Campaign Windows11Upgrade -Kinds Entra).Count -eq 0 }
     Test-Step 'Automatic Wave view offers "Refresh old inventories only"' { $allXaml -match 'x:Name="AutomaticRefreshStaleInventoryButton" Content="Refresh old inventories only"' -and $guiText -match 'Start-InventoryRefresh -Kinds @\(\$old' }
     foreach ($functionName in @('Get-AutomaticInventoryWarning')) {
         $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
@@ -439,14 +440,14 @@ try {
     #region Windows PowerShell 5.1 STA
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $validate = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $guiPath -ValidateOnly 2>&1 | ForEach-Object { [string]$_ })
-    Test-Step 'GUI -ValidateOnly loads under Windows PowerShell 5.1 STA for both Campaigns' { $LASTEXITCODE -eq 0 -and @($validate | Where-Object { $_ -match '^ValidateOnly: GUI 1\.1\.1 loaded; campaign=(HybridJoin|Windows11Upgrade); options=\d+' }).Count -eq 2 }
+    Test-Step 'GUI -ValidateOnly loads under Windows PowerShell 5.1 STA for both Campaigns' { $LASTEXITCODE -eq 0 -and @($validate | Where-Object { $_ -match '^ValidateOnly: GUI 1\.1\.2 loaded; campaign=(HybridJoin|Windows11Upgrade); options=\d+' }).Count -eq 2 }
     Test-Step 'GUI -ValidateOnly loads the three dedicated windows; Automatic Wave is offered for HybridJoin and Windows 11' { @($validate | Where-Object { $_ -match 'campaign=(HybridJoin|Windows11Upgrade); .*; windows=SinglePc,NewWave,AutomaticWave; automaticWaveButton=Visible\.$' }).Count -eq 2 }
     Test-Step 'GUI hides the Prerequisites Campaign while Prerequisites.Enabled is false (default)' { @($validate | Where-Object { $_ -match 'campaign=Prerequisites' }).Count -eq 0 }
     $globalConfig = Join-Path $packageRoot 'Config\SmartEndpointMigrationToolkit.local.json.txt'
     [IO.File]::WriteAllText($globalConfig, '{ "SchemaVersion": 1, "Options": { "Prerequisites.Enabled": true } }')
     try { $validateEnabled = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $guiPath -ValidateOnly 2>&1 | ForEach-Object { [string]$_ }) }
     finally { Remove-Item -LiteralPath $globalConfig -Force -ErrorAction SilentlyContinue }
-    Test-Step 'GUI lists the Prerequisites Campaign when Prerequisites.Enabled is true in the global configuration' { $LASTEXITCODE -eq 0 -and @($validateEnabled | Where-Object { $_ -match '^ValidateOnly: GUI 1\.1\.1 loaded; campaign=(HybridJoin|Windows11Upgrade|Prerequisites); options=\d+' }).Count -eq 3 -and @($validateEnabled | Where-Object { $_ -match 'campaign=Prerequisites; options=\d+' }).Count -eq 1 }
+    Test-Step 'GUI lists the Prerequisites Campaign when Prerequisites.Enabled is true in the global configuration' { $LASTEXITCODE -eq 0 -and @($validateEnabled | Where-Object { $_ -match '^ValidateOnly: GUI 1\.1\.2 loaded; campaign=(HybridJoin|Windows11Upgrade|Prerequisites); options=\d+' }).Count -eq 3 -and @($validateEnabled | Where-Object { $_ -match 'campaign=Prerequisites; options=\d+' }).Count -eq 1 }
     Test-Step 'Prerequisites hides the Automatic Wave button and keeps Single PC and New Wave' { @($validateEnabled | Where-Object { $_ -match 'campaign=Prerequisites; .*; windows=SinglePc,NewWave,AutomaticWave; automaticWaveButton=Collapsed\.$' }).Count -eq 1 }
     # The three dedicated windows load under Windows PowerShell 5.1 STA with the resources of the main window.
     $windowsScript = Join-Path $tempRoot 'windows-check.ps1'
@@ -569,7 +570,7 @@ $state.Window.Close()
     # the close path of the window X (waiting window, active Run detection) and the GUI exits.
     $smoke = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $guiPath -SmokeTest 2>&1 | ForEach-Object { [string]$_ })
     $smokeText = $smoke -join "`n"
-    Test-Step 'GUI -SmokeTest starts the real window and the Close button closes it through the waiting window' { $LASTEXITCODE -eq 0 -and $smokeText -match 'SmokeTest: GUI 1\.1\.1 rendered and closed by the Close button; campaign=HybridJoin; waves=\d+; closeWaitShown=1; activeRuns=0\.' }
+    Test-Step 'GUI -SmokeTest starts the real window and the Close button closes it through the waiting window' { $LASTEXITCODE -eq 0 -and $smokeText -match 'SmokeTest: GUI 1\.1\.2 rendered and closed by the Close button; campaign=HybridJoin; waves=\d+; closeWaitShown=1; activeRuns=0\.' }
     #endregion
 }
 catch {

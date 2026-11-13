@@ -12,7 +12,7 @@
     Requires Windows PowerShell 5.1 started with -STA.
 
 .VERSION
-    1.1.1
+    1.1.2
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -42,7 +42,7 @@ $ErrorActionPreference = 'Stop'
 if ([string]$PSVersionTable['PSEdition'] -eq 'Core' -or [Threading.Thread]::CurrentThread.ApartmentState -ne [Threading.ApartmentState]::STA) {
     throw ('SEMT_UNSUPPORTED_GUI_HOST: the GUI runs in Windows PowerShell 5.1 started with -STA (current: {0} {1}, {2}). Use Start-SmartEndpointMigrationToolkit-GUI.cmd.' -f [string]$PSVersionTable['PSEdition'],[string]$PSVersionTable['PSVersion'],[Threading.Thread]::CurrentThread.ApartmentState)
 }
-$script:GuiVersion = '1.1.1'
+$script:GuiVersion = '1.1.2'
 $script:PackageRoot = Split-Path -Path $PSScriptRoot -Parent
 Import-Module (Join-Path $script:PackageRoot 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -MinimumVersion 1.0.0 -Force
 $script:CampaignTitles = [ordered]@{ HybridJoin = 'Hybrid Join and Intune enrollment'; Windows11Upgrade = 'Windows 11 upgrade' }
@@ -274,8 +274,12 @@ function Get-AutomaticWaveCommandText {
 function Get-InventoryRefreshPlan {
     <#
     Two independent streams started in parallel: AD (ActiveDirectory module, the longest) and Graph
-    (one delegated sign-in). HybridJoin uses the combined Graph exporter (Intune, Entra, then users
-    and licenses on the same connection); Windows11Upgrade needs Intune only.
+    (one delegated sign-in). Every Intune refresh goes through the combined Graph exporter: it signs in
+    once, then runs the Intune, Entra (and, for HybridJoin, users and licenses) exports on that
+    connection. The Intune exporter started alone in the hidden window had to sign in by itself and
+    failed after about 20 Graph pages ("User canceled authentication": the SDK asked again for an
+    interactive sign-in that a hidden process cannot show). Windows11Upgrade reads Intune only; the
+    Entra cache refreshed with it is harmless.
     #>
     param(
         [Parameter(Mandatory = $true)][ValidateSet('HybridJoin','Windows11Upgrade','Prerequisites')][string]$Campaign,
@@ -288,7 +292,6 @@ function Get-InventoryRefreshPlan {
     if (-not $PSBoundParameters.ContainsKey('Kinds')) { $Kinds = if ($Campaign -eq 'HybridJoin') { @('AD','Intune','Entra','Users') } else { @('AD','Intune') } }
     if ($Campaign -ne 'HybridJoin') { $Kinds = @($Kinds | Where-Object { $_ -ne 'Entra' }) }
     $ad = [pscustomobject]@{ Label = 'AD'; Script = 'SmartM365-EndpointMigration-Export-ADDevicesCsv.ps1'; Arguments = @('-ForceRefresh') }
-    $intune = [pscustomobject]@{ Label = 'Intune'; Script = 'SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1'; Arguments = @('-ForceRefresh') }
     $entra = [pscustomobject]@{ Label = 'Entra'; Script = 'SmartM365-EndpointMigration-Export-EntraDevicesCsv.ps1'; Arguments = @('-ForceRefresh') }
     $withUsers = $Kinds -contains 'Users' -and $Campaign -eq 'HybridJoin'
     # One sign-in per refresh: users and licenses with Intune or Entra go through the combined
@@ -299,7 +302,9 @@ function Get-InventoryRefreshPlan {
     elseif ($Kinds -contains 'Intune' -and $Kinds -contains 'Entra') {
         [pscustomobject]@{ Label = 'Intune and Entra'; Script = 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1'; Arguments = @() }
     }
-    elseif ($Kinds -contains 'Intune') { $intune }
+    elseif ($Kinds -contains 'Intune') {
+        [pscustomobject]@{ Label = 'Intune and Entra'; Script = 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1'; Arguments = @() }
+    }
     elseif ($Kinds -contains 'Entra') { $entra }
     elseif ($withUsers) { [pscustomobject]@{ Label = 'Users and licenses'; Script = 'SmartM365-EndpointMigration-Export-UserLicensesCsv.ps1'; Arguments = @('-ForceRefresh') } }
     else { $null }
@@ -531,7 +536,7 @@ if (-not $ValidateOnly -and (Get-Command -Name Start-SmartM365GuiSplash -ErrorAc
 $xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Smart Endpoint Migration Toolkit v1.1.1"
+        Title="Smart Endpoint Migration Toolkit v1.1.2"
         Width="1240" Height="860" MinWidth="1080" MinHeight="740"
         WindowStartupLocation="CenterScreen"
         Background="#F5F8FB" FontFamily="Segoe UI" FontSize="12"
@@ -636,7 +641,7 @@ $xaml = @'
                     <Border Background="#E7F3FF" BorderBrush="#B5DCFF" BorderThickness="1" CornerRadius="8" Padding="10,3" HorizontalAlignment="Left" Margin="0,0,0,12">
                         <TextBlock Text="SMARTM365 DEVICES" Foreground="#005A9E" FontWeight="SemiBold"/>
                     </Border>
-                    <TextBlock x:Name="ProductVersionText" Text="v1.1.1" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                    <TextBlock x:Name="ProductVersionText" Text="v1.1.2" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
                     <TextBlock Text="Smart Endpoint Migration Toolkit" Foreground="{StaticResource TextBrush}" FontSize="28" FontWeight="SemiBold"/>
                     <TextBlock Text="Hybrid Join, Intune Enrollment &amp; Windows 11 Upgrade" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0"/>
                 </StackPanel>
