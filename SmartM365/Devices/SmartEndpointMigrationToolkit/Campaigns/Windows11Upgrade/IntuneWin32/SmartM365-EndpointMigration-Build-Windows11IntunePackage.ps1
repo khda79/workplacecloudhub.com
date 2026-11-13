@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Builds one Smart Endpoint Migration Toolkit Windows 11 Upgrade Intune Win32 package per setup language.
 .DESCRIPTION
@@ -6,7 +6,7 @@
     Package ids use the SmartM365-SEMT-Windows11Upgrade- prefix and app names use 'Smart Endpoint Migration Toolkit - Windows 11 Upgrade (<language>)' so they never collide with the previous Windows11UpgradeToolkit packages.
     Provenance: copied from SmartM365/Devices/Windows11UpgradeToolkit/IntuneWin32/Build-SmartM365Windows11IntunePackage.ps1 1.0.2 (see Docs\PROVENANCE.json.txt).
 .VERSION
-    1.0.2
+    1.0.1
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>

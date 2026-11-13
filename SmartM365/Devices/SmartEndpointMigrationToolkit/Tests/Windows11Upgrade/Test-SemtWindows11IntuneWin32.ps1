@@ -157,16 +157,20 @@ Write-Host ("Engine: {0} {1}; TestRoot={2}" -f $PSVersionTable.PSEdition,$PSVers
 try {
     # ---------- Static: parse, headers, ASCII ----------
     $provenance = Get-Content -LiteralPath $provenancePath -Raw | ConvertFrom-Json
+    $expectedScriptVersions = @{ 'SmartM365-EndpointMigration-Build-Windows11IntunePackage.ps1' = '1.0.1' }
     foreach ($path in $changedScripts + @($MyInvocation.MyCommand.Path)) {
         $leaf = Split-Path -Leaf $path
         Test-Step "parse without errors: $leaf" { (Get-ScriptAst -Path $path).Errors.Count -eq 0 }
         $text = Get-Content -LiteralPath $path -Raw
-        Test-Step "comment help has SYNOPSIS, DESCRIPTION, VERSION 1.0.0 and NOTES Author: $leaf" {
-            ($text -match '(?s)^\s*<#.*?\.SYNOPSIS.*?\.DESCRIPTION.*?\.VERSION\s+1\.0\.0\s.*?\.NOTES\s+Author: https://github\.com/khda79/workplacecloudhub\.com.*?#>')
+        # Scripts changed after the 1.0.0 baseline carry their own help version.
+        $expectedVersion = if ($expectedScriptVersions.ContainsKey($leaf)) { $expectedScriptVersions[$leaf] } else { '1.0.0' }
+        $versionPattern = [regex]::Escape($expectedVersion)
+        Test-Step "comment help has SYNOPSIS, DESCRIPTION, VERSION $expectedVersion and NOTES Author: $leaf" {
+            ($text -match ('(?s)^\s*<#.*?\.SYNOPSIS.*?\.DESCRIPTION.*?\.VERSION\s+' + $versionPattern + '\s.*?\.NOTES\s+Author: https://github\.com/khda79/workplacecloudhub\.com.*?#>'))
         }
         Test-Step "valid code signature: $leaf" { (Get-AuthenticodeSignature -LiteralPath $path).Status -eq 'Valid' }
         $versionMatch = [regex]::Match($text, '(?m)^\s*\$(script:)?ScriptVersion\s*=\s*''(?<V>[^'']+)''')
-        if ($versionMatch.Success) { Test-Step "ScriptVersion equals .VERSION: $leaf" { $versionMatch.Groups['V'].Value -eq '1.0.0' } }
+        if ($versionMatch.Success) { Test-Step "ScriptVersion equals .VERSION: $leaf" { $versionMatch.Groups['V'].Value -eq $expectedVersion } }
         $entry = @($provenance.Files | Where-Object { ($_.Destination -replace '/', '\') -like ('*\' + $leaf) })
         if ($entry.Count -gt 0) {
             $expected = 'Provenance: copied from {0} {1} (see Docs\PROVENANCE.json.txt).' -f $entry[0].Source,$entry[0].SourceVersion
