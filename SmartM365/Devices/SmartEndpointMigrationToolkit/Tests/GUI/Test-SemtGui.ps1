@@ -302,7 +302,8 @@ try {
     $refreshHandler = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Start-InventoryRefresh' }, $true)
     $planAssignment = if ($refreshHandler) { $refreshHandler.Find({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$plan' }, $true) }
     Test-Step 'inventory refresh keeps a one-stream plan (Graph only) as an array under StrictMode' { $null -ne $planAssignment -and $planAssignment.Right.Extent.Text -match '^@\(if ' }
-    Test-Step 'inventory refresh runs in a hidden process, never in a visible console' { $null -ne $refreshHandler -and $refreshHandler.Extent.Text -match '-WindowStyle Hidden' -and $guiText -notmatch '-NoExit' }
+    # Output goes to the GUI window: AD runs hidden, Graph minimized (room for a sign-in prompt), never an open console.
+    Test-Step 'inventory refresh runs hidden (AD) or minimized (Graph), never in an open console' { $null -ne $refreshHandler -and $refreshHandler.Extent.Text.Contains("{ 'Minimized' } else { 'Hidden' }") -and $refreshHandler.Extent.Text -notmatch "'Normal'|'Maximized'" -and $guiText -notmatch '-NoExit' }
     $refreshAssignment = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$inventoryRefreshXaml' }, $true)
     $refreshXaml = [string]$refreshAssignment.Right.Expression.Value
     Test-Step 'inventory refresh window shows the output, stops and closes' { foreach ($name in 'InventoryRefreshStateText','InventoryRefreshADStateText','InventoryRefreshADOutputText','InventoryRefreshGraphStateText','InventoryRefreshGraphOutputText','InventoryRefreshStopButton','InventoryRefreshCloseButton','InventoryRefreshOpenFolderButton') { if ($refreshXaml -notmatch ('x:Name="{0}"' -f $name)) { return $false } }; $true }
@@ -314,6 +315,11 @@ try {
     $savedRoot = $script:PackageRoot; $script:PackageRoot = $fakeRoot
     $refreshLog = Join-Path $fakeRoot "Run's log\InventoryRefresh.log"
     New-Item -ItemType Directory -Path (Split-Path $refreshLog -Parent) -Force | Out-Null
+    # The Graph stream runs minimized with a console title (an interactive sign-in during the export
+    # needs a visible parent console); AD stays hidden and gets no title.
+    $graphTitled = Get-InventoryRefreshCommandText -Exports @([pscustomobject]@{ Label = 'Intune and Entra'; Script = 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1'; Arguments = @() }) -LogPath $refreshLog -WindowTitle 'SEMT - Graph'
+    $adUntitled = Get-InventoryRefreshCommandText -Exports @([pscustomobject]@{ Label = 'AD'; Script = 'SmartM365-EndpointMigration-Export-ADDevicesCsv.ps1'; Arguments = @() }) -LogPath $refreshLog
+    Test-Step 'inventory refresh starts the Graph stream minimized with a title and AD hidden' { $guiText.Contains("`$windowStyle = if (`$item.Name -eq 'Graph') { 'Minimized' } else { 'Hidden' }") -and $guiText.Contains('-WindowStyle $windowStyle -PassThru') -and $graphTitled.Contains("WindowTitle = 'SEMT - Graph'") -and -not $adUntitled.Contains('WindowTitle') }
     $refreshCommand = Get-InventoryRefreshCommandText -Exports @([pscustomobject]@{ Label = 'AD'; Script = 'SmartM365-EndpointMigration-Export-ADDevicesCsv.ps1'; Arguments = @('-ForceRefresh') },[pscustomobject]@{ Label = 'Intune'; Script = 'SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1'; Arguments = @('-ForceRefresh') }) -LogPath $refreshLog
     $script:PackageRoot = $savedRoot
     $refreshProcess = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($refreshCommand))) -WindowStyle Hidden -PassThru -Wait
@@ -440,14 +446,14 @@ try {
     #region Windows PowerShell 5.1 STA
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $validate = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $guiPath -ValidateOnly 2>&1 | ForEach-Object { [string]$_ })
-    Test-Step 'GUI -ValidateOnly loads under Windows PowerShell 5.1 STA for both Campaigns' { $LASTEXITCODE -eq 0 -and @($validate | Where-Object { $_ -match '^ValidateOnly: GUI 1\.1\.2 loaded; campaign=(HybridJoin|Windows11Upgrade); options=\d+' }).Count -eq 2 }
+    Test-Step 'GUI -ValidateOnly loads under Windows PowerShell 5.1 STA for both Campaigns' { $LASTEXITCODE -eq 0 -and @($validate | Where-Object { $_ -match '^ValidateOnly: GUI 1\.1\.3 loaded; campaign=(HybridJoin|Windows11Upgrade); options=\d+' }).Count -eq 2 }
     Test-Step 'GUI -ValidateOnly loads the three dedicated windows; Automatic Wave is offered for HybridJoin and Windows 11' { @($validate | Where-Object { $_ -match 'campaign=(HybridJoin|Windows11Upgrade); .*; windows=SinglePc,NewWave,AutomaticWave; automaticWaveButton=Visible\.$' }).Count -eq 2 }
     Test-Step 'GUI hides the Prerequisites Campaign while Prerequisites.Enabled is false (default)' { @($validate | Where-Object { $_ -match 'campaign=Prerequisites' }).Count -eq 0 }
     $globalConfig = Join-Path $packageRoot 'Config\SmartEndpointMigrationToolkit.local.json.txt'
     [IO.File]::WriteAllText($globalConfig, '{ "SchemaVersion": 1, "Options": { "Prerequisites.Enabled": true } }')
     try { $validateEnabled = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $guiPath -ValidateOnly 2>&1 | ForEach-Object { [string]$_ }) }
     finally { Remove-Item -LiteralPath $globalConfig -Force -ErrorAction SilentlyContinue }
-    Test-Step 'GUI lists the Prerequisites Campaign when Prerequisites.Enabled is true in the global configuration' { $LASTEXITCODE -eq 0 -and @($validateEnabled | Where-Object { $_ -match '^ValidateOnly: GUI 1\.1\.2 loaded; campaign=(HybridJoin|Windows11Upgrade|Prerequisites); options=\d+' }).Count -eq 3 -and @($validateEnabled | Where-Object { $_ -match 'campaign=Prerequisites; options=\d+' }).Count -eq 1 }
+    Test-Step 'GUI lists the Prerequisites Campaign when Prerequisites.Enabled is true in the global configuration' { $LASTEXITCODE -eq 0 -and @($validateEnabled | Where-Object { $_ -match '^ValidateOnly: GUI 1\.1\.3 loaded; campaign=(HybridJoin|Windows11Upgrade|Prerequisites); options=\d+' }).Count -eq 3 -and @($validateEnabled | Where-Object { $_ -match 'campaign=Prerequisites; options=\d+' }).Count -eq 1 }
     Test-Step 'Prerequisites hides the Automatic Wave button and keeps Single PC and New Wave' { @($validateEnabled | Where-Object { $_ -match 'campaign=Prerequisites; .*; windows=SinglePc,NewWave,AutomaticWave; automaticWaveButton=Collapsed\.$' }).Count -eq 1 }
     # The three dedicated windows load under Windows PowerShell 5.1 STA with the resources of the main window.
     $windowsScript = Join-Path $tempRoot 'windows-check.ps1'
@@ -570,7 +576,7 @@ $state.Window.Close()
     # the close path of the window X (waiting window, active Run detection) and the GUI exits.
     $smoke = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $guiPath -SmokeTest 2>&1 | ForEach-Object { [string]$_ })
     $smokeText = $smoke -join "`n"
-    Test-Step 'GUI -SmokeTest starts the real window and the Close button closes it through the waiting window' { $LASTEXITCODE -eq 0 -and $smokeText -match 'SmokeTest: GUI 1\.1\.2 rendered and closed by the Close button; campaign=HybridJoin; waves=\d+; closeWaitShown=1; activeRuns=0\.' }
+    Test-Step 'GUI -SmokeTest starts the real window and the Close button closes it through the waiting window' { $LASTEXITCODE -eq 0 -and $smokeText -match 'SmokeTest: GUI 1\.1\.3 rendered and closed by the Close button; campaign=HybridJoin; waves=\d+; closeWaitShown=1; activeRuns=0\.' }
     #endregion
 }
 catch {

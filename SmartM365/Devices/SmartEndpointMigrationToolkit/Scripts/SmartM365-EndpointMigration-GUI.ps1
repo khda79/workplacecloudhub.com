@@ -12,7 +12,7 @@
     Requires Windows PowerShell 5.1 started with -STA.
 
 .VERSION
-    1.1.2
+    1.1.3
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -42,7 +42,7 @@ $ErrorActionPreference = 'Stop'
 if ([string]$PSVersionTable['PSEdition'] -eq 'Core' -or [Threading.Thread]::CurrentThread.ApartmentState -ne [Threading.ApartmentState]::STA) {
     throw ('SEMT_UNSUPPORTED_GUI_HOST: the GUI runs in Windows PowerShell 5.1 started with -STA (current: {0} {1}, {2}). Use Start-SmartEndpointMigrationToolkit-GUI.cmd.' -f [string]$PSVersionTable['PSEdition'],[string]$PSVersionTable['PSVersion'],[Threading.Thread]::CurrentThread.ApartmentState)
 }
-$script:GuiVersion = '1.1.2'
+$script:GuiVersion = '1.1.3'
 $script:PackageRoot = Split-Path -Path $PSScriptRoot -Parent
 Import-Module (Join-Path $script:PackageRoot 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -MinimumVersion 1.0.0 -Force
 $script:CampaignTitles = [ordered]@{ HybridJoin = 'Hybrid Join and Intune enrollment'; Windows11Upgrade = 'Windows 11 upgrade' }
@@ -322,9 +322,12 @@ function Get-InventoryRefreshCommandText {
     the stream runs even when a previous one fails, all output streams go to the log shown in the GUI
     window, and the exit code is 1 when at least one export failed.
     #>
-    param([Parameter(Mandatory = $true)][object[]]$Exports,[Parameter(Mandatory = $true)][string]$LogPath)
+    param([Parameter(Mandatory = $true)][object[]]$Exports,[Parameter(Mandatory = $true)][string]$LogPath,[string]$WindowTitle)
 
-    $lines = @('$ErrorActionPreference = ''Continue''','$semtFailed = 0','. {')
+    $lines = @('$ErrorActionPreference = ''Continue''','$semtFailed = 0')
+    # Title of the console (the minimized Graph window in the taskbar).
+    if (-not [string]::IsNullOrWhiteSpace($WindowTitle)) { $lines += ('try {{ $Host.UI.RawUI.WindowTitle = {0} }} catch {{ }}' -f (ConvertTo-PowerShellLiteral $WindowTitle)) }
+    $lines += '. {'
     foreach ($export in $Exports) {
         $path = Join-Path $script:PackageRoot ('Scripts\' + $export.Script)
         $call = (@('&',(ConvertTo-PowerShellLiteral $path)) + @($export.Arguments)) -join ' '
@@ -536,7 +539,7 @@ if (-not $ValidateOnly -and (Get-Command -Name Start-SmartM365GuiSplash -ErrorAc
 $xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Smart Endpoint Migration Toolkit v1.1.2"
+        Title="Smart Endpoint Migration Toolkit v1.1.3"
         Width="1240" Height="860" MinWidth="1080" MinHeight="740"
         WindowStartupLocation="CenterScreen"
         Background="#F5F8FB" FontFamily="Segoe UI" FontSize="12"
@@ -641,7 +644,7 @@ $xaml = @'
                     <Border Background="#E7F3FF" BorderBrush="#B5DCFF" BorderThickness="1" CornerRadius="8" Padding="10,3" HorizontalAlignment="Left" Margin="0,0,0,12">
                         <TextBlock Text="SMARTM365 DEVICES" Foreground="#005A9E" FontWeight="SemiBold"/>
                     </Border>
-                    <TextBlock x:Name="ProductVersionText" Text="v1.1.2" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                    <TextBlock x:Name="ProductVersionText" Text="v1.1.3" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
                     <TextBlock Text="Smart Endpoint Migration Toolkit" Foreground="{StaticResource TextBrush}" FontSize="28" FontWeight="SemiBold"/>
                     <TextBlock Text="Hybrid Join, Intune Enrollment &amp; Windows 11 Upgrade" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0"/>
                 </StackPanel>
@@ -1880,8 +1883,14 @@ function Start-InventoryRefresh {
     }
     $streams = foreach ($item in $plan) {
         $logPath = Join-Path $evidence ('InventoryRefresh-{0}.log' -f $item.Name)
-        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes((Get-InventoryRefreshCommandText -Exports $item.Exports -LogPath $logPath)))
-        $process = Start-Process -FilePath $powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded) -WindowStyle Hidden -PassThru
+        # The Graph stream runs minimized, not hidden: when Microsoft Graph asks for an interactive
+        # sign-in during the export, the sign-in window needs a visible parent console, otherwise it
+        # never shows and the export waits, then fails ("User canceled authentication"). Its output
+        # still goes to the log shown here; the console stays empty. AD has no sign-in: hidden.
+        $windowStyle = if ($item.Name -eq 'Graph') { 'Minimized' } else { 'Hidden' }
+        $windowTitle = if ($item.Name -eq 'Graph') { 'SEMT - Microsoft Graph inventory refresh (sign-in window; do not close)' } else { '' }
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes((Get-InventoryRefreshCommandText -Exports $item.Exports -LogPath $logPath -WindowTitle $windowTitle)))
+        $process = Start-Process -FilePath $powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded) -WindowStyle $windowStyle -PassThru
         $null = $process.Handle  # keeps ExitCode readable after the process exits
         $stateText = $popup.FindName(('InventoryRefresh{0}StateText' -f $item.Name))
         $stateText.Text = ('{0}: running since {1:HH:mm:ss}.' -f $item.Title,(Get-Date))
@@ -1893,8 +1902,8 @@ function Start-InventoryRefresh {
     }
     $script:InventoryRefresh.StateText.Text = switch (($plan | ForEach-Object { $_.Name }) -join '+') {
         'AD' { 'Active Directory export only (the Microsoft Graph inventories are up to date). AD needs the ActiveDirectory module.' }
-        'Graph' { 'Microsoft Graph export only (the AD inventory is up to date); the Microsoft Graph sign-in window opens now.' }
-        default { 'AD and Microsoft Graph exports run in parallel. AD needs the ActiveDirectory module; the Microsoft Graph sign-in window opens now.' }
+        'Graph' { 'Microsoft Graph export only (the AD inventory is up to date); the Microsoft Graph sign-in window opens now. If Graph asks to sign in again, it opens from the minimized "SEMT - Microsoft Graph" window in the taskbar.' }
+        default { 'AD and Microsoft Graph exports run in parallel. AD needs the ActiveDirectory module; the Microsoft Graph sign-in window opens now. If Graph asks to sign in again, it opens from the minimized "SEMT - Microsoft Graph" window in the taskbar.' }
     }
     $popup.FindName('InventoryRefreshOpenFolderButton').Add_Click({ Open-ShellPath $script:InventoryRefresh.Evidence })
     $script:InventoryRefresh.StopButton.Add_Click({

@@ -11,7 +11,7 @@
     "Engine": "1.0.3",
     "Worker": "1.0.3",
     "CoreModule": "1.0.0",
-    "GUI": "1.1.2",
+    "GUI": "1.1.3",
     "HybridJoinEndpoint": "1.0.1",
     "Windows11UpgradeEndpoint": "1.0.0",
     "PrerequisitesEndpoint": "1.0.0"
