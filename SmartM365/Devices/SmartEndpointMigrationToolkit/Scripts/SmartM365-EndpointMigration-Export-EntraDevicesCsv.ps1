@@ -36,7 +36,7 @@ Do not install Microsoft.Graph.Authentication automatically if it is missing.
 Regenerates the shared cache even when it is less than 2 hours old.
 
 .VERSION
-1.2.0
+1.3.0
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
@@ -57,7 +57,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.2.0"
+$ScriptVersion = "1.3.0"
 $EntraInventoryFreshnessHours = 24
 
 function Write-Host {
@@ -246,7 +246,9 @@ function Invoke-GraphPagedRequest {
     $page = 0
     while (-not [string]::IsNullOrWhiteSpace($nextUri)) {
         $page++
-        $response = Invoke-MgGraphRequest -Method GET -Uri $nextUri -ErrorAction Stop
+        # The hidden export process cannot show a sign-in window: a page that asks for one fails
+        # with GRAPH_SIGN_IN_REQUIRED, or ends the process when the SDK waits past the page timeout.
+        $response = Invoke-SemtGraphPageRequest -Uri $nextUri -Label 'Entra' -Page $page -ItemsRead $items.Count -ConnectedAt (Get-Variable -Name GraphConnectedAt -Scope Script -ValueOnly -ErrorAction SilentlyContinue)
         $pageItems = Get-GraphProperty -InputObject $response -Name "value"
         if ($pageItems) {
             foreach ($item in @($pageItems)) {
@@ -350,6 +352,7 @@ if (-not $NoConnect) {
     # for every process, so another export or a Run reading Graph would lose its silent token.
     Connect-MgGraph @connectParams | Out-Null
 }
+$script:GraphConnectedAt = Get-Date
 
 $context = Get-GraphConnectionContext
 if (-not $context) {

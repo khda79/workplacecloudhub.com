@@ -287,6 +287,8 @@ function Test-HybridJoinGraphSignInMissing {
     if ($null -eq $Export -or $Export.Success) { return $false }
     $logPath = [string](Get-SemtPropertyValue -InputObject $Export -Name 'LogPath' -Default '')
     if ([string]::IsNullOrWhiteSpace($logPath) -or -not (Test-Path -LiteralPath $logPath -PathType Leaf)) { return $false }
+    # Connected, then asked for a new interactive sign-in during the pages: same hidden prompt.
+    if (Select-String -LiteralPath $logPath -Pattern 'GRAPH_SIGN_IN_REQUIRED' -SimpleMatch -Quiet) { return $true }
     return -not (Select-String -LiteralPath $logPath -Pattern '\bAccount\s+:' -Quiet)
 }
 

@@ -748,6 +748,8 @@ function Invoke-MgGraphRequest {
     if ($page -lt 3) { $result['@odata.nextLink'] = 'https://graph.microsoft.com/v1.0/x?$select=a%2cb&$skiptoken=' + ($page + 1) }
     return $result
 }
+# The per-page deadline (Core module) is covered end to end in Test-SemtIntuneIdentity; here only paging.
+function Invoke-SemtGraphPageRequest { param($Uri,$Label,$Page,$ItemsRead,$ConnectedAt,$Headers) Invoke-MgGraphRequest -Method GET -Uri $Uri }
 $all = @(Invoke-GraphPagedRequest -Uri 'https://graph.microsoft.com/v1.0/x?$top=3')
 $loud = @($script:HostLines)
 $script:HostLines.Clear()

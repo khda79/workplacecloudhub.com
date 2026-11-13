@@ -130,6 +130,114 @@ function Get-SemtGraphModuleDiagnostic {
     return ('Documents folder: {0}. PSModulePath: {1}. PowerShellGet install record: {2}. Install it for all users from an elevated Windows PowerShell: Install-Module Microsoft.Graph.Authentication -Scope AllUsers' -f [Environment]::GetFolderPath('MyDocuments'),$env:PSModulePath,$(if ($installed.Count -gt 0) { $installed -join '; ' } else { 'none' }))
 }
 
+function Get-SemtGraphPageTimeoutSeconds {
+    <#
+    Longest wait for one Graph page. A page normally answers in 1-3 s and a throttled one (429,
+    retried by the SDK after Retry-After) in about a minute; SEMT_GRAPH_PAGE_TIMEOUT_SECONDS
+    overrides the default for tests.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $value = 0
+    if ([int]::TryParse([string]$env:SEMT_GRAPH_PAGE_TIMEOUT_SECONDS, [ref]$value) -and $value -ge 1) { return $value }
+    return 180
+}
+
+function Start-SemtGraphWatchdog {
+    <#
+    Arms a process watchdog: when a Graph call blocks longer than Seconds (the SDK waiting for an
+    interactive sign-in that a hidden process cannot show, with no timeout of its own), it writes
+    Message to the standard output and ends the process with ExitCode. A PowerShell pipeline cannot
+    interrupt that wait, so the process is ended; exporters run in their own process.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][int]$Seconds,
+        [Parameter(Mandatory = $true)][string]$Message,
+        [int]$ExitCode = 7
+    )
+
+    if (-not ('SemtGraphWatchdog' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Threading;
+public static class SemtGraphWatchdog
+{
+    private static readonly object Gate = new object();
+    private static Timer timer;
+    public static void Arm(int seconds, string message, int exitCode)
+    {
+        lock (Gate)
+        {
+            Disarm();
+            timer = new Timer(delegate(object state)
+            {
+                try { Console.Out.WriteLine(message); Console.Out.Flush(); } catch { }
+                Thread killer = new Thread(delegate() { Thread.Sleep(15000); try { System.Diagnostics.Process.GetCurrentProcess().Kill(); } catch { } });
+                killer.IsBackground = true;
+                killer.Start();
+                Environment.Exit(exitCode);
+            }, null, Math.Max(1, seconds) * 1000L, -1L);
+        }
+    }
+    public static void Disarm()
+    {
+        lock (Gate)
+        {
+            if (timer != null) { timer.Dispose(); timer = null; }
+        }
+    }
+}
+'@
+    }
+    [SemtGraphWatchdog]::Arm($Seconds, $Message, $ExitCode)
+}
+
+function Stop-SemtGraphWatchdog {
+    [CmdletBinding()]
+    param()
+
+    if ('SemtGraphWatchdog' -as [type]) { [SemtGraphWatchdog]::Disarm() }
+}
+
+function Invoke-SemtGraphPageRequest {
+    <#
+    One page of a paged Graph GET. A page that does not answer within Get-SemtGraphPageTimeoutSeconds
+    ends the process with GRAPH_SIGN_IN_REQUIRED (exit code 7); a sign-in error thrown by the SDK
+    becomes GRAPH_SIGN_IN_REQUIRED with the page reached; any other error keeps its message with the
+    page context. Never retried under another credential.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [int]$Page = 1,
+        [int]$ItemsRead = 0,
+        [AllowNull()]$ConnectedAt,
+        [AllowNull()][hashtable]$Headers
+    )
+
+    $target = try { $requestUri = [uri]$Uri; '{0}{1}' -f $requestUri.Host,$requestUri.AbsolutePath } catch { '' }
+    $elapsed = if ($ConnectedAt -is [datetime]) { [int]((Get-Date) - $ConnectedAt).TotalSeconds } else { -1 }
+    $timeout = Get-SemtGraphPageTimeoutSeconds
+    $hint = 'A hidden export cannot show the sign-in window. Refresh the inventories again; if it repeats, run Connect-MgGraph in a visible Windows PowerShell first.'
+    Start-SemtGraphWatchdog -Seconds $timeout -Message ("GRAPH_SIGN_IN_REQUIRED: {0} export stopped: Microsoft Graph did not answer page {1} within {2} s ({3} item(s) already read, {4} s after the connection; request {5}); the Graph SDK is most likely waiting for an interactive sign-in. No CSV was written. {6}" -f $Label,$Page,$timeout,$ItemsRead,($elapsed + $timeout),$target,$hint)
+    try {
+        $request = @{ Method = 'GET'; Uri = $Uri; ErrorAction = 'Stop' }
+        if ($Headers) { $request.Headers = $Headers }
+        return (Invoke-MgGraphRequest @request)
+    }
+    catch {
+        $detail = $_.Exception.Message
+        if ($detail -match 'InteractiveBrowserCredential|User canceled|AuthenticationFailed|MsalUiRequired|interaction_required|AADSTS') {
+            throw ("GRAPH_SIGN_IN_REQUIRED: {0} export: Microsoft Graph asked for a new interactive sign-in at page {1} ({2} item(s) already read, {3} s after the connection; request {4}). {5} Detail: {6}" -f $Label,$Page,$ItemsRead,$(if ($ConnectedAt -is [datetime]) { [int]((Get-Date) - $ConnectedAt).TotalSeconds } else { -1 }),$target,$hint,$detail)
+        }
+        throw ("{0} Graph request failed at page {1} ({2} item(s) already read; request {3}): {4}" -f $Label,$Page,$ItemsRead,$target,$detail)
+    }
+    finally { Stop-SemtGraphWatchdog }
+}
+
 function Get-SemtSharedInventoryPath {
     [CmdletBinding()]
     param(

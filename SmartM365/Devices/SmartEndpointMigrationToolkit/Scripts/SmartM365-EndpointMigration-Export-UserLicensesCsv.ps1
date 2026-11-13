@@ -1,6 +1,6 @@
 <#
 .VERSION
-1.2.0
+1.3.0
 #>
 <#
 .SYNOPSIS
@@ -49,6 +49,7 @@ if (-not $NoConnect) {
     if ($TenantId) { $connection.TenantId = $TenantId }
     Connect-MgGraph @connection | Out-Null
 }
+$graphConnectedAt = Get-Date
 try {
     $context = Get-MgContext
     if (-not $context -or $context.AuthType -ne 'Delegated' -or ($TenantId -and $context.TenantId -ne $TenantId)) { throw 'Delegated Graph context or tenant mismatch.' }
@@ -64,7 +65,9 @@ try {
     while ($next) {
         if ($seenPages.ContainsKey($next) -or $next -notmatch '^https://graph\.microsoft\.com/') { throw 'Invalid or repeated Graph continuation URL.' }
         $seenPages[$next] = $true
-        $page = Invoke-MgGraphRequest -Method GET -Uri $next -ErrorAction Stop
+        # A page that asks for an interactive sign-in fails with GRAPH_SIGN_IN_REQUIRED, or ends the
+        # hidden process when the SDK waits past the page timeout (it has no timeout of its own).
+        $page = Invoke-SemtGraphPageRequest -Uri $next -Label 'Users and licenses' -Page $seenPages.Count -ItemsRead $rows.Count -ConnectedAt $graphConnectedAt
         if (-not $page.Contains('value') -or $null -eq $page['value']) { throw 'Graph response is missing its value collection.' }
         foreach ($u in $page['value']) {
             if (-not $u['id'] -or -not $u.Contains('assignedPlans') -or $null -eq $u['assignedPlans'] -or -not $u.Contains('assignedLicenses') -or $null -eq $u['assignedLicenses']) { throw 'Graph returned a user without required license fields.' }

@@ -226,29 +226,40 @@ try {
     New-Item -ItemType Directory -Path $fakeGraphModule -Force | Out-Null
     Set-Content -LiteralPath (Join-Path $fakeGraphModule 'Microsoft.Graph.Authentication.psd1') -Encoding ASCII -Value "@{ ModuleVersion = '99.0.0'; RootModule = 'Microsoft.Graph.Authentication.psm1'; GUID = '9d1f6a3e-5b7c-4e2a-8f00-000000000099'; FunctionsToExport = @('Connect-MgGraph','Disconnect-MgGraph','Get-MgContext','Invoke-MgGraphRequest') }"
     Set-Content -LiteralPath (Join-Path $fakeGraphModule 'Microsoft.Graph.Authentication.psm1') -Encoding ASCII -Value @'
-function Connect-MgGraph { [CmdletBinding()] param([string[]]$Scopes,[switch]$NoWelcome,[string]$TenantId) Add-Content -LiteralPath $env:SEMT_FAKE_GRAPH_LOG -Value ('Connect|' + ($Scopes -join ',')) }
+function Connect-MgGraph { [CmdletBinding()] param([string[]]$Scopes,[switch]$NoWelcome,[string]$TenantId,[string]$ContextScope) Add-Content -LiteralPath $env:SEMT_FAKE_GRAPH_LOG -Value ('Connect|' + ($Scopes -join ',')) }
 function Disconnect-MgGraph { [CmdletBinding()] param() Add-Content -LiteralPath $env:SEMT_FAKE_GRAPH_LOG -Value 'Disconnect' }
 function Get-MgContext { [CmdletBinding()] param() [pscustomobject]@{ TenantId = '22222222-2222-2222-2222-222222222222'; Account = 'admin@example.test'; AuthType = 'Delegated' } }
 function Invoke-MgGraphRequest {
-    [CmdletBinding()] param([string]$Method,[string]$Uri,[string]$OutputType)
-    Add-Content -LiteralPath $env:SEMT_FAKE_GRAPH_LOG -Value 'Request'
+    [CmdletBinding()] param([string]$Method,[string]$Uri,[string]$OutputType,[hashtable]$Headers)
+    $kind = if ($Uri -like '*/users*') { 'Users' } elseif ($Uri -like '*managedDevices*') { 'Intune' } else { 'Entra' }
+    Add-Content -LiteralPath $env:SEMT_FAKE_GRAPH_LOG -Value ('Request|' + $kind)
+    $item = { param($n) if ($kind -eq 'Users') { @{ id = "u$n"; userPrincipalName = "user$n@example.test"; assignedPlans = @(); assignedLicenses = @() } } elseif ($kind -eq 'Intune') { @{ id = "m$n"; deviceName = "PC-00$n"; azureADDeviceId = "1111111$n-1111-1111-1111-111111111111"; operatingSystem = 'Windows' } } else { @{ id = "e$n"; deviceId = "2222222$n-2222-2222-2222-222222222222"; displayName = "PC-00$n"; operatingSystem = 'Windows'; accountEnabled = $true } } }
     if ($Uri -like '*skiptoken=page2*') {
         if ($env:SEMT_FAKE_GRAPH_MODE -eq 'SignIn') { throw 'InteractiveBrowserCredential authentication failed: User canceled authentication.' }
-        return @{ value = @(@{ id = 'm2'; deviceName = 'PC-002'; azureADDeviceId = '33333333-3333-3333-3333-333333333333'; operatingSystem = 'Windows' }) }
+        # The SDK waiting for a sign-in window that a hidden process cannot show: no answer, no timeout.
+        if ($env:SEMT_FAKE_GRAPH_MODE -eq 'Hang' -and $kind -eq $env:SEMT_FAKE_GRAPH_HANG_KIND) { Start-Sleep -Seconds 300 }
+        return @{ value = @(& $item 2) }
     }
-    return @{ value = @(@{ id = 'm1'; deviceName = 'PC-001'; azureADDeviceId = '11111111-1111-1111-1111-111111111111'; operatingSystem = 'Windows' }); '@odata.nextLink' = 'https://graph.microsoft.com/beta/deviceManagement/managedDevices?$skiptoken=page2' }
+    $base = ($Uri -split '\?')[0]
+    return @{ value = @(& $item 1); '@odata.nextLink' = ($base + '?$skiptoken=page2') }
 }
 '@
     $env:PSModulePath = (Join-Path $graphBase 'Modules') + ';' + $savedGraphModulePath
     $intuneExport = Join-Path $root 'Scripts\SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1'
-    $runFakeIntuneExport = {
-        param([string]$Mode,[string]$CsvPath)
+    $runFakeGraphScript = {
+        param([string]$Script,[string]$Mode,[string[]]$Arguments,[string]$HangKind = '')
         $ErrorActionPreference = 'Continue'
         $env:SEMT_FAKE_GRAPH_MODE = $Mode
-        $env:SEMT_FAKE_GRAPH_LOG = Join-Path $graphBase ('calls-' + $Mode + '.txt')
-        $output = @(& (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -ExecutionPolicy Bypass -File $intuneExport -OutputPath $CsvPath -ForceRefresh -SkipModuleInstall 2>&1)
-        [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($output -join "`n"); Calls = @(Get-Content -LiteralPath $env:SEMT_FAKE_GRAPH_LOG -ErrorAction SilentlyContinue) }
+        $env:SEMT_FAKE_GRAPH_HANG_KIND = $HangKind
+        $env:SEMT_GRAPH_PAGE_TIMEOUT_SECONDS = '4'
+        $env:SEMT_FAKE_GRAPH_LOG = Join-Path $graphBase ('calls-' + [guid]::NewGuid().ToString('N') + '.txt')
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        $output = @(& (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -ExecutionPolicy Bypass -File $Script @Arguments 2>&1)
+        [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($output -join "`n"); Calls = @(Get-Content -LiteralPath $env:SEMT_FAKE_GRAPH_LOG -ErrorAction SilentlyContinue); Seconds = $watch.Elapsed.TotalSeconds }
     }
+    # Windows PowerShell wraps a child's error record at the console width, even inside words: compare without whitespace.
+    $hasText = { param($Result,[string]$Text) ($Result.Output -replace '\s+','').Contains(($Text -replace '\s+','')) }
+    $runFakeIntuneExport = { param([string]$Mode,[string]$CsvPath) & $runFakeGraphScript $intuneExport $Mode @('-OutputPath',$CsvPath,'-ForceRefresh','-SkipModuleInstall') 'Intune' }
     $okCsv = Join-Path $graphBase 'DevicesIntune-ok.csv'
     $ok = & $runFakeIntuneExport 'Ok' $okCsv
     if ($ok.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $okCsv) -or @(Import-Csv -LiteralPath $okCsv).Count -ne 2) { throw "Fake two-page Intune export failed: $($ok.Output)" }
@@ -256,15 +267,38 @@ function Invoke-MgGraphRequest {
     $signInCsv = Join-Path $graphBase 'DevicesIntune-signin.csv'
     $signIn = & $runFakeIntuneExport 'SignIn' $signInCsv
     if ($signIn.ExitCode -eq 0 -or (Test-Path -LiteralPath $signInCsv)) { throw 'An Intune export interrupted by a sign-in request still succeeded or wrote a CSV.' }
-    if ($signIn.Output -notmatch 'GRAPH_SIGN_IN_REQUIRED: Microsoft Graph asked for a new interactive sign-in at page 2 \(1 device\(s\) already read') { throw "Sign-in request was not reported as GRAPH_SIGN_IN_REQUIRED: $($signIn.Output)" }
+    if (-not (& $hasText $signIn 'GRAPH_SIGN_IN_REQUIRED: Intune export: Microsoft Graph asked for a new interactive sign-in at page 2 (1 item(s) already read')) { throw "Sign-in request was not reported as GRAPH_SIGN_IN_REQUIRED: $($signIn.Output)" }
     if ($signIn.Calls -contains 'Disconnect') { throw 'Intune export disconnected from Graph.' }
+
+    # The Graph SDK waiting with no timeout for a sign-in window a hidden process cannot show (seen in the
+    # field: users and licenses blocked for more than 50 minutes): each page has a deadline, then the
+    # process ends with GRAPH_SIGN_IN_REQUIRED (exit code 7) and writes no CSV.
+    $hangCsv = Join-Path $graphBase 'DevicesIntune-hang.csv'
+    $hang = & $runFakeIntuneExport 'Hang' $hangCsv
+    if ($hang.ExitCode -ne 7 -or (Test-Path -LiteralPath $hangCsv) -or $hang.Seconds -ge 90 -or -not (& $hasText $hang 'GRAPH_SIGN_IN_REQUIRED: Intune export stopped: Microsoft Graph did not answer page 2 within 4 s (1 item(s) already read')) { throw ("A blocked Intune page did not end the export with GRAPH_SIGN_IN_REQUIRED: exit={0}; {1:N0} s; {2}" -f $hang.ExitCode,$hang.Seconds,$hang.Output) }
+    $userExport = Join-Path $root 'Scripts\SmartM365-EndpointMigration-Export-UserLicensesCsv.ps1'
+    $usersCsv = Join-Path $graphBase 'UsersLicenses-hang.csv'
+    $usersHang = & $runFakeGraphScript $userExport 'Hang' @('-OutputPath',$usersCsv,'-ForceRefresh') 'Users'
+    if ($usersHang.ExitCode -ne 7 -or (Test-Path -LiteralPath $usersCsv) -or $usersHang.Seconds -ge 90 -or -not (& $hasText $usersHang 'GRAPH_SIGN_IN_REQUIRED: Users and licenses export stopped: Microsoft Graph did not answer page 2 within 4 s')) { throw ("A blocked users page did not end the export with GRAPH_SIGN_IN_REQUIRED: exit={0}; {1:N0} s; {2}" -f $usersHang.ExitCode,$usersHang.Seconds,$usersHang.Output) }
+    $usersOk = & $runFakeGraphScript $userExport 'Ok' @('-OutputPath',$usersCsv,'-ForceRefresh')
+    if ($usersOk.ExitCode -ne 0 -or @(Import-Csv -LiteralPath $usersCsv).Count -ne 2) { throw "Fake two-page users export failed: $($usersOk.Output)" }
+    # The combined exporter runs Intune, Entra and users in one process: Intune is written, then the
+    # blocked Entra page ends the process before users and licenses would wait as well.
+    $combined = Join-Path $root 'Scripts\SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1'
+    $combinedIntune = Join-Path $graphBase 'Combined-Intune.csv'; $combinedEntra = Join-Path $graphBase 'Combined-Entra.csv'; $combinedUsers = Join-Path $graphBase 'Combined-Users.csv'
+    $combinedHang = & $runFakeGraphScript $combined 'Hang' @('-IntuneOutputPath',$combinedIntune,'-EntraOutputPath',$combinedEntra,'-IncludeUserLicenses','-UserLicensesOutputPath',$combinedUsers,'-SkipModuleInstall') 'Entra'
+    if ($combinedHang.ExitCode -ne 7 -or -not (Test-Path -LiteralPath $combinedIntune) -or (Test-Path -LiteralPath $combinedEntra) -or (Test-Path -LiteralPath $combinedUsers) -or @($combinedHang.Calls | Where-Object { $_ -eq 'Request|Users' }).Count -ne 0 -or -not (& $hasText $combinedHang 'GRAPH_SIGN_IN_REQUIRED: Entra export stopped: Microsoft Graph did not answer page 2 within 4 s')) { throw ("A blocked Entra page in the combined export was not stopped cleanly: exit={0}; calls={1}; {2}" -f $combinedHang.ExitCode,($combinedHang.Calls -join ','),$combinedHang.Output) }
+    # Pages that answer in time disarm the watchdog: the slower CSV writing afterwards never trips it.
+    $combinedOk = & $runFakeGraphScript $combined 'Ok' @('-IntuneOutputPath',$combinedIntune,'-EntraOutputPath',$combinedEntra,'-IncludeUserLicenses','-UserLicensesOutputPath',$combinedUsers,'-SkipModuleInstall')
+    if ($combinedOk.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $combinedEntra) -or -not (Test-Path -LiteralPath $combinedUsers)) { throw "Fake combined export failed: $($combinedOk.Output)" }
 }
 finally {
     $env:PSModulePath = $savedGraphModulePath
-    Remove-Item Env:SEMT_FAKE_GRAPH_MODE, Env:SEMT_FAKE_GRAPH_LOG -ErrorAction SilentlyContinue
+    Remove-Item Env:SEMT_FAKE_GRAPH_MODE, Env:SEMT_FAKE_GRAPH_LOG, Env:SEMT_FAKE_GRAPH_HANG_KIND, Env:SEMT_GRAPH_PAGE_TIMEOUT_SECONDS -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $graphBase -Recurse -Force -ErrorAction SilentlyContinue
 }
 Write-Host 'PASS: a Graph sign-in request in a hidden Intune export fails with GRAPH_SIGN_IN_REQUIRED and no CSV'
+Write-Host 'PASS: a Graph page blocked on a hidden sign-in ends Intune, users and the combined export with GRAPH_SIGN_IN_REQUIRED (exit 7) and no CSV'
 Write-Host 'PASS: local Intune trace with unhealthy join stays a review item'
 $hjEndpointText = [IO.File]::ReadAllText((Join-Path $root 'Campaigns\HybridJoin\Scripts\SmartM365-Invoke-EndpointMigration-HybridJoin.ps1'))
 if ($hjEndpointText -match '\$status = "INTUNE_ENROLLED"' -or $hjEndpointText -notmatch '"INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY" \{ return "REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN" \}' -or $hjEndpointText -notmatch '\$status = "INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY"') { throw 'Endpoint still reports a local Intune trace with unhealthy join as INTUNE_ENROLLED.' }
