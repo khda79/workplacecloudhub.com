@@ -12,7 +12,7 @@
   "AllowRestore": false,
   "RequireConfirmationPhrase": true,
   "ApplyConfirmationPhrase": "APPLY",
-  "RestoreConfirmationPhrase": "RESTORE WINDOWS SHELL",
+  "RestoreConfirmationPhrase": "RESTORE",
   "CitrixWorkspacePath": "",
   "AvdClientPath": "",
   "WindowsAppPackageName": "MicrosoftCorporationII.Windows365",

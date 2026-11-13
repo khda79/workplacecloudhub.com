@@ -79,12 +79,55 @@ function Test-IsAdministrator {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Initialize-ThinClientAdminTokenApi {
+    if ('SmartThinClient.AdminToken' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;using System.ComponentModel;using System.Runtime.InteropServices;using System.Security.Principal;
+namespace SmartThinClient {
+ public static class AdminToken {
+  [StructLayout(LayoutKind.Sequential)] struct SidAndAttributes {public IntPtr Sid;public uint Attributes;}
+  [StructLayout(LayoutKind.Sequential)] struct TokenGroups {public uint Count;public SidAndAttributes First;}
+  [DllImport("advapi32.dll",SetLastError=true)]
+  [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+  [return:MarshalAs(UnmanagedType.Bool)]
+  static extern bool GetTokenInformation(IntPtr token,int information,IntPtr buffer,int length,out int returned);
+  public static bool IsAdministratorGroup(string sid,uint attributes) {
+   return sid=="S-1-5-32-544" && (attributes & (4u|16u))!=0;
+  }
+  public static bool HasAdministratorSid(IntPtr token) {
+   int length;GetTokenInformation(token,2,IntPtr.Zero,0,out length);
+   int error=Marshal.GetLastWin32Error();
+   if(error!=122 || length<=0 || length>1048576) throw new Win32Exception(error,"Cannot size current token groups.");
+   IntPtr buffer=Marshal.AllocHGlobal(length);
+   try {
+    int returned;if(!GetTokenInformation(token,2,buffer,length,out returned)) throw new Win32Exception(Marshal.GetLastWin32Error());
+    int offset=Marshal.OffsetOf(typeof(TokenGroups),"First").ToInt32(),stride=Marshal.SizeOf(typeof(SidAndAttributes));
+    if(returned<offset || returned>length) throw new InvalidOperationException("Invalid token group buffer.");
+    uint count=unchecked((uint)Marshal.ReadInt32(buffer));
+    if(count>(returned-offset)/stride) throw new InvalidOperationException("Invalid token group count.");
+    for(int i=0;i<count;i++) {
+     var group=(SidAndAttributes)Marshal.PtrToStructure(IntPtr.Add(buffer,offset+i*stride),typeof(SidAndAttributes));
+     if(group.Sid!=IntPtr.Zero && IsAdministratorGroup(new SecurityIdentifier(group.Sid).Value,group.Attributes)) return true;
+    }
+    return false;
+   } finally {Marshal.FreeHGlobal(buffer);}
+  }
+ }
+}
+'@
+}
+
 function Get-ThinClientAdminTokenState {
     $identity = $null
     try {
         $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
         $elevated = (New-Object Security.Principal.WindowsPrincipal($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-        $member = $elevated -or @($identity.Groups | Where-Object { $_.Value -eq 'S-1-5-32-544' }).Count -gt 0
+        $member = $elevated
+        if (-not $member) {
+            Initialize-ThinClientAdminTokenApi
+            # WindowsIdentity.Groups omits deny-only SIDs from a filtered UAC token.
+            $member = [SmartThinClient.AdminToken]::HasAdministratorSid($identity.Token)
+        }
         [pscustomobject]@{IsAdministratorAccount=[bool]$member;IsElevated=[bool]$elevated}
     }
     catch { [pscustomobject]@{IsAdministratorAccount=$false;IsElevated=$false} }
@@ -308,7 +351,7 @@ function Resolve-Config {
         AllowRestore = $false
         RequireConfirmationPhrase = $true
         ApplyConfirmationPhrase = 'APPLY'
-        RestoreConfirmationPhrase = 'RESTORE WINDOWS SHELL'
+        RestoreConfirmationPhrase = 'RESTORE'
         CitrixWorkspacePath = ''
         AvdClientPath = ''
         WindowsAppPackageName = 'MicrosoftCorporationII.Windows365'
@@ -1496,7 +1539,7 @@ function New-LauncherScript {
     $configuredPath = [string](Get-Variable -Name ConfigPath -ValueOnly -ErrorAction SilentlyContinue)
     $controlPanelConfig = if([string]::IsNullOrWhiteSpace($configuredPath)){Join-Path $script:ScriptRoot 'SmartThinClient-Shell.config.json'}else{$configuredPath}
     $controlPanelConfigLiteral = ConvertTo-QuotedPowerShellString -Value $controlPanelConfig
-    $sharedUiFunctions = (@('New-ThinClientUiResources','Get-ThinClientProviderVisibility','ConvertTo-ThinClientSettingsButtons','Get-ThinClientVisibleSettingsPages','New-ThinClientSettingsRequest','Show-ThinClientLimitedSettings','Get-ThinClientAdminTokenState','Open-ThinClientAdminPanel','Confirm-ThinClientPowerAction','Invoke-ThinClientPowerAction') | ForEach-Object { 'function ' + $_ + ' {' + (Get-Command -Name $_ -CommandType Function).Definition + '}' }) -join "`r`n"
+    $sharedUiFunctions = (@('New-ThinClientUiResources','Get-ThinClientProviderVisibility','ConvertTo-ThinClientSettingsButtons','Get-ThinClientVisibleSettingsPages','New-ThinClientSettingsRequest','Show-ThinClientLimitedSettings','Initialize-ThinClientAdminTokenApi','Get-ThinClientAdminTokenState','Open-ThinClientAdminPanel','Confirm-ThinClientPowerAction','Invoke-ThinClientPowerAction') | ForEach-Object { 'function ' + $_ + ' {' + (Get-Command -Name $_ -CommandType Function).Definition + '}' }) -join "`r`n"
     $shellXaml = Get-ThinClientShellXaml
     $content = @"
 param([ValidateSet('Citrix','AVD','WebOnly','Hybrid')][string]`$Profile = '$EffectiveProfile')
@@ -1665,8 +1708,9 @@ $shellXaml
     `$settingsButton = `$window.FindName('SettingsButton')
     `$adminButton = `$window.FindName('AdminButton')
     if ((Get-ThinClientAdminTokenState).IsAdministratorAccount) { `$adminButton.Visibility = 'Visible' }
+    `$adminButton.Tag = [pscustomobject]@{ScriptPath=`$ControlPanelScript;ConfigPath=`$ControlPanelConfig;WorkspaceProfile=[string]`$Profile}
     `$adminButton.Add_Click({
-        try { Open-ThinClientAdminPanel -ScriptPath `$ControlPanelScript -ConfigPath `$ControlPanelConfig -Profile `$Profile }
+        try { `$request=`$this.Tag;Open-ThinClientAdminPanel -ScriptPath `$request.ScriptPath -ConfigPath `$request.ConfigPath -Profile `$request.WorkspaceProfile }
         catch { Show-LauncherNotice ('Admin panel could not open: '+`$_.Exception.Message) }
     })
     `$signOutButton = `$window.FindName('SignOutButton')
@@ -2085,7 +2129,7 @@ function Assert-RestoreAllowed {
     if (-not (Test-IsAdministrator)) { throw 'Restore requires an elevated administrator PowerShell session.' }
     if (-not [bool](Get-ConfigValue -Config $Config -Name 'AllowRestore' -Default $false)) { throw 'Restore is blocked because AllowRestore is false in configuration.' }
     if ([bool](Get-ConfigValue -Config $Config -Name 'RequireConfirmationPhrase' -Default $true)) {
-        $phrase = [string](Get-ConfigValue -Config $Config -Name 'RestoreConfirmationPhrase' -Default 'RESTORE WINDOWS SHELL')
+        $phrase = [string](Get-ConfigValue -Config $Config -Name 'RestoreConfirmationPhrase' -Default 'RESTORE')
         if ($ConfirmRestore -ne $phrase) { throw "Restore requires -ConfirmRestore '$phrase'." }
     }
 }
@@ -2329,6 +2373,142 @@ function Invoke-ThinClientRestore {
     return $result
 }
 
+function Test-ThinClientRestoreValueEqual {
+    param($Left,$Right)
+    return $Left.ValueExists -eq $Right.ValueExists -and (-not $Left.ValueExists -or ($Left.ValueKind -ceq $Right.ValueKind -and $Left.Value -ceq $Right.Value))
+}
+
+function Get-ThinClientWindowsRestoreState {
+    [pscustomobject][ordered]@{
+        Policy=Get-ThinClientCustomShellPolicy
+        Run=Get-RegistryValueSnapshot -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name 'SmartThinClientShell'
+        Winlogon=Get-RegistryValueSnapshot -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name 'Shell'
+    }
+}
+
+function Get-ThinClientLegacyStartupRoot {
+    param([string]$Command)
+    if ($Command -notmatch ' -File "([^"]+)"$') { throw 'The recorded startup is not a recognized ThinClient launcher. Use advanced restore for manual review.' }
+    $path=$Matches[1]
+    if (-not [IO.Path]::IsPathRooted($path) -or $path.StartsWith('\\') -or [IO.Path]::GetFileName($path) -ine 'SmartThinClient-LaunchWorkspace.ps1') { throw 'The recorded launcher is not a local ThinClient file.' }
+    $root=[IO.Path]::GetFullPath((Split-Path (Split-Path $path -Parent) -Parent)).TrimEnd('\')
+    if ($root -eq [IO.Path]::GetPathRoot($root).TrimEnd('\') -or $Command -cne (Get-LauncherCommandLine -Root $root)) { throw 'The recorded startup command does not match the managed ThinClient launcher.' }
+    return $root
+}
+
+function Get-ThinClientWindowsRestoreFingerprint {
+    param($Plan)
+    $value=[ordered]@{ComputerName=$Plan.ComputerName;InitialState=$Plan.InitialState;Launchers=@($Plan.Launchers);Steps=@($Plan.Steps|Select-Object Path,SHA256,OutputRoot,SchemaVersion,CreatedUtc,ExpectedPolicy,ExpectedRun)}
+    $bytes=[Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $value -Depth 16 -Compress))
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','') } finally { $sha.Dispose() }
+}
+
+function Get-ThinClientWindowsRestorePlan {
+    param([Parameter(Mandatory=$true)]$Config)
+    if((Get-ConfigValue -Config $Config -Name ShellMode -Default Launcher) -notin @('Launcher','CustomShell') -or (Get-ConfigValue -Config $Config -Name EnableAssignedAccess -Default $false) -or (Get-ConfigValue -Config $Config -Name EnableShellLauncher -Default $false)){throw 'This kiosk configuration requires advanced restore of its reviewed backup.'}
+    $initial=Get-ThinClientWindowsRestoreState
+    if (-not $initial.Winlogon.ValueExists -or $initial.Winlogon.Value -ine 'explorer.exe') { throw 'Windows Explorer is not the recorded Windows logon shell. Use advanced restore for manual review; no changes were made.' }
+    $machine=Get-ThinClientMachineRoot -Config $Config
+    $managed=Get-LauncherCommandLine -Root $machine -Machine
+    $policy=$initial.Policy;$run=$initial.Run;$limit=[long]::MaxValue
+    $cache=@{};$seen=@{};$launchers=[Collections.Generic.List[object]]::new();$steps=[Collections.Generic.List[object]]::new()
+    while ($true) {
+        # Only our exact custom-shell command or recorded own startup can select a history root.
+        if ($run.ValueExists) { if($run.ValueKind -ne 'String'){throw 'ThinClient startup has an unexpected registry type.'};[void](Get-ThinClientLegacyStartupRoot -Command $run.Value) }
+        if ($policy.ValueExists -and $policy.Value -ine 'explorer.exe') {
+            if ($policy.Value -cne $managed) { throw 'Another custom shell is configured. Automatic Windows desktop restore will not replace it.' }
+            $root=$machine;$schema=3
+        } elseif ($run.ValueExists) { $root=Get-ThinClientLegacyStartupRoot -Command $run.Value;$schema=2 }
+        else { break }
+        if ($steps.Count -ge 64) { throw 'Rollback history exceeds the automatic restore limit. Use advanced restore.' }
+        if (-not $cache.ContainsKey($root)) {
+            $folder=Join-Path $root 'Rollback';$launcher=Join-Path $root 'Launcher\SmartThinClient-LaunchWorkspace.ps1'
+            foreach($p in @($root,$folder,(Split-Path $launcher -Parent),$launcher)) { if((Test-Path -LiteralPath $p) -and ((Get-Item -LiteralPath $p -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Automatic restore refuses redirected history or launcher paths.'} }
+            $exists=Test-Path -LiteralPath $launcher -PathType Leaf
+            $launchers.Add([pscustomobject][ordered]@{Path=$launcher;Exists=[bool]$exists;SHA256=$(if($exists){(Get-FileHash -LiteralPath $launcher).Hash}else{''})})
+            $items=@(Get-ChildItem -LiteralPath $folder -Filter ('SmartThinClient_Rollback_'+$env:COMPUTERNAME+'_*.json') -File -ErrorAction SilentlyContinue)
+            $cache[$root]=@(foreach($file in $items) {
+                if($file.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Automatic restore refuses redirected rollback files.'}
+                $beforeHash=(Get-FileHash -LiteralPath $file.FullName).Hash
+                $state=Read-JsonFile -Path $file.FullName
+                $priorRoot=$script:OutputRoot
+                try {$script:OutputRoot=$root;Assert-RollbackState -State $state -Config $Config} finally {$script:OutputRoot=$priorRoot}
+                if($state.SchemaVersion -eq 2 -and $state.Config.ShellMode -ne 'Launcher'){throw 'This history requires advanced kiosk restore; no changes were made.'}
+                $snapshotConfig=Convert-ObjectToHashtable -InputObject $state.Config
+                if((Get-ConfigValue -Config $snapshotConfig -Name EnableAssignedAccess -Default $false) -or (Get-ConfigValue -Config $snapshotConfig -Name EnableShellLauncher -Default $false)){throw 'This backup includes kiosk changes and requires advanced restore.'}
+                $date=[DateTimeOffset]::Parse([string]$state.CreatedUtc,[Globalization.CultureInfo]::InvariantCulture)
+                if((Get-FileHash -LiteralPath $file.FullName).Hash -cne $beforeHash){throw 'A rollback changed while preparing the review. Try again.'}
+                [pscustomobject]@{Path=$file.FullName;SHA256=$beforeHash;State=$state;Ticks=$date.UtcDateTime.Ticks}
+            })
+        }
+        $eligible=@($cache[$root]|Where-Object {$_.Ticks -lt $limit}|Sort-Object Ticks -Descending)
+        if(-not $eligible.Count){throw 'A required earlier ThinClient backup is missing. Automatic restore cannot safely reach the Windows desktop; no changes were made.'}
+        if($eligible.Count -gt 1 -and $eligible[0].Ticks -eq $eligible[1].Ticks){throw 'Rollback history is ambiguous. Use advanced restore; no changes were made.'}
+        $item=$eligible[0];$state=$item.State
+        if($seen.ContainsKey($item.Path) -or $state.SchemaVersion -ne $schema){throw 'The rollback sequence does not match the configured shell.'}
+        $seen[$item.Path]=$true;$limit=$item.Ticks
+        $steps.Add([pscustomobject][ordered]@{Path=$item.Path;SHA256=$item.SHA256;OutputRoot=$root;SchemaVersion=$schema;CreatedUtc=[string]$state.CreatedUtc;ExpectedPolicy=$policy;ExpectedRun=$run})
+        if($schema -eq 3){$policy=$state.CustomShellPolicy}
+        $startup=@($state.Registry|Where-Object {$_.Path -ieq 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -and $_.Name -eq 'SmartThinClientShell'})
+        if($startup.Count -gt 1){throw 'Rollback contains duplicate startup snapshots.'}
+        if($startup.Count){$run=$startup[0]}
+    }
+    $plan=[pscustomobject][ordered]@{Purpose='WindowsDesktop';ComputerName=$env:COMPUTERNAME;InitialState=$initial;Launchers=$launchers.ToArray();Steps=$steps.ToArray();AlreadyWindows=($steps.Count -eq 0);ReviewHash=''}
+    $plan.ReviewHash=Get-ThinClientWindowsRestoreFingerprint -Plan $plan
+    return $plan
+}
+
+function Convert-ThinClientWindowsRestorePlanToText {
+    param($Plan)
+    if($Plan.AlreadyWindows){return 'The Windows desktop (Explorer) is already configured and ThinClient automatic startup is disabled. No changes are needed.'}
+    $scope=if(@($Plan.Steps|Where-Object SchemaVersion -eq 3).Count){'All users on this device'}else{'ThinClient automatic startup on this device'}
+    return (@('Action: Restore the Windows desktop (Explorer)',('Scope: '+$scope),'',('Previous ThinClient configurations to undo: '+$Plan.Steps.Count),'Remove the recorded ThinClient custom shell and automatic startup.','Restore the Windows restrictions recorded in those backups.','Keep user accounts, application files, configuration and backup history.','','Your current session stays open. Sign out and sign in again after completion to use Windows Explorer.','Domain policy can override local policy. This is not a Windows factory reset.') -join [Environment]::NewLine)
+}
+
+function Invoke-ThinClientWindowsRestore {
+    param([Parameter(Mandatory=$true)]$Config,[Parameter(Mandatory=$true)]$Plan)
+    Assert-RestoreAllowed -Config $Config
+    if($Plan.Purpose -ne 'WindowsDesktop' -or $Plan.ComputerName -cne $env:COMPUTERNAME -or $Plan.ReviewHash -cne (Get-ThinClientWindowsRestoreFingerprint -Plan $Plan)){throw 'The Windows desktop restore review is invalid. No changes were made.'}
+    $fresh=Get-ThinClientWindowsRestorePlan -Config $Config
+    if($fresh.ReviewHash -cne $Plan.ReviewHash){throw 'The shell state or backup history changed after review. Review Restore again; no changes were made.'}
+    if($fresh.AlreadyWindows){throw 'Windows desktop is already configured. No restore was run.'}
+    $locks=[Collections.Generic.List[IO.FileStream]]::new();$completed=[Collections.Generic.List[object]]::new()
+    $oldRoot=$script:OutputRoot;$oldRollback=$script:RollbackRoot;$oldJson=$script:EvidenceJsonPath;$oldCsv=$script:EvidenceCsvPath;$oldPath=$RollbackPath
+    try {
+        # Lock and hash every reviewed file before the first write. Existing single-backup engine remains authoritative.
+        foreach($step in $fresh.Steps){
+            $stream=[IO.File]::Open($step.Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read);$locks.Add($stream)
+            $sha=[Security.Cryptography.SHA256]::Create();try{$hash=([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-','')}finally{$sha.Dispose()}
+            if($hash -cne $step.SHA256){throw 'A rollback changed after review. No restore steps were run.'}
+        }
+        foreach($step in $fresh.Steps){
+            $now=Get-ThinClientWindowsRestoreState
+            if(-not(Test-ThinClientRestoreValueEqual $now.Policy $step.ExpectedPolicy) -or -not(Test-ThinClientRestoreValueEqual $now.Run $step.ExpectedRun) -or -not(Test-ThinClientRestoreValueEqual $now.Winlogon $fresh.InitialState.Winlogon)){throw 'Windows shell or startup changed during restore; remaining steps were stopped.'}
+            $script:OutputRoot=$step.OutputRoot;$script:RollbackRoot=Join-Path $step.OutputRoot 'Rollback';$RollbackPath=$step.Path
+            $index=$completed.Count+1
+            $script:EvidenceJsonPath=Join-Path (Split-Path $oldJson) (([IO.Path]::GetFileNameWithoutExtension($oldJson))+'_step_'+$index+'.json')
+            $script:EvidenceCsvPath=Join-Path (Split-Path $oldCsv) (([IO.Path]::GetFileNameWithoutExtension($oldCsv))+'_step_'+$index+'.csv')
+            $result=Invoke-ThinClientRestore -Config $Config
+            if($result.Status -ne 'Restored'){throw 'A restore step did not complete successfully.'}
+            $completed.Add([pscustomobject]@{Path=$step.Path;SHA256=$step.SHA256;EvidenceJsonPath=$script:EvidenceJsonPath})
+        }
+        $final=Get-ThinClientWindowsRestoreState
+        if(($final.Policy.ValueExists -and $final.Policy.Value -ine 'explorer.exe') -or $final.Run.ValueExists -or $final.Winlogon.Value -ine 'explorer.exe'){throw 'Windows desktop restore did not reach the reviewed final state.'}
+    } catch {
+        $message='Windows desktop restore stopped after '+$completed.Count+' of '+$fresh.Steps.Count+' steps. '+$_.Exception.Message
+        $script:EvidenceJsonPath=$oldJson;$script:EvidenceCsvPath=$oldCsv
+        Export-Evidence -Evidence ([pscustomobject]@{Status='RestoreFailed';ComputerName=$env:COMPUTERNAME;RequestedAction='Restore';Message=$message;CompletedSteps=$completed.ToArray();PlannedSteps=$fresh.Steps.Count}) -Config $Config
+        throw $message
+    } finally {
+        foreach($stream in $locks){$stream.Dispose()}
+        $script:OutputRoot=$oldRoot;$script:RollbackRoot=$oldRollback;$script:EvidenceJsonPath=$oldJson;$script:EvidenceCsvPath=$oldCsv;$RollbackPath=$oldPath
+    }
+    $result=[pscustomobject]@{Status='Restored';RequestedAction='Restore';ComputerName=$env:COMPUTERNAME;WindowsDesktopRestored=$true;RestoredSnapshots=$completed.ToArray();OutputRoot=$oldRoot;LogPath=$script:LogPath;EvidenceJsonPath=$oldJson;EvidenceCsvPath=$oldCsv}
+    Export-Evidence -Evidence $result -Config $Config
+    return $result
+}
+
 function Get-ThinClientVisualPreviewTarget {
     param($Config, [ValidateSet('Citrix','AVD','WebOnly')][string]$Provider, [string]$EffectiveProfile = 'Auto')
     $urls = Get-WorkspaceWebUrls -Config $Config -EffectiveProfile $EffectiveProfile
@@ -2477,6 +2657,7 @@ function Invoke-ThinClientGuiAction {
         [string]$Confirmation = '',
         [string]$SelectedRollbackPath = '',
         [string]$ExpectedRollbackHash = '',
+        $WindowsRestorePlan = $null,
         [securestring]$Password
     )
     Assert-ConfigValues -Config $Config
@@ -2493,10 +2674,11 @@ function Invoke-ThinClientGuiAction {
         $effective = Resolve-EffectiveProfile -RequestedProfile $SelectedProfile -Config $Config
         $effectiveConfig = Merge-ProfileConfig -Config $Config -EffectiveProfile $effective
         Assert-ThinClientGuiAccess -Config $effectiveConfig -RequestedAction $RequestedAction
-        $defaultPhrase = if ($RequestedAction -eq 'Apply') { 'APPLY' } else { 'RESTORE WINDOWS SHELL' }
+        $defaultPhrase = if ($RequestedAction -eq 'Apply') { 'APPLY' } else { 'RESTORE' }
         $phrase = [string](Get-ConfigValue -Config $effectiveConfig -Name ($RequestedAction + 'ConfirmationPhrase') -Default $defaultPhrase)
         if ([string]::IsNullOrWhiteSpace($phrase) -or $Confirmation -cne $phrase) { throw "$RequestedAction requires the exact confirmation phrase. No changes were made." }
         if ($RequestedAction -eq 'Apply') { return Invoke-ThinClientApply -Config $Config }
+        if ($null -ne $WindowsRestorePlan) { return Invoke-ThinClientWindowsRestore -Config $effectiveConfig -Plan $WindowsRestorePlan }
         if ([string]::IsNullOrWhiteSpace($RollbackPath) -or [string]::IsNullOrWhiteSpace($ExpectedRollbackHash)) { throw 'Select and review an explicit rollback file before Restore.' }
         if ((Get-FileHash -LiteralPath $RollbackPath -Algorithm SHA256).Hash -ne $ExpectedRollbackHash) { throw 'The rollback file changed after review. Select and review it again.' }
         return Invoke-ThinClientRestore -Config $effectiveConfig
@@ -2540,10 +2722,12 @@ function Get-ThinClientOperationFeedback {
     $applied = $status -eq 'Applied'
     $mode = [string](Get-ConfigValue -Config $Config -Name ShellMode -Default 'Launcher')
     $auto = [string](Get-ConfigValue -Config $Config -Name AutoLaunchMode -Default 'RunKey')
-    $title = if($applied){'Apply completed'}else{'Restore completed'}
-    $message = if($applied){'The reviewed workspace settings were applied successfully. A rollback backup was saved before the changes.'}else{'The settings and launcher recorded in the selected rollback were restored successfully.'}
+    $desktop = [bool](Get-ResultValue -Result $Result -Name WindowsDesktopRestored -Default $false)
+    $title = if($applied){'Apply completed'}elseif($desktop){'Windows desktop restored'}else{'Restore completed'}
+    $message = if($applied){'The reviewed workspace settings were applied successfully. A rollback backup was saved before the changes.'}elseif($desktop){'The reviewed ThinClient configurations were undone. Windows Explorer is configured and ThinClient automatic startup is disabled.'}else{'The settings and launcher recorded in the selected rollback were restored successfully.'}
     $next = if(-not $applied){'Sign out and sign in again to use the restored shell settings. This window does not close your session.'}elseif($mode -eq 'CustomShell'){'ThinClient is configured to replace Explorer for all users at their next sign-in. Sign out and sign in to activate it. The current desktop is not closed automatically; domain policy can override local policy.'}elseif($mode -eq 'Launcher' -and $auto -eq 'None'){'Automatic startup is disabled. Use Preview to inspect the workspace; Apply does not open it automatically.'}elseif($mode -eq 'Launcher'){'ThinClient will start at the next Windows sign-in. This Launcher mode keeps Explorer. Use Preview to inspect the workspace now.'}else{'Sign out and sign in again to use the configured shell. This window does not close your session.'}
     $details = [Collections.Generic.List[string]]::new()
+    if($desktop){$details.Add('Previous ThinClient configurations restored: '+@($Result.RestoredSnapshots).Count)}
     foreach($entry in @(@('EffectiveProfile','Profile'),@('LauncherPath','Workspace launcher'),@('RollbackPath',$(if($applied){'Rollback backup'}else{'Rollback restored'})),@('EvidenceJsonPath','Report'),@('LogPath','Log'))) {
         $value = [string](Get-ResultValue -Result $Result -Name $entry[0] -Default '')
         if ($value) { $details.Add($entry[1]+': '+$value) }
@@ -2570,8 +2754,8 @@ function Confirm-ThinClientSignOut {
 }
 
 function Invoke-ThinClientSignOut {
-    param($Owner)
-    if(-not(Confirm-ThinClientSignOut -Owner $Owner)){return $false}
+    param($Owner,[switch]$Confirmed)
+    if(-not $Confirmed -and -not(Confirm-ThinClientSignOut -Owner $Owner)){return $false}
     Write-SmartThinClientLog -Message 'User confirmed sign-out of the current Windows session.'
     $process=Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\shutdown.exe') -ArgumentList '/l' -WindowStyle Hidden -Wait -PassThru -ErrorAction Stop
     if($process.ExitCode -ne 0){throw ('Windows sign-out could not start (exit '+$process.ExitCode+'). Your session remains open.')}
@@ -2603,7 +2787,7 @@ function Show-ThinClientOperationFeedback {
     $signOut=$dialog.FindName('SignOutButton');$signOut.Style=$dialog.FindResource('AccentButton')
     if($Feedback.SignOutRecommended){$signOut.Visibility='Visible';$done.Content='Later'}else{$done.Style=$dialog.FindResource('AccentButton')}
     $signOut.Add_Click({
-        try {if(Invoke-ThinClientSignOut -Owner $dialog){$dialog.Close()}}
+        try {if(Invoke-ThinClientSignOut -Owner $dialog -Confirmed){$dialog.Close()}}
         catch {$dialog.FindName('NextStep').Text='Sign-out failed: '+$_.Exception.Message;Write-SmartThinClientLog -Message ('Sign-out failed: '+$_.Exception.Message) -Level ERROR}
     })
     $files=$dialog.FindName('FilesButton');$files.IsEnabled=-not [string]::IsNullOrWhiteSpace($Feedback.OutputRoot)
@@ -2612,7 +2796,7 @@ function Show-ThinClientOperationFeedback {
 }
 
 function Show-ThinClientConfirmation {
-    param($Owner, [string]$RequestedAction, [string]$Summary, [string]$Phrase, [bool]$RequestPassword = $false)
+    param($Owner, [string]$RequestedAction, [string]$Summary, [string]$Phrase, [bool]$RequestPassword = $false, [switch]$WindowsDesktop)
     Add-Type -AssemblyName PresentationFramework
     [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Title="Confirm workspace change" Width="700" Height="600" MinWidth="580" MinHeight="480" WindowStartupLocation="CenterOwner" ResizeMode="CanResize" Background="#F5F8FB" FontFamily="Segoe UI">
@@ -2649,6 +2833,15 @@ function Show-ThinClientConfirmation {
     $confirmButton = $dialog.FindName('ConfirmButton')
     $confirmButton.Content = $RequestedAction
     $confirmButton.Style = $dialog.FindResource('AccentButton')
+    if($WindowsDesktop){
+        $dialog.Title='Restaurer le bureau Windows'
+        $dialog.FindName('HeadingText').Text='Restaurer le bureau Windows'
+        $dialog.FindName('WarningText').Text='Return to Windows Explorer using the reviewed backup history. Your session stays open until you choose to sign out.'
+        $confirmButton.Content='Restore Windows'
+        $confirmButton.MinWidth=140
+        $confirmButton.IsDefault=$false
+        $dialog.FindName('CancelButton').IsDefault=$true
+    }
     $passwordBox = $dialog.FindName('UserPassword')
     if ($RequestPassword) { $dialog.FindName('PasswordPanel').Visibility = 'Visible' }
     $inputBox.Add_TextChanged({ $confirmButton.IsEnabled = -not [string]::IsNullOrWhiteSpace($Phrase) -and $inputBox.Text -ceq $Phrase })
@@ -2785,7 +2978,7 @@ function Show-ThinClientGui {
     }
     $actionButtons = @($auditButton, $previewButton, $applyButton, $restoreButton, $openOutputButton)
     $runAction = {
-        param([string]$RequestedAction)
+        param([string]$RequestedAction,[switch]$AdvancedRestore)
         $confirmation = $null
         foreach ($button in $actionButtons) { $button.IsEnabled = $false }
         try {
@@ -2798,7 +2991,7 @@ function Show-ThinClientGui {
                 $effectiveProfile = Resolve-EffectiveProfile -RequestedProfile $selectedProfile -Config $Config
                 $effectiveConfig = Merge-ProfileConfig -Config $Config -EffectiveProfile $effectiveProfile
                 Assert-ThinClientGuiAccess -Config $effectiveConfig -RequestedAction $RequestedAction
-                $defaultPhrase = if ($RequestedAction -eq 'Apply') { 'APPLY' } else { 'RESTORE WINDOWS SHELL' }
+                $defaultPhrase = if ($RequestedAction -eq 'Apply') { 'APPLY' } else { 'RESTORE' }
                 $phrase = [string](Get-ConfigValue -Config $effectiveConfig -Name ($RequestedAction + 'ConfirmationPhrase') -Default $defaultPhrase)
                 $requestPassword = $false
                 if ($RequestedAction -eq 'Apply') {
@@ -2807,7 +3000,7 @@ function Show-ThinClientGui {
                     $outputText.Text = $summary
                     $requestPassword = [bool](Get-ConfigValue -Config $effectiveConfig -Name 'CreateDedicatedLocalUser' -Default $false)
                 }
-                else {
+                elseif($AdvancedRestore) {
                     $picker = New-Object Microsoft.Win32.OpenFileDialog
                     $picker.Title = 'Select the rollback file to review and restore'
                     $picker.Filter = 'Rollback JSON (*.json)|*.json'
@@ -2822,7 +3015,13 @@ function Show-ThinClientGui {
                     $parameters.ExpectedRollbackHash = (Get-FileHash -LiteralPath $picker.FileName -Algorithm SHA256).Hash
                     $summary = 'Rollback: ' + $picker.FileName + [Environment]::NewLine + 'SHA256: ' + $parameters.ExpectedRollbackHash + [Environment]::NewLine + (($rollback | Select-Object ComputerName, TargetUserSid, OutputRoot, LauncherPath, LauncherExisted, CustomShellPolicy, ManagedShellCommand, Config, Registry) | ConvertTo-Json -Depth 10)
                 }
-                $confirmation = Show-ThinClientConfirmation -Owner $window -RequestedAction $RequestedAction -Summary $summary -Phrase $phrase -RequestPassword $requestPassword
+                else {
+                    $parameters.WindowsRestorePlan=Get-ThinClientWindowsRestorePlan -Config $effectiveConfig
+                    $summary=Convert-ThinClientWindowsRestorePlanToText -Plan $parameters.WindowsRestorePlan
+                    $outputText.Text=$summary
+                    if($parameters.WindowsRestorePlan.AlreadyWindows){$statusText.Text='Windows desktop already configured';return}
+                }
+                $confirmation = Show-ThinClientConfirmation -Owner $window -RequestedAction $RequestedAction -Summary $summary -Phrase $phrase -RequestPassword $requestPassword -WindowsDesktop:($RequestedAction -eq 'Restore' -and -not $AdvancedRestore)
                 if ($null -eq $confirmation) { $statusText.Text = $RequestedAction + ' cancelled'; return }
                 $parameters.Confirmation = $confirmation.Phrase
                 $parameters.Password = $confirmation.Password
@@ -2871,6 +3070,11 @@ function Show-ThinClientGui {
         $button.Tag = [string]$button.Content
         $button.Add_Click({ & $runAction -RequestedAction ([string]$this.Tag) })
     }
+    $restoreButton.ToolTip='Restore the Windows desktop. Right-click for advanced restore of a specific backup.'
+    $restoreButton.ContextMenu=[Windows.Controls.ContextMenu]::new()
+    $advancedRestore=[Windows.Controls.MenuItem]::new();$advancedRestore.Header='Restore a specific backup (advanced)';$advancedRestore.Tag=$runAction
+    $advancedRestore.Add_Click({& $this.Tag -RequestedAction Restore -AdvancedRestore})
+    [void]$restoreButton.ContextMenu.Items.Add($advancedRestore)
 
 
     $openOutputButton.Add_Click({
@@ -2952,8 +3156,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCRb+icTbEFbZ1V
-# Gn8fjMG8lM+qNNBX2chFs7ka30pwEqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCtHhF4n7HGpdvP
+# wJvKZg8jICysi51aGkPKm0LslF2KA6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3086,31 +3290,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEOmyCzzeXYyWpNRf6i6hJ1iyehTGqOojhsPJ/tWHO9JMA0GCSqG
-# SIb3DQEBAQUABIIBgGzbTBaxedjK6hUPrPqBL7f+kqIC+Ez7Z/HiK03xx1XDzub1
-# fp02yiaMm71i1sNd5O5cokF2blR7fuEh27tuCWqP7irKzpsOUUlwZm+Sq1cmHiBj
-# Z0XEy9sonvW/3Uh1h6Ltyr2DoZUFRpnV/c7kwFh+fyWyiGThN791aRFDLItnN9P/
-# 9VIrFgR31Fp9KNZKfJ9xDvsNjMe/YJdkBcf+gyi2U9CfPVsIZqixFuR5XRnMJjrc
-# +g1ozV2EdaTXgJSPBaEJupBymtPqo5yMzPUQ5Tlu/Ek75aQkZqBOBHT3FI407yHp
-# /iNXZimOhItt52AqVeJ/PwFLktlRcTiYUwyprr1qw0TJIr7eWvxNHOJ53Q0BmKtO
-# VJC+soKvoYnbbIBcsUatHG/VH0khe60OYNrSexCxTSMFGGBPIWEoD3ThuyZxCOK+
-# Xu2QmXEWEzOmK9NSuqK/6rS8QyZZwARuhoAGPOpiOUhxXCw8+DsNCfK7+2UIaInN
-# cdjNhD2+LVI43mxZNaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILfytq+EONOqcK9c+FqXChQXO20F0BqIMhOZJV9hPfOwMA0GCSqG
+# SIb3DQEBAQUABIIBgA3W1bvmd3fBPhLi1vP91i+2sZ26WdN3KiD2KRbTqZIQl/F5
+# x9UiA08TL1tHGHl52gYwCJtuQt2/ktPF9IQdsaam1OH5T6s3xU2uwGrGVjSwJSF8
+# 2B7FpPoeWVgFA7UENy3nMuGuexL6cUMqi7VgicHDZoNTIjPXzxIZVNPeJYMv3lHk
+# QIxnXuWXSsW6TpjCde0LillpQ5c5F71VIIze7B3hw6Sv36MBOxyAYPjQ6mI5KspP
+# L8zAm7IPQuMpCTRPBpMVNmD8/UHaZNuEFpNw2P/P43dBncVptE2Vn1gKzAA1pfh/
+# b74S7SFwXllVH5t0LRoAwJO7u29x1hO/Dp1Xr75E/WeyKRHloQoY1dH3jrZb3R6X
+# WUYZbPm2/GZ5ceCMz2p8DozlThXhczWlfVpsZHYv7hzE19NpT+5KSDV3NOAeza3w
+# 294lvB9RoHvPFT6uAV++ZQGlzdvgPvjMNpIX8O+ShKS+SBN/TlSV+jRbH4OBcDqH
+# eHGWOVk29BYL53IO0aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTMxNzA1
-# NDJaMC8GCSqGSIb3DQEJBDEiBCBQ9G4k0sHXYrGsu+lanz74dvWbauySwCrN++GW
-# mlJl9DANBgkqhkiG9w0BAQEFAASCAgB83OpVHcm9Ngnscj4w9dT9dLtyJ/P2lSnv
-# Hs+v70j47SdLJy6fDcOoAWNhkJNab1lJZT+BIKl4NexWq4ZbfZN5ZVtygE0ECCaH
-# CE8BX8mfNqznJcKE6ja/iNB/fqTBCwuXJeyLS4AaMSeN68Ul1XLtUb/gJThQILGb
-# oM6C6xzjipYgYKz8jFk1RRz49z8Q16/8Bbh7TJ9ukT+K1eJb04Wh/Z7AfoggSz4j
-# YGFr2kIrlCSUM7byHXVevPUMBDz1wi4VSb3UiEgEI/7K045go2V+gY/ZZdMVTOSa
-# YJWMN/BTUbi/gPs/2i4B6AAVFmIE7XURMEG4cTTCluDIyDxuUgV7gmfEoMg2RQKJ
-# lcgRadBNK+BIk81C0m9pxRY00b8Jjve0oO3AomrMWR1wG9xymo13VI1FE59+j4GG
-# QQ9uAzeBF0tMG0Wm8+KSf7Mpx1CgwYmKSTteZv1N/dCUChuDVAIuffeiZOJUQDpU
-# c93j6/2F9bnr5QnDCqdxNKstAxx5aBVdhJdoqD0qBOWvw3wy57aVWBM6MnHvdGue
-# AVgNB6njTMfq4qV54VFxbz+v3sY0fLCsDQnc0asQv3meMYHT2FW52pWBG3e+taX7
-# XkkK2MIzujjtNc9KTq9k89h9dHYTSjE8LRJI9Py6X6j3ayC0cviAgrwt3DzKs2kB
-# cB473lulIg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTMyMTQ1
+# NTdaMC8GCSqGSIb3DQEJBDEiBCB25aZ36KpWsCL9oFt4t5GWvulYKE/Rqq7rt365
+# YEtp0zANBgkqhkiG9w0BAQEFAASCAgAOEWYa/wi4od9gEj3m2AHcFZnDB71qMnvj
+# uxG0+IjCYCPubUMbi/QfHArY2bO+OqKRcOsNVXmOxlvCJ4L/JTLgR0DM9wfcLquq
+# qWKFI4DG+sIhjtySwTcOQ65zSYUJFM/4xWxEyutgzmEGtlEkFk2iF6ZpdtxuR1TH
+# LT4nFjBwD8BNq2C+KZ+kC3HnS+wfFgMQanG5Wl+SvnbDXBdTj6HHhPRZMePjRhnm
+# +nB9K18QMucWADEUDcK2ETEi/7EyW3rQSINRRS8WB8RZOA/gAEX5N0BkB8pkXSTg
+# 1CA93cAgI5qdn1u7d/g23NU1Mo5bku/Lfo4TlV414XEc5h0xA0z3LXLJ8EreRHM/
+# kIAlk3jyySHPComm3iso5BBdepOFCynK47OMqVyXZJi2aQsKuegBTZocl/ZoJn9q
+# LwTEXb/WwKZKNuOuq1cMOvG2wjYD/NbFxjvQoQkbJ6aCeBRff2RpDBzKX3mpZKcg
+# Ghv3mqUxXSXQP9wiUsrmzlfpcA1ZIcdeSj8EfCIMA3jcfYUSkI3EvLjMKMYiRD+J
+# 2FkNooATQNGhZOUxSKs1LRXIaXHpv0B/UeFsEGEJAr5CBzH8mwbXF/3mMXD8MXVl
+# jd+zCQmpZh58B1v8hbJRCSH77LftIs8G8rPR3FxIKPXkZPclCMay2llRi9pmt2Pb
+# uwiQwRH0sg==
 # SIG # End signature block

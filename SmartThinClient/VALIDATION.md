@@ -1,5 +1,23 @@
 # Smart ThinClient validation
 
+## Short restore phrase and direct completion sign-out - 2026-11-13
+
+Version remains 1.1.4. Fresh defaults use RESTORE as the exact restore phrase, alongside APPLY. Explicit custom phrases remain supported. After successful Apply/Restore, the result dialog's Sign out now button is the explicit sign-out choice and no longer opens another confirmation. The save-work reminder stays visible, Later remains the default, and sign-out does not force-close applications. Standalone unconfirmed sign-out requests still retain their existing confirmation.
+
+168/168 isolated regressions pass under Windows PowerShell 5.1 and PowerShell 7, including the shortened default/custom-phrase contract and the actual completion click handler forwarding its confirmed choice. All sign-out process requests are mocked; no Windows sign-out is executed by these tests.
+
+## Direct Windows desktop restore review - 2026-11-13
+
+Version remains 1.1.4. Default GUI Restore prepares a read-only, complete Windows desktop recovery plan and shows a modern **Restaurer le bureau Windows** confirmation with Cancel as the default and the existing exact restore phrase. It follows current managed custom-shell/Run startup history in reverse order, including the earlier user-profile Launcher, without scanning arbitrary user profiles. Right-click Restore retains the advanced single-backup picker; CLI single-backup behavior is unchanged. Assigned Access/Shell Launcher histories require advanced restore rather than claiming automatic Explorer recovery.
+
+165/165 isolated regressions pass under Windows PowerShell 5.1 and PowerShell 7. Tests use synthetic JSON histories and temporary launchers with all Windows policy/registry writes mocked. The two original rollback engines undo CustomShell then Launcher; repeated CustomShell snapshots are planned in order. Missing/foreign/ambiguous history, changed review files/launcher/policy, tampered plans, late file-hash changes, exact phrase/admin/config gates, cancellation, no-change plans and partial failures are covered. Every reviewed backup is locked and hash-checked before the first mutation; step evidence stays separate from aggregate results. No live Restore, session sign-out or Windows policy change is performed during this qualification.
+
+## Filtered administrator token detection - 2026-11-13
+
+Version remains 1.1.4. Admin visibility now reads the current native token groups, including the built-in Administrators SID marked deny-only by UAC. WindowsIdentity.Groups omits that SID on the affected filtered token. Account membership and actual elevation remain separate: a filtered administrator still requests RunAs when opening the protected control panel, and a standard user remains refused. No group membership or privilege is changed.
+
+153/153 isolated regressions pass under Windows PowerShell 5.1 and PowerShell 7. Coverage includes enabled/deny-only/disabled group attributes, rejection of unrelated standard/domain SIDs, serialization into the generated shell, standard-account refusal and filtered-account elevation routing. The operational Admin button captures its script/configuration/workspace profile on the control, so the callback cannot substitute PowerShell's automatic PROFILE path. The callback regression deliberately contaminates ambient profile/path variables before invoking the actual generated handler. Elevation requests in the regression suite are mocked; the tests do not accept UAC prompts.
+
 ## Power confirmations and visible version - 2026-11-13
 
 Version remains 1.1.4 and appears at the lower right of the control panel, operational shell and visual Preview. Customer WebShellTitle values remain independent. Restart and Shutdown share a compact branded WPF confirmation, with Cancel as the default, explicit action labels and a save-work reminder. Cancellation leaves the primary shell close guard intact. Confirmed requests capture Windows exit codes without forcing application closure; failures restore the previous close guard and appear in the shell status.
