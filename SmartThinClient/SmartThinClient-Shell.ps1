@@ -4,7 +4,8 @@ Audits, applies, and restores a controlled thin-client workspace shell on Window
 
 .DESCRIPTION
 Smart ThinClient Shell prepares a Windows endpoint for Citrix, Azure Virtual Desktop,
-web-only, or hybrid workspace access. Audit and Preview are read-only. Apply and
+web-only, or hybrid workspace access. Audit and CLI Preview are read-only. Visual
+Preview can open live Windows settings on explicit request. Apply and
 Restore are guarded by administrator checks, configuration gates, confirmation
 phrases, rollback files, logs, and JSON/CSV evidence.
 .NOTES
@@ -76,6 +77,29 @@ function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Get-ThinClientAdminTokenState {
+    $identity = $null
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $elevated = (New-Object Security.Principal.WindowsPrincipal($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        $member = $elevated -or @($identity.Groups | Where-Object { $_.Value -eq 'S-1-5-32-544' }).Count -gt 0
+        [pscustomobject]@{IsAdministratorAccount=[bool]$member;IsElevated=[bool]$elevated}
+    }
+    catch { [pscustomobject]@{IsAdministratorAccount=$false;IsElevated=$false} }
+    finally { if ($identity) { $identity.Dispose() } }
+}
+
+function Open-ThinClientAdminPanel {
+    param([Parameter(Mandatory = $true)][string]$ScriptPath,[Parameter(Mandatory = $true)][string]$ConfigPath,[ValidateSet('Citrix','AVD','WebOnly','Hybrid','Auto')][string]$Profile='Auto')
+    $role = Get-ThinClientAdminTokenState
+    if (-not $role.IsAdministratorAccount) { throw 'The Admin control panel is available only to administrator accounts.' }
+    if ([IO.Path]::GetFileName($ScriptPath) -ne 'SmartThinClient-Shell.ps1' -or -not (Test-Path -LiteralPath $ScriptPath -PathType Leaf) -or -not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) { throw 'The protected control-panel script or configuration is unavailable.' }
+    $arguments = '-NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File "'+$ScriptPath+'" -Gui -Action Audit -Profile '+$Profile+' -ConfigPath "'+$ConfigPath+'"'
+    $parameters = @{FilePath=(Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe');ArgumentList=$arguments;WindowStyle='Hidden';ErrorAction='Stop'}
+    if (-not $role.IsElevated) { $parameters.Verb='RunAs' }
+    Start-Process @parameters | Out-Null
 }
 
 function ConvertTo-PlainText {
@@ -246,6 +270,13 @@ function Merge-ProfileConfig {
 
     foreach ($property in $profileConfig.PSObject.Properties) {
         if ($null -ne $property.Value -and ([string]$property.Value).Length -gt 0 -and [string]$property.Value -ne '__USE_GLOBAL__') {
+            if ($property.Name -eq 'WebShellSettingsButtons') {
+                $buttons = ConvertTo-ThinClientSettingsButtons -Value (Get-ConfigValue -Config $merged -Name 'WebShellSettingsButtons' -Default $null)
+                $overrides = ConvertTo-ThinClientSettingsButtons -Value $property.Value
+                foreach ($key in $overrides.Keys) { $buttons[$key] = $overrides[$key] }
+                $merged[$property.Name] = $buttons
+                continue
+            }
             $merged[$property.Name] = $property.Value
         }
     }
@@ -268,13 +299,15 @@ function Resolve-Config {
         OutputRoot = 'C:\ProgramData\SmartThinClient\Shell'
         LogRetentionCount = 10
         ShellMode = 'Launcher'
+        EnableCustomShell = $false
+        MachineRoot = (Join-Path $env:ProgramData 'SmartThinClient\Machine')
         TargetUserMode = 'ExistingUser'
         TargetUserName = ''
         CreateDedicatedLocalUser = $false
         AllowApply = $false
         AllowRestore = $false
         RequireConfirmationPhrase = $true
-        ApplyConfirmationPhrase = 'APPLY SMARTTHINCLIENT'
+        ApplyConfirmationPhrase = 'APPLY'
         RestoreConfirmationPhrase = 'RESTORE WINDOWS SHELL'
         CitrixWorkspacePath = ''
         AvdClientPath = ''
@@ -291,7 +324,8 @@ function Resolve-Config {
         WebShellAllowExternalBrowser = $true
         WebShellAllowPowerControls = $true
         WebShellAllowLimitedSettings = $true
-        WebShellAllowedSettingsPages = @('ms-settings:network-status', 'ms-settings:display', 'ms-settings:sound', 'ms-settings:dateandtime')
+        WebShellSettingsButtons = [ordered]@{Network=$true;Display=$true;Sound=$true;DateAndTime=$true;Bluetooth=$false;Printers=$false}
+        WebShellAllowedSettingsPages = @('ms-settings:network-status', 'ms-settings:display', 'ms-settings:sound', 'ms-settings:dateandtime', 'ms-settings:bluetooth', 'ms-settings:printers')
         WebOnlyUrl = 'https://workplacecloudhub.com/'
         PreferredWorkspaceUrl = ''
         FallbackWebUrl = ''
@@ -552,6 +586,7 @@ function Get-KioskCapability {
         EditionId = $editionId
         AssignedAccessCmdletAvailable = $assignedAccessCmdlet
         ShellLauncherClassAvailable = $shellLauncherClass
+        CustomShellPolicyAvailable = ($editionId -match '^(Professional|Enterprise|Education|IoTEnterprise)' -and (Test-Path -LiteralPath (Join-Path $env:WINDIR 'System32\gpedit.dll')))
         SupportsProgressiveLockdown = $assignedAccessCmdlet -or $shellLauncherClass
     }
 }
@@ -590,6 +625,49 @@ function Get-TargetUserState {
         Enabled = if ($localUser) { [bool]$localUser.Enabled } else { $false }
         Sid = if ($localUser) { [string]$localUser.SID } else { '' }
     }
+}
+
+function Get-ThinClientCurrentIdentity {
+    $identity = $null
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $name = [string]$identity.Name
+        $sid = if ($identity.User) { [string]$identity.User.Value } else { '' }
+        $authority = if ($name.Contains('\')) { ($name -split '\\',2)[0] } else { '' }
+        $kind = if ($authority -eq $env:COMPUTERNAME -or $authority -eq '.') { 'Local' }
+            elseif ($authority -eq 'AzureAD') { 'Entra' }
+            elseif ($authority -eq 'MicrosoftAccount') { 'MicrosoftAccount' }
+            elseif ($authority -in @('NT AUTHORITY','NT SERVICE','BUILTIN','IIS APPPOOL','Window Manager')) { 'System' }
+            elseif ($sid -like 'S-1-5-21-*' -and $authority) { 'Domain' }
+            else { 'Other' }
+        [pscustomobject]@{Name=$name;Sid=$sid;AccountType=$kind;Authenticated=[bool]$identity.IsAuthenticated}
+    }
+    catch { return $null }
+    finally { if ($null -ne $identity) { $identity.Dispose() } }
+}
+
+function Resolve-ThinClientTargetIdentity {
+    param([Parameter(Mandatory = $true)]$TargetUser, $CurrentIdentity)
+    # Diagnostic identity only. Keep the operational local-user state/SID unchanged.
+    if ($TargetUser.LocalUserExists) {
+        $localName = if ([string]$TargetUser.UserName -like '*\*') { [string]$TargetUser.UserName } else { $env:COMPUTERNAME+'\'+$TargetUser.UserName }
+        return [pscustomobject]@{Exists=$true;Enabled=[bool]$TargetUser.Enabled;AccountType='Local';Status=$(if($TargetUser.Enabled){'Detected'}else{'Disabled'});Name=$localName;Sid=[string]$TargetUser.Sid;Source='LocalAccountLookup'}
+    }
+    if ($TargetUser.Mode -eq 'DedicatedUser') {
+        return [pscustomobject]@{Exists=$false;Enabled=$null;AccountType='Local';Status='NotVerified';Name=[string]$TargetUser.UserName;Sid='';Source='LocalAccountLookup'}
+    }
+    if ($null -eq $CurrentIdentity) { $CurrentIdentity = Get-ThinClientCurrentIdentity }
+    if ($null -ne $CurrentIdentity -and $CurrentIdentity.Authenticated -and -not [string]::IsNullOrWhiteSpace($CurrentIdentity.Sid)) {
+        $requested = [string]$TargetUser.UserName
+        $current = [string]$CurrentIdentity.Name
+        $shortName = ($current -split '\\')[-1]
+        $unqualified = -not $requested.Contains('\') -and -not $requested.Contains('@')
+        $same = $requested -ieq $current -or ($unqualified -and $requested -ieq $shortName)
+        if ($requested.StartsWith('.\') -and $CurrentIdentity.AccountType -eq 'Local') { $same = $requested.Substring(2) -ieq $shortName }
+        if ($same) { return [pscustomobject]@{Exists=$true;Enabled=$null;AccountType=[string]$CurrentIdentity.AccountType;Status='Detected';Name=$current;Sid=[string]$CurrentIdentity.Sid;Source='CurrentWindowsToken'} }
+    }
+    # Do not treat a different/unreachable domain identity as a nonexistent local account.
+    [pscustomobject]@{Exists=$null;Enabled=$null;AccountType='Unknown';Status='NotVerified';Name=[string]$TargetUser.UserName;Sid='';Source='NotVerified'}
 }
 
 function New-DedicatedUserIfNeeded {
@@ -659,6 +737,7 @@ function Invoke-ThinClientAudit {
     $browser = Get-BrowserSignal -Config $Config
     $kiosk = Get-KioskCapability
     $targetUser = Get-TargetUserState -Config $Config
+    $targetIdentity = Resolve-ThinClientTargetIdentity -TargetUser $targetUser
     $webUrls = Get-WorkspaceWebUrls -Config $Config -EffectiveProfile $effectiveProfile
     $os = Get-CimInstance -ClassName Win32_OperatingSystem
 
@@ -676,11 +755,18 @@ function Invoke-ThinClientAudit {
         OSBuildNumber = $os.BuildNumber
         EditionId = $kiosk.EditionId
         ShellMode = [string](Get-ConfigValue -Config $Config -Name 'ShellMode' -Default 'Launcher')
+        ShellScope = if((Get-ConfigValue -Config $Config -Name ShellMode -Default Launcher) -eq 'CustomShell'){'AllUsers'}else{'ConfiguredMode'}
         TargetUserMode = $targetUser.Mode
         TargetUserName = $targetUser.UserName
-        TargetUserExists = $targetUser.LocalUserExists
-        TargetUserEnabled = $targetUser.Enabled
+        TargetUserExists = $targetIdentity.Exists
+        TargetUserEnabled = $targetIdentity.Enabled
         TargetUserSid = $targetUser.Sid
+        TargetLocalUserExists = $targetUser.LocalUserExists
+        TargetUserAccountType = $targetIdentity.AccountType
+        TargetUserIdentityStatus = $targetIdentity.Status
+        TargetUserResolvedName = $targetIdentity.Name
+        TargetUserResolvedSid = $targetIdentity.Sid
+        TargetUserIdentitySource = $targetIdentity.Source
         CitrixWorkspaceInstalled = $citrix.Installed
         CitrixWorkspacePath = $citrix.Path
         AvdClientInstalled = $avd.Installed
@@ -697,6 +783,7 @@ function Invoke-ThinClientAudit {
         WebOnlyUrlConfigured = -not [string]::IsNullOrWhiteSpace($webUrls.WebOnly)
         AssignedAccessCmdletAvailable = $kiosk.AssignedAccessCmdletAvailable
         ShellLauncherClassAvailable = $kiosk.ShellLauncherClassAvailable
+        CustomShellPolicyAvailable = [bool](Get-ResultValue -Result $kiosk -Name CustomShellPolicyAvailable -Default $false)
         SupportsProgressiveLockdown = $kiosk.SupportsProgressiveLockdown
         AllowApply = [bool](Get-ConfigValue -Config $Config -Name 'AllowApply' -Default $false)
         AllowRestore = [bool](Get-ConfigValue -Config $Config -Name 'AllowRestore' -Default $false)
@@ -730,7 +817,7 @@ function Convert-AuditToText {
     foreach ($name in @(
         'Status', 'ComputerName', 'UserName', 'IsAdministrator', 'OSName', 'OSVersion',
         'EditionId', 'RequestedProfile', 'EffectiveProfile', 'ShellMode', 'TargetUserMode',
-        'TargetUserName', 'TargetUserExists', 'CitrixWorkspaceInstalled', 'CitrixWorkspacePath',
+        'TargetUserName', 'TargetUserAccountType', 'TargetUserIdentityStatus', 'TargetUserResolvedName', 'TargetUserExists', 'CitrixWorkspaceInstalled', 'CitrixWorkspacePath',
         'AvdClientInstalled', 'AvdClassicClientPath', 'WindowsAppPackage', 'BrowserInstalled',
         'PreferredAccessMode', 'UseWebShell', 'CitrixWebUrlConfigured', 'AvdWebUrlConfigured',
         'BrowserPath', 'WebOnlyUrlConfigured', 'AssignedAccessCmdletAvailable', 'ShellLauncherClassAvailable',
@@ -991,7 +1078,9 @@ function Write-ThinClientCliSummary {
 }
 
 function Get-LauncherCommandLine {
-    $launcherPath = Join-Path $script:OutputRoot 'Launcher\SmartThinClient-LaunchWorkspace.ps1'
+    param([string]$Root=$script:OutputRoot,[switch]$Machine)
+    $launcherPath = Join-Path $Root 'Launcher\SmartThinClient-LaunchWorkspace.ps1'
+    if($Machine){return ('"{0}" -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "{1}"' -f (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'),$launcherPath)}
     return ('powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}"' -f $launcherPath)
 }
 
@@ -1001,46 +1090,352 @@ function ConvertTo-QuotedPowerShellString {
     return "'{0}'" -f ($Value -replace "'", "''")
 }
 
+function New-ThinClientUiResources {
+    Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
+    [xml]$resources = @'
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Style TargetType="Button">
+    <Setter Property="Background" Value="White"/><Setter Property="Foreground" Value="#24364B"/>
+    <Setter Property="BorderBrush" Value="#CBD5E1"/><Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="FontFamily" Value="Segoe UI"/><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/>
+    <Setter Property="Padding" Value="14,0"/><Setter Property="MinHeight" Value="34"/><Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="HorizontalContentAlignment" Value="Center"/><Setter Property="VerticalContentAlignment" Value="Center"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+      <Border x:Name="Frame" CornerRadius="6" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
+        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" RecognizesAccessKey="True"/>
+      </Border>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Frame" Property="Background" Value="#E6F4FF"/><Setter TargetName="Frame" Property="BorderBrush" Value="#78B5E8"/><Setter Property="Foreground" Value="#005A9E"/></Trigger>
+        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Frame" Property="Background" Value="#CDE7FC"/></Trigger>
+        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Frame" Property="BorderBrush" Value="#0078D4"/><Setter TargetName="Frame" Property="BorderThickness" Value="2"/></Trigger>
+        <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Frame" Property="Background" Value="#F1F4F8"/><Setter TargetName="Frame" Property="BorderBrush" Value="#E2E8F0"/><Setter Property="Foreground" Value="#8491A3"/><Setter Property="Cursor" Value="Arrow"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="AccentButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Background" Value="#0078D4"/><Setter Property="Foreground" Value="White"/><Setter Property="BorderBrush" Value="#0078D4"/></Style>
+  <Style TargetType="ComboBoxItem">
+    <Setter Property="Padding" Value="10,7"/><Setter Property="Foreground" Value="#24364B"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBoxItem">
+      <Border x:Name="Row" Background="Transparent" CornerRadius="4" Padding="{TemplateBinding Padding}"><ContentPresenter/></Border>
+      <ControlTemplate.Triggers><Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Row" Property="Background" Value="#EFF6FF"/></Trigger><Trigger Property="IsSelected" Value="True"><Setter TargetName="Row" Property="Background" Value="#DCEEFF"/><Setter Property="Foreground" Value="#005A9E"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger></ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style TargetType="ComboBox">
+    <Setter Property="Background" Value="White"/><Setter Property="BorderBrush" Value="#CBD5E1"/><Setter Property="Foreground" Value="#24364B"/><Setter Property="FontSize" Value="12"/><Setter Property="MinHeight" Value="34"/>
+    <Setter Property="ScrollViewer.CanContentScroll" Value="True"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBox">
+      <Grid>
+        <Border x:Name="Frame" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6"/>
+        <ToggleButton Focusable="False" ClickMode="Press" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+          <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="Transparent" CornerRadius="6"/></ControlTemplate></ToggleButton.Template>
+        </ToggleButton>
+        <ContentPresenter Margin="12,0,32,0" VerticalAlignment="Center" HorizontalAlignment="Left" IsHitTestVisible="False" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"/>
+        <Path Data="M 0 0 L 4 4 L 8 0" Stroke="#5F6B7A" StrokeThickness="1.5" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0" IsHitTestVisible="False"/>
+        <Popup x:Name="PART_Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False" PopupAnimation="Fade">
+          <Border MinWidth="{TemplateBinding ActualWidth}" Background="White" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="6" Padding="4" Margin="0,4,0,0"><ScrollViewer MaxHeight="260" CanContentScroll="True"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/></ScrollViewer></Border>
+        </Popup>
+      </Grid>
+      <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Frame" Property="BorderBrush" Value="#78B5E8"/></Trigger><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="Frame" Property="BorderBrush" Value="#0078D4"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.55"/></Trigger></ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+</ResourceDictionary>
+'@
+    return ,([Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($resources)))
+}
+
+function Get-ThinClientProviderVisibility {
+    param([string]$EffectiveProfile, [bool]$ShowProviderButtons = $true)
+    return @{ Citrix = ($ShowProviderButtons -and $EffectiveProfile -in @('Citrix','Hybrid')); AVD = ($ShowProviderButtons -and $EffectiveProfile -in @('AVD','Hybrid')); WebOnly = ($ShowProviderButtons -and $EffectiveProfile -in @('WebOnly','Hybrid')) }
+}
+
+function ConvertTo-ThinClientSettingsButtons {
+    param($Value)
+    $buttons = [ordered]@{}
+    if ($null -eq $Value) { return ,$buttons }
+    if ($Value -is [Collections.IDictionary]) { foreach ($key in $Value.Keys) { $buttons[[string]$key] = $Value[$key] } }
+    elseif ($Value -is [pscustomobject]) { foreach ($property in $Value.PSObject.Properties) { $buttons[$property.Name] = $property.Value } }
+    else { throw 'WebShellSettingsButtons must be a JSON object of booleans.' }
+    foreach ($key in $buttons.Keys) { if ($buttons[$key] -isnot [bool]) { throw "WebShellSettingsButtons.$key must be a JSON boolean." } }
+    return ,$buttons
+}
+
+function Get-ThinClientVisibleSettingsPages {
+    param([string[]]$SettingsPages, $SettingsButtons)
+    $buttons = ConvertTo-ThinClientSettingsButtons -Value $SettingsButtons
+    $names = @{'ms-settings:network-status'='Network';'ms-settings:display'='Display';'ms-settings:sound'='Sound';'ms-settings:dateandtime'='DateAndTime';'ms-settings:printers'='Printers';'ms-settings:bluetooth'='Bluetooth'}
+    foreach ($page in @($SettingsPages | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+        $uri = $null
+        if (-not [Uri]::TryCreate($page,[UriKind]::Absolute,[ref]$uri) -or $uri.Scheme -ne 'ms-settings') { throw 'Only configured ms-settings: pages can be opened from Settings.' }
+        $key = if ($names.ContainsKey($page)) { $names[$page] } else { $page }
+        if (-not $buttons.Contains($key) -or $buttons[$key]) { $page }
+    }
+}
+
+function Confirm-ThinClientPowerAction {
+    param($Owner,[ValidateSet('Restart','Shutdown')][string]$Action)
+    Add-Type -AssemblyName PresentationFramework
+    [xml]$xaml=@'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Title="Confirm device action" Width="470" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" Background="#F5F8FB" FontFamily="Segoe UI">
+ <StackPanel Margin="18">
+  <Border Background="White" BorderBrush="#DDE7F0" BorderThickness="1" CornerRadius="8" Padding="18"><StackPanel>
+   <Border Background="#FFF4D6" CornerRadius="6" Padding="8,3" HorizontalAlignment="Left"><TextBlock Text="Device action" Foreground="#8A5700" FontWeight="SemiBold"/></Border>
+   <TextBlock Name="Heading" FontSize="23" FontWeight="SemiBold" Foreground="#1F2937" Margin="0,12,0,8"/>
+   <TextBlock Name="Description" TextWrapping="Wrap" Foreground="#5F6B7A"/>
+  </StackPanel></Border>
+  <Border Background="#E6F4FF" BorderBrush="#B9DDF7" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,12,0,0"><TextBlock Text="Save your open work before continuing. Your Windows session and running applications will close." TextWrapping="Wrap" Foreground="#24364B"/></Border>
+  <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0"><Button Name="CancelButton" Content="Cancel" IsCancel="True" IsDefault="True" MinWidth="100" Height="36" Margin="0,0,10,0"/><Button Name="ConfirmButton" MinWidth="110" Height="36"/></StackPanel>
+ </StackPanel>
+</Window>
+'@
+    $dialog=[Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($xaml))
+    [void]$dialog.Resources.MergedDictionaries.Add((New-ThinClientUiResources))
+    if($Owner){$dialog.Owner=$Owner;$dialog.Icon=$Owner.Icon}
+    $restart=$Action -eq 'Restart'
+    $dialog.Title=if($restart){'Confirm restart'}else{'Confirm shutdown'}
+    $dialog.FindName('Heading').Text=if($restart){'Restart this device?'}else{'Shut down this device?'}
+    $dialog.FindName('Description').Text=if($restart){'Windows will restart. Sign in again to return to your workspace.'}else{'Windows will shut down. You will need to turn the device on again to return to your workspace.'}
+    $dialog.FindName('CancelButton').Add_Click({$dialog.DialogResult=$false})
+    $confirm=$dialog.FindName('ConfirmButton');$confirm.Content=if($restart){'Restart'}else{'Shut down'};$confirm.Style=$dialog.FindResource('AccentButton');$confirm.Add_Click({$dialog.DialogResult=$true})
+    return $dialog.ShowDialog() -eq $true
+}
+
+function Invoke-ThinClientPowerAction {
+    param($Owner,[ValidateSet('Restart','Shutdown')][string]$Action)
+    if(-not(Confirm-ThinClientPowerAction -Owner $Owner -Action $Action)){return $false}
+    $prior=Get-Variable -Name ShellExitRequested -Scope Script -ErrorAction SilentlyContinue
+    $previousExit=if($prior){[bool]$prior.Value}else{$false}
+    $script:ShellExitRequested=$true
+    try {
+        $arguments=if($Action -eq 'Restart'){'/r /t 0'}else{'/s /t 0'}
+        $process=Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\shutdown.exe') -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru -ErrorAction Stop
+        if($process.ExitCode -ne 0){throw ('Windows returned exit '+$process.ExitCode+'.')}
+        return $true
+    }catch{$script:ShellExitRequested=$previousExit;throw}
+}
+
+function New-ThinClientSettingsRequest {
+    param([string]$Page)
+    if($Page -notin @('ms-settings:network-status','ms-settings:display','ms-settings:sound','ms-settings:dateandtime','ms-settings:bluetooth','ms-settings:printers')){throw 'This Windows settings page is not allowed.'}
+    if(-not('SmartThinClient.SettingsLaunchRequest' -as [type])){
+        Add-Type -TypeDefinition @'
+using System;using System.Diagnostics;using System.Threading;using System.IO;
+namespace SmartThinClient {
+ public sealed class SettingsLaunchRequest {
+  public volatile bool Completed;
+  public bool Requested;
+  public string Error="";
+  public static SettingsLaunchRequest Begin(string page) {
+   if(Array.IndexOf(new[]{"ms-settings:network-status","ms-settings:display","ms-settings:sound","ms-settings:dateandtime","ms-settings:bluetooth","ms-settings:printers"},page)<0)throw new ArgumentException("Settings page is not allowed.");
+   var request=new SettingsLaunchRequest();
+   ThreadPool.QueueUserWorkItem(delegate(object unused){
+    try {using(var process=Process.Start(new ProcessStartInfo(page){UseShellExecute=true,ErrorDialog=false})){request.Requested=true;}}
+    catch(Exception ex){request.Error=ex.Message;try{string dir=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),@"WCH\Smart365\Logs");Directory.CreateDirectory(dir);File.AppendAllText(Path.Combine(dir,"SmartThinClient-Settings.log"),DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")+" [ERROR] "+page+": "+ex.Message.Replace("\r"," ").Replace("\n"," ")+Environment.NewLine);}catch{}}
+    finally {request.Completed=true;}
+   });
+   return request;
+  }
+ }
+}
+'@ -ErrorAction Stop
+    }
+    [SmartThinClient.SettingsLaunchRequest]::Begin($Page)
+}
+
+function Show-ThinClientLimitedSettings {
+    param([string[]]$SettingsPages, $SettingsButtons, $Owner, [switch]$PreviewMode, [switch]$NativeMode, [string]$NativeSettingsHelper)
+    $pages = @(Get-ThinClientVisibleSettingsPages -SettingsPages $SettingsPages -SettingsButtons $SettingsButtons)
+    if($NativeMode){
+        if([IO.Path]::GetFileName($NativeSettingsHelper) -ne 'SmartThinClient-DeviceSettings.ps1' -or -not(Test-Path -LiteralPath $NativeSettingsHelper -PathType Leaf)){throw 'The native device settings helper is unavailable. Reinstall the complete application files.'}
+        . $NativeSettingsHelper
+    }
+    Add-Type -AssemblyName PresentationFramework
+    $menu = [Windows.Window]::new(); $menu.Title = 'Smart ThinClient Settings'; $menu.Width = 360; $menu.SizeToContent = 'Height'; $menu.MaxHeight = 520; $menu.ResizeMode = 'NoResize'; $menu.WindowStartupLocation = 'CenterScreen'; $menu.Background = '#F5F8FB'
+    if ($null -ne $Owner) { $menu.Owner = $Owner; $menu.WindowStartupLocation = 'CenterOwner'; if ($null -ne $Owner.Icon) { $menu.Icon = $Owner.Icon } }
+    [void]$menu.Resources.MergedDictionaries.Add((New-ThinClientUiResources))
+    $panel = [Windows.Controls.StackPanel]::new(); $panel.Margin = '18'
+    $title = [Windows.Controls.TextBlock]::new(); $title.Text = 'Windows settings'; $title.FontSize = 22; $title.FontWeight = 'SemiBold'; $title.Foreground = '#1F2937'; $title.Margin = '0,0,0,8'; [void]$panel.Children.Add($title)
+    $note = [Windows.Controls.TextBlock]::new(); $note.TextWrapping = 'Wrap'; $note.Foreground = '#5F6B7A'; $note.Margin = '0,0,0,14'
+    $note.Text = if ($PreviewMode) { 'These are live Windows settings, including in Preview. Changes made there affect this device.' } else { 'Open a Windows settings page allowed by the shell configuration.' }; [void]$panel.Children.Add($note)
+    if($NativeMode){$title.Text='Device settings';$note.Text='Built-in device controls work without Explorer. Changes are live, including in Preview. Available controls follow Windows permissions.'}
+    $labels = @{ 'ms-settings:network-status'='Network'; 'ms-settings:display'='Display'; 'ms-settings:sound'='Sound'; 'ms-settings:dateandtime'='Date and time'; 'ms-settings:printers'='Printers'; 'ms-settings:bluetooth'='Bluetooth' }
+    $list = [Windows.Controls.StackPanel]::new()
+    if ($pages.Count -eq 0) { $empty = [Windows.Controls.TextBlock]::new(); $empty.Text = 'No settings pages are enabled by configuration.'; $empty.TextWrapping = 'Wrap'; $empty.Margin = '0,0,0,10'; [void]$list.Children.Add($empty) }
+    $status = [Windows.Controls.TextBlock]::new();$status.TextWrapping='Wrap';$status.Foreground='#5F6B7A';$status.Margin='0,4,0,8'
+    $pending=[pscustomobject]@{Request=$null;Started=[DateTime]::MinValue;Page=''}
+    $timer=[Windows.Threading.DispatcherTimer]::new();$timer.Interval=[TimeSpan]::FromMilliseconds(200)
+    $timer.Add_Tick({
+        try {
+            if($null -eq $pending.Request){$timer.Stop();return}
+            if($pending.Request.Completed){
+                $status.Text=if($pending.Request.Requested){'Open request sent for '+$labels[$pending.Page]+'.'}else{'Windows Settings could not open: '+$pending.Request.Error}
+                $status.Foreground=if($pending.Request.Requested){'#167044'}else{'#B42318'}
+                foreach($entry in $list.Children){if($entry -is [Windows.Controls.Button]){$entry.IsEnabled=$true}}
+                $timer.Stop()
+            }elseif(([DateTime]::Now-$pending.Started).TotalSeconds -ge 20){$status.Text='Windows Settings is not responding. You can close this dialog; the workspace remains available.';$status.Foreground='#B42318'}
+        }catch{$status.Text='Windows Settings could not open: '+$_.Exception.Message;$status.Foreground='#B42318';$timer.Stop()}
+    })
+    foreach ($page in $pages) {
+        $button = [Windows.Controls.Button]::new(); $button.Height = 36; $button.Margin = '0,0,0,8'; $button.HorizontalContentAlignment = 'Left'; $button.Content = if ($labels.ContainsKey($page)) { $labels[$page] } else { $page }; $button.Tag = $page
+        $button.Add_Click({
+            try {
+                if($NativeMode){
+                    $nativePages=@{'ms-settings:network-status'='Network';'ms-settings:display'='Display';'ms-settings:sound'='Sound';'ms-settings:dateandtime'='DateAndTime';'ms-settings:bluetooth'='Bluetooth';'ms-settings:printers'='Printers'}
+                    Show-SmartThinClientDeviceSettings -Page $nativePages[[string]$this.Tag] -Owner $menu -PreviewMode:$PreviewMode
+                    return
+                }
+                $pending.Page=[string]$this.Tag;$pending.Started=[DateTime]::Now;$pending.Request=New-ThinClientSettingsRequest -Page $pending.Page
+                $status.Text='Opening '+$labels[$pending.Page]+'...';$status.Foreground='#005A9E'
+                foreach($entry in $list.Children){if($entry -is [Windows.Controls.Button]){$entry.IsEnabled=$false}}
+                $timer.Start()
+            }catch{$status.Text='Windows Settings could not open: '+$_.Exception.Message;$status.Foreground='#B42318'}
+        }); [void]$list.Children.Add($button)
+    }
+    $scroll = [Windows.Controls.ScrollViewer]::new(); $scroll.MaxHeight = 280; $scroll.VerticalScrollBarVisibility = 'Auto'; $scroll.Content = $list; [void]$panel.Children.Add($scroll)
+    [void]$panel.Children.Add($status)
+    $close = [Windows.Controls.Button]::new(); $close.Content = 'Close'; $close.Height = 34; $close.Margin = '0,6,0,0'; $close.Add_Click({ $menu.Close() }); [void]$panel.Children.Add($close)
+    $menu.Content = $panel; try {[void]$menu.ShowDialog()}finally{$timer.Stop()}
+}
+
+function Get-ThinClientClientDownload {
+    param([Parameter(Mandatory = $true)][ValidateSet('CitrixWorkspace','WindowsApp')][string]$Client)
+    if ($Client -eq 'CitrixWorkspace') {
+        return [pscustomobject]@{Label='Download Citrix Workspace';Url='https://www.citrix.com/downloads/workspace-app/windows/'}
+    }
+    [pscustomobject]@{Label='Download Windows App';Url='https://apps.microsoft.com/detail/9n1f85v9t8bn'}
+}
+
+function Get-ThinClientAuditSummary {
+    param([Parameter(Mandatory = $true)]$Audit)
+    if ($Audit -isnot [Collections.IDictionary]) { $Audit = Convert-ObjectToHashtable -InputObject $Audit }
+    $checks = [Collections.Generic.List[object]]::new()
+    $add = { param($label,$state,$detail,[string]$downloadClient='') [void]$checks.Add([pscustomobject]@{Label=$label;State=$state;Detail=$detail;DownloadClient=$downloadClient}) }
+    $profile = [string](Get-ConfigValue -Config $Audit -Name EffectiveProfile -Default 'WebOnly')
+    $os = [string](Get-ConfigValue -Config $Audit -Name OSName -Default '')
+    $shellMode = [string](Get-ConfigValue -Config $Audit -Name ShellMode -Default 'Launcher')
+    $unsupported = ($shellMode -eq 'AssignedAccess' -and -not (Get-ConfigValue -Config $Audit -Name AssignedAccessCmdletAvailable -Default $false)) -or ($shellMode -eq 'ShellLauncher' -and -not (Get-ConfigValue -Config $Audit -Name ShellLauncherClassAvailable -Default $false)) -or ($shellMode -eq 'CustomShell' -and -not (Get-ConfigValue -Config $Audit -Name CustomShellPolicyAvailable -Default $false))
+    & $add 'Windows' $(if($unsupported){'Blocked'}elseif($os){'Success'}else{'Warning'}) $(if($unsupported){$shellMode+' unavailable'}elseif($os){[string](Get-ConfigValue -Config $Audit -Name EditionId -Default 'Detected')}else{'Not reported'})
+    $native = -not [bool](Get-ConfigValue -Config $Audit -Name UseWebShell -Default $true) -and (Get-ConfigValue -Config $Audit -Name PreferredAccessMode -Default 'Web') -eq 'Native'
+    $browser = [bool](Get-ConfigValue -Config $Audit -Name BrowserInstalled -Default $false)
+    & $add 'Browser' $(if($browser){'Success'}elseif($native){'Info'}else{'Blocked'}) $(if($browser){'Detected'}elseif($native){'Native mode'}else{'Not detected'})
+    $providers = if($profile -eq 'Hybrid'){@('Citrix','AVD')}else{@($profile)}
+    foreach($provider in $providers) {
+        $key = switch($provider){'Citrix'{'CitrixWebUrlConfigured'}'AVD'{'AvdWebUrlConfigured'}default{'WebOnlyUrlConfigured'}}
+        $configured = [bool](Get-ConfigValue -Config $Audit -Name $key -Default $false)
+        $fallback = $provider -ne 'WebOnly' -and [bool](Get-ConfigValue -Config $Audit -Name WebOnlyUrlConfigured -Default $false)
+        if ($provider -eq 'WebOnly') {
+            & $add 'WebOnly access' $(if($configured -and $browser){if($native){'Warning'}else{'Success'}}else{'Blocked'}) $(if($configured -and $browser){if($native){'Web fallback'}else{'URL configured'}}elseif($configured){'Browser missing'}else{'No destination'})
+            continue
+        }
+        $windowsApp = [string](Get-ConfigValue -Config $Audit -Name WindowsAppPackage -Default '')
+        $legacyAvd = [string](Get-ConfigValue -Config $Audit -Name AvdClassicClientPath -Default '')
+        $client = if($provider -eq 'Citrix'){[bool](Get-ConfigValue -Config $Audit -Name CitrixWorkspaceInstalled -Default $false)}else{(-not [string]::IsNullOrWhiteSpace($windowsApp)) -or (-not [string]::IsNullOrWhiteSpace($legacyAvd))}
+        $nativeReady = $native -and $client
+        $webAvailable = $browser -and ($configured -or $fallback)
+        $webState = if($nativeReady -and (-not $configured -or -not $browser)){'Info'}elseif($configured -and $browser){'Success'}elseif($fallback -and $browser){'Warning'}else{'Blocked'}
+        $webDetail = if($nativeReady -and -not $configured){'Not configured (native mode)'}elseif($nativeReady -and -not $browser){'Browser missing (native mode)'}elseif($configured -and $browser){'URL configured'}elseif($fallback -and $browser){'WebOnly fallback'}elseif(($configured -or $fallback) -and -not $browser){'Browser missing'}else{'No destination'}
+        & $add ($provider+' Web') $webState $webDetail
+        $missingClientState = if(-not $native){'Info'}elseif($webAvailable){'Warning'}else{'Blocked'}
+        if ($provider -eq 'Citrix') {
+            $reported = $Audit.Contains('CitrixWorkspaceInstalled') -and $null -ne $Audit['CitrixWorkspaceInstalled']
+            & $add 'Citrix Workspace' $(if($client){'Success'}else{$missingClientState}) $(if($client){'Detected'}elseif($reported){'Not detected'}else{'Not reported'}) $(if(-not $client){'CitrixWorkspace'}else{''})
+        }
+        else {
+            $appReported = $Audit.Contains('WindowsAppPackage') -and $null -ne $Audit['WindowsAppPackage']
+            $legacyReported = $Audit.Contains('AvdClassicClientPath') -and $null -ne $Audit['AvdClassicClientPath']
+            & $add 'Windows App' $(if($windowsApp){'Success'}elseif($legacyAvd){'Info'}else{$missingClientState}) $(if($windowsApp){'Detected'}elseif($appReported){'Not detected'}else{'Not reported'}) $(if(-not $windowsApp){'WindowsApp'}else{''})
+            & $add 'Remote Desktop (legacy)' $(if($legacyAvd){'Warning'}else{'Info'}) $(if($legacyAvd){'Detected (legacy)'}elseif($legacyReported){'Not detected'}else{'Not reported'})
+        }
+    }
+    $identityStatus = [string](Get-ConfigValue -Config $Audit -Name TargetUserIdentityStatus -Default '')
+    $identityKind = [string](Get-ConfigValue -Config $Audit -Name TargetUserAccountType -Default 'Unknown')
+    $targetState = 'Warning'; $targetDetail = 'Not verified'
+    if ($identityStatus -eq 'Detected') {
+        $targetState = if($identityKind -eq 'System'){'Warning'}else{'Success'}
+        $targetDetail = switch($identityKind){'Domain'{'Domain account detected'}'Local'{'Local account detected'}'Entra'{'Entra account detected'}'MicrosoftAccount'{'Microsoft account detected'}'System'{'System identity'}default{'Account detected'}}
+    }
+    elseif ($identityStatus -eq 'Disabled') { $targetDetail = 'Local account disabled' }
+    elseif (-not $identityStatus -and (Get-ConfigValue -Config $Audit -Name TargetUserExists -Default $false)) { $targetState = 'Success'; $targetDetail = 'Account detected' }
+    & $add $(if($shellMode -eq 'CustomShell'){'Current account'}else{'Target account'}) $targetState $targetDetail
+    if ($shellMode -eq 'CustomShell') { & $add 'Shell scope' 'Info' 'All users (configured)' }
+    $state = if(@($checks|Where-Object State -eq Blocked).Count){'Blocked'}elseif(@($checks|Where-Object State -eq Warning).Count){'Warning'}else{'Success'}
+    $gates = 'Apply ' + $(if(Get-ConfigValue -Config $Audit -Name AllowApply -Default $false){'enabled'}else{'disabled'}) + ' | Restore ' + $(if(Get-ConfigValue -Config $Audit -Name AllowRestore -Default $false){'enabled'}else{'disabled'})
+    [pscustomobject]@{State=$state;Status=$(switch($state){'Blocked'{'Blocked'}'Warning'{'Review required'}default{'Checks passed'}});Checks=@($checks.ToArray());Note=($gates + '. Native clients are optional in Web mode. Local signals only; sign-in and remote sessions are not tested by Audit.')}
+}
+
+function Set-ThinClientAuditSummary {
+    param($Audit,$Panel,$Title,$Note,$Container)
+    $summary = Get-ThinClientAuditSummary -Audit $Audit
+    $colors = @{Success=@('#E8F5EE','#167044');Warning=@('#FFF4D6','#8A5700');Blocked=@('#FDECEC','#B42318');Info=@('#EDF2F7','#526579')}
+    $Title.Text = 'Audit | '+$summary.Status; $Title.Foreground = $colors[$summary.State][1]; $Note.Text = $summary.Note
+    $Panel.Children.Clear()
+    foreach($check in $summary.Checks) {
+        $card=[Windows.Controls.Border]::new();$card.Background=$colors[$check.State][0];$card.CornerRadius='6';$card.Padding='10,7';$card.Margin='0,0,6,6';$card.MinWidth=140
+        $text=[Windows.Controls.TextBlock]::new();$text.Text=$check.Label+' | '+$check.Detail;$text.Foreground=$colors[$check.State][1];$text.FontWeight='SemiBold'
+        $content=[Windows.Controls.StackPanel]::new();[void]$content.Children.Add($text)
+        if ($check.DownloadClient) {
+            $download=Get-ThinClientClientDownload -Client $check.DownloadClient
+            $link=[Windows.Documents.Hyperlink]::new([Windows.Documents.Run]::new($download.Label));$link.Tag=$check.DownloadClient;$link.ToolTip=$download.Url
+            $link.Add_Click({
+                try { $target=Get-ThinClientClientDownload -Client ([string]$this.Tag);Start-Process -FilePath $target.Url -ErrorAction Stop }
+                catch { [void][Windows.MessageBox]::Show(('Unable to open the official download page. '+$_.Exception.Message),'Smart ThinClient','OK','Warning') }
+            })
+            $linkText=[Windows.Controls.TextBlock]::new();$linkText.FontSize=11;$linkText.Margin='0,4,0,0';[void]$linkText.Inlines.Add($link);[void]$content.Children.Add($linkText)
+        }
+        $card.Child=$content;[void]$Panel.Children.Add($card)
+    }
+    $Container.Visibility='Visible'
+}
+
+function Get-ThinClientVersion {
+    return '1.1.4'
+}
+
 function Get-ThinClientShellXaml {
-    return @'
+    $layout = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Smart ThinClient Shell" WindowStartupLocation="CenterScreen"
         WindowState="Maximized" Background="#F5F8FB">
   <Grid>
     <Grid.RowDefinitions>
-      <RowDefinition Height="58"/>
+      <RowDefinition Height="Auto"/>
       <RowDefinition Height="*"/>
       <RowDefinition Height="40"/>
     </Grid.RowDefinitions>
     <Border Grid.Row="0" Background="#1F2937" Padding="12,8">
-      <DockPanel LastChildFill="True">
-        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-          <Button Name="BackButton" Content="Back" Width="78" Height="34" Margin="0,0,8,0"/>
-          <Button Name="RefreshButton" Content="Refresh" Width="82" Height="34" Margin="0,0,8,0"/>
-          <Button Name="ExternalButton" Content="Open browser" Width="112" Height="34" Margin="0,0,8,0"/>
-          <Button Name="SettingsButton" Content="Settings" Width="86" Height="34" Margin="0,0,8,0"/>
-          <Button Name="SignOutButton" Content="Sign out" Width="86" Height="34" Margin="0,0,8,0"/>
-          <Button Name="RestartButton" Content="Restart" Width="82" Height="34" Margin="0,0,8,0"/>
-          <Button Name="ShutdownButton" Content="Shutdown" Width="92" Height="34"/>
-        </StackPanel>
-        <StackPanel Orientation="Horizontal">
-          <TextBlock Name="TitleText" Text="Smart ThinClient" Foreground="White" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,18,0"/>
-          <Button Name="CitrixButton" Content="Citrix Web" Width="98" Height="34" Margin="0,0,8,0"/>
-          <Button Name="AvdButton" Content="AVD Web" Width="90" Height="34" Margin="0,0,8,0"/>
-          <Button Name="WebOnlyButton" Content="Web" Width="72" Height="34"/>
-        </StackPanel>
-      </DockPanel>
+      <Grid Name="ToolbarLayout">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+        <WrapPanel Name="NavigationButtons" Grid.Column="0" HorizontalAlignment="Left" VerticalAlignment="Center">
+          <Button Name="CitrixButton" Content="Citrix Web" Width="98" Height="34" Margin="0,2,8,2"/>
+          <Button Name="AvdButton" Content="AVD Web" Width="90" Height="34" Margin="0,2,8,2"/>
+          <Button Name="WebOnlyButton" Content="Web" Width="72" Height="34" Margin="0,2,8,2"/>
+          <Button Name="BackButton" Content="Back" Width="78" Height="34" Margin="0,2,8,2"/>
+          <Button Name="RefreshButton" Content="Refresh" Width="82" Height="34" Margin="0,2,8,2"/>
+          <Button Name="ExternalButton" Content="Open browser" Width="112" Height="34" Margin="0,2,8,2"/>
+        </WrapPanel>
+        <TextBlock Name="TitleText" Grid.Column="1" Text="Smart ThinClient" Foreground="White" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" HorizontalAlignment="Center" TextAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="280" Margin="16,0"/>
+        <WrapPanel Name="SessionButtons" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center">
+          <Button Name="SettingsButton" Content="Settings" Width="86" Height="34" Margin="0,2,8,2"/>
+          <Button Name="AdminButton" Content="Admin" ToolTip="Open the administrator control panel" Visibility="Collapsed" Width="76" Height="34" Margin="0,2,8,2"/>
+          <Button Name="SignOutButton" Content="Sign out" Width="86" Height="34" Margin="0,2,8,2"/>
+          <Button Name="RestartButton" Content="Restart" Width="82" Height="34" Margin="0,2,8,2"/>
+          <Button Name="ShutdownButton" Content="Shutdown" Width="92" Height="34" Margin="0,2,0,2"/>
+        </WrapPanel>
+      </Grid>
     </Border>
     <Border Grid.Row="1" Background="White" BorderBrush="#DDE7F0" BorderThickness="1,0,1,0">
-      <WebBrowser Name="WorkspaceBrowser"/>
+      <ContentControl Name="WorkspaceBrowser"/>
     </Border>
     <Border Grid.Row="2" Background="#F8FBFE" BorderBrush="#DDE7F0" BorderThickness="1,1,1,0" Padding="10,0">
-      <TextBlock Name="StatusText" Text="Ready" Foreground="#5F6B7A" VerticalAlignment="Center"/>
+      <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <TextBlock Name="StatusText" Text="Ready" Foreground="#5F6B7A" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+        <TextBlock Name="VersionText" Grid.Column="1" Text="Smart ThinClient v__APP_VERSION__" Foreground="#64748B" FontSize="11" VerticalAlignment="Center" Margin="16,0,0,0" ToolTip="Smart ThinClient version __APP_VERSION__"/>
+      </Grid>
     </Border>
   </Grid>
 </Window>
 '@
+    return $layout.Replace('__APP_VERSION__',(Get-ThinClientVersion))
 }
 
 function New-LauncherScript {
@@ -1071,6 +1466,7 @@ function New-LauncherScript {
     $allowExternalBrowser = [bool](Get-ConfigValue -Config $Config -Name 'WebShellAllowExternalBrowser' -Default $true)
     $allowPowerControls = [bool](Get-ConfigValue -Config $Config -Name 'WebShellAllowPowerControls' -Default $true)
     $allowLimitedSettings = [bool](Get-ConfigValue -Config $Config -Name 'WebShellAllowLimitedSettings' -Default $true)
+    $primaryCustomShell = (Get-ConfigValue -Config $Config -Name ShellMode -Default Launcher) -eq 'CustomShell'
     $hybridDefault = [string](Get-ConfigValue -Config $Config -Name 'HybridDefaultProvider' -Default '')
     $webShellPreferredProvider = [string](Get-ConfigValue -Config $Config -Name 'WebShellPreferredProvider' -Default '')
     if ($hybridDefault -notin @('Citrix', 'AVD', 'WebOnly')) { $hybridDefault = $webShellPreferredProvider }
@@ -1090,7 +1486,17 @@ function New-LauncherScript {
     $webShellTitleLiteral = ConvertTo-QuotedPowerShellString -Value $webShellTitle
     $hybridDefaultLiteral = ConvertTo-QuotedPowerShellString -Value $hybridDefault
     $settingsPagesLiteral = '@({0})' -f (($settingsPages | ForEach-Object { ConvertTo-QuotedPowerShellString -Value $_ }) -join ', ')
+    $settingsButtons = ConvertTo-ThinClientSettingsButtons -Value (Get-ConfigValue -Config $Config -Name 'WebShellSettingsButtons' -Default $null)
+    $settingsButtonsLiteral = '@{' + (($settingsButtons.Keys | ForEach-Object { (ConvertTo-QuotedPowerShellString -Value $_) + ' = $' + ([string]$settingsButtons[$_]).ToLowerInvariant() }) -join '; ') + '}'
 
+    $webViewHelperLiteral = ConvertTo-QuotedPowerShellString -Value (Join-Path $script:ScriptRoot 'SmartThinClient-WebView2.ps1')
+    $deviceSettingsHelperLiteral = ConvertTo-QuotedPowerShellString -Value (Join-Path $script:ScriptRoot 'SmartThinClient-DeviceSettings.ps1')
+    $windowIconLiteral = ConvertTo-QuotedPowerShellString -Value (Join-Path $script:ScriptRoot 'Assets\WorkplaceCloudHub.ico')
+    $controlPanelScriptLiteral = ConvertTo-QuotedPowerShellString -Value (Join-Path $script:ScriptRoot 'SmartThinClient-Shell.ps1')
+    $configuredPath = [string](Get-Variable -Name ConfigPath -ValueOnly -ErrorAction SilentlyContinue)
+    $controlPanelConfig = if([string]::IsNullOrWhiteSpace($configuredPath)){Join-Path $script:ScriptRoot 'SmartThinClient-Shell.config.json'}else{$configuredPath}
+    $controlPanelConfigLiteral = ConvertTo-QuotedPowerShellString -Value $controlPanelConfig
+    $sharedUiFunctions = (@('New-ThinClientUiResources','Get-ThinClientProviderVisibility','ConvertTo-ThinClientSettingsButtons','Get-ThinClientVisibleSettingsPages','New-ThinClientSettingsRequest','Show-ThinClientLimitedSettings','Get-ThinClientAdminTokenState','Open-ThinClientAdminPanel','Confirm-ThinClientPowerAction','Invoke-ThinClientPowerAction') | ForEach-Object { 'function ' + $_ + ' {' + (Get-Command -Name $_ -CommandType Function).Definition + '}' }) -join "`r`n"
     $shellXaml = Get-ThinClientShellXaml
     $content = @"
 param([ValidateSet('Citrix','AVD','WebOnly','Hybrid')][string]`$Profile = '$EffectiveProfile')
@@ -1103,14 +1509,20 @@ param([ValidateSet('Citrix','AVD','WebOnly','Hybrid')][string]`$Profile = '$Effe
 `$AvdWebUrl = $avdWebUrlLiteral
 `$WebOnlyUrl = $webUrlLiteral
 `$WindowsAppUri = $windowsAppUriLiteral
+`$ControlPanelScript = $controlPanelScriptLiteral
+`$ControlPanelConfig = $controlPanelConfigLiteral
+`$DeviceSettingsHelper = $deviceSettingsHelperLiteral
 `$WebShellTitle = $webShellTitleLiteral
 `$SettingsPages = $settingsPagesLiteral
+`$SettingsButtons = $settingsButtonsLiteral
 `$BrowserKioskMode = [bool]::Parse('$browserKiosk')
 `$UseWebShell = [bool]::Parse('$useWebShell')
 `$PreferredAccessMode = '$preferredAccessMode'
 `$ShowProviderButtons = [bool]::Parse('$showProviderButtons')
 `$AllowExternalBrowser = [bool]::Parse('$allowExternalBrowser')
 `$AllowPowerControls = [bool]::Parse('$allowPowerControls')
+`$PrimaryCustomShell = [bool]::Parse('$primaryCustomShell')
+`$script:ShellExitRequested = `$false
 `$AllowLimitedSettings = [bool]::Parse('$allowLimitedSettings')
 `$HybridSelectionAtStartup = [bool]::Parse('$hybridSelection')
 `$HybridDefaultProvider = $hybridDefaultLiteral
@@ -1214,49 +1626,10 @@ function Select-HybridProvider {
     return [string]`$choice.Tag
 }
 
+$sharedUiFunctions
 function Show-LimitedSettings {
-    Add-Type -AssemblyName PresentationFramework
-    `$menu = New-Object System.Windows.Window
-    `$menu.Title = 'Smart ThinClient Settings'
-    `$menu.Width = 420
-    `$menu.Height = 300
-    `$menu.WindowStartupLocation = 'CenterScreen'
-    `$menu.ResizeMode = 'NoResize'
-    `$panel = New-Object System.Windows.Controls.StackPanel
-    `$panel.Margin = '18'
-    `$title = New-Object System.Windows.Controls.TextBlock
-    `$title.Text = 'Limited settings'
-    `$title.FontSize = 22
-    `$title.FontWeight = 'SemiBold'
-    `$title.Margin = '0,0,0,12'
-    `$panel.Children.Add(`$title) | Out-Null
-    `$labels = @{
-        'ms-settings:network-status' = 'Network'
-        'ms-settings:display' = 'Display'
-        'ms-settings:sound' = 'Sound'
-        'ms-settings:dateandtime' = 'Date and time'
-        'ms-settings:printers' = 'Printers'
-        'ms-settings:bluetooth' = 'Bluetooth'
-    }
-    foreach (`$page in `$SettingsPages) {
-        `$button = New-Object System.Windows.Controls.Button
-        `$button.Height = 36
-        `$button.Margin = '0,0,0,8'
-        `$button.HorizontalContentAlignment = 'Left'
-        `$button.Padding = '12,0'
-        `$button.Content = if (`$labels.ContainsKey(`$page)) { `$labels[`$page] } else { `$page }
-        `$button.Tag = `$page
-        `$button.Add_Click({ Start-Process ([string]`$this.Tag) })
-        `$panel.Children.Add(`$button) | Out-Null
-    }
-    `$close = New-Object System.Windows.Controls.Button
-    `$close.Height = 34
-    `$close.Margin = '0,8,0,0'
-    `$close.Content = 'Close'
-    `$close.Add_Click({ `$menu.Close() })
-    `$panel.Children.Add(`$close) | Out-Null
-    `$menu.Content = `$panel
-    `$menu.ShowDialog() | Out-Null
+    `$nativeSettings = `$PrimaryCustomShell -or -not @(Get-Process explorer -ErrorAction SilentlyContinue | Where-Object SessionId -eq ([Diagnostics.Process]::GetCurrentProcess().SessionId)).Count
+    Show-ThinClientLimitedSettings -SettingsPages `$SettingsPages -SettingsButtons `$SettingsButtons -Owner `$window -NativeMode:`$nativeSettings -NativeSettingsHelper `$DeviceSettingsHelper
 }
 
 function Show-WebShell {
@@ -1269,9 +1642,20 @@ $shellXaml
 
     `$reader = New-Object System.Xml.XmlNodeReader `$xaml
     `$window = [Windows.Markup.XamlReader]::Load(`$reader)
-    `$browser = `$window.FindName('WorkspaceBrowser')
+    [void]`$window.Resources.MergedDictionaries.Add((New-ThinClientUiResources))
+    if (Test-Path -LiteralPath $windowIconLiteral) { `$window.Icon = [Windows.Media.Imaging.BitmapFrame]::Create([Uri]::new($windowIconLiteral,[UriKind]::Absolute)) }
+    `$browserHost = `$window.FindName('WorkspaceBrowser')
+    `$browser = `$null
+    `$browserError = ''
+    try { . $webViewHelperLiteral; `$browser = New-SmartThinClientWebView2; `$browserHost.Content = `$browser }
+    catch { `$browserError = `$_.Exception.Message; `$errorView = [Windows.Controls.TextBlock]::new();`$errorView.Text = 'The workspace browser could not initialize. Use Admin to review the configuration. '+`$browserError;`$errorView.TextWrapping='Wrap';`$errorView.Margin='24';`$browserHost.Content=`$errorView }
     `$titleText = `$window.FindName('TitleText')
     `$statusText = `$window.FindName('StatusText')
+    if(`$browser -and `$browser.Tag -and `$browser.Tag.PSObject.Properties['StatusTarget']){`$browser.Tag.StatusTarget=`$statusText}
+    if (`$PrimaryCustomShell) {
+        `$window.WindowStyle = 'None'; `$window.ResizeMode = 'NoResize'
+        `$window.Add_Closing({param(`$sender,`$eventArgs) if(-not `$script:ShellExitRequested){`$eventArgs.Cancel=`$true}})
+    }
     `$citrixButton = `$window.FindName('CitrixButton')
     `$avdButton = `$window.FindName('AvdButton')
     `$webOnlyButton = `$window.FindName('WebOnlyButton')
@@ -1279,17 +1663,24 @@ $shellXaml
     `$refreshButton = `$window.FindName('RefreshButton')
     `$externalButton = `$window.FindName('ExternalButton')
     `$settingsButton = `$window.FindName('SettingsButton')
+    `$adminButton = `$window.FindName('AdminButton')
+    if ((Get-ThinClientAdminTokenState).IsAdministratorAccount) { `$adminButton.Visibility = 'Visible' }
+    `$adminButton.Add_Click({
+        try { Open-ThinClientAdminPanel -ScriptPath `$ControlPanelScript -ConfigPath `$ControlPanelConfig -Profile `$Profile }
+        catch { Show-LauncherNotice ('Admin panel could not open: '+`$_.Exception.Message) }
+    })
     `$signOutButton = `$window.FindName('SignOutButton')
     `$restartButton = `$window.FindName('RestartButton')
     `$shutdownButton = `$window.FindName('ShutdownButton')
     `$script:CurrentUrl = ''
 
     `$titleText.Text = `$WebShellTitle
-    if (-not `$ShowProviderButtons) {
-        `$citrixButton.Visibility = 'Collapsed'
-        `$avdButton.Visibility = 'Collapsed'
-        `$webOnlyButton.Visibility = 'Collapsed'
-    }
+    `$titleText.ToolTip = `$WebShellTitle
+    `$window.Title = `$WebShellTitle
+    `$providerVisibility = Get-ThinClientProviderVisibility -EffectiveProfile `$Profile -ShowProviderButtons `$ShowProviderButtons
+    if (-not `$providerVisibility.Citrix) { `$citrixButton.Visibility = 'Collapsed' }
+    if (-not `$providerVisibility.AVD) { `$avdButton.Visibility = 'Collapsed' }
+    if (-not `$providerVisibility.WebOnly) { `$webOnlyButton.Visibility = 'Collapsed' }
     if (-not `$AllowExternalBrowser) { `$externalButton.Visibility = 'Collapsed' }
     if (-not `$AllowLimitedSettings) { `$settingsButton.Visibility = 'Collapsed' }
     if (-not `$AllowPowerControls) {
@@ -1300,6 +1691,7 @@ $shellXaml
 
     `$navigate = {
         param([string]`$Provider)
+        if (`$null -eq `$browser) { `$statusText.Text = 'Browser unavailable: '+`$browserError; return }
         `$script:CurrentProvider = `$Provider
         `$url = Get-ProviderUrl -Provider `$Provider
         if ([string]::IsNullOrWhiteSpace(`$url)) {
@@ -1309,24 +1701,25 @@ $shellXaml
         }
         `$script:CurrentUrl = `$url
         `$statusText.Text = "Opening `$Provider - `$url"
-        `$browser.Navigate(`$url)
+        try { `$browser.Source = [Uri]`$url }
+        catch { `$statusText.Text = 'Navigation failed: '+`$_.Exception.Message }
     }
 
     `$citrixButton.Add_Click({ & `$navigate 'Citrix' })
     `$avdButton.Add_Click({ & `$navigate 'AVD' })
     `$webOnlyButton.Add_Click({ & `$navigate 'WebOnly' })
-    `$backButton.Add_Click({ if (`$browser.CanGoBack) { `$browser.GoBack() } })
-    `$refreshButton.Add_Click({ `$browser.Refresh() })
-    `$externalButton.Add_Click({ Open-ExternalBrowser -Url `$script:CurrentUrl })
-    `$settingsButton.Add_Click({ Show-LimitedSettings })
-    `$signOutButton.Add_Click({ shutdown.exe /l })
+    `$backButton.Add_Click({try {if (`$browser -and `$browser.CanGoBack) { `$browser.GoBack() }}catch{`$statusText.Text='Back failed: '+`$_.Exception.Message}})
+    `$refreshButton.Add_Click({try {if(`$browser){`$browser.Reload()}}catch{`$statusText.Text='Refresh failed: '+`$_.Exception.Message}})
+    `$externalButton.Add_Click({try {Open-ExternalBrowser -Url `$script:CurrentUrl}catch{`$statusText.Text='Browser launch failed: '+`$_.Exception.Message}})
+    `$settingsButton.Add_Click({try {Show-LimitedSettings}catch{`$statusText.Text='Settings failed: '+`$_.Exception.Message}})
+    `$signOutButton.Add_Click({ `$script:ShellExitRequested=`$true;shutdown.exe /l })
     `$restartButton.Add_Click({
-        `$answer = [System.Windows.MessageBox]::Show('Restart this computer?', 'Smart ThinClient Shell', 'YesNo', 'Question')
-        if (`$answer -eq 'Yes') { shutdown.exe /r /t 0 }
+        try {[void](Invoke-ThinClientPowerAction -Owner `$window -Action Restart)}
+        catch {`$statusText.Text='Restart failed: '+`$_.Exception.Message}
     })
     `$shutdownButton.Add_Click({
-        `$answer = [System.Windows.MessageBox]::Show('Shut down this computer?', 'Smart ThinClient Shell', 'YesNo', 'Question')
-        if (`$answer -eq 'Yes') { shutdown.exe /s /t 0 }
+        try {[void](Invoke-ThinClientPowerAction -Owner `$window -Action Shutdown)}
+        catch {`$statusText.Text='Shutdown failed: '+`$_.Exception.Message}
     })
 
     if (`$InitialProvider -eq 'Hybrid') { `$InitialProvider = `$HybridDefaultProvider }
@@ -1334,7 +1727,7 @@ $shellXaml
     `$window.ShowDialog() | Out-Null
 }
 
-if (`$Profile -eq 'Hybrid') {
+if (`$Profile -eq 'Hybrid' -and -not `$PrimaryCustomShell) {
     `$Profile = Select-HybridProvider
     if ([string]::IsNullOrWhiteSpace(`$Profile)) { exit 0 }
 }
@@ -1361,6 +1754,147 @@ function Get-TargetUserSystemPolicyPath {
     return ('Registry::HKEY_USERS\{0}\Software\Policies\Microsoft\Windows\System' -f $parsedSid.Value)
 }
 
+function Initialize-ThinClientCustomShellApi {
+    if ('SmartThinClient.LocalUserShellPolicy' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32;
+using Microsoft.Win32.SafeHandles;
+namespace SmartThinClient {
+ [ComImport, Guid("EA502723-A23D-11D1-A7D3-0000F87571E3"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+ internal interface ILocalPolicy {
+  [PreserveSig] int New([MarshalAs(UnmanagedType.LPWStr)] string a,[MarshalAs(UnmanagedType.LPWStr)] string b,uint c);
+  [PreserveSig] int OpenDSGPO([MarshalAs(UnmanagedType.LPWStr)] string a,uint b);
+  [PreserveSig] int OpenLocalMachineGPO(uint flags);
+  [PreserveSig] int OpenRemoteMachineGPO([MarshalAs(UnmanagedType.LPWStr)] string a,uint b);
+  [PreserveSig] int Save([MarshalAs(UnmanagedType.Bool)] bool machine,[MarshalAs(UnmanagedType.Bool)] bool add,ref Guid extension,ref Guid editor);
+  [PreserveSig] int Delete();
+  [PreserveSig] int GetName([MarshalAs(UnmanagedType.LPWStr)] StringBuilder a,int b);
+  [PreserveSig] int GetDisplayName([MarshalAs(UnmanagedType.LPWStr)] StringBuilder a,int b);
+  [PreserveSig] int SetDisplayName([MarshalAs(UnmanagedType.LPWStr)] string a);
+  [PreserveSig] int GetPath([MarshalAs(UnmanagedType.LPWStr)] StringBuilder a,int b);
+  [PreserveSig] int GetDSPath(uint a,[MarshalAs(UnmanagedType.LPWStr)] StringBuilder b,int c);
+  [PreserveSig] int GetFileSysPath(uint a,[MarshalAs(UnmanagedType.LPWStr)] StringBuilder b,int c);
+  [PreserveSig] int GetRegistryKey(uint section,out IntPtr handle);
+  [PreserveSig] int GetOptions(out uint a);
+  [PreserveSig] int SetOptions(uint a,uint b);
+  [PreserveSig] int GetType(out uint a);
+  [PreserveSig] int GetMachineName([MarshalAs(UnmanagedType.LPWStr)] StringBuilder a,int b);
+  [PreserveSig] int GetPropertySheetPages(out IntPtr a,out uint b);
+ }
+ public sealed class ShellPolicyState {
+  public bool ValueExists;
+  public string ValueKind;
+  public string Value;
+ }
+ public static class LocalUserShellPolicy {
+  const string KeyPath = @"Software\Microsoft\Windows\CurrentVersion\Policies\System";
+  static void Check(int result) { if(result != 0) Marshal.ThrowExceptionForHR(result < 0 ? result : unchecked((int)0x80004005)); }
+  static ShellPolicyState ReadKey(RegistryKey root) {
+   using(var key=root.OpenSubKey(KeyPath,false)) {
+    if(key==null || Array.FindIndex(key.GetValueNames(),n=>String.Equals(n,"Shell",StringComparison.OrdinalIgnoreCase))<0)
+     return new ShellPolicyState {ValueExists=false,ValueKind="",Value=""};
+    var kind=key.GetValueKind("Shell");
+    if(kind!=RegistryValueKind.String && kind!=RegistryValueKind.ExpandString) throw new InvalidOperationException("Existing custom shell policy has an unsupported value type.");
+    return new ShellPolicyState {ValueExists=true,ValueKind=kind.ToString(),Value=(string)key.GetValue("Shell","",RegistryValueOptions.DoNotExpandEnvironmentNames)};
+   }
+  }
+  static bool Equal(ShellPolicyState a,ShellPolicyState b) {return a.ValueExists==b.ValueExists && (!a.ValueExists || (a.ValueKind==b.ValueKind && String.Equals(a.Value,b.Value,StringComparison.Ordinal)));}
+  static ShellPolicyState Access(bool write,ShellPolicyState desired,ShellPolicyState expected) {
+   object instance=null;
+   try {
+    instance=Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("EA502722-A23D-11D1-A7D3-0000F87571E3"),true));
+    var policy=(ILocalPolicy)instance;
+    Check(policy.OpenLocalMachineGPO(write ? 1u : 3u));
+    uint options;Check(policy.GetOptions(out options));
+    if((options&1u)!=0) throw new InvalidOperationException("Local user policy is disabled; no shell policy changed.");
+    IntPtr native;Check(policy.GetRegistryKey(1,out native));
+    using(var handle=new SafeRegistryHandle(native,true)) using(var root=RegistryKey.FromHandle(handle)) {
+     var current=ReadKey(root);
+     if(!write) return current;
+     if(expected==null || !Equal(current,expected)) throw new InvalidOperationException("Custom shell policy changed after review; no policy saved.");
+     if(desired.ValueExists) {
+      RegistryValueKind kind;
+      if(!Enum.TryParse(desired.ValueKind,out kind) || (kind!=RegistryValueKind.String && kind!=RegistryValueKind.ExpandString) || String.IsNullOrWhiteSpace(desired.Value)) throw new InvalidOperationException("Invalid shell policy state.");
+      using(var key=root.CreateSubKey(KeyPath)) key.SetValue("Shell",desired.Value,kind);
+     } else {using(var key=root.OpenSubKey(KeyPath,true)) {if(key!=null) key.DeleteValue("Shell",false);}}
+     var extension=new Guid("35378EAC-683F-11D2-A89A-00C04FBBCFA2");
+     var editor=new Guid("8FC0B734-A0E1-11D1-A7D3-0000F87571E3");
+     Check(policy.Save(false,true,ref extension,ref editor));
+     return ReadKey(root);
+    }
+   } finally {if(instance!=null && Marshal.IsComObject(instance)) Marshal.FinalReleaseComObject(instance);}
+  }
+  public static ShellPolicyState Read() {return Access(false,null,null);}
+  public static ShellPolicyState Write(ShellPolicyState desired,ShellPolicyState expected) {return Access(true,desired,expected);}
+ }
+}
+'@ -ErrorAction Stop
+}
+
+function Get-ThinClientCustomShellPolicy {
+    Initialize-ThinClientCustomShellApi
+    $state = [SmartThinClient.LocalUserShellPolicy]::Read()
+    [pscustomobject]@{Scope='LocalPolicyAllUsers';ValueExists=[bool]$state.ValueExists;ValueKind=[string]$state.ValueKind;Value=[string]$state.Value}
+}
+
+function Set-ThinClientCustomShellPolicy {
+    param($Desired,$Expected)
+    if (-not (Test-IsAdministrator)) { throw 'Changing the all-users shell policy requires an elevated administrator.' }
+    Initialize-ThinClientCustomShellApi
+    $states=@(foreach($item in @($Desired,$Expected)) {
+        if($item.Scope -ne 'LocalPolicyAllUsers' -or $item.ValueExists -isnot [bool] -or ($item.ValueExists -and ($item.ValueKind -notin @('String','ExpandString') -or [string]::IsNullOrWhiteSpace($item.Value)))) { throw 'Invalid custom shell policy snapshot.' }
+        $native=[SmartThinClient.ShellPolicyState]::new();$native.ValueExists=$item.ValueExists;$native.ValueKind=$item.ValueKind;$native.Value=$item.Value;$native
+    })
+    $result=[SmartThinClient.LocalUserShellPolicy]::Write($states[0],$states[1])
+    if($result.ValueExists -ne $Desired.ValueExists -or ($Desired.ValueExists -and ($result.ValueKind -ne $Desired.ValueKind -or $result.Value -cne $Desired.Value))) { throw 'Custom shell policy verification failed; retain the rollback for recovery.' }
+}
+
+function Get-ThinClientMachineRoot {
+    param($Config)
+    $programData=[IO.Path]::GetFullPath($env:ProgramData).TrimEnd('\')
+    $path=[IO.Path]::GetFullPath([string](Get-ConfigValue -Config $Config -Name MachineRoot -Default (Join-Path $programData 'SmartThinClient\Machine'))).TrimEnd('\')
+    if(-not $path.StartsWith($programData+'\',[StringComparison]::OrdinalIgnoreCase) -or $path -eq $programData){throw 'MachineRoot must be a dedicated local directory under ProgramData.'}
+    for($current=$path;$current.Length -ge $programData.Length;$current=Split-Path -Path $current -Parent){if((Test-Path -LiteralPath $current) -and ((Get-Item -LiteralPath $current -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'MachineRoot cannot traverse a symbolic link or junction.'};if($current -eq $programData){break}}
+    $path
+}
+
+function Initialize-ThinClientMachineRoot {
+    param($Config)
+    if(-not(Test-IsAdministrator)){throw 'Machine storage requires an elevated administrator.'}
+    $path=Get-ThinClientMachineRoot -Config $Config
+    $marker=Join-Path $path 'SmartThinClient-Machine.json'
+    if((Test-Path -LiteralPath $path) -and -not(Test-Path -LiteralPath $marker -PathType Leaf)){throw 'Existing MachineRoot is not owned by SmartThinClient; choose a dedicated directory.'}
+    if(Test-Path -LiteralPath $marker){
+        $owner=(Get-Acl -LiteralPath $path).GetOwner([Security.Principal.SecurityIdentifier]).Value
+        if($owner -notin @('S-1-5-18','S-1-5-32-544') -or ((Get-Item -LiteralPath $marker -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Existing machine storage is not administrator-owned.'}
+        $ownership=Read-JsonFile -Path $marker;if($ownership.AppName -ne $script:AppName -or $ownership.Root -ine $path){throw 'MachineRoot ownership marker mismatch.'}
+    }
+    New-Item -ItemType Directory -Path $path -Force|Out-Null
+    foreach($folder in @($path,(Join-Path $path 'Launcher'),(Join-Path $path 'Rollback'))) {
+        if((Test-Path -LiteralPath $folder) -and ((Get-Item -LiteralPath $folder -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Machine storage cannot contain redirected directories.'}
+        New-Item -ItemType Directory -Path $folder -Force|Out-Null
+        $acl=[Security.AccessControl.DirectorySecurity]::new();$acl.SetAccessRuleProtection($true,$false)
+        $acl.SetOwner([Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))
+        foreach($sid in @('S-1-5-18','S-1-5-32-544')){$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),'FullControl','ContainerInherit,ObjectInherit','None','Allow'))}
+        if($folder -ne (Join-Path $path 'Rollback')){$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-11'),'ReadAndExecute','ContainerInherit,ObjectInherit','None','Allow'))}
+        Set-Acl -LiteralPath $folder -AclObject $acl
+    }
+    [pscustomobject]@{AppName=$script:AppName;Root=$path;SchemaVersion=1}|ConvertTo-Json|Set-Content -LiteralPath $marker -Encoding UTF8
+    $path
+}
+
+function Protect-ThinClientMachineLauncher {
+    param([string]$Path)
+    if((Get-Item -LiteralPath $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Refusing a redirected machine launcher.'}
+    $acl=[Security.AccessControl.FileSecurity]::new();$acl.SetAccessRuleProtection($true,$false);$acl.SetOwner([Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))
+    foreach($sid in @('S-1-5-18','S-1-5-32-544')){$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),'FullControl','Allow'))}
+    $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-11'),'ReadAndExecute','Allow'))
+    Set-Acl -LiteralPath $Path -AclObject $acl
+}
+
 function New-RollbackState {
     param(
         [Parameter(Mandatory = $true)]$Config,
@@ -1371,7 +1905,7 @@ function New-RollbackState {
     $runKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
     $explorerPolicy = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer'
     $snapshots = @(
-        if ((Get-ConfigValue -Config $Config -Name 'AutoLaunchMode' -Default 'RunKey') -eq 'RunKey') {
+        if ((Get-ConfigValue -Config $Config -Name 'AutoLaunchMode' -Default 'RunKey') -eq 'RunKey' -or (Get-ConfigValue -Config $Config -Name 'ShellMode' -Default 'Launcher') -eq 'CustomShell') {
             Get-RegistryValueSnapshot -Path $runKey -Name 'SmartThinClientShell'
         }
         $level = Get-ConfigValue -Config $Config -Name 'ShellRestrictionLevel' -Default 'None'
@@ -1384,7 +1918,7 @@ function New-RollbackState {
     )
     $launcherPath = Join-Path $script:OutputRoot 'Launcher\SmartThinClient-LaunchWorkspace.ps1'
 
-    [ordered]@{
+    $state = [ordered]@{
         AppName = $script:AppName
         RunId = $script:RunId
         SchemaVersion = 2
@@ -1400,6 +1934,12 @@ function New-RollbackState {
         Config = $Config
         Registry = $snapshots
     }
+    if((Get-ConfigValue -Config $Config -Name ShellMode -Default Launcher) -eq 'CustomShell') {
+        $state.SchemaVersion=3
+        $state.CustomShellPolicy=Get-ThinClientCustomShellPolicy
+        $state.ManagedShellCommand=Get-LauncherCommandLine -Machine
+    }
+    return $state
 }
 
 function Save-RollbackState {
@@ -1418,15 +1958,16 @@ function Assert-ConfigValues {
         PreferredAccessMode = @('Web','Native')
         AutoLaunchMode = @('None','RunKey')
         ShellRestrictionLevel = @('None','Basic','Strict')
-        ShellMode = @('Launcher','AssignedAccess','ShellLauncher')
+        ShellMode = @('Launcher','AssignedAccess','ShellLauncher','CustomShell')
         TargetUserMode = @('ExistingUser','DedicatedUser')
     }
     foreach ($key in $choices.Keys) {
         if ($Config.Contains($key) -and $Config[$key] -notin $choices[$key]) { throw "Invalid configuration value for $key." }
     }
-    foreach ($key in @('AllowApply','AllowRestore','RequireConfirmationPhrase','CreateDedicatedLocalUser','UseWebShell','BrowserKioskMode','EnableShellLimitations','EnableAssignedAccess','EnableShellLauncher','HybridSelectionAtStartup','WebShellShowProviderButtons','WebShellAllowExternalBrowser','WebShellAllowPowerControls','WebShellAllowLimitedSettings','WriteCsvEvidence')) {
+    foreach ($key in @('AllowApply','AllowRestore','RequireConfirmationPhrase','CreateDedicatedLocalUser','UseWebShell','BrowserKioskMode','EnableShellLimitations','EnableAssignedAccess','EnableShellLauncher','EnableCustomShell','HybridSelectionAtStartup','WebShellShowProviderButtons','WebShellAllowExternalBrowser','WebShellAllowPowerControls','WebShellAllowLimitedSettings','WriteCsvEvidence')) {
         if ($Config.Contains($key) -and $Config[$key] -isnot [bool]) { throw "$key must be a JSON boolean, not a string." }
     }
+    [void](ConvertTo-ThinClientSettingsButtons -Value (Get-ConfigValue -Config $Config -Name 'WebShellSettingsButtons' -Default $null))
 }
 
 function Assert-CimSuccess {
@@ -1442,6 +1983,21 @@ function Assert-ApplyPreflight {
     $assigned = [bool](Get-ConfigValue -Config $Config -Name 'EnableAssignedAccess' -Default $false)
     $shell = [bool](Get-ConfigValue -Config $Config -Name 'EnableShellLauncher' -Default $false)
     $mode = Get-ConfigValue -Config $Config -Name 'ShellMode' -Default 'Launcher'
+    if($mode -eq 'CustomShell') {
+        if(-not(Get-ConfigValue -Config $Config -Name EnableCustomShell -Default $false)){throw 'CustomShell requires EnableCustomShell=true.'}
+        if($assigned -or $shell -or (Get-ConfigValue -Config $Config -Name CreateDedicatedLocalUser -Default $false)){throw 'The all-users custom shell cannot be combined with per-user kiosk or dedicated-account changes.'}
+        if(-not(Get-ResultValue -Result $Audit -Name CustomShellPolicyAvailable -Default $false)){throw 'The local Custom User Interface policy is unavailable on this Windows edition.'}
+        if(-not(Get-ConfigValue -Config $Config -Name UseWebShell -Default $true) -or (Get-ConfigValue -Config $Config -Name PreferredAccessMode -Default Web) -ne 'Web'){throw 'The all-users custom shell requires the persistent embedded Web shell.'}
+        if(-not(Get-ConfigValue -Config $Config -Name RequireConfirmationPhrase -Default $true)){throw 'All-users shell replacement requires an explicit confirmation phrase.'}
+        if(-not(Get-ResultValue -Result $Audit -Name BrowserInstalled -Default $false)){throw 'A detected browser is required before replacing Explorer.'}
+        $provider=[string](Get-ResultValue -Result $Audit -Name EffectiveProfile -Default WebOnly)
+        $urlKeys=if($provider -eq 'Hybrid'){@('CitrixWebUrlConfigured','AvdWebUrlConfigured','WebOnlyUrlConfigured')}elseif($provider -eq 'Citrix'){@('CitrixWebUrlConfigured','WebOnlyUrlConfigured')}elseif($provider -eq 'AVD'){@('AvdWebUrlConfigured','WebOnlyUrlConfigured')}else{@('WebOnlyUrlConfigured')}
+        if(@($urlKeys|Where-Object {Get-ResultValue -Result $Audit -Name $_ -Default $false}).Count -eq 0){throw 'A configured workspace Web URL is required before replacing Explorer.'}
+        $machineRoot=Get-ThinClientMachineRoot -Config $Config
+        $policy=Get-ThinClientCustomShellPolicy
+        $managedCommand=Get-LauncherCommandLine -Root $machineRoot -Machine
+        if($policy.ValueExists -and $policy.Value -notin @('explorer.exe',$managedCommand)){throw 'A different Custom User Interface policy is already configured; review it before replacement.'}
+    }
     if ($assigned -and $shell) { throw 'Assigned Access and Shell Launcher cannot be applied together.' }
     if (($mode -eq 'AssignedAccess' -and -not $assigned) -or ($mode -eq 'ShellLauncher' -and -not $shell)) { throw 'ShellMode requires its matching Enable setting.' }
     if ($TargetUser.Mode -eq 'DedicatedUser' -and -not $TargetUser.LocalUserExists) {
@@ -1477,13 +2033,23 @@ function Assert-ApplyPreflight {
 }
 
 function Assert-RollbackState {
-    param($State)
+    param($State,$Config=([ordered]@{}))
     foreach ($name in @('SchemaVersion','AppName','ComputerName','Config','Registry','OutputRoot','LauncherPath','LauncherExisted','LauncherContent','TargetUserSid')) {
         if ($null -eq $State.PSObject.Properties[$name]) { throw "Incomplete or legacy rollback: missing $name. Manual review is required." }
     }
-    if ($State.SchemaVersion -ne 2 -or $State.AppName -ne $script:AppName -or $State.ComputerName -ne $env:COMPUTERNAME) { throw 'Rollback schema, application or computer does not match; no state restored.' }
-    $expected = Join-Path $script:OutputRoot 'Launcher\SmartThinClient-LaunchWorkspace.ps1'
-    if ([IO.Path]::GetFullPath($State.OutputRoot) -ne [IO.Path]::GetFullPath($script:OutputRoot) -or [IO.Path]::GetFullPath($State.LauncherPath) -ne [IO.Path]::GetFullPath($expected)) { throw 'Rollback output/launcher path mismatch. Use the original OutputRoot.' }
+    if ($State.SchemaVersion -notin @(2,3) -or $State.AppName -ne $script:AppName -or $State.ComputerName -ne $env:COMPUTERNAME) { throw 'Rollback schema, application or computer does not match; no state restored.' }
+    $expectedRoot = if($State.SchemaVersion -eq 3){Get-ThinClientMachineRoot -Config $Config}else{$script:OutputRoot}
+    $expected = Join-Path $expectedRoot 'Launcher\SmartThinClient-LaunchWorkspace.ps1'
+    if ([IO.Path]::GetFullPath($State.OutputRoot) -ne [IO.Path]::GetFullPath($expectedRoot) -or [IO.Path]::GetFullPath($State.LauncherPath) -ne [IO.Path]::GetFullPath($expected)) { throw 'Rollback output/launcher path mismatch. Use the original OutputRoot or MachineRoot.' }
+    if($State.SchemaVersion -eq 3) {
+        if($null -eq $State.PSObject.Properties['CustomShellPolicy'] -or $null -eq $State.PSObject.Properties['ManagedShellCommand']){throw 'Incomplete custom-shell rollback.'}
+        $policy=$State.CustomShellPolicy
+        if($policy.Scope -ne 'LocalPolicyAllUsers' -or $policy.ValueExists -isnot [bool] -or ($policy.ValueExists -and ($policy.ValueKind -notin @('String','ExpandString') -or [string]::IsNullOrWhiteSpace($policy.Value)))){throw 'Invalid custom-shell rollback policy.'}
+        if($State.ManagedShellCommand -cne (Get-LauncherCommandLine -Root $expectedRoot -Machine)){throw 'Custom-shell rollback command mismatch.'}
+        if($policy.ValueExists -and $policy.Value -notin @('explorer.exe',$State.ManagedShellCommand)){throw 'Rollback contains an unrelated custom shell command.'}
+        if($State.Config.ShellMode -ne 'CustomShell' -or $State.Config.EnableCustomShell -ne $true){throw 'Rollback does not describe an enabled all-users custom shell.'}
+        if((Test-Path -LiteralPath $expected) -and ((Get-Item -LiteralPath $expected -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Rollback launcher path is redirected.'}
+    }
     if ($State.LauncherExisted -isnot [bool]) { throw 'Invalid rollback launcher state.' }
     if ($State.LauncherExisted) { [void][Convert]::FromBase64String($State.LauncherContent) }
     $allowed = @{
@@ -1508,7 +2074,7 @@ function Assert-ApplyAllowed {
     if (-not (Test-IsAdministrator)) { throw 'Apply requires an elevated administrator PowerShell session.' }
     if (-not [bool](Get-ConfigValue -Config $Config -Name 'AllowApply' -Default $false)) { throw 'Apply is blocked because AllowApply is false in configuration.' }
     if ([bool](Get-ConfigValue -Config $Config -Name 'RequireConfirmationPhrase' -Default $true)) {
-        $phrase = [string](Get-ConfigValue -Config $Config -Name 'ApplyConfirmationPhrase' -Default 'APPLY SMARTTHINCLIENT')
+        $phrase = [string](Get-ConfigValue -Config $Config -Name 'ApplyConfirmationPhrase' -Default 'APPLY')
         if ($ConfirmApply -ne $phrase) { throw "Apply requires -ConfirmApply '$phrase'." }
     }
 }
@@ -1607,37 +2173,54 @@ function Invoke-ThinClientApply {
     Assert-ApplyAllowed -Config $Config
     Assert-ApplyPreflight -Config $Config -Audit $audit -TargetUser $targetUser
 
-    $rollbackState = New-RollbackState -Config $Config -Audit $audit -EffectiveProfile $effectiveProfile
-    $rollbackFile = Save-RollbackState -State $rollbackState
-    [void](New-DedicatedUserIfNeeded -Config $Config -TargetUser $targetUser)
-    $audit = Invoke-ThinClientAudit -Config $Config -RequestedProfile $effectiveProfile -RequestedAction 'Preview'
-    $rollbackState.TargetUserSid = $audit.TargetUserSid
-    [void](Save-RollbackState -State $rollbackState)
-    $launcherPath = New-LauncherScript -Config $Config -EffectiveProfile $effectiveProfile -Audit $audit
-    $launcherCommand = Get-LauncherCommandLine
+    $custom = (Get-ConfigValue -Config $Config -Name ShellMode -Default Launcher) -eq 'CustomShell'
+    $reportRoot=$script:OutputRoot;$oldRollbackRoot=$script:RollbackRoot
+    try {
+        if($custom){$script:OutputRoot=Initialize-ThinClientMachineRoot -Config $Config;$script:RollbackRoot=Join-Path $script:OutputRoot 'Rollback'}
+        $launcherCandidate=Join-Path $script:OutputRoot 'Launcher\SmartThinClient-LaunchWorkspace.ps1'
+        if($custom -and (Test-Path -LiteralPath $launcherCandidate) -and ((Get-Item -LiteralPath $launcherCandidate -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Refusing a redirected machine launcher.'}
+        $rollbackState = New-RollbackState -Config $Config -Audit $audit -EffectiveProfile $effectiveProfile
+        $rollbackFile = Save-RollbackState -State $rollbackState
+        [void](New-DedicatedUserIfNeeded -Config $Config -TargetUser $targetUser)
+        $audit = Invoke-ThinClientAudit -Config $Config -RequestedProfile $effectiveProfile -RequestedAction 'Preview'
+        $rollbackState.TargetUserSid = $audit.TargetUserSid
+        [void](Save-RollbackState -State $rollbackState)
+        $launcherPath = New-LauncherScript -Config $Config -EffectiveProfile $effectiveProfile -Audit $audit
+        $launcherCommand = Get-LauncherCommandLine -Machine:$custom
+        if($custom) {
+            Protect-ThinClientMachineLauncher -Path $launcherPath
+            $desired=[pscustomobject]@{Scope='LocalPolicyAllUsers';ValueExists=$true;ValueKind='String';Value=$launcherCommand}
+            Set-ThinClientCustomShellPolicy -Desired $desired -Expected $rollbackState.CustomShellPolicy
+            $previousRun=@($rollbackState.Registry|Where-Object {$_.Path -eq 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -and $_.Name -eq 'SmartThinClientShell'})
+            if($previousRun.Count -and $previousRun[0].ValueExists){Remove-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name SmartThinClientShell -ErrorAction Stop}
+        }
+        else { Apply-AutoLaunch -Config $Config -CommandLine $launcherCommand }
+        Apply-ShellLimitations -Config $Config -Audit $audit
+        Apply-AssignedAccess -Config $Config -Audit $audit
+        Apply-ShellLauncher -Config $Config -Audit $audit -LauncherCommand $launcherCommand
 
-    Apply-AutoLaunch -Config $Config -CommandLine $launcherCommand
-    Apply-ShellLimitations -Config $Config -Audit $audit
-    Apply-AssignedAccess -Config $Config -Audit $audit
-    Apply-ShellLauncher -Config $Config -Audit $audit -LauncherCommand $launcherCommand
-
-    $result = [pscustomobject]([ordered]@{
+        $result = [pscustomobject]([ordered]@{
         AppName = $script:AppName
         RunId = $script:RunId
         ComputerName = $env:COMPUTERNAME
         RequestedAction = 'Apply'
         EffectiveProfile = $effectiveProfile
         Status = 'Applied'
+        ShellMode = [string](Get-ConfigValue -Config $Config -Name ShellMode -Default Launcher)
+        ShellScope = if($custom){'AllUsers'}else{'ConfiguredMode'}
         LauncherPath = $launcherPath
         LauncherCommand = $launcherCommand
         RollbackPath = $rollbackFile
         OutputRoot = $script:OutputRoot
+        ReportRoot = $reportRoot
         LogPath = $script:LogPath
         EvidenceJsonPath = $script:EvidenceJsonPath
         EvidenceCsvPath = $script:EvidenceCsvPath
     })
-    Export-Evidence -Evidence $result -Config $Config
-    return $result
+        Export-Evidence -Evidence $result -Config $Config
+        return $result
+    }
+    finally {$script:OutputRoot=$reportRoot;$script:RollbackRoot=$oldRollbackRoot}
 }
 
 function Invoke-ThinClientLaunchOnly {
@@ -1649,7 +2232,9 @@ function Invoke-ThinClientLaunchOnly {
     $installedRoot = $script:OutputRoot
     try {
         $script:OutputRoot = Join-Path $installedRoot ('LaunchOnly\' + [guid]::NewGuid().ToString('N'))
-        $launcherPath = New-LauncherScript -Config $Config -EffectiveProfile $effectiveProfile -Audit $audit
+        $launchConfig=Copy-Config -Config $Config
+        if((Get-ConfigValue -Config $launchConfig -Name ShellMode -Default Launcher) -eq 'CustomShell'){$launchConfig.ShellMode='Launcher'}
+        $launcherPath = New-LauncherScript -Config $launchConfig -EffectiveProfile $effectiveProfile -Audit $audit
     }
     finally { $script:OutputRoot = $installedRoot }
     $launcherCommand = ('powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "{0}" -Profile "{1}"' -f $launcherPath, $effectiveProfile)
@@ -1679,8 +2264,10 @@ function Invoke-ThinClientLaunchOnly {
 }
 
 function Resolve-RollbackPath {
+    param($Config=([ordered]@{}))
     if (-not [string]::IsNullOrWhiteSpace($RollbackPath)) { return $RollbackPath }
-    $latest = Get-ChildItem -LiteralPath $script:RollbackRoot -Filter 'SmartThinClient_Rollback_*.json' -ErrorAction SilentlyContinue |
+    $root=if((Get-ConfigValue -Config $Config -Name ShellMode -Default Launcher) -eq 'CustomShell'){Join-Path (Get-ThinClientMachineRoot -Config $Config) 'Rollback'}else{$script:RollbackRoot}
+    $latest = Get-ChildItem -LiteralPath $root -Filter 'SmartThinClient_Rollback_*.json' -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
     if ($latest) { return $latest.FullName }
@@ -1691,10 +2278,17 @@ function Invoke-ThinClientRestore {
     param([Parameter(Mandatory = $true)]$Config)
 
     Assert-RestoreAllowed -Config $Config
-    $path = Resolve-RollbackPath
+    $path = Resolve-RollbackPath -Config $Config
     $rollback = Read-JsonFile -Path $path
     if ($null -eq $rollback) { throw "Rollback file is empty or invalid: $path" }
-    Assert-RollbackState -State $rollback
+    Assert-RollbackState -State $rollback -Config $Config
+
+    if($rollback.SchemaVersion -eq 3) {
+        $current=Get-ThinClientCustomShellPolicy
+        $unchangedOriginal=$current.ValueExists -eq $rollback.CustomShellPolicy.ValueExists -and (-not $current.ValueExists -or ($current.ValueKind -eq $rollback.CustomShellPolicy.ValueKind -and $current.Value -ceq $rollback.CustomShellPolicy.Value))
+        if($current.ValueExists -and $current.Value -ceq $rollback.ManagedShellCommand){Set-ThinClientCustomShellPolicy -Desired $rollback.CustomShellPolicy -Expected $current}
+        elseif(-not $unchangedOriginal){throw 'Custom shell policy no longer matches this rollback; no state restored.'}
+    }
 
     foreach ($snapshot in @($rollback.Registry)) {
         Restore-RegistryValue -Snapshot $snapshot
@@ -1712,6 +2306,7 @@ function Invoke-ThinClientRestore {
         $parent = Split-Path $rollback.LauncherPath -Parent
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
         [IO.File]::WriteAllBytes($rollback.LauncherPath, [Convert]::FromBase64String($rollback.LauncherContent))
+        if($rollback.SchemaVersion -eq 3){Protect-ThinClientMachineLauncher -Path $rollback.LauncherPath}
     }
     elseif (Test-Path -LiteralPath $rollback.LauncherPath) {
         Remove-Item -LiteralPath $rollback.LauncherPath -Force -ErrorAction Stop
@@ -1724,7 +2319,7 @@ function Invoke-ThinClientRestore {
         RequestedAction = 'Restore'
         Status = 'Restored'
         RollbackPath = $path
-        OutputRoot = $script:OutputRoot
+        OutputRoot = if($rollback.SchemaVersion -eq 3){$rollback.OutputRoot}else{$script:OutputRoot}
         LogPath = $script:LogPath
         EvidenceJsonPath = $script:EvidenceJsonPath
         EvidenceCsvPath = $script:EvidenceCsvPath
@@ -1755,35 +2350,33 @@ function Show-ThinClientVisualPreview {
     $Config = Merge-ProfileConfig -Config $Config -EffectiveProfile $effectiveProfile
     [xml]$xaml = Get-ThinClientShellXaml
     $window = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($xaml))
+    [void]$window.Resources.MergedDictionaries.Add((New-ThinClientUiResources))
     if ($null -ne $Owner) { $window.Owner = $Owner }
     $window.Title = 'Smart ThinClient - Visual Preview'
     $window.WindowState = 'Normal'
-    $window.Width = 1220; $window.Height = 800
-    $window.MinWidth = 1000; $window.MinHeight = 600
+    $window.Width = 1080; $window.Height = 720
+    $window.MinWidth = 760; $window.MinHeight = 520
     $iconPath = Join-Path $script:ScriptRoot 'Assets\WorkplaceCloudHub.ico'
     if (Test-Path -LiteralPath $iconPath) { $window.Icon = [Windows.Media.Imaging.BitmapFrame]::Create([Uri]::new($iconPath,[UriKind]::Absolute)) }
-    $browser = $window.FindName('WorkspaceBrowser')
+    . (Join-Path $script:ScriptRoot 'SmartThinClient-WebView2.ps1')
+    $browserHost = $window.FindName('WorkspaceBrowser')
+    $browser = New-SmartThinClientWebView2 -PreviewOnly
+    $browserHost.Content = $browser
     $statusText = $window.FindName('StatusText')
     $window.FindName('TitleText').Text = [string](Get-ConfigValue -Config $Config -Name 'WebShellTitle' -Default 'Smart ThinClient')
+    $window.FindName('TitleText').ToolTip = $window.FindName('TitleText').Text
     $grid = $window.Content
-    # Let the same shell toolbar wrap on a normal-sized preview window.
-    $toolbar = @($grid.Children | Where-Object { [Windows.Controls.Grid]::GetRow($_) -eq 0 })[0]
-    $panels = @($toolbar.Child.Children)
-    $toolbar.Child.Children.Clear()
-    $wrap = [Windows.Controls.WrapPanel]::new()
-    foreach ($panel in @($panels[1],$panels[0])) { $panel.Margin = '0,2,0,2'; [void]$wrap.Children.Add($panel) }
-    $toolbar.Child = $wrap
-    $grid.RowDefinitions[0].Height = [Windows.GridLength]::Auto
     $row = [Windows.Controls.RowDefinition]::new(); $row.Height = [Windows.GridLength]::Auto
     $grid.RowDefinitions.Insert(1,$row)
     foreach ($child in @($grid.Children)) { $oldRow = [Windows.Controls.Grid]::GetRow($child); if ($oldRow -ge 1) { [Windows.Controls.Grid]::SetRow($child,$oldRow+1) } }
     $banner = [Windows.Controls.Border]::new(); $banner.Background = '#E6F4FF'; $banner.Padding = '12,8'
     $label = [Windows.Controls.TextBlock]::new(); $label.TextWrapping = 'Wrap'
-    $label.Text = 'VISUAL PREVIEW - No Windows settings are changed. System actions, native clients and external launches are disabled. Close this window to return to the control panel.'
+    $label.Text = 'VISUAL PREVIEW - No shell changes are applied. Settings opens live Windows settings. Power actions, native clients and external browser launches are disabled.'
     $banner.Child = $label; [Windows.Controls.Grid]::SetRow($banner,1); [void]$grid.Children.Add($banner)
     $showProviders = [bool](Get-ConfigValue -Config $Config -Name 'WebShellShowProviderButtons' -Default $true)
-    foreach ($name in @('CitrixButton','AvdButton','WebOnlyButton')) { if (-not $showProviders) { $window.FindName($name).Visibility = 'Collapsed' } }
-    $visibility = @{ ExternalButton = 'WebShellAllowExternalBrowser'; SettingsButton = 'WebShellAllowLimitedSettings'; SignOutButton = 'WebShellAllowPowerControls'; RestartButton = 'WebShellAllowPowerControls'; ShutdownButton = 'WebShellAllowPowerControls' }
+    $providerVisibility = Get-ThinClientProviderVisibility -EffectiveProfile $effectiveProfile -ShowProviderButtons $showProviders
+    foreach ($pair in @(@('CitrixButton','Citrix'),@('AvdButton','AVD'),@('WebOnlyButton','WebOnly'))) { if (-not $providerVisibility[$pair[1]]) { $window.FindName($pair[0]).Visibility = 'Collapsed' } }
+    $visibility = @{ ExternalButton = 'WebShellAllowExternalBrowser'; SignOutButton = 'WebShellAllowPowerControls'; RestartButton = 'WebShellAllowPowerControls'; ShutdownButton = 'WebShellAllowPowerControls' }
     foreach ($name in $visibility.Keys) {
         $button = $window.FindName($name)
         $button.IsEnabled = $false
@@ -1791,6 +2384,29 @@ function Show-ThinClientVisualPreview {
         if (-not (Get-ConfigValue -Config $Config -Name $visibility[$name] -Default $true)) { $button.Visibility = 'Collapsed' }
         # These controls deliberately have no action handlers in preview.
     }
+    $settingsButton = $window.FindName('SettingsButton')
+    $adminButton = $window.FindName('AdminButton')
+    if ((Get-ThinClientAdminTokenState).IsAdministratorAccount) { $adminButton.Visibility = 'Visible' }
+    $adminButton.Add_Click({
+        try {
+            $role = Get-ThinClientAdminTokenState
+            if (-not $role.IsAdministratorAccount) { throw 'Administrator account required.' }
+            if ($role.IsElevated -and $Owner -and $Owner.Title -eq 'Smart ThinClient Control Panel') { $window.Close();return }
+            $panelConfig = if([string]::IsNullOrWhiteSpace($ConfigPath)){Join-Path $script:ScriptRoot 'SmartThinClient-Shell.config.json'}else{$ConfigPath}
+            Open-ThinClientAdminPanel -ScriptPath (Join-Path $script:ScriptRoot 'SmartThinClient-Shell.ps1') -ConfigPath $panelConfig -Profile $effectiveProfile
+        } catch { $statusText.Text='Admin panel could not open: '+$_.Exception.Message }
+    })
+    $settingsButton.Style = $window.FindResource('AccentButton')
+    if (-not (Get-ConfigValue -Config $Config -Name 'WebShellAllowLimitedSettings' -Default $true)) { $settingsButton.Visibility = 'Collapsed' }
+    $settingsButton.ToolTip = 'Open the configured live Windows settings pages.'
+    $settingsButton.Add_Click({
+        try {
+            $pages = @(Get-ConfigValue -Config $Config -Name 'WebShellAllowedSettingsPages' -Default @('ms-settings:network-status','ms-settings:display','ms-settings:sound','ms-settings:dateandtime'))
+            $buttons = Get-ConfigValue -Config $Config -Name 'WebShellSettingsButtons' -Default $null
+            $nativeSettings=(Get-ConfigValue -Config $Config -Name ShellMode -Default Launcher) -eq 'CustomShell' -or -not @(Get-Process explorer -ErrorAction SilentlyContinue|Where-Object SessionId -eq ([Diagnostics.Process]::GetCurrentProcess().SessionId)).Count
+            Show-ThinClientLimitedSettings -SettingsPages $pages -SettingsButtons $buttons -Owner $window -PreviewMode -NativeMode:$nativeSettings -NativeSettingsHelper (Join-Path $script:ScriptRoot 'SmartThinClient-DeviceSettings.ps1')
+        } catch { $statusText.Text = 'Settings could not open: ' + $_.Exception.Message }
+    })
     $navigate = {
         param([string]$Provider)
         $target = Get-ThinClientVisualPreviewTarget -Config $Config -Provider $Provider -EffectiveProfile $effectiveProfile
@@ -1801,21 +2417,18 @@ function Show-ThinClientVisualPreview {
             return
         }
         $statusText.Text = 'Preview - ' + $Provider + $(if($target.UsesWebOnlyFallback){' (WebOnly fallback)'}else{''}) + ' - ' + $target.Url
-        try { $browser.Navigate([Uri]$target.Url) }
+        try { $browser.Source = [Uri]$target.Url }
         catch { $statusText.Text = 'Preview navigation failed: ' + $_.Exception.Message }
     }
-    $browser.Add_Navigating({
+    $browser.Add_CoreWebView2InitializationCompleted({
         param($sender,$eventArgs)
-        if ($null -ne $eventArgs.Uri -and $eventArgs.Uri.Scheme -notin @('http','https','about')) {
-            $eventArgs.Cancel = $true
-            $statusText.Text = 'External application links are disabled in visual preview.'
-        }
+        if (-not $eventArgs.IsSuccess) { $statusText.Text = 'WebView2 initialization failed: ' + $eventArgs.InitializationException.Message }
     })
     $window.FindName('CitrixButton').Add_Click({ & $navigate 'Citrix' })
     $window.FindName('AvdButton').Add_Click({ & $navigate 'AVD' })
     $window.FindName('WebOnlyButton').Add_Click({ & $navigate 'WebOnly' })
     $window.FindName('BackButton').Add_Click({ if ($browser.CanGoBack) { $browser.GoBack() } })
-    $window.FindName('RefreshButton').Add_Click({ if ($null -ne $browser.Source) { $browser.Refresh() } })
+    $window.FindName('RefreshButton').Add_Click({ if ($null -ne $browser.Source) { $browser.Reload() } })
     $initialProvider = $effectiveProfile
     if ($initialProvider -eq 'Hybrid') { $initialProvider = [string](Get-ConfigValue -Config $Config -Name 'HybridDefaultProvider' -Default 'Citrix') }
     if ($initialProvider -notin @('Citrix','AVD','WebOnly')) { $initialProvider = 'WebOnly' }
@@ -1827,18 +2440,21 @@ function Show-ThinClientVisualPreview {
 
 function Get-ThinClientPreviewPlan {
     param($Config, $Audit)
+    $custom=(Get-ConfigValue -Config $Config -Name ShellMode -Default Launcher) -eq 'CustomShell'
+    $launcherRoot=if($custom){Get-ThinClientMachineRoot -Config $Config}else{$script:OutputRoot}
     return [pscustomobject][ordered]@{
         ChangesApplied = $false
         EffectiveProfile = $Audit.EffectiveProfile
         TargetUser = $Audit.TargetUserName
         ShellMode = Get-ConfigValue -Config $Config -Name 'ShellMode' -Default 'Launcher'
-        AutoLaunchMode = Get-ConfigValue -Config $Config -Name 'AutoLaunchMode' -Default 'RunKey'
+        ShellScope = if($custom){'All users - replace Explorer'}else{'Configured mode'}
+        AutoLaunchMode = if($custom){'Custom User Interface policy (next sign-in)'}else{Get-ConfigValue -Config $Config -Name 'AutoLaunchMode' -Default 'RunKey'}
         ShellRestrictions = if (Get-ConfigValue -Config $Config -Name 'EnableShellLimitations' -Default $false) { Get-ConfigValue -Config $Config -Name 'ShellRestrictionLevel' -Default 'None' } else { 'None' }
         AssignedAccess = Get-ConfigValue -Config $Config -Name 'EnableAssignedAccess' -Default $false
         ShellLauncher = Get-ConfigValue -Config $Config -Name 'EnableShellLauncher' -Default $false
         CreateDedicatedUser = Get-ConfigValue -Config $Config -Name 'CreateDedicatedLocalUser' -Default $false
-        LauncherPath = Join-Path $script:OutputRoot 'Launcher\SmartThinClient-LaunchWorkspace.ps1'
-        RollbackDirectory = $script:RollbackRoot
+        LauncherPath = Join-Path $launcherRoot 'Launcher\SmartThinClient-LaunchWorkspace.ps1'
+        RollbackDirectory = if($custom){Join-Path $launcherRoot 'Rollback'}else{$script:RollbackRoot}
         ApplyEnabled = Get-ConfigValue -Config $Config -Name 'AllowApply' -Default $false
         Note = 'Plan only. Apply separately checks administrator rights, configuration, confirmation and prerequisites, then saves rollback before changes.'
     }
@@ -1877,7 +2493,7 @@ function Invoke-ThinClientGuiAction {
         $effective = Resolve-EffectiveProfile -RequestedProfile $SelectedProfile -Config $Config
         $effectiveConfig = Merge-ProfileConfig -Config $Config -EffectiveProfile $effective
         Assert-ThinClientGuiAccess -Config $effectiveConfig -RequestedAction $RequestedAction
-        $defaultPhrase = if ($RequestedAction -eq 'Apply') { 'APPLY SMARTTHINCLIENT' } else { 'RESTORE WINDOWS SHELL' }
+        $defaultPhrase = if ($RequestedAction -eq 'Apply') { 'APPLY' } else { 'RESTORE WINDOWS SHELL' }
         $phrase = [string](Get-ConfigValue -Config $effectiveConfig -Name ($RequestedAction + 'ConfirmationPhrase') -Default $defaultPhrase)
         if ([string]::IsNullOrWhiteSpace($phrase) -or $Confirmation -cne $phrase) { throw "$RequestedAction requires the exact confirmation phrase. No changes were made." }
         if ($RequestedAction -eq 'Apply') { return Invoke-ThinClientApply -Config $Config }
@@ -1888,29 +2504,151 @@ function Invoke-ThinClientGuiAction {
     finally { $DedicatedUserPassword = $null; $Password = $null }
 }
 
+function Start-ThinClientGuiRun {
+    param([ValidateSet('Audit','Preview','Apply','Restore')][string]$RequestedAction)
+    $script:RunId = (Get-Date -Format 'yyyyMMdd-HHmmssfff') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8)
+    $folder = Split-Path -Path $script:EvidenceJsonPath -Parent
+    $stem = 'SmartThinClient_Shell_{0}_{1}_{2}' -f $RequestedAction,$env:COMPUTERNAME,$script:RunId
+    $script:EvidenceJsonPath = Join-Path $folder ($stem+'.json')
+    $script:EvidenceCsvPath = Join-Path $folder ($stem+'.csv')
+    if (-not [string]::IsNullOrWhiteSpace($script:LogPath)) { $script:LogPath = Join-Path (Split-Path -Path $script:LogPath -Parent) ('SmartThinClient-Shell_'+$script:RunId+'.log') }
+}
+
+function Convert-ThinClientApplyPlanToText {
+    param($Config,$Audit)
+    $plan = Get-ThinClientPreviewPlan -Config $Config -Audit $Audit
+    $lines = @(
+        ('Profile: '+$plan.EffectiveProfile)
+        ('Shell mode: '+$plan.ShellMode)
+        ('Scope: '+$plan.ShellScope)
+        ('Automatic startup: '+$plan.AutoLaunchMode)
+        ('Shell restrictions: '+$plan.ShellRestrictions)
+        ('Create a dedicated local user: '+$plan.CreateDedicatedUser)
+        ''
+        ('Workspace launcher: '+$plan.LauncherPath)
+        ('Rollback folder: '+$plan.RollbackDirectory)
+        ''
+        'A rollback is saved before changes. The current Windows session is not closed automatically.'
+    )
+    $lines -join [Environment]::NewLine
+}
+
+function Get-ThinClientOperationFeedback {
+    param($Result,$Config)
+    $status = [string](Get-ResultValue -Result $Result -Name Status -Default '')
+    if ($status -notin @('Applied','Restored')) { throw 'The operation did not return a completed Apply or Restore result.' }
+    $applied = $status -eq 'Applied'
+    $mode = [string](Get-ConfigValue -Config $Config -Name ShellMode -Default 'Launcher')
+    $auto = [string](Get-ConfigValue -Config $Config -Name AutoLaunchMode -Default 'RunKey')
+    $title = if($applied){'Apply completed'}else{'Restore completed'}
+    $message = if($applied){'The reviewed workspace settings were applied successfully. A rollback backup was saved before the changes.'}else{'The settings and launcher recorded in the selected rollback were restored successfully.'}
+    $next = if(-not $applied){'Sign out and sign in again to use the restored shell settings. This window does not close your session.'}elseif($mode -eq 'CustomShell'){'ThinClient is configured to replace Explorer for all users at their next sign-in. Sign out and sign in to activate it. The current desktop is not closed automatically; domain policy can override local policy.'}elseif($mode -eq 'Launcher' -and $auto -eq 'None'){'Automatic startup is disabled. Use Preview to inspect the workspace; Apply does not open it automatically.'}elseif($mode -eq 'Launcher'){'ThinClient will start at the next Windows sign-in. This Launcher mode keeps Explorer. Use Preview to inspect the workspace now.'}else{'Sign out and sign in again to use the configured shell. This window does not close your session.'}
+    $details = [Collections.Generic.List[string]]::new()
+    foreach($entry in @(@('EffectiveProfile','Profile'),@('LauncherPath','Workspace launcher'),@('RollbackPath',$(if($applied){'Rollback backup'}else{'Rollback restored'})),@('EvidenceJsonPath','Report'),@('LogPath','Log'))) {
+        $value = [string](Get-ResultValue -Result $Result -Name $entry[0] -Default '')
+        if ($value) { $details.Add($entry[1]+': '+$value) }
+    }
+    $signOutRecommended = -not $applied -or $mode -ne 'Launcher' -or $auto -ne 'None'
+    if($signOutRecommended){$next += ' Choose Sign out now to activate the changes, or Later to keep working. Save your open work first.'}
+    [pscustomobject]@{Title=$title;Message=$message;NextStep=$next;SignOutRecommended=[bool]$signOutRecommended;Details=($details -join [Environment]::NewLine);OutputRoot=[string](Get-ResultValue -Result $Result -Name OutputRoot -Default '')}
+}
+
+function Confirm-ThinClientSignOut {
+    param($Owner)
+    Add-Type -AssemblyName PresentationFramework
+    [xml]$xaml=@'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Title="Sign out of Windows?" Width="460" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" Background="#F5F8FB" FontFamily="Segoe UI">
+ <StackPanel Margin="18"><Border Background="White" BorderBrush="#DDE7F0" BorderThickness="1" CornerRadius="8" Padding="16"><StackPanel><TextBlock Text="Sign out now?" FontSize="22" FontWeight="SemiBold" Foreground="#1F2937"/><TextBlock Text="Save your open work before continuing. This signs out your current Windows session. Sign in again to use the updated shell settings." TextWrapping="Wrap" Foreground="#5F6B7A" Margin="0,10,0,0"/></StackPanel></Border><StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0"><Button Name="CancelButton" Content="Cancel" IsCancel="True" IsDefault="True" MinWidth="100" Height="36" Margin="0,0,10,0"/><Button Name="SignOutButton" Content="Sign out" MinWidth="110" Height="36"/></StackPanel></StackPanel>
+</Window>
+'@
+    $dialog=[Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($xaml))
+    [void]$dialog.Resources.MergedDictionaries.Add((New-ThinClientUiResources))
+    $dialog.Owner=$Owner;$dialog.Icon=$Owner.Icon
+    $dialog.FindName('CancelButton').Add_Click({$dialog.DialogResult=$false})
+    $signOut=$dialog.FindName('SignOutButton');$signOut.Style=$dialog.FindResource('AccentButton');$signOut.Add_Click({$dialog.DialogResult=$true})
+    return $dialog.ShowDialog() -eq $true
+}
+
+function Invoke-ThinClientSignOut {
+    param($Owner)
+    if(-not(Confirm-ThinClientSignOut -Owner $Owner)){return $false}
+    Write-SmartThinClientLog -Message 'User confirmed sign-out of the current Windows session.'
+    $process=Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\shutdown.exe') -ArgumentList '/l' -WindowStyle Hidden -Wait -PassThru -ErrorAction Stop
+    if($process.ExitCode -ne 0){throw ('Windows sign-out could not start (exit '+$process.ExitCode+'). Your session remains open.')}
+    return $true
+}
+
+function Show-ThinClientOperationFeedback {
+    param($Owner,$Feedback)
+    Add-Type -AssemblyName PresentationFramework
+    [xml]$xaml=@'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Title="Workspace changes completed" Width="700" Height="480" MinWidth="580" MinHeight="400" WindowStartupLocation="CenterOwner" Background="#F5F8FB" FontFamily="Segoe UI">
+ <Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <Border Background="White" BorderBrush="#DDE7F0" BorderThickness="1" CornerRadius="8" Padding="16"><StackPanel>
+   <Border Background="#E8F5EE" CornerRadius="6" Padding="8,3" HorizontalAlignment="Left"><TextBlock Text="Completed" Foreground="#167044" FontWeight="SemiBold"/></Border>
+   <TextBlock Name="ResultTitle" FontSize="24" FontWeight="SemiBold" Foreground="#1F2937" Margin="0,8,0,7"/><TextBlock Name="ResultMessage" TextWrapping="Wrap" Foreground="#334155"/>
+  </StackPanel></Border>
+  <Border Grid.Row="1" Background="#E6F4FF" BorderBrush="#B9DDF7" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,12,0,12"><StackPanel><TextBlock Text="Next step" FontWeight="SemiBold" Foreground="#005A9E" Margin="0,0,0,5"/><TextBlock Name="NextStep" TextWrapping="Wrap" Foreground="#24364B"/></StackPanel></Border>
+  <Border Grid.Row="2" Background="White" BorderBrush="#DDE7F0" BorderThickness="1" CornerRadius="8" Padding="12"><TextBox Name="ResultDetails" IsReadOnly="True" BorderThickness="0" TextWrapping="Wrap" FontSize="11" VerticalScrollBarVisibility="Auto"/></Border>
+  <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0"><Button Name="FilesButton" Content="Open files" MinWidth="110" Height="36" Margin="0,0,10,0"/><Button Name="DoneButton" Content="Done" IsCancel="True" IsDefault="True" MinWidth="110" Height="36"/><Button Name="SignOutButton" Content="Sign out now" Visibility="Collapsed" MinWidth="120" Height="36" Margin="10,0,0,0"/></StackPanel>
+ </Grid>
+</Window>
+'@
+    $dialog=[Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($xaml))
+    [void]$dialog.Resources.MergedDictionaries.Add((New-ThinClientUiResources))
+    $dialog.Owner=$Owner;$dialog.Icon=$Owner.Icon;$dialog.Title=$Feedback.Title
+    $dialog.FindName('ResultTitle').Text=$Feedback.Title;$dialog.FindName('ResultMessage').Text=$Feedback.Message
+    $dialog.FindName('NextStep').Text=$Feedback.NextStep;$dialog.FindName('ResultDetails').Text=$Feedback.Details
+    $done=$dialog.FindName('DoneButton');$done.Add_Click({$dialog.Close()})
+    $signOut=$dialog.FindName('SignOutButton');$signOut.Style=$dialog.FindResource('AccentButton')
+    if($Feedback.SignOutRecommended){$signOut.Visibility='Visible';$done.Content='Later'}else{$done.Style=$dialog.FindResource('AccentButton')}
+    $signOut.Add_Click({
+        try {if(Invoke-ThinClientSignOut -Owner $dialog){$dialog.Close()}}
+        catch {$dialog.FindName('NextStep').Text='Sign-out failed: '+$_.Exception.Message;Write-SmartThinClientLog -Message ('Sign-out failed: '+$_.Exception.Message) -Level ERROR}
+    })
+    $files=$dialog.FindName('FilesButton');$files.IsEnabled=-not [string]::IsNullOrWhiteSpace($Feedback.OutputRoot)
+    $files.Add_Click({if(Test-Path -LiteralPath $Feedback.OutputRoot -PathType Container){Start-Process -FilePath explorer.exe -ArgumentList ('"'+$Feedback.OutputRoot+'"')}})
+    [void]$dialog.ShowDialog()
+}
+
 function Show-ThinClientConfirmation {
     param($Owner, [string]$RequestedAction, [string]$Summary, [string]$Phrase, [bool]$RequestPassword = $false)
     Add-Type -AssemblyName PresentationFramework
     [xml]$xaml = @"
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Title="Confirm workspace change" Width="720" Height="650" MinHeight="540" WindowStartupLocation="CenterOwner" ResizeMode="CanResize" Background="#F5F8FB">
- <Grid Margin="20"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
- <TextBlock Name="WarningText" TextWrapping="Wrap" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,12"/>
- <TextBox Name="SummaryText" Grid.Row="1" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" Padding="10"/>
- <StackPanel Grid.Row="2" Margin="0,14,0,0"><TextBlock Name="PhraseLabel" TextWrapping="Wrap"/><TextBox Name="PhraseInput" Height="32" Margin="0,6,0,0"/></StackPanel>
- <StackPanel Name="PasswordPanel" Grid.Row="3" Margin="0,10,0,0" Visibility="Collapsed"><TextBlock Text="New dedicated local user password (only needed if creating the configured user)" TextWrapping="Wrap"/><PasswordBox Name="UserPassword" Height="32" Margin="0,6,0,0"/></StackPanel>
- <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0"><Button Name="CancelButton" Content="Cancel" IsCancel="True" MinWidth="100" Height="34" Margin="0,0,10,0"/><Button Name="ConfirmButton" Content="Confirm" IsEnabled="False" MinWidth="100" Height="34"/></StackPanel>
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Title="Confirm workspace change" Width="700" Height="600" MinWidth="580" MinHeight="480" WindowStartupLocation="CenterOwner" ResizeMode="CanResize" Background="#F5F8FB" FontFamily="Segoe UI">
+ <Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+ <Border Background="White" BorderBrush="#DDE7F0" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,12"><StackPanel>
+  <Border Background="#E6F4FF" CornerRadius="6" Padding="8,3" HorizontalAlignment="Left"><TextBlock Text="Review changes" Foreground="#005A9E" FontWeight="SemiBold" FontSize="11"/></Border>
+  <TextBlock Name="HeadingText" FontSize="24" FontWeight="SemiBold" Foreground="#1F2937" Margin="0,8,0,6"/>
+  <TextBlock Name="WarningText" TextWrapping="Wrap" Foreground="#5F6B7A"/>
+ </StackPanel></Border>
+ <Border Grid.Row="1" Background="White" BorderBrush="#DDE7F0" BorderThickness="1" CornerRadius="8" Padding="14"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+  <TextBlock Text="Planned changes" FontWeight="SemiBold" Foreground="#1F2937" Margin="0,0,0,8"/>
+  <TextBox Name="SummaryText" Grid.Row="1" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" BorderThickness="0" Background="White" Foreground="#334155" FontFamily="Segoe UI" FontSize="12"/>
+ </Grid></Border>
+ <Border Grid.Row="2" Background="White" BorderBrush="#DDE7F0" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,12,0,0"><StackPanel>
+  <TextBlock Name="PhraseLabel" TextWrapping="Wrap" FontWeight="SemiBold" Foreground="#1F2937"/>
+  <Border BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="6" Padding="10,5" Margin="0,7,0,0"><TextBox Name="PhraseInput" BorderThickness="0" MinHeight="24" FontSize="15" VerticalContentAlignment="Center"/></Border>
+  <TextBlock Text="The confirmation is case-sensitive." FontSize="11" Foreground="#5F6B7A" Margin="0,5,0,0"/>
+  <StackPanel Name="PasswordPanel" Margin="0,12,0,0" Visibility="Collapsed"><TextBlock Text="Password for the new dedicated local user" TextWrapping="Wrap" Foreground="#1F2937"/><Border BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="6" Padding="10,5" Margin="0,6,0,0"><PasswordBox Name="UserPassword" BorderThickness="0" MinHeight="24"/></Border></StackPanel>
+ </StackPanel></Border>
+ <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0"><Button Name="CancelButton" Content="Cancel" IsCancel="True" MinWidth="100" Height="36" Margin="0,0,10,0"/><Button Name="ConfirmButton" Content="Apply" IsDefault="True" IsEnabled="False" MinWidth="110" Height="36"/></StackPanel>
  </Grid>
 </Window>
 "@
     $dialog = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($xaml))
+    [void]$dialog.Resources.MergedDictionaries.Add((New-ThinClientUiResources))
     $dialog.Owner = $Owner
     $dialog.Icon = $Owner.Icon
     $dialog.Title = 'Confirm ' + $RequestedAction
+    $dialog.FindName('HeadingText').Text = 'Confirm ' + $RequestedAction
     $dialog.FindName('WarningText').Text = if ($RequestedAction -eq 'Apply') { 'Apply changes local workspace settings. Review this plan; a rollback is saved before changes.' } else { 'Restore changes local workspace settings using the exact reviewed rollback file.' }
     $dialog.FindName('SummaryText').Text = $Summary
     $dialog.FindName('PhraseLabel').Text = 'Type exactly: ' + $Phrase
     $inputBox = $dialog.FindName('PhraseInput')
     $confirmButton = $dialog.FindName('ConfirmButton')
+    $confirmButton.Content = $RequestedAction
+    $confirmButton.Style = $dialog.FindResource('AccentButton')
     $passwordBox = $dialog.FindName('UserPassword')
     if ($RequestPassword) { $dialog.FindName('PasswordPanel').Visibility = 'Visible' }
     $inputBox.Add_TextChanged({ $confirmButton.IsEnabled = -not [string]::IsNullOrWhiteSpace($Phrase) -and $inputBox.Text -ceq $Phrase })
@@ -1941,64 +2679,73 @@ function Show-ThinClientGui {
     [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Smart ThinClient Control Panel" Height="800" Width="1180" MinHeight="700" MinWidth="1040"
+        Title="Smart ThinClient Control Panel" Height="620" Width="960" MinHeight="540" MinWidth="720"
         Background="#F5F8FB" WindowStartupLocation="CenterScreen">
-  <Grid Margin="18">
+  <Grid Margin="14">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto"/>
       <RowDefinition Height="Auto"/>
       <RowDefinition Height="*"/>
       <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
-    <Border Grid.Row="0" Background="White" BorderBrush="#DDE7F0" BorderThickness="1" CornerRadius="8" Padding="18">
+    <Border Grid.Row="0" Background="White" BorderBrush="#DDE7F0" BorderThickness="1" CornerRadius="8" Padding="12">
       <Grid>
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="*"/>
-          <ColumnDefinition Width="220"/>
+          <ColumnDefinition Width="104"/>
         </Grid.ColumnDefinitions>
         <StackPanel>
           <Border Background="#E6F4FF" CornerRadius="8" Padding="10,4" HorizontalAlignment="Left">
             <TextBlock Text="Endpoint workspace" Foreground="#005A9E" FontWeight="SemiBold"/>
           </Border>
-          <TextBlock Text="Smart ThinClient Control Panel" FontSize="28" FontWeight="SemiBold" Foreground="#1F2937" Margin="0,12,0,0"/>
-          <TextBlock Text="Inspect, preview, apply, and restore Citrix, AVD, or web workspace settings." Foreground="#5F6B7A" FontSize="14" Margin="0,4,0,0"/>
+          <TextBlock Text="Smart ThinClient Control Panel" FontSize="24" FontWeight="SemiBold" Foreground="#1F2937" Margin="0,8,0,0"/>
+          <TextBlock Text="Inspect, preview, apply, and restore Citrix, AVD, or web workspace settings." Foreground="#5F6B7A" FontSize="12" TextWrapping="Wrap" Margin="0,4,10,0"/>
         </StackPanel>
         <Border Grid.Column="1" Background="#F8FBFE" BorderBrush="#DDE7F0" BorderThickness="1" CornerRadius="8" Padding="12">
-          <Image Name="LogoImage" Stretch="Uniform"/>
+          <Image Name="LogoImage" Height="78" Stretch="Uniform"/>
         </Border>
       </Grid>
     </Border>
-    <Border Grid.Row="1" Background="White" BorderBrush="#DDE7F0" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,14,0,14">
-      <Grid>
-        <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="*"/>
-          <ColumnDefinition Width="Auto"/>
-        </Grid.ColumnDefinitions>
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+    <Border Grid.Row="1" Background="White" BorderBrush="#DDE7F0" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,10,0,10">
+      <WrapPanel Orientation="Horizontal">
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,3,12,3">
           <TextBlock Text="Profile" Foreground="#5F6B7A" VerticalAlignment="Center" Margin="0,0,8,0"/>
-          <ComboBox Name="ProfileCombo" Width="160" Height="34" SelectedIndex="0">
+          <ComboBox Name="ProfileCombo" Width="136" Height="34" SelectedIndex="0">
             <ComboBoxItem Content="Auto"/>
             <ComboBoxItem Content="Citrix"/>
             <ComboBoxItem Content="AVD"/>
             <ComboBoxItem Content="WebOnly"/>
             <ComboBoxItem Content="Hybrid"/>
           </ComboBox>
-          <TextBlock Name="StatusText" Text="Ready" Foreground="#5F6B7A" VerticalAlignment="Center" Margin="18,0,0,0"/>
+          <TextBlock Name="StatusText" Text="Ready" Foreground="#5F6B7A" VerticalAlignment="Center" Margin="12,0,0,0"/>
         </StackPanel>
-        <StackPanel Grid.Column="1" Orientation="Horizontal">
-          <Button Name="AuditButton" Content="Audit" Height="34" MinWidth="90" Background="#0078D4" Foreground="White" BorderBrush="#0078D4" Padding="16,0" Margin="0,0,8,0"/>
-          <Button Name="PreviewButton" Content="Preview" Height="34" MinWidth="90" Padding="16,0" Margin="0,0,8,0"/>
-          <Button Name="ApplyButton" Content="Apply" Height="34" MinWidth="90" Padding="16,0" Margin="0,0,8,0"/>
-          <Button Name="RestoreButton" Content="Restore" Height="34" MinWidth="90" Padding="16,0" Margin="0,0,8,0"/>
-          <Button Name="OpenOutputButton" Content="Open output" Height="34" MinWidth="120" Padding="16,0"/>
-        </StackPanel>
-      </Grid>
+        <WrapPanel Orientation="Horizontal" Margin="0,3,0,3">
+          <Button Name="AuditButton" Content="Audit" Height="34" MinWidth="76" Padding="12,0" Margin="0,0,8,0"/>
+          <Button Name="PreviewButton" Content="Preview" Height="34" MinWidth="76" Padding="12,0" Margin="0,0,8,0"/>
+          <Button Name="ApplyButton" Content="Apply" Height="34" MinWidth="76" Padding="12,0" Margin="0,0,8,0"/>
+          <Button Name="RestoreButton" Content="Restore" Height="34" MinWidth="76" Padding="12,0" Margin="0,0,8,0"/>
+          <Button Name="OpenOutputButton" Content="Open files" ToolTip="Open reports, logs and rollback files" Height="34" MinWidth="106" Padding="12,0"/>
+        </WrapPanel>
+      </WrapPanel>
     </Border>
     <Border Grid.Row="2" Background="White" BorderBrush="#DDE7F0" BorderThickness="1" CornerRadius="8" Padding="12">
-      <TextBox Name="OutputText" FontFamily="Consolas" FontSize="13" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" IsReadOnly="True" BorderThickness="0"/>
+      <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <Border Name="AuditSummaryContainer" Visibility="Collapsed" Background="#F8FBFE" BorderBrush="#DDE7F0" BorderThickness="0,0,0,1" Padding="0,0,0,8" Margin="0,0,0,8">
+          <StackPanel>
+            <TextBlock Name="AuditSummaryTitle" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <WrapPanel Name="AuditSummaryCards"/>
+            <TextBlock Name="AuditSummaryNote" Foreground="#5F6B7A" FontSize="11" TextWrapping="Wrap"/>
+          </StackPanel>
+        </Border>
+      <TextBox Grid.Row="1" Name="OutputText" FontFamily="Consolas" FontSize="12" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" IsReadOnly="True" BorderThickness="0"/>
+      </Grid>
     </Border>
-    <Border Grid.Row="3" Background="White" BorderBrush="#DDE7F0" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,14,0,0">
-      <TextBlock Text="Preview makes no Windows changes. Apply/Restore require administrator rights, configuration permission, and typed confirmation." Foreground="#5F6B7A"/>
+    <Border Grid.Row="3" Background="White" BorderBrush="#DDE7F0" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,10,0,0">
+      <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <TextBlock Text="Preview does not apply shell changes. Settings opens live Windows settings. Apply/Restore remain guarded." TextWrapping="Wrap" FontSize="11" Foreground="#5F6B7A"/>
+        <TextBlock Name="VersionText" Grid.Column="1" Foreground="#64748B" FontSize="11" VerticalAlignment="Center" Margin="16,0,0,0"/>
+      </Grid>
     </Border>
   </Grid>
 </Window>
@@ -2006,6 +2753,8 @@ function Show-ThinClientGui {
 
     $reader = New-Object System.Xml.XmlNodeReader $xaml
     $window = [Windows.Markup.XamlReader]::Load($reader)
+    $window.FindName('VersionText').Text = 'Smart ThinClient v' + (Get-ThinClientVersion)
+    [void]$window.Resources.MergedDictionaries.Add((New-ThinClientUiResources))
     $windowIconPath = Join-Path $script:ScriptRoot 'Assets\WorkplaceCloudHub.ico'
     if (Test-Path -LiteralPath $windowIconPath) {
         $window.Icon = [Windows.Media.Imaging.BitmapFrame]::Create([Uri]::new($windowIconPath, [UriKind]::Absolute))
@@ -2027,6 +2776,7 @@ function Show-ThinClientGui {
         $logoImage.Source = $bitmap
     }
 
+    $auditButton.Style = $window.FindResource('AccentButton')
     $applyButton = $window.FindName('ApplyButton')
     $restoreButton = $window.FindName('RestoreButton')
     $previewButton = $window.FindName('PreviewButton')
@@ -2039,6 +2789,7 @@ function Show-ThinClientGui {
         $confirmation = $null
         foreach ($button in $actionButtons) { $button.IsEnabled = $false }
         try {
+            Start-ThinClientGuiRun -RequestedAction $RequestedAction
             $selectedProfile = [string]$profileCombo.Text
             $statusText.Text = 'Running ' + $RequestedAction.ToLowerInvariant() + '...'
             $parameters = @{ Config = $Config; RequestedAction = $RequestedAction; SelectedProfile = $selectedProfile }
@@ -2047,12 +2798,12 @@ function Show-ThinClientGui {
                 $effectiveProfile = Resolve-EffectiveProfile -RequestedProfile $selectedProfile -Config $Config
                 $effectiveConfig = Merge-ProfileConfig -Config $Config -EffectiveProfile $effectiveProfile
                 Assert-ThinClientGuiAccess -Config $effectiveConfig -RequestedAction $RequestedAction
-                $defaultPhrase = if ($RequestedAction -eq 'Apply') { 'APPLY SMARTTHINCLIENT' } else { 'RESTORE WINDOWS SHELL' }
+                $defaultPhrase = if ($RequestedAction -eq 'Apply') { 'APPLY' } else { 'RESTORE WINDOWS SHELL' }
                 $phrase = [string](Get-ConfigValue -Config $effectiveConfig -Name ($RequestedAction + 'ConfirmationPhrase') -Default $defaultPhrase)
                 $requestPassword = $false
                 if ($RequestedAction -eq 'Apply') {
                     $preview = Invoke-ThinClientGuiAction -Config $Config -RequestedAction Preview -SelectedProfile $selectedProfile
-                    $summary = Convert-AuditToText -Audit $preview
+                    $summary = Convert-ThinClientApplyPlanToText -Config $effectiveConfig -Audit $preview
                     $outputText.Text = $summary
                     $requestPassword = [bool](Get-ConfigValue -Config $effectiveConfig -Name 'CreateDedicatedLocalUser' -Default $false)
                 }
@@ -2061,14 +2812,15 @@ function Show-ThinClientGui {
                     $picker.Title = 'Select the rollback file to review and restore'
                     $picker.Filter = 'Rollback JSON (*.json)|*.json'
                     $picker.CheckFileExists = $true
-                    $picker.InitialDirectory = $script:RollbackRoot
+                    $picker.InitialDirectory = if((Get-ConfigValue -Config $Config -Name ShellMode -Default Launcher) -eq 'CustomShell'){Join-Path (Get-ThinClientMachineRoot -Config $Config) 'Rollback'}else{$script:RollbackRoot}
+                    if(-not(Test-Path -LiteralPath $picker.InitialDirectory -PathType Container)){$picker.InitialDirectory=$script:RollbackRoot}
                     if ($picker.ShowDialog($window) -ne $true) { $statusText.Text = 'Restore cancelled'; return }
                     $parameters.SelectedRollbackPath = $picker.FileName
                     $rollback = Read-JsonFile -Path $picker.FileName
                     if ($null -eq $rollback) { throw 'The selected rollback is empty or invalid.' }
-                    Assert-RollbackState -State $rollback
+                    Assert-RollbackState -State $rollback -Config $Config
                     $parameters.ExpectedRollbackHash = (Get-FileHash -LiteralPath $picker.FileName -Algorithm SHA256).Hash
-                    $summary = 'Rollback: ' + $picker.FileName + [Environment]::NewLine + 'SHA256: ' + $parameters.ExpectedRollbackHash + [Environment]::NewLine + (($rollback | Select-Object ComputerName, TargetUserSid, OutputRoot, LauncherPath, LauncherExisted, Config, Registry) | ConvertTo-Json -Depth 10)
+                    $summary = 'Rollback: ' + $picker.FileName + [Environment]::NewLine + 'SHA256: ' + $parameters.ExpectedRollbackHash + [Environment]::NewLine + (($rollback | Select-Object ComputerName, TargetUserSid, OutputRoot, LauncherPath, LauncherExisted, CustomShellPolicy, ManagedShellCommand, Config, Registry) | ConvertTo-Json -Depth 10)
                 }
                 $confirmation = Show-ThinClientConfirmation -Owner $window -RequestedAction $RequestedAction -Summary $summary -Phrase $phrase -RequestPassword $requestPassword
                 if ($null -eq $confirmation) { $statusText.Text = $RequestedAction + ' cancelled'; return }
@@ -2076,18 +2828,36 @@ function Show-ThinClientGui {
                 $parameters.Password = $confirmation.Password
             }
             $result = Invoke-ThinClientGuiAction @parameters
+            if ($RequestedAction -eq 'Audit') { Set-ThinClientAuditSummary -Audit $result -Panel ($window.FindName('AuditSummaryCards')) -Title ($window.FindName('AuditSummaryTitle')) -Note ($window.FindName('AuditSummaryNote')) -Container ($window.FindName('AuditSummaryContainer')) }
             if ($RequestedAction -eq 'Preview') {
                 $statusText.Text = 'Visual preview open'
                 Show-ThinClientVisualPreview -Config $Config -Audit $result -Owner $window
-                $outputText.Text = 'Visual preview closed. Profile: ' + $result.EffectiveProfile + '. No Windows settings were changed. Audit and the change plan are saved in the output folder.'
+                $outputText.Text = 'Visual preview closed. Profile: ' + $result.EffectiveProfile + '. No shell changes were applied. Audit and the change plan are saved in the output folder.'
                 $statusText.Text = 'Visual preview closed'
                 return
             }
-            $outputText.Text = if ($RequestedAction -in @('Audit','Preview')) { Convert-AuditToText -Audit $result } else { $result | ConvertTo-Json -Depth 8 }
+            if ($RequestedAction -in @('Apply','Restore')) {
+                $window.FindName('AuditSummaryContainer').Visibility = 'Collapsed'
+                $feedback = Get-ThinClientOperationFeedback -Result $result -Config $Config
+                $outputText.Text = $feedback.Title+[Environment]::NewLine+$feedback.Message+[Environment]::NewLine+[Environment]::NewLine+$feedback.NextStep+[Environment]::NewLine+[Environment]::NewLine+$feedback.Details
+                $statusText.Text = $feedback.Title
+                Show-ThinClientOperationFeedback -Owner $window -Feedback $feedback
+                return
+            }
+            $outputText.Text = Convert-AuditToText -Audit $result
             $statusText.Text = $RequestedAction + ' completed'
         }
         catch {
-            $statusText.Text = $RequestedAction + ' did not complete'
+            $window.FindName('AuditSummaryContainer').Visibility = 'Collapsed'
+            if ($RequestedAction -eq 'Audit') {
+                $window.FindName('AuditSummaryTitle').Text = 'Audit | Blocked'
+                $window.FindName('AuditSummaryTitle').Foreground = '#B42318'
+                $window.FindName('AuditSummaryCards').Children.Clear()
+                $window.FindName('AuditSummaryNote').Text = 'Audit did not complete: ' + $_.Exception.Message
+                $window.FindName('AuditSummaryContainer').Visibility = 'Visible'
+            }
+            $configurationBlock = $RequestedAction -in @('Apply','Restore') -and $_.Exception.Message -eq "$RequestedAction is blocked because Allow$RequestedAction is false in configuration. No changes were made."
+            $statusText.Text = if ($configurationBlock) { $RequestedAction + ' blocked by configuration' } else { $RequestedAction + ' did not complete' }
             $outputText.Text = $_.Exception.Message
             Write-SmartThinClientLog -Level 'ERROR' -Message $_.Exception.Message
         }
@@ -2104,9 +2874,16 @@ function Show-ThinClientGui {
 
 
     $openOutputButton.Add_Click({
-        if (Test-Path -LiteralPath $script:OutputRoot) { Start-Process -FilePath explorer.exe -ArgumentList $script:OutputRoot }
+        $folder=$script:OutputRoot
+        if((Get-ConfigValue -Config $Config -Name ShellMode -Default Launcher) -eq 'CustomShell'){$machine=Get-ThinClientMachineRoot -Config $Config;if(Test-Path -LiteralPath (Join-Path $machine 'SmartThinClient-Machine.json')){$folder=$machine}}
+        if (Test-Path -LiteralPath $folder) { Start-Process -FilePath explorer.exe -ArgumentList ('"'+$folder+'"') }
     })
 
+    $profileCombo.Add_SelectionChanged({
+        $window.FindName('AuditSummaryContainer').Visibility = 'Collapsed'
+        $statusText.Text = 'Profile changed - run Audit'
+        if ($null -ne $profileCombo.SelectedItem) { $outputText.Text = 'Profile: ' + [string]$profileCombo.SelectedItem.Content + '. Run Audit or Preview to inspect this profile.' }
+    })
     $outputText.Text = 'Ready. Audit inspects the device; Preview opens the workspace shell without applying Windows settings.'
     if ($splash) { Close-SmartThinClientGuiSplash -Splash $splash }
     [void]$window.ShowDialog()
@@ -2175,8 +2952,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBuMQAxZfKADGAs
-# Ndsg5sbEm4NMF26+2Nx1ASF1ls1/f6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCRb+icTbEFbZ1V
+# Gn8fjMG8lM+qNNBX2chFs7ka30pwEqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2309,31 +3086,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPF8JVKmtyHvHOZdPms3ep8mHt9txgJfR4xKpwhvt3tXMA0GCSqG
-# SIb3DQEBAQUABIIBgJjN574VnjsnliSqami7AanNnrKAB/rGjEmJZXUnsRx6FM33
-# NkmYHH8pQgZ35m1hV/ReiZNoeBr3YD2+kSGT8m0s3CAUeMzXK2UxpcluBU7LMAXX
-# RY1R6OqKHKq/Ht/vlicVRxnPldnPpUKPpZfGynHKyaumJ4hvVJYkOBhAGG11q3+h
-# ksqRJ4iBaF4TMOLVrNmMWO++bnTR+II9z+hZhmlcwhj29vV00EJi4TC6lDflgpbB
-# 0OUHcUOOaSQtsFLvjrMhEEhI5nhMS/YqldsCyGhxWaDK3B97xAn2Wt6o/JycvqXQ
-# tTDTKNBFdq9qFuLTEeahsptSGfAva4g32APFShLLFSgiaKbK0YlNxuzhMbuHIqyl
-# wqHBEpkXZ1gQW7rT/f58r+iYt3aC9/aA72oV/lap41Dk/B3C7GPq80ZM+0b6TOK3
-# uU3ODbbugSc5/tyau9MRU4KveCWGnN9Lq8m/kpTB/wa2DxRPthbyF2UlrjHuazvc
-# pOhSR9t1dH3bzeDBcaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEOmyCzzeXYyWpNRf6i6hJ1iyehTGqOojhsPJ/tWHO9JMA0GCSqG
+# SIb3DQEBAQUABIIBgGzbTBaxedjK6hUPrPqBL7f+kqIC+Ez7Z/HiK03xx1XDzub1
+# fp02yiaMm71i1sNd5O5cokF2blR7fuEh27tuCWqP7irKzpsOUUlwZm+Sq1cmHiBj
+# Z0XEy9sonvW/3Uh1h6Ltyr2DoZUFRpnV/c7kwFh+fyWyiGThN791aRFDLItnN9P/
+# 9VIrFgR31Fp9KNZKfJ9xDvsNjMe/YJdkBcf+gyi2U9CfPVsIZqixFuR5XRnMJjrc
+# +g1ozV2EdaTXgJSPBaEJupBymtPqo5yMzPUQ5Tlu/Ek75aQkZqBOBHT3FI407yHp
+# /iNXZimOhItt52AqVeJ/PwFLktlRcTiYUwyprr1qw0TJIr7eWvxNHOJ53Q0BmKtO
+# VJC+soKvoYnbbIBcsUatHG/VH0khe60OYNrSexCxTSMFGGBPIWEoD3ThuyZxCOK+
+# Xu2QmXEWEzOmK9NSuqK/6rS8QyZZwARuhoAGPOpiOUhxXCw8+DsNCfK7+2UIaInN
+# cdjNhD2+LVI43mxZNaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQyMTI3
-# MDZaMC8GCSqGSIb3DQEJBDEiBCDD3g5q1BBItgqcC6JkcV6OWg5WZmRFmemVNLnV
-# Ud0VVTANBgkqhkiG9w0BAQEFAASCAgAj1uh3jQhShzu7rBHQofIqqPLKzfYSW51i
-# wASt7FfuxhEUIuJiNGvzYtfqPqY5nWWvL4HWI34c/b3CqaBFIkhLhWocGav4gN8u
-# rpnRifb6cV0Y9oO5AMdJeJfxMipTwEoVjSyK+dYJqMGGI7NXe3DMHetWR/gpRB/Z
-# ksXYPuco+anvdzh5pW9gVbAw+MDslrotMte1T+cKBIqMBJNs0aEzBGFvfPBG7hCp
-# CHMACsOrwYvvLRKZw4E8fjudT/sf/JMOK8DsuanJnZuqqD1lMC504fHTu9dguZEP
-# 1t7qM4wcq2Xux+4DFJxoeqeCZ3UPVLt9oB5eZCdFYiHFVpOQJiWA3WtVyq9d+7te
-# f3k984hQu3iRu9a8ZAPwEknOQcLwa4BeZjTMSmRZN/evxZOb/1supuGJ1XL16ojC
-# sddIqJI/U6LWk51FymOyQjRnjfeSB/ztbbYZDNMMNeVdit/XNbJRnsDU9p267C61
-# 28uLxJflcO+GpbvTqQLSiiLPpcjOm0WDUwe8NOtBbcuLGMz28jzY3qiwwmRO2tdw
-# JrHZVlDPP970Dr5+B1uL/wsjFqruurDY5OjGAffs6H6D9MkCAuqwJjzgyqFx7eWn
-# 3eUpJhJLAPEzvve6cX88Dy/PIfqvlMo7RCkEGo0B88gbiyiSc3DOfQlmuJIlVEMA
-# 5AfGxogvtg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTMxNzA1
+# NDJaMC8GCSqGSIb3DQEJBDEiBCBQ9G4k0sHXYrGsu+lanz74dvWbauySwCrN++GW
+# mlJl9DANBgkqhkiG9w0BAQEFAASCAgB83OpVHcm9Ngnscj4w9dT9dLtyJ/P2lSnv
+# Hs+v70j47SdLJy6fDcOoAWNhkJNab1lJZT+BIKl4NexWq4ZbfZN5ZVtygE0ECCaH
+# CE8BX8mfNqznJcKE6ja/iNB/fqTBCwuXJeyLS4AaMSeN68Ul1XLtUb/gJThQILGb
+# oM6C6xzjipYgYKz8jFk1RRz49z8Q16/8Bbh7TJ9ukT+K1eJb04Wh/Z7AfoggSz4j
+# YGFr2kIrlCSUM7byHXVevPUMBDz1wi4VSb3UiEgEI/7K045go2V+gY/ZZdMVTOSa
+# YJWMN/BTUbi/gPs/2i4B6AAVFmIE7XURMEG4cTTCluDIyDxuUgV7gmfEoMg2RQKJ
+# lcgRadBNK+BIk81C0m9pxRY00b8Jjve0oO3AomrMWR1wG9xymo13VI1FE59+j4GG
+# QQ9uAzeBF0tMG0Wm8+KSf7Mpx1CgwYmKSTteZv1N/dCUChuDVAIuffeiZOJUQDpU
+# c93j6/2F9bnr5QnDCqdxNKstAxx5aBVdhJdoqD0qBOWvw3wy57aVWBM6MnHvdGue
+# AVgNB6njTMfq4qV54VFxbz+v3sY0fLCsDQnc0asQv3meMYHT2FW52pWBG3e+taX7
+# XkkK2MIzujjtNc9KTq9k89h9dHYTSjE8LRJI9Py6X6j3ayC0cviAgrwt3DzKs2kB
+# cB473lulIg==
 # SIG # End signature block

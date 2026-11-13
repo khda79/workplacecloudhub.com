@@ -152,6 +152,8 @@ SmartM365/SharePointMigration/Tools/Python/**
 !/SmartCitrix/SmartCitrix.global.local.json.template
 !/SmartThinClient/README.md
 !/SmartThinClient/**/*.ps1
+!/SmartThinClient/SmartThinClient-WebView2.psd1
+!/SmartThinClient/Dependencies/WebView2/LICENSE.txt
 !/SmartThinClient/**/*.cmd
 !/SmartThinClient/**/*.md
 /SmartThinClient/TEST-PLAN-WINDOWS11.md

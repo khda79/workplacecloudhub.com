@@ -13,5 +13,8 @@
 # covers the exact line endings, so Git must never convert them.
 **/ThirdParty/** -text -eol -whitespace
 
+# Preserve the WebView2 SDK publisher's license verbatim.
+SmartThinClient/Dependencies/WebView2/LICENSE.txt -text -eol -whitespace
+
 # Tenant-specific values are restored locally by a private clean/smudge filter (see .git/config).
 SmartWorkplaceIntelligence/pbip/SmartWorkplaceIntelligence.SemanticModel/definition/expressions.tmdl filter=tenant-url

@@ -39,8 +39,14 @@ function New-LocalUser { throw 'Unexpected user creation' }
 function Set-AssignedAccess { throw 'Unexpected kiosk write' }
 function Clear-AssignedAccess { throw 'Synthetic restore failure' }
 function Invoke-CimMethod { throw 'Unexpected CIM call' }
+function Get-ThinClientCustomShellPolicy { throw 'Unexpected local shell policy access' }
+function Set-ThinClientCustomShellPolicy { throw 'Unexpected local shell policy write' }
+function Initialize-ThinClientMachineRoot { throw 'Unexpected machine storage provisioning' }
+function Protect-ThinClientMachineLauncher { throw 'Unexpected machine launcher ACL change' }
+function Remove-ItemProperty { throw 'Unexpected startup registry removal' }
 function Export-Evidence { param($Evidence,$Config) }
 function Test-IsAdministrator { return $true }
+function Get-ThinClientCurrentIdentity { [pscustomobject]@{Name='EXAMPLE\TEST-USER';Sid='S-1-5-21-1-2-3-1001';AccountType='Domain';Authenticated=$true} }
 function Get-RegistryValueSnapshot { param($Path,$Name) [pscustomobject]@{Path=$Path;Name=$Name;ValueExists=$false;ValueKind='';Value=$null} }
 $audit = [pscustomobject]@{EffectiveProfile='Citrix';CitrixWorkspacePath=$PSHOME;AvdClassicClientPath='';BrowserPath='';TargetUserName='TEST-USER';TargetUserSid='S-1-5-21-1-2-3-1001'}
 Check 'Native configuration survives profile templates' {
@@ -162,7 +168,7 @@ Check 'Apply saves rollback before account mutation and respects None' {
     function Get-TargetUserState { param($Config) [pscustomobject]@{Mode='ExistingUser';LocalUserExists=$true} }
     function Save-RollbackState { param($State) $script:sequence += 'save'; 'synthetic-rollback.json' }
     function New-DedicatedUserIfNeeded { param($Config,$TargetUser) $script:sequence += 'account'; $false }
-    $ConfirmApply='APPLY SMARTTHINCLIENT'
+    $ConfirmApply='APPLY'
     $result=Invoke-ThinClientApply -Config ([ordered]@{AllowApply=$true;AutoLaunchMode='None'})
     Assert ($result.Status -eq 'Applied') 'Missing Applied result'
     Assert (($script:sequence -join ',') -eq 'save,account,save') 'Account attempted before rollback'
@@ -239,7 +245,7 @@ Check 'Strict preflight rejects unloaded target hive before apply writes' {
     function Get-TargetUserState { param($Config) [pscustomobject]@{Mode='ExistingUser';LocalUserExists=$true;Sid=$audit.TargetUserSid} }
     function Test-Path { param($LiteralPath) $false }
     function Save-RollbackState { throw 'Unexpected rollback write' }
-    $ConfirmApply = 'APPLY SMARTTHINCLIENT'
+    $ConfirmApply = 'APPLY'
     $caught = ''
     try { Invoke-ThinClientApply -Config ([ordered]@{AllowApply=$true;EnableShellLimitations=$true;ShellRestrictionLevel='Strict'}) } catch { $caught = $_.Exception.Message }
     Assert ($caught -like '*target user registry hive*loaded*') 'Apply did not stop at hive preflight'
@@ -439,6 +445,33 @@ Check 'GUI requires administrator with enabled JSON gates' {
         Assert ($message -like '*elevated administrator*') 'Non-admin dispatch was not blocked'
     }
 }
+function Invoke-SyntheticGuiStatusHandler($Config,$Action,[bool]$Administrator) {
+    function Test-IsAdministrator { return $Administrator }
+    function Write-SmartThinClientLog { param($Level,$Message) }
+    function Invoke-ThinClientGuiAction { throw 'Unexpected engine dispatch during status check' }
+    $assignment=$ast.Find({param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$runAction'},$true)
+    if($null -eq $assignment){throw 'GUI handler not found'}
+    $handler=& ([scriptblock]::Create($assignment.Right.Extent.Text))
+    $profileCombo=[pscustomobject]@{Text='WebOnly'}
+    $statusText=[pscustomobject]@{Text=''};$outputText=[pscustomobject]@{Text=''}
+    $actionButtons=@([pscustomobject]@{IsEnabled=$true})
+    $window=[pscustomobject]@{Container=[pscustomobject]@{Visibility='Visible'}}
+    $window | Add-Member ScriptMethod FindName {param($Name) if($Name -ne 'AuditSummaryContainer'){throw 'Unexpected UI access'};return $this.Container}
+    & $handler -RequestedAction $Action
+    [pscustomobject]@{Status=$statusText.Text;Detail=$outputText.Text;ButtonsEnabled=$actionButtons[0].IsEnabled}
+}
+Check 'Actual GUI handler reports configuration-blocked Apply and Restore distinctly' {
+    foreach($mode in @('Apply','Restore')) {
+        $r=Invoke-SyntheticGuiStatusHandler -Config ([ordered]@{AllowApply=$false;AllowRestore=$false}) -Action $mode -Administrator $true
+        Assert ($r.Status -ceq ($mode+' blocked by configuration') -and $r.Detail -like '*No changes were made*' -and $r.ButtonsEnabled) 'Configuration block displayed as an execution failure or left controls disabled'
+    }
+}
+Check 'Actual GUI handler keeps other Apply and Restore failures distinct from configuration blocks' {
+    foreach($mode in @('Apply','Restore')) {
+        $r=Invoke-SyntheticGuiStatusHandler -Config ([ordered]@{AllowApply=$true;AllowRestore=$true}) -Action $mode -Administrator $false
+        Assert ($r.Status -ceq ($mode+' did not complete') -and $r.Detail -like '*elevated administrator*' -and $r.ButtonsEnabled) 'Administrator refusal was mislabeled as a configuration block'
+    }
+}
 Check 'GUI requires exact typed confirmation even with optional CLI phrases' {
     function Resolve-EffectiveProfile { param($RequestedProfile,$Config) $RequestedProfile }
     function Merge-ProfileConfig { param($Config,$EffectiveProfile) $Config }
@@ -450,7 +483,7 @@ Check 'GUI requires exact typed confirmation even with optional CLI phrases' {
 Check 'GUI cannot bypass an effective profile mutation gate' {
     function Resolve-EffectiveProfile { param($RequestedProfile,$Config) $RequestedProfile }
     function Merge-ProfileConfig { param($Config,$EffectiveProfile) [ordered]@{AllowApply=$false;AllowRestore=$false} }
-    Reject {Invoke-ThinClientGuiAction -Config ([ordered]@{AllowApply=$true;AllowRestore=$true}) -RequestedAction Apply -SelectedProfile WebOnly -Confirmation 'APPLY SMARTTHINCLIENT'}
+    Reject {Invoke-ThinClientGuiAction -Config ([ordered]@{AllowApply=$true;AllowRestore=$true}) -RequestedAction Apply -SelectedProfile WebOnly -Confirmation 'APPLY'}
 }
 Check 'GUI Apply forwards selected profile phrase and secure password into existing engine' {
     function Resolve-EffectiveProfile { param($RequestedProfile,$Config) $RequestedProfile }
@@ -458,8 +491,8 @@ Check 'GUI Apply forwards selected profile phrase and secure password into exist
     function Invoke-ThinClientApply { param($Config) [pscustomobject]@{Selected=$Profile;Phrase=$ConfirmApply;PasswordSet=($DedicatedUserPassword -is [securestring]);Status='MockApplied'} }
     $secret=ConvertTo-SecureString 'synthetic-fixture-only' -AsPlainText -Force
     try {
-        $r=Invoke-ThinClientGuiAction -Config ([ordered]@{AllowApply=$true}) -RequestedAction Apply -SelectedProfile AVD -Confirmation 'APPLY SMARTTHINCLIENT' -Password $secret
-        Assert ($r.Selected -eq 'AVD' -and $r.Phrase -eq 'APPLY SMARTTHINCLIENT' -and $r.PasswordSet -and $r.Status -eq 'MockApplied') 'Apply did not reuse engine inputs'
+        $r=Invoke-ThinClientGuiAction -Config ([ordered]@{AllowApply=$true}) -RequestedAction Apply -SelectedProfile AVD -Confirmation 'APPLY' -Password $secret
+        Assert ($r.Selected -eq 'AVD' -and $r.Phrase -eq 'APPLY' -and $r.PasswordSet -and $r.Status -eq 'MockApplied') 'Apply did not reuse engine inputs'
     } finally {$secret.Dispose()}
 }
 Check 'GUI Restore requires explicit reviewed rollback instead of latest fallback' {
@@ -520,14 +553,510 @@ Check 'Visual preview and generated shell share one layout without a launch or m
 }
 
 
+foreach($profileCase in @('Citrix','AVD','WebOnly','Hybrid')) {
+    Check ("Provider toolbar matches $profileCase profile") {
+        $visible=Get-ThinClientProviderVisibility -EffectiveProfile $profileCase
+        foreach($provider in @('Citrix','AVD','WebOnly')) { Assert ($visible[$provider] -eq ($profileCase -eq 'Hybrid' -or $profileCase -eq $provider)) 'Other profile provider remained visible' }
+    }
+}
+Check 'Provider toolbar global hide still overrides every profile' {
+    $v=Get-ThinClientProviderVisibility -EffectiveProfile Hybrid -ShowProviderButtons $false
+    Assert (-not $v.Citrix -and -not $v.AVD -and -not $v.WebOnly) 'Global provider hide ignored'
+}
+Check 'Shared shell keeps navigation left and session controls right of the centered title' {
+    [xml]$x=Get-ThinClientShellXaml
+    $left=$x.SelectSingleNode("//*[@Name='NavigationButtons']");$right=$x.SelectSingleNode("//*[@Name='SessionButtons']");$title=$x.SelectSingleNode("//*[@Name='TitleText']")
+    Assert ($left.GetAttribute('Grid.Column') -eq '0' -and $right.GetAttribute('Grid.Column') -eq '2' -and $title.GetAttribute('Grid.Column') -eq '1') 'Toolbar groups lost their columns'
+    Assert (($left.ChildNodes.Name -join '|') -eq 'CitrixButton|AvdButton|WebOnlyButton|BackButton|RefreshButton|ExternalButton') 'Navigation controls moved to the wrong group'
+    Assert (($right.ChildNodes.Name -join '|') -eq 'SettingsButton|AdminButton|SignOutButton|RestartButton|ShutdownButton') 'Session controls moved to the wrong group'
+}
+Check 'Custom workspace title is preserved as a literal in the generated shell' {
+    $name="Example & Co <Workspace>'s name"
+    $path=New-LauncherScript -Config ([ordered]@{WebShellTitle=$name}) -EffectiveProfile Citrix -Audit $audit
+    $t=$null;$e=$null;$generated=[Management.Automation.Language.Parser]::ParseFile($path,[ref]$t,[ref]$e)
+    Assert ($e.Count -eq 0) 'Custom title broke launcher syntax'
+    $assignment=$generated.Find({param($n)$n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$WebShellTitle'},$true)
+    $literal=$assignment.Right.Find({param($n)$n -is [Management.Automation.Language.StringConstantExpressionAst]},$true)
+    Assert ($literal.Value -ceq $name) 'Custom title was escaped or interpreted incorrectly'
+}
+Check 'Audit summary accepts actual PSCustomObject evidence and false mutation gates are neutral' {
+    $a=[pscustomobject]@{OSName='Windows';EffectiveProfile='WebOnly';BrowserInstalled=$true;WebOnlyUrlConfigured=$true;TargetUserExists=$true;AllowApply=$false;AllowRestore=$false}
+    $r=Get-ThinClientAuditSummary -Audit $a
+    Assert ($r.State -eq 'Success' -and $r.Note -like '*Apply disabled*' -and $r.Note -like '*Restore disabled*') 'Safe gates incorrectly failed readiness signals'
+}
+Check 'Audit summary warns about a local target missing and fallback without claiming remote readiness' {
+    $r=Get-ThinClientAuditSummary -Audit ([pscustomobject]@{OSName='Windows';EffectiveProfile='Citrix';BrowserInstalled=$true;CitrixWebUrlConfigured=$false;WebOnlyUrlConfigured=$true;TargetUserExists=$false})
+    Assert ($r.State -eq 'Warning' -and @($r.Checks|Where-Object State -eq Warning).Count -eq 2 -and $r.Note -like '*not tested*') 'Fallback/local-target warning lost'
+}
+Check 'Audit summary blocks missing browser or destination instead of treating unknown as passed' {
+    $r=Get-ThinClientAuditSummary -Audit ([pscustomobject]@{EffectiveProfile='WebOnly';TargetUserExists=$true})
+    Assert ($r.State -eq 'Blocked') 'Missing evidence incorrectly passed'
+}
+Check 'Limited Settings refuses other URI schemes before opening UI or processes' {
+    foreach($page in @('https://example.invalid/','file:///C:/Windows/System32/cmd.exe','javascript:alert(1)')) {
+        $message='';try {Show-ThinClientLimitedSettings -SettingsPages @($page)}catch{$message=$_.Exception.Message}
+        Assert ($message -like '*Only configured ms-settings*') 'Settings did not reject an external scheme before UI'
+    }
+}
+Check 'Settings launch request rejects arbitrary URIs before loading native launch code' {
+    foreach($uri in @('https://example.invalid/','file:///C:/Windows/System32/cmd.exe','ms-settings:workplace','ms-settings:display?unexpected=1')){Reject {New-ThinClientSettingsRequest -Page $uri}}
+}
+Check 'Native device settings import without initializing devices or changing settings' {
+    . (Join-Path $sourceRoot 'SmartThinClient-DeviceSettings.ps1')
+    Assert ([bool](Get-Command Show-SmartThinClientDeviceSettings -CommandType Function)) 'Native settings helper did not load'
+    Reject {Show-SmartThinClientDeviceSettings -Page 'ms-settings:workplace'}
+}
+Check 'Native menu refuses an unexpected helper before creating its window' {
+    $message='';try{Show-ThinClientLimitedSettings -SettingsPages @('ms-settings:display') -NativeMode -NativeSettingsHelper $SourcePath}catch{$message=$_.Exception.Message}
+    Assert ($message -like '*native device settings helper is unavailable*') 'Unexpected helper reached native UI initialization'
+}
+Check 'Audit summary blocks an unavailable requested kiosk platform' {
+    $a=[ordered]@{OSName='Windows';EffectiveProfile='WebOnly';ShellMode='ShellLauncher';ShellLauncherClassAvailable=$false;BrowserInstalled=$true;WebOnlyUrlConfigured=$true;TargetUserExists=$true}
+    $r=Get-ThinClientAuditSummary -Audit $a
+    Assert ($r.State -eq 'Blocked' -and @($r.Checks|Where-Object {$_.Label -eq 'Windows' -and $_.State -eq 'Blocked'}).Count -eq 1) 'Unsupported platform was marked ready'
+}
+Check 'Generated shell and Preview use shared settings and provider code' {
+    $fn=$ast.EndBlock.Statements|Where-Object {$_ -is [Management.Automation.Language.FunctionDefinitionAst] -and $_.Name -eq 'New-LauncherScript'}
+    Assert ($fn.Extent.Text -like '*Show-ThinClientLimitedSettings*' -and $fn.Extent.Text -like '*Get-ThinClientProviderVisibility*') 'Generated shell did not share helper behavior'
+    $fn=$ast.EndBlock.Statements|Where-Object {$_ -is [Management.Automation.Language.FunctionDefinitionAst] -and $_.Name -eq 'Show-ThinClientVisualPreview'}
+    Assert ($fn.Extent.Text -like '*Show-ThinClientLimitedSettings*' -and $fn.Extent.Text -like '*-PreviewMode*') 'Preview Settings not connected'
+}
+Check 'Audit summary requires a web destination when the embedded shell overrides native preference' {
+    $a=[pscustomobject]@{OSName='Windows';EffectiveProfile='Citrix';UseWebShell=$true;PreferredAccessMode='Native';CitrixWorkspaceInstalled=$true;BrowserInstalled=$true;TargetUserExists=$true}
+    Assert ((Get-ThinClientAuditSummary -Audit $a).State -eq 'Blocked') 'Native signal masked missing embedded-shell URL'
+}
+Check 'Audit summary recognizes native-only access without an installed browser' {
+    $a=[pscustomobject]@{OSName='Windows';EffectiveProfile='Citrix';UseWebShell=$false;PreferredAccessMode='Native';CitrixWorkspaceInstalled=$true;BrowserInstalled=$false;TargetUserExists=$true}
+    Assert ((Get-ThinClientAuditSummary -Audit $a).State -eq 'Success') 'Native-only client incorrectly required a web destination'
+}
+Check 'Citrix Web configuration never implies Citrix Workspace installation' {
+    $r=Get-ThinClientAuditSummary -Audit ([pscustomobject]@{OSName='Windows';EffectiveProfile='Citrix';BrowserInstalled=$true;CitrixWebUrlConfigured=$true;CitrixWorkspaceInstalled=$false;TargetUserExists=$true})
+    Assert ($r.State -eq 'Success' -and @($r.Checks|Where-Object {$_.Label -eq 'Citrix Web' -and $_.State -eq 'Success' -and $_.Detail -eq 'URL configured'}).Count -eq 1) 'Web destination signal lost'
+    Assert (@($r.Checks|Where-Object {$_.Label -eq 'Citrix Workspace' -and $_.State -eq 'Info' -and $_.Detail -eq 'Not detected'}).Count -eq 1) 'Missing native client was hidden or shown as installed'
+}
+Check 'Installed Citrix Workspace has its own successful card without masking a missing Web destination' {
+    $r=Get-ThinClientAuditSummary -Audit ([pscustomobject]@{OSName='Windows';EffectiveProfile='Citrix';UseWebShell=$true;BrowserInstalled=$true;CitrixWorkspaceInstalled=$true;TargetUserExists=$true})
+    Assert ($r.State -eq 'Blocked' -and @($r.Checks|Where-Object {$_.Label -eq 'Citrix Workspace' -and $_.State -eq 'Success' -and $_.Detail -eq 'Detected'}).Count -eq 1) 'Installed native client masked missing Web destination'
+}
+Check 'AVD Web remains distinct from absent Windows App and legacy clients' {
+    $r=Get-ThinClientAuditSummary -Audit ([pscustomobject]@{OSName='Windows';EffectiveProfile='AVD';BrowserInstalled=$true;AvdWebUrlConfigured=$true;AvdClientInstalled=$false;WindowsAppPackage='';AvdClassicClientPath='';TargetUserExists=$true})
+    Assert ($r.State -eq 'Success' -and @($r.Checks|Where-Object {$_.Label -eq 'AVD Web' -and $_.State -eq 'Success'}).Count -eq 1) 'AVD Web signal lost'
+    Assert (@($r.Checks|Where-Object {$_.Label -in @('Windows App','Remote Desktop (legacy)') -and $_.State -eq 'Info' -and $_.Detail -eq 'Not detected'}).Count -eq 2) 'AVD Web configuration implied native clients'
+}
+Check 'Windows App package is identified separately from legacy Remote Desktop' {
+    $r=Get-ThinClientAuditSummary -Audit ([pscustomobject]@{OSName='Windows';EffectiveProfile='AVD';BrowserInstalled=$true;AvdWebUrlConfigured=$true;AvdClientInstalled=$true;WindowsAppPackage='MicrosoftCorporationII.Windows365';AvdClassicClientPath='';TargetUserExists=$true})
+    Assert ($r.State -eq 'Success' -and @($r.Checks|Where-Object {$_.Label -eq 'Windows App' -and $_.State -eq 'Success' -and $_.Detail -eq 'Detected'}).Count -eq 1) 'Windows App package not identified'
+    Assert (@($r.Checks|Where-Object {$_.Label -eq 'Remote Desktop (legacy)' -and $_.Detail -eq 'Not detected'}).Count -eq 1) 'Windows App was confused with legacy client'
+}
+Check 'Legacy AVD client is a warning and never implies Windows App presence' {
+    $r=Get-ThinClientAuditSummary -Audit ([pscustomobject]@{OSName='Windows';EffectiveProfile='AVD';BrowserInstalled=$true;AvdWebUrlConfigured=$true;AvdClientInstalled=$true;WindowsAppPackage='';AvdClassicClientPath='C:\Synthetic\msrdcw.exe';TargetUserExists=$true})
+    Assert ($r.State -eq 'Warning' -and @($r.Checks|Where-Object {$_.Label -eq 'Remote Desktop (legacy)' -and $_.State -eq 'Warning' -and $_.Detail -eq 'Detected (legacy)'}).Count -eq 1) 'Legacy installation was presented as a current client'
+    Assert (@($r.Checks|Where-Object {$_.Label -eq 'Windows App' -and $_.Detail -eq 'Not detected'}).Count -eq 1) 'Legacy aggregate signal became a Windows App detection'
+}
+Check 'Both AVD native clients retain distinct installation signals' {
+    $r=Get-ThinClientAuditSummary -Audit ([pscustomobject]@{OSName='Windows';EffectiveProfile='AVD';BrowserInstalled=$true;AvdWebUrlConfigured=$true;AvdClientInstalled=$true;WindowsAppPackage='MicrosoftCorporationII.Windows365';AvdClassicClientPath='C:\Synthetic\msrdcw.exe';TargetUserExists=$true})
+    Assert (@($r.Checks|Where-Object {$_.Label -eq 'Windows App' -and $_.State -eq 'Success'}).Count -eq 1 -and @($r.Checks|Where-Object {$_.Label -eq 'Remote Desktop (legacy)' -and $_.State -eq 'Warning'}).Count -eq 1) 'Concurrent client signals were collapsed'
+}
+Check 'Required native client absence warns with Web fallback and blocks without it' {
+    foreach($provider in @('Citrix','AVD')) {
+        $a=[ordered]@{OSName='Windows';EffectiveProfile=$provider;UseWebShell=$false;PreferredAccessMode='Native';BrowserInstalled=$true;CitrixWebUrlConfigured=$true;AvdWebUrlConfigured=$true;CitrixWorkspaceInstalled=$false;WindowsAppPackage='';AvdClassicClientPath='';TargetUserExists=$true}
+        Assert ((Get-ThinClientAuditSummary -Audit $a).State -eq 'Warning') 'Missing required native client ignored despite Web fallback'
+        $a.BrowserInstalled=$false
+        Assert ((Get-ThinClientAuditSummary -Audit $a).State -eq 'Blocked') 'Missing native client and browser incorrectly passed'
+    }
+}
+Check 'Unknown client details are never presented as installed or definitely absent' {
+    foreach($provider in @('Citrix','AVD')) {
+        $r=Get-ThinClientAuditSummary -Audit ([pscustomobject]@{OSName='Windows';EffectiveProfile=$provider;BrowserInstalled=$true;CitrixWebUrlConfigured=$true;AvdWebUrlConfigured=$true;AvdClientInstalled=$true;TargetUserExists=$true})
+        $clientCards=@($r.Checks|Where-Object Label -in @('Citrix Workspace','Windows App','Remote Desktop (legacy)'))
+        Assert ($clientCards.Count -gt 0 -and @($clientCards|Where-Object {$_.State -ne 'Info' -or $_.Detail -ne 'Not reported'}).Count -eq 0) 'Unknown client evidence inferred an installation state'
+    }
+}
+Check 'Hybrid summary shows all five distinct provider checks' {
+    $r=Get-ThinClientAuditSummary -Audit ([pscustomobject]@{OSName='Windows';EffectiveProfile='Hybrid';BrowserInstalled=$true;CitrixWebUrlConfigured=$true;AvdWebUrlConfigured=$true;CitrixWorkspaceInstalled=$false;WindowsAppPackage='';AvdClassicClientPath='';TargetUserExists=$true})
+    $expected=@('Citrix Web','Citrix Workspace','AVD Web','Windows App','Remote Desktop (legacy)')
+    Assert ($r.Checks.Count -eq 8 -and @($expected|Where-Object {$_ -notin $r.Checks.Label}).Count -eq 0) 'Hybrid lost provider/client cards'
+}
+Check 'Missing native clients offer only their current official download destinations' {
+    $r=Get-ThinClientAuditSummary -Audit ([pscustomobject]@{OSName='Windows';EffectiveProfile='Hybrid';BrowserInstalled=$true;CitrixWebUrlConfigured=$true;AvdWebUrlConfigured=$true;CitrixWorkspaceInstalled=$false;WindowsAppPackage='';AvdClassicClientPath='';TargetUserExists=$true})
+    $downloads=@($r.Checks|Where-Object DownloadClient)
+    Assert ($downloads.Count -eq 2 -and 'CitrixWorkspace' -in $downloads.DownloadClient -and 'WindowsApp' -in $downloads.DownloadClient) 'Expected two current-client download prompts'
+    foreach($item in $downloads){$target=Get-ThinClientClientDownload -Client $item.DownloadClient;Assert ($target.Url -match '^https://' -and $target.Label -like 'Download *') 'Download destination was not an HTTPS page'}
+    Assert ((Get-ThinClientClientDownload -Client CitrixWorkspace).Url -eq 'https://www.citrix.com/downloads/workspace-app/windows/') 'Citrix download destination changed'
+    Assert ((Get-ThinClientClientDownload -Client WindowsApp).Url -eq 'https://apps.microsoft.com/detail/9n1f85v9t8bn') 'Windows App download destination changed'
+}
+Check 'Detected clients suppress download prompts and WebOnly offers no native clients' {
+    $r=Get-ThinClientAuditSummary -Audit ([pscustomobject]@{OSName='Windows';EffectiveProfile='Hybrid';BrowserInstalled=$true;CitrixWebUrlConfigured=$true;AvdWebUrlConfigured=$true;CitrixWorkspaceInstalled=$true;WindowsAppPackage='MicrosoftCorporationII.Windows365';AvdClassicClientPath='';TargetUserExists=$true})
+    Assert (@($r.Checks|Where-Object DownloadClient).Count -eq 0) 'Detected client still requested installation'
+    $r=Get-ThinClientAuditSummary -Audit ([pscustomobject]@{OSName='Windows';EffectiveProfile='WebOnly';BrowserInstalled=$true;WebOnlyUrlConfigured=$true;TargetUserExists=$true})
+    Assert (@($r.Checks|Where-Object DownloadClient).Count -eq 0) 'WebOnly offered unrelated client downloads'
+}
+Check 'Legacy Remote Desktop does not suppress the Windows App download prompt' {
+    $r=Get-ThinClientAuditSummary -Audit ([pscustomobject]@{OSName='Windows';EffectiveProfile='AVD';BrowserInstalled=$true;AvdWebUrlConfigured=$true;WindowsAppPackage='';AvdClassicClientPath='C:\Synthetic\msrdcw.exe';TargetUserExists=$true})
+    $downloads=@($r.Checks|Where-Object DownloadClient)
+    Assert ($downloads.Count -eq 1 -and $downloads[0].DownloadClient -eq 'WindowsApp') 'Legacy client masked current-client download'
+}
+Check 'Download destination selection refuses arbitrary URLs and legacy client identifiers' {
+    foreach($client in @('https://example.invalid/','file:///C:/Windows/System32/cmd.exe','RemoteDesktop','')){Reject {Get-ThinClientClientDownload -Client $client}}
+}
+$settingsDefaultPages=@('ms-settings:network-status','ms-settings:display','ms-settings:sound','ms-settings:dateandtime')
+Check 'Settings exposes four default pages without requiring new configuration keys' {
+    $pages=@(Get-ThinClientVisibleSettingsPages -SettingsPages $settingsDefaultPages)
+    Assert (($pages -join '|') -eq ($settingsDefaultPages -join '|')) 'Default Settings pages changed'
+}
+Check 'Fresh Settings defaults allow optional Bluetooth and Printers but show only the original four' {
+    $savedRoot=$script:ScriptRoot
+    try {
+        $script:ScriptRoot=Join-Path $testRoot 'settings-template-free'
+        New-Item -ItemType Directory $script:ScriptRoot -Force | Out-Null
+        $ConfigPath=''
+        $defaults=Resolve-Config
+        $template=Get-Content -LiteralPath (Join-Path $sourceRoot 'SmartThinClient-Shell.config.template.json') -Raw | ConvertFrom-Json
+        foreach($config in @($defaults,(Convert-ObjectToHashtable -InputObject $template))) {
+            Assert ($config.WebShellSettingsButtons.Bluetooth -eq $false -and $config.WebShellSettingsButtons.Printers -eq $false) 'Optional pages enabled by default'
+            $visible=@(Get-ThinClientVisibleSettingsPages -SettingsPages $config.WebShellAllowedSettingsPages -SettingsButtons $config.WebShellSettingsButtons)
+            Assert (($visible -join '|') -eq ($settingsDefaultPages -join '|')) 'Default visible pages changed'
+            $buttons=ConvertTo-ThinClientSettingsButtons -Value $config.WebShellSettingsButtons
+            $buttons.Bluetooth=$true;$buttons.Printers=$true
+            $visible=@(Get-ThinClientVisibleSettingsPages -SettingsPages $config.WebShellAllowedSettingsPages -SettingsButtons $buttons)
+            Assert ($visible.Count -eq 6 -and 'ms-settings:bluetooth' -in $visible -and 'ms-settings:printers' -in $visible) 'Explicitly enabled optional pages missing'
+        }
+    } finally { $script:ScriptRoot=$savedRoot }
+}
+foreach($optionalCase in @(@('Bluetooth','ms-settings:bluetooth'),@('Printers','ms-settings:printers'))) {
+    Check ('Settings independently hides optional '+$optionalCase[0]) {
+        $buttons=[ordered]@{Bluetooth=$true;Printers=$true};$buttons[$optionalCase[0]]=$false
+        $visible=@(Get-ThinClientVisibleSettingsPages -SettingsPages @($settingsDefaultPages+'ms-settings:bluetooth'+'ms-settings:printers') -SettingsButtons $buttons)
+        Assert ($visible.Count -eq 5 -and $optionalCase[1] -notin $visible) 'Optional visibility hid the wrong page'
+    }
+}
+Check 'Existing explicitly configured optional pages stay visible without visibility flags' {
+    $visible=@(Get-ThinClientVisibleSettingsPages -SettingsPages @('ms-settings:bluetooth','ms-settings:printers'))
+    Assert ($visible.Count -eq 2) 'Existing allowed-page choice was lost'
+}
+foreach($buttonCase in @(@('Network','ms-settings:network-status'),@('Display','ms-settings:display'),@('Sound','ms-settings:sound'),@('DateAndTime','ms-settings:dateandtime'))) {
+    Check ('Settings independently hides '+$buttonCase[0]) {
+        $flags=[ordered]@{};$flags[$buttonCase[0]]=$false
+        $pages=@(Get-ThinClientVisibleSettingsPages -SettingsPages $settingsDefaultPages -SettingsButtons $flags)
+        Assert ($pages.Count -eq 3 -and $buttonCase[1] -notin $pages) 'Button visibility affected the wrong page'
+    }
+}
+Check 'All Settings pages can be hidden without restoring defaults' {
+    $flags=[pscustomobject]@{Network=$false;Display=$false;Sound=$false;DateAndTime=$false}
+    Assert (@(Get-ThinClientVisibleSettingsPages -SettingsPages $settingsDefaultPages -SettingsButtons $flags).Count -eq 0) 'False flags restored hidden defaults'
+}
+Check 'Settings flags do not add a page removed from the allowed list' {
+    $pages=@(Get-ThinClientVisibleSettingsPages -SettingsPages @('ms-settings:display') -SettingsButtons ([pscustomobject]@{Network=$true;Display=$true;Sound=$true;DateAndTime=$true;Bluetooth=$true;Printers=$true}))
+    Assert ($pages.Count -eq 1 -and $pages[0] -eq 'ms-settings:display') 'Existing allow-list choice was overwritten'
+}
+Check 'Settings visibility rejects string booleans and invalid root types' {
+    foreach($value in @([pscustomobject]@{Network='false'},'false',@($true,$false))) { Reject {ConvertTo-ThinClientSettingsButtons -Value $value} }
+}
+Check 'Partial profile Settings flags inherit unspecified global visibility without changing global values' {
+    function Get-ProfileConfig {param($ProfileName) [pscustomobject]@{WebShellSettingsButtons=[pscustomobject]@{Sound=$false;Bluetooth=$true}}}
+    $cfg=[ordered]@{WebShellSettingsButtons=[pscustomobject]@{Network=$false;Display=$true;Bluetooth=$false;Printers=$false}}
+    $merged=Merge-ProfileConfig -Config $cfg -EffectiveProfile Citrix
+    Assert (-not $merged.WebShellSettingsButtons.Network -and -not $merged.WebShellSettingsButtons.Sound -and $merged.WebShellSettingsButtons.Display) 'Partial override lost inherited flags'
+    Assert (-not $cfg.WebShellSettingsButtons.Network -and -not $cfg.WebShellSettingsButtons.PSObject.Properties['Sound']) 'Global Settings flags were mutated'
+    Assert ($merged.WebShellSettingsButtons.Bluetooth -and -not $merged.WebShellSettingsButtons.Printers -and -not $cfg.WebShellSettingsButtons.Bluetooth) 'Optional profile flags lost inheritance or changed global state'
+}
+Check 'Generated launcher serializes boolean Settings flags and shares filtering logic' {
+    $file=New-LauncherScript -Config ([ordered]@{WebShellSettingsButtons=[pscustomobject]@{Network=$false;Display=$true;Bluetooth=$true;Printers=$false};WebShellAllowedSettingsPages=@($settingsDefaultPages+'ms-settings:bluetooth'+'ms-settings:printers')}) -EffectiveProfile Citrix -Audit $audit
+    $t=$null;$err=$null;$generated=[Management.Automation.Language.Parser]::ParseFile($file,[ref]$t,[ref]$err)
+    Assert ($err.Count -eq 0) 'Visibility flags broke generated PowerShell'
+    $text=Get-Content $file -Raw
+    Assert ($text.Contains("'Network' = `$false") -and $text -like '*Get-ThinClientVisibleSettingsPages*') 'Generated shell lost visibility flags/filter'
+    Assert ($text.Contains("'Bluetooth' = `$true") -and $text.Contains("'Printers' = `$false") -and $text.Contains("'ms-settings:bluetooth'") -and $text.Contains("'ms-settings:printers'")) 'Generated shell lost optional pages or boolean values'
+}
+function New-SyntheticTarget($Name='TEST-USER',$Mode='ExistingUser') { [pscustomobject]@{Mode=$Mode;UserName=$Name;LocalUserExists=$false;Enabled=$false;Sid=''} }
+Check 'Current domain account resolves from its Windows token without changing local operational state' {
+    $target=New-SyntheticTarget
+    $identity=Resolve-ThinClientTargetIdentity -TargetUser $target
+    Assert ($identity.Exists -and $identity.AccountType -eq 'Domain' -and $identity.Name -eq 'EXAMPLE\TEST-USER' -and $identity.Source -eq 'CurrentWindowsToken') 'Current domain identity not detected'
+    Assert ($null -eq $identity.Enabled -and -not $target.LocalUserExists -and $target.Sid -eq '') 'Domain detection changed local guard state or invented directory enabled status'
+}
+Check 'Qualified current domain name matches case-insensitively' {
+    $r=Resolve-ThinClientTargetIdentity -TargetUser (New-SyntheticTarget 'example\test-user')
+    Assert ($r.Status -eq 'Detected' -and $r.AccountType -eq 'Domain') 'Qualified current identity not detected'
+}
+Check 'Another domain with the same short username is not confused with the current token' {
+    $r=Resolve-ThinClientTargetIdentity -TargetUser (New-SyntheticTarget 'OTHER\TEST-USER')
+    Assert ($null -eq $r.Exists -and $r.Status -eq 'NotVerified' -and $r.Sid -eq '') 'Another domain inherited the current SID'
+}
+Check 'Unresolved other account stays unknown instead of being reported nonexistent' {
+    foreach($name in @('someone-else','other@example.invalid')) {
+        $r=Resolve-ThinClientTargetIdentity -TargetUser (New-SyntheticTarget $name)
+        Assert ($null -eq $r.Exists -and $r.Status -eq 'NotVerified') 'Unknown account was classified as missing or current'
+    }
+}
+Check 'Dedicated local user requirement is not satisfied by a current domain account of the same name' {
+    $r=Resolve-ThinClientTargetIdentity -TargetUser (New-SyntheticTarget 'TEST-USER' 'DedicatedUser')
+    Assert (-not $r.Exists -and $r.AccountType -eq 'Local' -and $r.Source -eq 'LocalAccountLookup') 'Domain account satisfied dedicated-local requirement'
+}
+Check 'Verified local account keeps its original SID and enabled state' {
+    $target=[pscustomobject]@{Mode='ExistingUser';UserName='LOCAL-USER';LocalUserExists=$true;Enabled=$true;Sid='S-1-5-21-4-5-6-1002'}
+    $r=Resolve-ThinClientTargetIdentity -TargetUser $target
+    Assert ($r.Exists -and $r.AccountType -eq 'Local' -and $r.Enabled -and $r.Sid -eq $target.Sid) 'Local identity changed'
+}
+Check 'Disabled local account is detected but remains a warning' {
+    $target=[pscustomobject]@{Mode='ExistingUser';UserName='LOCAL-USER';LocalUserExists=$true;Enabled=$false;Sid='S-1-5-21-4-5-6-1002'}
+    $r=Resolve-ThinClientTargetIdentity -TargetUser $target
+    $s=Get-ThinClientAuditSummary -Audit ([pscustomobject]@{OSName='Windows';EffectiveProfile='WebOnly';BrowserInstalled=$true;WebOnlyUrlConfigured=$true;TargetUserExists=$r.Exists;TargetUserAccountType=$r.AccountType;TargetUserIdentityStatus=$r.Status})
+    Assert ($r.Status -eq 'Disabled' -and $s.State -eq 'Warning') 'Disabled local account was marked ready'
+}
+Check 'Local account collision retains the operational local target rather than borrowing the domain token' {
+    $target=[pscustomobject]@{Mode='ExistingUser';UserName='TEST-USER';LocalUserExists=$true;Enabled=$true;Sid='S-1-5-21-4-5-6-1002'}
+    $r=Resolve-ThinClientTargetIdentity -TargetUser $target
+    Assert ($r.AccountType -eq 'Local' -and $r.Sid -eq $target.Sid) 'Local/domain name collision replaced the local target'
+}
+Check 'Unauthenticated or SID-less token cannot confirm an identity' {
+    foreach($token in @([pscustomobject]@{Name='EXAMPLE\TEST-USER';Sid='';AccountType='Domain';Authenticated=$true},[pscustomobject]@{Name='EXAMPLE\TEST-USER';Sid='S-1-5-21-1-2-3-1001';AccountType='Domain';Authenticated=$false})) {
+        $r=Resolve-ThinClientTargetIdentity -TargetUser (New-SyntheticTarget) -CurrentIdentity $token
+        Assert ($r.Status -eq 'NotVerified') 'Unverified token confirmed an account'
+    }
+}
+Check 'Domain target card is successful without requiring a local account' {
+    $r=Get-ThinClientAuditSummary -Audit ([pscustomobject]@{OSName='Windows';EffectiveProfile='WebOnly';BrowserInstalled=$true;WebOnlyUrlConfigured=$true;TargetUserExists=$true;TargetLocalUserExists=$false;TargetUserAccountType='Domain';TargetUserIdentityStatus='Detected'})
+    $card=@($r.Checks|Where-Object Label -eq 'Target account')
+    Assert ($r.State -eq 'Success' -and $card.Count -eq 1 -and $card[0].Detail -eq 'Domain account detected') 'Domain account retained the missing-local warning'
+}
+Check 'Unverified target card remains a warning even when other checks pass' {
+    $r=Get-ThinClientAuditSummary -Audit ([pscustomobject]@{OSName='Windows';EffectiveProfile='WebOnly';BrowserInstalled=$true;WebOnlyUrlConfigured=$true;TargetUserExists=$null;TargetUserIdentityStatus='NotVerified'})
+    Assert ($r.State -eq 'Warning') 'Unresolved identity incorrectly passed'
+}
+Check 'Domain identity detection does not relax Strict or kiosk local-user preflight guards' {
+    $target=New-SyntheticTarget
+    $identity=Resolve-ThinClientTargetIdentity -TargetUser $target
+    foreach($cfg in @([ordered]@{EnableShellLimitations=$true;ShellRestrictionLevel='Strict'},[ordered]@{EnableAssignedAccess=$true;ShellMode='AssignedAccess'},[ordered]@{EnableShellLauncher=$true;ShellMode='ShellLauncher'})) {
+        $message='';try{Assert-ApplyPreflight -Config $cfg -Audit ([pscustomobject]@{TargetUserExists=$identity.Exists;TargetUserResolvedSid=$identity.Sid;TargetUserSid=''}) -TargetUser $target}catch{$message=$_.Exception.Message}
+        Assert ($message -like '*local*user*') 'Domain diagnostic identity bypassed local-only operational guards'
+    }
+}
+Check 'System identity is not presented as an ordinary ready target' {
+    $r=Get-ThinClientAuditSummary -Audit ([pscustomobject]@{OSName='Windows';EffectiveProfile='WebOnly';BrowserInstalled=$true;WebOnlyUrlConfigured=$true;TargetUserExists=$true;TargetUserIdentityStatus='Detected';TargetUserAccountType='System'})
+    Assert ($r.State -eq 'Warning') 'System identity was marked ready for a user workspace'
+}
+Check 'APPLY is the default phrase and explicit custom phrases remain authoritative' {
+    $template=Get-Content (Join-Path $sourceRoot 'SmartThinClient-Shell.config.template.json') -Raw|ConvertFrom-Json
+    Assert ($template.ApplyConfirmationPhrase -ceq 'APPLY' -and $template.RequireConfirmationPhrase) 'Short default phrase or mandatory confirmation missing'
+    $ConfirmApply='APPLY';Assert-ApplyAllowed -Config ([ordered]@{AllowApply=$true})
+    $ConfirmApply='APPLY SMARTTHINCLIENT';Assert-ApplyAllowed -Config ([ordered]@{AllowApply=$true;ApplyConfirmationPhrase='APPLY SMARTTHINCLIENT'})
+    $ConfirmApply='APPLY';Reject {Assert-ApplyAllowed -Config ([ordered]@{AllowApply=$true;ApplyConfirmationPhrase='CUSTOM PHRASE'})}
+}
+Check 'GUI action identifiers preserve earlier evidence and rollback names' {
+    Start-ThinClientGuiRun -RequestedAction Apply
+    $first=$script:RunId;$path=$script:EvidenceJsonPath
+    Set-Content -LiteralPath $path -Value '{"Status":"Applied"}'
+    Start-ThinClientGuiRun -RequestedAction Preview
+    Assert ($script:RunId -ne $first -and $script:EvidenceJsonPath -ne $path -and (Get-Content $path -Raw) -like '*Applied*') 'Later action replaced earlier evidence'
+}
+Check 'Apply completion feedback identifies scope backup and next sign-in' {
+    $r=Get-ThinClientOperationFeedback -Config ([ordered]@{ShellMode='CustomShell'}) -Result ([pscustomobject]@{Status='Applied';EffectiveProfile='Citrix';RollbackPath='C:\Synthetic\rollback.json';LauncherPath='C:\Synthetic\launcher.ps1';OutputRoot='C:\Synthetic'})
+    Assert ($r.Title -eq 'Apply completed' -and $r.NextStep -like '*replace Explorer for all users*' -and $r.Details -like '*rollback.json*') 'Completion information missing'
+    Reject {Get-ThinClientOperationFeedback -Config ([ordered]@{}) -Result ([pscustomobject]@{Status='PreviewOnly'})}
+}
+Check 'Completed operations offer sign-out only when a next sign-in is relevant' {
+    $applied=[pscustomobject]@{Status='Applied'};$restored=[pscustomobject]@{Status='Restored'}
+    foreach($cfg in @([ordered]@{ShellMode='CustomShell'},[ordered]@{ShellMode='Launcher';AutoLaunchMode='RunKey'})){
+        $feedback=Get-ThinClientOperationFeedback -Result $applied -Config $cfg
+        Assert ($feedback.SignOutRecommended -and $feedback.NextStep -like '*Save your open work*') 'Sign-out choice or save-work message missing'
+    }
+    Assert (-not (Get-ThinClientOperationFeedback -Result $applied -Config ([ordered]@{ShellMode='Launcher';AutoLaunchMode='None'})).SignOutRecommended) 'Launch-only completion offered an unnecessary sign-out'
+    Assert ((Get-ThinClientOperationFeedback -Result $restored -Config ([ordered]@{})).SignOutRecommended) 'Restore omitted next-sign-in choice'
+    Reject {Get-ThinClientOperationFeedback -Result ([pscustomobject]@{Status='PreviewOnly'}) -Config ([ordered]@{})}
+}
+Check 'Sign-out cancellation never launches a system process' {
+    function Confirm-ThinClientSignOut {param($Owner) $false}
+    function Start-Process {throw 'Cancellation must not launch shutdown'}
+    Assert (-not (Invoke-ThinClientSignOut -Owner $null)) 'Cancelled sign-out reported a request'
+}
+Check 'Confirmed sign-out targets current session without forcing application closure' {
+    function Confirm-ThinClientSignOut {param($Owner) $true}
+    $script:signOutRequest=$null;$script:signOutExit=0
+    function Start-Process {[CmdletBinding()]param($FilePath,$ArgumentList,$WindowStyle,[switch]$Wait,[switch]$PassThru) $script:signOutRequest=@{}+$PSBoundParameters;[pscustomobject]@{ExitCode=$script:signOutExit}}
+    Assert (Invoke-ThinClientSignOut -Owner $null) 'Confirmed sign-out was not requested'
+    Assert ($script:signOutRequest.FilePath -eq (Join-Path $env:SystemRoot 'System32\shutdown.exe') -and $script:signOutRequest.ArgumentList -ceq '/l' -and $script:signOutRequest.WindowStyle -eq 'Hidden' -and $script:signOutRequest.Wait -and $script:signOutRequest.PassThru) 'Wrong process, session scope or forced sign-out arguments'
+    $script:signOutExit=5;Reject {Invoke-ThinClientSignOut -Owner $null}
+}
+Check 'Restore completion feedback remains distinct from applying or launching' {
+    $r=Get-ThinClientOperationFeedback -Config ([ordered]@{}) -Result ([pscustomobject]@{Status='Restored';RollbackPath='C:\Synthetic\selected.json'})
+    Assert ($r.Title -eq 'Restore completed' -and $r.Message -like '*selected rollback*' -and $r.NextStep -like '*sign in*') 'Restore feedback was ambiguous'
+}
+Check 'Actual GUI Apply handler displays completion feedback instead of only JSON' {
+    $script:feedbackShown=$null
+    function Write-SmartThinClientLog {param($Level,$Message)}
+    function Invoke-ThinClientGuiAction {param($Config,$RequestedAction,$SelectedProfile,$Confirmation,$Password) if($RequestedAction -eq 'Preview'){return $audit};[pscustomobject]@{Status='Applied';EffectiveProfile=$SelectedProfile;RollbackPath='synthetic-backup.json';OutputRoot=$testRoot}}
+    function Show-ThinClientConfirmation {param($Owner,$RequestedAction,$Summary,$Phrase,$RequestPassword) [pscustomobject]@{Phrase=$Phrase;Password=$null}}
+    function Show-ThinClientOperationFeedback {param($Owner,$Feedback) $script:feedbackShown=$Feedback}
+    $Config=[ordered]@{AllowApply=$true;AllowRestore=$true};$profileCombo=[pscustomobject]@{Text='Citrix'}
+    $statusText=[pscustomobject]@{Text=''};$outputText=[pscustomobject]@{Text=''};$actionButtons=@([pscustomobject]@{IsEnabled=$true})
+    $window=[pscustomobject]@{Container=[pscustomobject]@{Visibility='Visible'}};$window|Add-Member ScriptMethod FindName {param($Name) $this.Container}
+    $assignment=$ast.Find({param($n) $n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$runAction'},$true)
+    $handler=& ([scriptblock]::Create($assignment.Right.Extent.Text));& $handler -RequestedAction Apply
+    Assert ($statusText.Text -eq 'Apply completed' -and $null -ne $script:feedbackShown -and $outputText.Text -like '*synthetic-backup.json*' -and $window.Container.Visibility -eq 'Collapsed' -and $actionButtons[0].IsEnabled) 'GUI did not show the completed operation and backup'
+}
+Check 'Admin panel refuses standard users before any process launch' {
+    function Get-ThinClientAdminTokenState {[pscustomobject]@{IsAdministratorAccount=$false;IsElevated=$false}}
+    $message='';try{Open-ThinClientAdminPanel -ScriptPath $SourcePath -ConfigPath (Join-Path $sourceRoot 'SmartThinClient-Shell.config.template.json')}catch{$message=$_.Exception.Message}
+    Assert ($message -like '*only to administrator accounts*') 'Standard account reached panel launch'
+}
+Check 'Admin panel requests elevation only for filtered administrator accounts' {
+    $script:adminLaunch=$null
+    function Get-ThinClientAdminTokenState {[pscustomobject]@{IsAdministratorAccount=$true;IsElevated=$false}}
+    function Start-Process {[CmdletBinding()]param($FilePath,$ArgumentList,$WindowStyle,$Verb) $script:adminLaunch=@{}+$PSBoundParameters}
+    Open-ThinClientAdminPanel -ScriptPath $SourcePath -ConfigPath (Join-Path $sourceRoot 'SmartThinClient-Shell.config.template.json') -Profile Citrix
+    Assert ($script:adminLaunch.Verb -eq 'RunAs' -and $script:adminLaunch.WindowStyle -eq 'Hidden' -and $script:adminLaunch.ArgumentList -like '*-Action Audit*') 'Filtered admin was not elevated safely'
+    function Get-ThinClientAdminTokenState {[pscustomobject]@{IsAdministratorAccount=$true;IsElevated=$true}}
+    Open-ThinClientAdminPanel -ScriptPath $SourcePath -ConfigPath (Join-Path $sourceRoot 'SmartThinClient-Shell.config.template.json') -Profile AVD
+    Assert (-not $script:adminLaunch.ContainsKey('Verb')) 'Elevated admin was prompted again'
+}
+Check 'Generated and Preview shells include a role-gated Admin entry' {
+    [xml]$x=Get-ThinClientShellXaml
+    $admin=$x.SelectSingleNode("//*[local-name()='Button' and @Name='AdminButton']")
+    Assert ($admin.Visibility -eq 'Collapsed') 'Admin control was visible by default'
+    $launcher=New-LauncherScript -Config ([ordered]@{}) -EffectiveProfile Citrix -Audit $audit
+    $text=Get-Content $launcher -Raw
+    Assert ($text -like '*Get-ThinClientAdminTokenState*' -and $text -like '*Open-ThinClientAdminPanel*') 'Operational shell missed admin guards'
+}
+Check 'Custom-shell plan uses machine storage without applying changes' {
+    $cfg=[ordered]@{ShellMode='CustomShell';EnableCustomShell=$true}
+    $r=Get-ThinClientPreviewPlan -Config $cfg -Audit $audit
+    Assert (-not $r.ChangesApplied -and $r.ShellScope -like 'All users*' -and $r.LauncherPath.StartsWith($env:ProgramData,[StringComparison]::OrdinalIgnoreCase)) 'Plan retained a user-profile launcher'
+}
+Check 'Primary Hybrid custom shell starts persistently without a cancellable provider picker' {
+    $launcher=New-LauncherScript -Config ([ordered]@{ShellMode='CustomShell';EnableCustomShell=$true}) -EffectiveProfile Hybrid -Audit $audit
+    $t=$null;$e=$null;$generated=[Management.Automation.Language.Parser]::ParseFile($launcher,[ref]$t,[ref]$e)
+    if($e.Count){throw ($e|Out-String)}
+    $entry=@($generated.EndBlock.Statements|Where-Object {$_ -is [Management.Automation.Language.IfStatementAst]})
+    function Select-HybridProvider {throw 'Primary shell must not exit on provider-picker cancellation'}
+    function Show-WebShell {param($InitialProvider) $script:primaryProvider=$InitialProvider}
+    $Profile='Hybrid';$PrimaryCustomShell=$true;$UseWebShell=$true;$PreferredAccessMode='Web';$script:primaryProvider=''
+    & ([scriptblock]::Create(($entry.Extent.Text -join "`r`n")))
+    Assert ($script:primaryProvider -eq 'Hybrid') 'Primary Hybrid shell did not start'
+}
+Check 'Machine storage refuses user profiles and remote paths' {
+    foreach($path in @($env:USERPROFILE,'\\server\share\SmartThinClient')){Reject {Get-ThinClientMachineRoot -Config ([ordered]@{MachineRoot=$path})}}
+}
+Check 'Custom-shell preflight requires explicit enablement supported OS persistent shell and confirmation' {
+    function Get-ThinClientCustomShellPolicy {[pscustomobject]@{Scope='LocalPolicyAllUsers';ValueExists=$false;ValueKind='';Value=''}}
+    $a=[pscustomobject]@{CustomShellPolicyAvailable=$true;BrowserInstalled=$true;WebOnlyUrlConfigured=$true};$u=[pscustomobject]@{Mode='ExistingUser';LocalUserExists=$false;Sid=''}
+    foreach($cfg in @([ordered]@{ShellMode='CustomShell'},[ordered]@{ShellMode='CustomShell';EnableCustomShell=$true;UseWebShell=$false},[ordered]@{ShellMode='CustomShell';EnableCustomShell=$true;RequireConfirmationPhrase=$false})){Reject {Assert-ApplyPreflight -Config $cfg -Audit $a -TargetUser $u}}
+    Reject {Assert-ApplyPreflight -Config ([ordered]@{ShellMode='CustomShell';EnableCustomShell=$true}) -Audit ([pscustomobject]@{CustomShellPolicyAvailable=$false}) -TargetUser $u}
+    Reject {Assert-ApplyPreflight -Config ([ordered]@{ShellMode='CustomShell';EnableCustomShell=$true;PreferredAccessMode='Native'}) -Audit $a -TargetUser $u}
+    Assert-ApplyPreflight -Config ([ordered]@{ShellMode='CustomShell';EnableCustomShell=$true}) -Audit $a -TargetUser $u
+}
+Check 'Custom-shell Apply saves rollback before policy change and restores report context' {
+    $machine=Join-Path $testRoot 'MachineApply';New-Item -ItemType Directory "$machine\Launcher","$machine\Rollback" -Force|Out-Null
+    $report=$script:OutputRoot;$priorRollback=$script:RollbackRoot;$script:machineSequence=@();$script:installedPolicy=$null
+    function Invoke-ThinClientAudit {param($Config,$RequestedProfile,$RequestedAction) [pscustomobject]@{EffectiveProfile='Citrix';TargetUserName='TEST-USER';TargetUserSid='';CustomShellPolicyAvailable=$true;BrowserInstalled=$true;CitrixWebUrlConfigured=$true;CitrixWorkspacePath='';AvdClassicClientPath='';BrowserPath=''}}
+    function Get-TargetUserState {param($Config) [pscustomobject]@{Mode='ExistingUser';LocalUserExists=$false;Sid=''}}
+    function Get-ThinClientMachineRoot {param($Config) $machine}
+    function Initialize-ThinClientMachineRoot {param($Config) $machine}
+    function Get-ThinClientCustomShellPolicy {[pscustomobject]@{Scope='LocalPolicyAllUsers';ValueExists=$false;ValueKind='';Value=''}}
+    function Get-RegistryValueSnapshot {param($Path,$Name) [pscustomobject]@{Path=$Path;Name=$Name;ValueExists=$true;ValueKind='String';Value='old launcher'}}
+    function Save-RollbackState {param($State) $script:machineSequence+='backup';$script:savedMachineState=$State;'synthetic-machine-rollback.json'}
+    function Protect-ThinClientMachineLauncher {param($Path) $script:machineSequence+='acl'}
+    function Set-ThinClientCustomShellPolicy {param($Desired,$Expected) $script:machineSequence+='policy';$script:installedPolicy=$Desired}
+    function Remove-ItemProperty {param($LiteralPath,$Name,$ErrorAction) $script:machineSequence+='startup'}
+    function Apply-AutoLaunch {throw 'RunKey must not be applied for a replacement shell'}
+    $ConfirmApply='APPLY'
+    $r=Invoke-ThinClientApply -Config ([ordered]@{AllowApply=$true;ShellMode='CustomShell';EnableCustomShell=$true;AutoLaunchMode='None'})
+    Assert ($r.Status -eq 'Applied' -and $r.ShellScope -eq 'AllUsers' -and $r.OutputRoot -eq $machine -and $r.LauncherPath.StartsWith($machine)) 'Machine-scoped result missing'
+    Assert (($script:machineSequence -join ',') -eq 'backup,backup,acl,policy,startup' -and $script:savedMachineState.SchemaVersion -eq 3) 'Policy or startup changed before rollback'
+    Assert ($script:OutputRoot -eq $report -and $script:RollbackRoot -eq $priorRollback -and $script:installedPolicy.Value -like '*System32*PowerShell*') 'Report context or absolute shell executable missing'
+}
+Check 'Custom-shell Apply policy failure preserves startup and restores the report context' {
+    $machine=Join-Path $testRoot 'MachineFailure';New-Item -ItemType Directory "$machine\Launcher","$machine\Rollback" -Force|Out-Null
+    $report=$script:OutputRoot;$script:startupRemoved=$false
+    function Invoke-ThinClientAudit {param($Config,$RequestedProfile,$RequestedAction) [pscustomobject]@{EffectiveProfile='Citrix';TargetUserName='TEST-USER';TargetUserSid='';CustomShellPolicyAvailable=$true;BrowserInstalled=$true;CitrixWebUrlConfigured=$true;CitrixWorkspacePath='';AvdClassicClientPath='';BrowserPath=''}}
+    function Get-TargetUserState {param($Config) [pscustomobject]@{Mode='ExistingUser';LocalUserExists=$false;Sid=''}}
+    function Get-ThinClientMachineRoot {param($Config) $machine}
+    function Initialize-ThinClientMachineRoot {param($Config) $machine}
+    function Get-ThinClientCustomShellPolicy {[pscustomobject]@{Scope='LocalPolicyAllUsers';ValueExists=$false;ValueKind='';Value=''}}
+    function Save-RollbackState {param($State) 'synthetic-failure-rollback.json'}
+    function Protect-ThinClientMachineLauncher {param($Path)}
+    function Set-ThinClientCustomShellPolicy {param($Desired,$Expected) throw 'Synthetic policy save failure'}
+    function Remove-ItemProperty {$script:startupRemoved=$true}
+    $ConfirmApply='APPLY'
+    $message='';try{Invoke-ThinClientApply -Config ([ordered]@{AllowApply=$true;ShellMode='CustomShell';EnableCustomShell=$true;AutoLaunchMode='None'})}catch{$message=$_.Exception.Message}
+    Assert ($message -eq 'Synthetic policy save failure' -and -not $script:startupRemoved -and $script:OutputRoot -eq $report) 'Failure did not reach the policy boundary or changed startup/report context'
+}
+Check 'Custom-shell rollback restores policy and rejects unrelated current shell changes' {
+    $machine=Join-Path $testRoot 'MachineRestore';New-Item -ItemType Directory "$machine\Launcher","$machine\Rollback" -Force|Out-Null
+    function Get-ThinClientMachineRoot {param($Config) $machine}
+    $cfg=[ordered]@{AllowRestore=$true;ShellMode='CustomShell';EnableCustomShell=$true;AutoLaunchMode='None'}
+    $state=[pscustomobject]@{SchemaVersion=3;AppName=$script:AppName;ComputerName=$env:COMPUTERNAME;Config=$cfg;Registry=@();OutputRoot=$machine;LauncherPath=(Join-Path $machine 'Launcher\SmartThinClient-LaunchWorkspace.ps1');LauncherExisted=$false;LauncherContent='';TargetUserSid='';CustomShellPolicy=[pscustomobject]@{Scope='LocalPolicyAllUsers';ValueExists=$false;ValueKind='';Value=''};ManagedShellCommand=(Get-LauncherCommandLine -Root $machine -Machine)}
+    $RollbackPath=Join-Path $machine 'Rollback\selected.json';$state|ConvertTo-Json -Depth 12|Set-Content $RollbackPath
+    $ConfirmRestore='RESTORE WINDOWS SHELL';$script:restoredPolicy=$null;$script:foreignShell=$false
+    function Get-ThinClientCustomShellPolicy {[pscustomobject]@{Scope='LocalPolicyAllUsers';ValueExists=$true;ValueKind='String';Value=$(if($script:foreignShell){'unrelated.exe'}else{$state.ManagedShellCommand})}}
+    function Set-ThinClientCustomShellPolicy {param($Desired,$Expected) $script:restoredPolicy=$Desired}
+    $r=Invoke-ThinClientRestore -Config $cfg
+    Assert ($r.Status -eq 'Restored' -and $null -ne $script:restoredPolicy -and -not $script:restoredPolicy.ValueExists) 'Original policy was not restored'
+    $script:foreignShell=$true;$script:restoredPolicy=$null
+    Reject {Invoke-ThinClientRestore -Config $cfg}
+    Assert ($null -eq $script:restoredPolicy) 'Foreign policy was overwritten during Restore'
+}
+Check 'Custom-shell rollback rejects incomplete and mismatched policy snapshots' {
+    $machine=Join-Path $testRoot 'MachineValidation'
+    function Get-ThinClientMachineRoot {param($Config) $machine}
+    $cfg=[ordered]@{ShellMode='CustomShell';EnableCustomShell=$true}
+    $state=[pscustomobject]@{SchemaVersion=3;AppName=$script:AppName;ComputerName=$env:COMPUTERNAME;Config=$cfg;Registry=@();OutputRoot=$machine;LauncherPath=(Join-Path $machine 'Launcher\SmartThinClient-LaunchWorkspace.ps1');LauncherExisted=$false;LauncherContent='';TargetUserSid='';CustomShellPolicy=[pscustomobject]@{Scope='LocalPolicyAllUsers';ValueExists=$false;ValueKind='';Value=''};ManagedShellCommand=(Get-LauncherCommandLine -Root $machine -Machine)}
+    Assert-RollbackState -State $state -Config $cfg
+    $state.CustomShellPolicy.ValueExists='false';Reject {Assert-RollbackState -State $state -Config $cfg}
+    $state.CustomShellPolicy.ValueExists=$false;$state.ManagedShellCommand='foreign.exe';Reject {Assert-RollbackState -State $state -Config $cfg}
+    $state.PSObject.Properties.Remove('CustomShellPolicy');Reject {Assert-RollbackState -State $state -Config $cfg}
+}
+Check 'Shell version matches release header and is embedded independently of customer title' {
+    $header=[regex]::Match((Get-Content $SourcePath -Raw),'(?m)^Version:\s*(\S+)').Groups[1].Value
+    Assert ((Get-ThinClientVersion) -ceq $header) 'Runtime version drifted from release header'
+    [xml]$x=Get-ThinClientShellXaml
+    $label=$x.SelectSingleNode("//*[@Name='VersionText']")
+    Assert ($label.Text -ceq ('Smart ThinClient v'+$header)) 'Shell version is missing'
+    $path=New-LauncherScript -Config ([ordered]@{WebShellTitle='Customer workspace'}) -EffectiveProfile Citrix -Audit $audit
+    Assert ((Get-Content $path -Raw).Contains('Smart ThinClient v'+$header)) 'Installed launcher omitted version'
+}
+foreach($powerAction in @('Restart','Shutdown')) {
+    Check ("$powerAction cancellation leaves shell running and launches nothing") {
+        $script:ShellExitRequested=$false;$owner=[object]::new()
+        function Confirm-ThinClientPowerAction {param($Owner,$Action) Assert ($Owner -eq $owner -and $Action -eq $powerAction) 'Confirmation context lost';return $false}
+        Assert (-not(Invoke-ThinClientPowerAction -Owner $owner -Action $powerAction)) 'Cancellation was accepted'
+        Assert (-not $script:ShellExitRequested) 'Cancel allowed primary shell to exit'
+    }
+    Check ("$powerAction confirmation launches correct Windows command without force") {
+        $script:ShellExitRequested=$false;$script:powerLaunch=$null
+        function Confirm-ThinClientPowerAction {param($Owner,$Action) return $true}
+        function Start-Process {[CmdletBinding()]param($FilePath,$ArgumentList,$WindowStyle,[switch]$Wait,[switch]$PassThru)
+            Assert $script:ShellExitRequested 'Primary shell would block Windows session closure'
+            $script:powerLaunch=@{}+$PSBoundParameters;[pscustomobject]@{ExitCode=0}
+        }
+        Assert (Invoke-ThinClientPowerAction -Action $powerAction) 'Confirmed action failed'
+        $expected=if($powerAction -eq 'Restart'){'/r /t 0'}else{'/s /t 0'}
+        Assert ($script:powerLaunch.FilePath -eq (Join-Path $env:SystemRoot 'System32\shutdown.exe') -and $script:powerLaunch.ArgumentList -ceq $expected) 'Incorrect or forced power command'
+        Assert ($script:powerLaunch.WindowStyle -eq 'Hidden' -and $script:powerLaunch.Wait -and $script:powerLaunch.PassThru) 'Power command did not capture Windows result'
+    }
+    foreach($failureMode in @('Launch','ExitCode')) {
+        Check ("$powerAction $failureMode failure restores shell close guard") {
+            function Confirm-ThinClientPowerAction {param($Owner,$Action) return $true}
+            function Start-Process {[CmdletBinding()]param($FilePath,$ArgumentList,$WindowStyle,[switch]$Wait,[switch]$PassThru)
+                if($failureMode -eq 'Launch'){throw 'Synthetic Windows launch failure'}
+                [pscustomobject]@{ExitCode=5}
+            }
+            foreach($prior in @($false,$true)) {
+                $script:ShellExitRequested=$prior
+                Reject {Invoke-ThinClientPowerAction -Action $powerAction}
+                Assert ($script:ShellExitRequested -eq $prior) 'Failure lost previous shell closing state'
+            }
+        }
+    }
+}
 Write-Host "RESULT passed=$script:passed failed=$script:failed"
 if ($script:failed) { exit 1 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD4QAlFOFQ7NBpi
-# 2BiMJepGuZ6PFObvD8sSxK+lqGXnrKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDQoTXp3EN6xoBx
+# GRQIiC9eeQRibP3dVD84wlCLj0zGxKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -660,31 +1189,31 @@ if ($script:failed) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGrywMt8PJ3fEO1HxnTI2esb5S3HoyOvqHu2D3GAKjxkMA0GCSqG
-# SIb3DQEBAQUABIIBgGHwTg1JCnTVZntJz5Itmqd2W47TsSiDvXyzdrqDMp/Da9M5
-# nJeIofLeOJTJIG3xZHPy64v+8SU1aN8lNvSgHp1AMuOyjIK5JxrSNONC/UFf2aUe
-# TqWhzlWH+Pk7fsnEX1dPzfOe3QpBNamrZTT2cPbhLSbyoUZ4tDZ5ypG2gGSBY4Vg
-# umYAeA2AxDFxZBUb1VbfiF4TqHqjMW8kTTYSQ16E8Bp0PtwRF151/yP+TNEUImc4
-# y91+Gf0y4uL7KJQNk3/Z6zS5wfuRInvcXYZvrkFVEWIDlUUH0N7PCWyrjald79uo
-# zay2dUp4WNXGJsVy4MS5JDJJyTsAfSsVLi9UEuv4AkG0Hg93NqdwuWfeumv3VhGV
-# 4q6dL8yVJ8Gv/0WBs3nebMg9vnr+Ugzh63UR1Z4oSPT4lAG0sfNZ9JAsSNQZszTY
-# vs0Un8+5GTMtafL+Y4NYLZD1bbXrInv+zegbSY6wx6bep0jAseqjAtglyMztfnfI
-# zG+qF3O/wFG5+XrZ96GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILR7/6W0qyPyn632ovjVdmFH3ZVdcm6cT2oweTHsVkkEMA0GCSqG
+# SIb3DQEBAQUABIIBgIHfsWop96Cz37jYCop+DwTIhAIqHeQ7y4adAT0mXjnVSDo9
+# ba/bHrf2Va54G+zpGSyDnmqVhYHXijjCiUf4k1tZojQTY1E7SXlQIIzAO8+4klJi
+# A9wWe6HO+STeRJqTHxmn0OR/pmhcJzXBZFV5KIBwTZqZzqiiXT0eEyLavdnfMRce
+# 3P+D8CxpCPfEX9HTZPOOeC5/sADEzHVwjrshZbbjzCvD0qBFrPj08R9HSBu0Y0tm
+# BPXE76GWw7hv+S/XNYUP+UHeQuImAAWvJCSLo9Wcmm++Cvet6aorFoPLb/dGTOlP
+# 01spa+JudlFTV807fFpiBbLTbS/74KxtSm/XZQ1Kl/LcmOmF+RWzBJ+8XZzGy/KC
+# /jynBsLB3JJmUeHyui+/JCwNhUR2idBBu/43a+DlOYHcs/PmntQma8dcilm4p0Gr
+# lqfxw+J2hbjZolN9pTD2eLdE9s6Bn+0h3BsmJumB4ZEWfwnKtgoJtm6mikRlnGYr
+# IPfCSKpEy5Lf6PKthKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQyMTI3
-# MDZaMC8GCSqGSIb3DQEJBDEiBCAllNzuBqWe8AlC3RoGAzdqdoWKu7mGiyoMdRYK
-# n2/94zANBgkqhkiG9w0BAQEFAASCAgAqWzhlq3u+5aBGRwMgMh1h3gS3/+wVSxup
-# 7U+lowbTLMkxQtfA/RPLDweLyUMRjhS7KduliHHXS/AisPk7SimV+0u9xzHeV3fW
-# hE5cGILhvgYd/KDcO6Db/rlNDCb/KS2wc/oKAeJZQaRNOL3TxwfM5gYakD8SYxMn
-# fCMRQZW0tIinD4Qvd+9h3wINJbiasZbbdpk4zg8kjIL9KcwlJlpOLk9Ug0iNDRyE
-# poVCduhCnN0KGfiTe91qRBNjHeqHmW+ERlzqjnqLQJ4P4Au7YgopBgxtVv5TJA8P
-# Vl83Lv0LSixKh7a3nY24C9BzbTpSApKKoBiFQMXnaRqN8IX3h3s4xzkPa+5rmKRi
-# JZM1G6i7ArCWQl5igP5n8pm354cVPUXny3sQNTDS9v4RK3Z6Tg5zyysXCKls7GRP
-# i8thspSR8TXhLK/Y8eLVwbyumti2O3HFPFacHTU42zap8QZ4W+wpk/5ZS3axoHG0
-# AF/xt2ynNLUstVoxGhde9BikXbDPQwYgNMkUJYSM9CqLC9iYl1kln+KPJmnmn8HO
-# jPXmTYIj/XQQc0enjnvYl5AlB/MNaCE1B7OR2l1MDIZpJCGlgEawJVR0Xq/La+rn
-# NAd8/ERMv35vHojXkVxCNzZSN774RfF0dnMZPrPgTzE9+6SHS0v+O5EamQbNsY9w
-# 22kqLVK04A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTMxNzA1
+# NDNaMC8GCSqGSIb3DQEJBDEiBCBWQRG7nMNpu1GoH8nOCXt/kJiClvrJd4Yg62QW
+# qsQUzjANBgkqhkiG9w0BAQEFAASCAgAPA18BWpJecmWDgeWA5ww41VrNumA2kyjz
+# J28u7rH5li7WF5At12++tNpkbvmnSzyHxx1sVxx0/j2nLRROfU9f5uN+D1ak/Vaz
+# 5FjDG93YrlL2yBWNOAeVQ8iXKCczs0DbGOKmHcWcLQQuZKAkgEqBdQC53sr6oq63
+# NO8/OGCx8ajNOwGrREpEm7/92XXsnlSWgKtuvu6jJqpe9xlQlAa/iZNaScSfnLWH
+# Sv4Hzec30Pot5AmvIhb3W0XDhb7ThmelUr3j/1EqHxvy7PNtRmH7v3IntQNixLbp
+# dEf3i/pZNCrBle6z4J8If1K6bOtpB6PLita63jN43WW+qN6tLsHU98DZ4CHdzHxy
+# y8jndqeGzb5E9P32GZ5pq1+WUzijwfUsfEjxKaMYabQeZ5HlZuchY+Uh8Av62mSy
+# pDzeHftvJ4XPqr7SoTu69HzeMlTZdWPtDTrf3WlQMunARffOu0ySnXqCROit+63O
+# nSN9IfEiUo3Aezu5jONPVWp8BKyPng3sQ7ZxtfFs+IN5r+13CQ2N1EyOMJwxBmod
+# Zm34AdaiU63pgwKRRZ1hbKvuUNwODTTaFfyZTSVax1dcCK+iH9gTa4dlaG70Fa6k
+# OAA79Kgm/+jkbz4Yx2swUt2rGjvttmL19wINsnw0KlPpZk3LoCphA7N1zGV+Z4Mw
+# glw7QitHaw==
 # SIG # End signature block
