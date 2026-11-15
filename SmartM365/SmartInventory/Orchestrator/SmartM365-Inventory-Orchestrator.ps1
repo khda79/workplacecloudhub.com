@@ -110,7 +110,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.92
+1.5.93
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -123,7 +123,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.92
+    Version : 1.5.93
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
@@ -160,7 +160,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.92"
+$ScriptVersion = "1.5.93"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -6357,6 +6357,57 @@ function Test-OrchestratorElectionPlanAssignmentsEqual {
     return (Get-OrchestratorElectionPlanAssignmentSignature -Plan $Left) -ceq (Get-OrchestratorElectionPlanAssignmentSignature -Plan $Right)
 }
 
+function Get-OrchestratorReportMailDispatcher {
+    # One server sends the shared report mail queue (1.5.93): the first Active live server by name.
+    # Live means what the election uses: a valid capability document and a fresh heartbeat. An
+    # Inactive server never sends the queue; a stopped, stale or deactivated dispatcher is replaced
+    # by the next one at the following tick. Without distributed scheduling an Active server sends it.
+    $local = ([string]$env:COMPUTERNAME).ToUpperInvariant()
+    if (-not $script:Settings.DistributedSchedulingEnabled) {
+        if (Test-OrchestratorLocalServerActive) { return $local }
+        return ''
+    }
+    $candidates = @(
+        @(Get-LiveOrchestratorServerCapabilities) |
+            ForEach-Object { ([string]$_.ServerName).Trim().ToUpperInvariant() } |
+            Where-Object { $_ -and (Test-OrchestratorLocalServerActive -ServerName $_) } |
+            Sort-Object -Unique
+    )
+    if ($candidates.Count -eq 0) { return '' }
+    return [string]$candidates[0]
+}
+
+function Invoke-OrchestratorReportMailQueue {
+    # Sends the queued report emails only on the dispatcher. Each queued message keeps its own
+    # exclusive lock and Sending/Sent state, so a short overlap during a change of dispatcher
+    # cannot send a message twice.
+    $local = ([string]$env:COMPUTERNAME).ToUpperInvariant()
+    $fallback = $false
+    try { $dispatcher = Get-OrchestratorReportMailDispatcher }
+    catch {
+        # Peer documents unreadable: an Active server keeps sending rather than leaving the queue unattended.
+        $fallback = $true
+        $dispatcher = if (Test-OrchestratorLocalServerActive) { $local } else { '' }
+        $script:ReportMailDispatcherError = $_.Exception.Message
+    }
+    $previous = Get-Variable -Name ReportMailDispatcher -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    $previousFallback = [bool](Get-Variable -Name ReportMailDispatcherFallback -Scope Script -ValueOnly -ErrorAction SilentlyContinue)
+    if ($null -eq $previous -or [string]$previous -ne $dispatcher -or $previousFallback -ne $fallback) {
+        if ($fallback) {
+            $detail = if ($dispatcher) { 'this Active server sends it until the peers are readable again' } else { 'this Inactive server does not send it' }
+            Write-OrchestratorLog -Message ("Report mail queue dispatcher could not be determined ({0}); {1}." -f $script:ReportMailDispatcherError, $detail) -Level WARN
+        }
+        elseif ($dispatcher -eq $local) { Write-OrchestratorLog -Message 'Report mail queue dispatcher: this server (first Active live server); it sends the queued report emails.' }
+        elseif ($dispatcher) { Write-OrchestratorLog -Message ("Report mail queue dispatcher: {0}; this server does not send the queued report emails." -f $dispatcher) }
+        else { Write-OrchestratorLog -Message 'Report mail queue dispatcher: none, no Active live server; queued report emails wait.' -Level WARN }
+        $script:ReportMailDispatcher = $dispatcher
+        $script:ReportMailDispatcherFallback = $fallback
+    }
+    if ($dispatcher -ne $local) { return }
+    $mailQueue = Invoke-SmartM365DeferredMail
+    if ($mailQueue) { Write-OrchestratorLog -Message ('Report mail queue: ' + ($mailQueue | ConvertTo-Json -Compress)) }
+}
+
 function Get-OrchestratorInactiveServers {
     if (-not $script:Settings.PSObject.Properties['ServerStates']) { return @() }
     $states = $script:Settings.ServerStates
@@ -6487,7 +6538,7 @@ function Write-ServerAllowlistSummary {
     if (-not (Test-OrchestratorLocalServerActive)) {
         # A chosen state, not a fault: INFO, once per instance and again only after the server was Active (1.5.77).
         if (-not $script:InactiveSummaryLogged) {
-            Write-OrchestratorLog -Message ("Server inactive: no job will be launched on {0} (cluster ServerStates). Heartbeat, peer monitoring, maintenance, disk space guard, mails and mirror copy keep running; set the server Active in the Orchestrator GUI to give it jobs." -f $env:COMPUTERNAME)
+            Write-OrchestratorLog -Message ("Server inactive: no job will be launched on {0} (cluster ServerStates). Heartbeat, peer monitoring, maintenance, disk space guard, its own mails and mirror copy keep running, but it never sends the shared report mail queue; set the server Active in the Orchestrator GUI to give it jobs." -f $env:COMPUTERNAME)
             $script:InactiveSummaryLogged = $true
         }
         return
@@ -9177,8 +9228,7 @@ try {
             Write-OrchestratorLog -Message ("Launch prerequisite monitoring failed without stopping the scheduler: {0}" -f $_.Exception.Message) -Level ERROR
         }
         try {
-            $mailQueue = Invoke-SmartM365DeferredMail
-            if ($mailQueue) { Write-OrchestratorLog -Message ('Report mail queue: ' + ($mailQueue | ConvertTo-Json -Compress)) }
+            Invoke-OrchestratorReportMailQueue
         } catch { Write-OrchestratorLog -Message ('Report mail queue failed: ' + $_.Exception.Message) -Level ERROR }
         Send-DailySummaryIfDue -Now $now
         Update-OrchestratorResourceMetrics -Now $now
