@@ -3,7 +3,7 @@
 .SYNOPSIS
 Fictional diagnostic evidence covering every Analyzer tab and native HTML section.
 .VERSION
-1.0.0
+1.0.1
 #>
 function script:Initialize-SmartM365DemoProfile {
     $s=$script:SmartM365Demo;$c=$s.Controls
@@ -122,14 +122,27 @@ function script:Invoke-SmartM365DemoProfileAction {
 }
 function script:Export-SmartM365DemoProfileOutputs {
     $s=$script:SmartM365Demo
-    return @(Export-SmartM365DemoNativeReport -Kind Analyzer -SourcePath $s.GuiPath -Name 'EndpointDiagnostics-DEMO.html' -Data $s.Data.Analysis)
+    $ast=Get-SmartM365DemoAst $s.GuiPath
+    $versionAssignment=$ast.Find({param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$script:AppVersion'},$true)
+    if(-not $versionAssignment){throw 'Analyzer version is missing from the demo source.'}
+    $version=[string]$versionAssignment.Right.Expression.SafeGetValue()
+    if($version -notmatch '^\d+\.\d+\.\d+$'){throw 'Analyzer version is invalid for the demo report.'}
+    $paths=@(Export-SmartM365DemoNativeReport -Kind Analyzer -SourcePath $s.GuiPath -Name 'EndpointDiagnostics-DEMO.html' -Data $s.Data.Analysis)
+    foreach($path in $paths){
+        $content=[IO.File]::ReadAllText($path)
+        $content=$content -replace '(<title>[^<]*?) v - ',(' $1'.TrimStart()+' v'+$version+' - ')
+        $content=$content -replace '(<h1>[^<]*?) v</h1>',(' $1'.TrimStart()+' v'+$version+'</h1>')
+        if($content -notmatch ('<h1>[^<]* v'+[regex]::Escape($version)+'</h1>')){throw 'Demo report version could not be verified.'}
+        [IO.File]::WriteAllText($path,$content,[Text.UTF8Encoding]::new($false))
+    }
+    return $paths
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCATm1zpu+OaCJR/
-# x+k7ZfOh2qBSW/HdgKevyirLXdqLKqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBPucMnSmXWmWkB
+# xvb1Vl1qBDoeLLQ5ZA6PBIM1e9A5WaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -262,31 +275,31 @@ function script:Export-SmartM365DemoProfileOutputs {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINvFdWqOnmGZbKW+TF2dJ9QCShhtnDzzHNpFjg5tQigXMA0GCSqG
-# SIb3DQEBAQUABIIBgJTOSiO8Z9SCVFzA906Yhf4GoWPoUrjzIyVatHszUkY1KOHT
-# LrnvCDVszI84KLFu5ge/o5ATW7dgg0jy7BEApcBac1u7cyh0/9AdLfSntFQaIOB9
-# JYANsml9A9MTbNEcSBRQbfS7kLeO2KD3F6dUdntJdvtxhKGtqkg0xts1OCs3EF3G
-# WMTKk1kA4Y2uNJttRHx1HWII+4apuwobKBiq+vgeeOSJOKjy516+GKl3pe5uCm/X
-# /bmsc0iLQFIfshx2eeCucNTyYnPU2KJX1zPls1ATz5s6KNZ30dJM5sDpKvN3BFog
-# 7SBHtoA2WRUl2PovsHYwTfZrj25zJdic6bzDHs6gSFcJ3PoLllMtn6uVMooxnIDK
-# DvgccnSKZlBU1I9PCh9KpMb9t79QSfBW7dr5c8kh5SRRVFLpEoaZVWRw6sv6INYN
-# /srh7TgmkvKj//XrrvZMPKyf/rNoYBZcVsGMZdCbkHUoJx8wZh5uo7AxVJKyT+Qy
-# 0zGCQyQSvLFaFhgBaqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOucqKydtk18x20REc+zxcMVZCKp20iEaOPzcafh6CCMMA0GCSqG
+# SIb3DQEBAQUABIIBgHkTkNnMekEyLDMSQflsKTutvbQQfjqM5g+6i9FlC52Bt9Io
+# Y2xS2o+lqYqRMoUf95RsZ4w5riBmOSwEFog29Hy3F6OIcDlQzniTFYGnwbv1U7Nm
+# LqqLKpusPcnurmrboxyzvi4w9bPx/bf6BMPhdTafwom5mC6FAoybd2smpuTMS+QG
+# x7/XLA6kiP7CaWAwc1Pw/xAW5FzmM4S2LgwfvVvb2FrSvH+cEFtIrAw+VWvL8aP8
+# 7joAy9snhvHTkwH/Jxqd/ARdXLKUwgSItznUM52whq4pKvooxCJk6SaSCg9n+O3m
+# EnUMEu4+YHBYrRAAROx08Vfq7/9hSunIY/jWa89fq1Nmypbq+6t7HmYcEk8qCmQZ
+# TyRma8xYVgT6Gpo/HaQQWkF8Mh5AjNw7l6mszNguZpbNf+kOiV28t3Bc3z/hCBWY
+# 83XaC5GpjlRy/64xhj7RZAzL3TJUpYBrKTZ8JgqGcD4rt3Cn9HIlRmI+VTq5V+1Q
+# plQ+r/BfqjW3P4MUtaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMDQ2
-# MzlaMC8GCSqGSIb3DQEJBDEiBCBW/O7Faxjaz/Yw8xNDlFgsIeiJGHoZs1/tDDtS
-# ycdptzANBgkqhkiG9w0BAQEFAASCAgB3QleMs2uMe4dRKVawli3+Vl59DckzwPw7
-# vaYPtVw9qC61tReeOBe9X+knAib1snw3JIZ1JYSlATQ1TMRkE7rwhttfCRx1HBjI
-# DflkgUl4eUYMGFYdbpii0V/x/jw65RmKhnZCVcj5rWhZtruH4eHZ1VRSIIyXU39P
-# PwWUOXxBeZojPJo5F/HUfaXTRNpa2XfaHwUgEoW5ZalqQyui4U/uL2kknUZKiyOy
-# +TmH1SUPQi6Hy0X9J+6jmZLE+tY/G3ZkYbbiCctLWiTr8aw9xHTKOCj1TO3GtKfY
-# VDJDMXZakElSLfF/8iazg8SadE2QIslY/PcCJHQcfXN0OE5V3XleRXNlIVLtnN8b
-# e8Z25CfhfV8UwWimiZB6BrIGYH6WJmzQaIAZwSfr6aGqYCIeKh/eEifuuaPq2KSO
-# 3+tNA9Ul0qav4cqkycjIYuSimsYbb7RDN4I3Tq9deHFawdSGDAWFfOrxFktjGzfE
-# 6IeSXZo1agCPlhGwi2iMA1cVmeMAXrTh2TG7w39YzLG/L+cG9+1UP3cVsTDUS194
-# YTc5k9jJqy+J1UP8dzS8KFDszJ2IOGHBrXArRPf7PFVqiH7i/bf8LrIQ5QYV3cm4
-# Jm2CaEyGmxxEsWVOa1ZwkROgfa+WhevXXFY2r4cZ/bxNKeBpVdl1Xm6oqxUar/LT
-# UbnuofbXsg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTUyMzU2
+# MjFaMC8GCSqGSIb3DQEJBDEiBCDlUkLmhukWSKib3mToWsukeEYWoN9rRhNo2w80
+# l66VOTANBgkqhkiG9w0BAQEFAASCAgAAOSObZmO/zRgo/PIf15AEaRqgrwa2re5C
+# GJzaVPTO7toHWg3quoB/XbjeN0/ox7AoJnfAOh6gIwvAfiINYDbt6z6txwV5YJYG
+# F1QmeW+l3C10HiH8rEJABcLXIeORn9Li0sT+n90BHfAuuldfMaUioTTmcp80ynPB
+# CgFgrHQVawfjR7PvKu8/74k4Trz5LaAuj1dmqghBmgHaqAm71/5FKiVLhHlhLLZT
+# +sFwvBt68yiatjjq+IIRK0QsRI6SOHsW2ccgFlIWmWNYmeY1sOTTa9Y9XnXqGWhi
+# cu6cZH5HYUX5AizBNd7qr3Y4I3cZzqRepPy3X4lTke7cHO2O9VHqK9PiLKC7th/s
+# xDskF9Q9QG+N9i1HGGmgWmNUYFCVUthpzZXCkSJMG8KoWJG8guz26RgYMDWj3UnP
+# pCiqJ8TRwDVOlEFa8wAu5XxWy+aKLL3W8ic/4wPzHwg8yX4hNu4qfM1K20poRiO+
+# L4cIPvyvITFoL7EqdZooSZAaHRADfIsQ1NBO25cO4y1SDP6yczWgE9Pp5L9xGmL5
+# bGp3UCbMAGCGQC7p9p/3wq7q6PYST6JQ3xmj0CGan5ORBTsYd84eNTWsdf8aX9vz
+# fEB8j8owI9ta9SV55wLRdTM/zOznzvFUjc2aF5aXyEGl1RUDGfeZnqey1X1qa/f8
+# XdU0xt81kw==
 # SIG # End signature block

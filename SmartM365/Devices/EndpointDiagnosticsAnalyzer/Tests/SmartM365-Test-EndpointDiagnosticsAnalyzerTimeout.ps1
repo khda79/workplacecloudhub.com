@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validates synthetic application behavior against the current source version.
 .VERSION
-1.0.1
+1.0.2
 #>
 
 [CmdletBinding()]
@@ -33,7 +33,7 @@ Assert-True ($guiContent -match 'Local collection command timed out and was skip
 Assert-True ($guiContent -match '\$exitCode = if \(\$completed\) \{ \$process\.ExitCode \} else \{ -1 \}') 'The bounded process exit-code handling is missing.'
 Assert-True ($guiContent -match '\$markerPassed = \$resultMarker -and \[string\]\$resultMarker\.Result -eq ''PASS''') 'The explicit collection PASS result marker is missing.'
 Assert-True ($guiContent -match 'accepting the completed ZIP and explicit PASS result marker') 'The unavailable asynchronous exit-code fallback is missing.'
-Assert-True ($guiContent -match 'accepting the completed analysis CLIXML result') 'The unavailable analysis exit-code fallback is missing.'
+Assert-True ($guiContent -match 'Complete-SedaAnalysisProcess -Worker') 'The retained-handle analysis completion is missing.'
 Assert-True ($guiContent -match '\$resultExists = Test-Path[^\r\n]*\r?\n\s*\$analysisSucceeded = Test-SedaAnalysisCompletion') 'Analysis completion is evaluated before the CLIXML result existence check.'
 
 foreach ($functionName in @('ConvertTo-SedaProcessArgument','Stop-SedaProcessTree','Test-SedaCollectionCompletion','Test-SedaAnalysisCompletion','Invoke-SedaProcessWithTimeout')) {
@@ -52,8 +52,8 @@ Assert-True (-not (Test-SedaCollectionCompletion -ExitCode 1 -ZipExists $true -M
 Assert-True (-not (Test-SedaCollectionCompletion -ExitCode $null -ZipExists $false -MarkerPassed $true)) 'A missing ZIP was accepted.'
 Assert-True (-not (Test-SedaCollectionCompletion -ExitCode $null -ZipExists $true -MarkerPassed $false)) 'A missing PASS marker was accepted.'
 Assert-True (Test-SedaAnalysisCompletion -ExitCode 0 -ResultExists $true) 'A successful analysis was rejected.'
-Assert-True (Test-SedaAnalysisCompletion -ExitCode $null -ResultExists $true) 'An unavailable exit code rejected a valid analysis result.'
-Assert-True (Test-SedaAnalysisCompletion -ExitCode '' -ResultExists $true) 'An empty exit code rejected a valid analysis result.'
+Assert-True (-not (Test-SedaAnalysisCompletion -ExitCode $null -ResultExists $true)) 'An unavailable analysis exit code was accepted.'
+Assert-True (-not (Test-SedaAnalysisCompletion -ExitCode '' -ResultExists $true)) 'An empty analysis exit code was accepted.'
 Assert-True (-not (Test-SedaAnalysisCompletion -ExitCode 1 -ResultExists $true)) 'A non-zero analysis exit code was accepted.'
 Assert-True (-not (Test-SedaAnalysisCompletion -ExitCode $null -ResultExists $false)) 'A missing analysis result was accepted.'
 
@@ -86,11 +86,12 @@ Assert-True ($null -eq (Get-Process -Id $slow.ProcessId -ErrorAction SilentlyCon
     GuiCancellationAvailable = $true
 }
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB38sjoG6aF7h5K
-# Cucgj6XUKHUr0/pHCcKZJWV6NEiwpqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCkcPCbrGKxvW3s
+# /XCl4nYG0DG4JcgNsOphnyKKtZnqDKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -223,31 +224,31 @@ Assert-True ($null -eq (Get-Process -Id $slow.ProcessId -ErrorAction SilentlyCon
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEX2PhCOsvrP1vKMvPrGo0vBJ02TvzTS5IWpPHfRsGmhMA0GCSqG
-# SIb3DQEBAQUABIIBgBeTdo7jjGuYJSgABNpfLlntMN7hgZ24Ie+q2t3xVWCjGHJ4
-# wAZc5uxEjknLg3KR/AataH8I2Nun4OHvgY1I1Tj+2tVxtcFGigqu/NmGJOV+vR7Y
-# ubLhMqXI/uTL1O20U9xL4VYV1KQr3j0pEbjcuO7BdsWwagDwVcBnssaJCOW9j0Mp
-# eQFAdUwclKfTsGv5gw7ZK128U59xeIRfnEIam78CBzdnXbc4CPmqIPE+v1Si37xB
-# owPwf6EEB2ufWGyrgOv6itNefcL8MyrouPKN4WYl0Gc8oNSCawFVzGQ/rOFn84xq
-# jraFv7V6g6UCDiD3xftKv2a6yz8iVxJ8U0B3HONB/wzN+qno6zL+1qZUkjZTdCXq
-# HrMxTQoy7UDA/l8T+vzrjMunvAWYlYn4jrMZrQVrxazU3tb1AJt5Pi5dHMYQMHGt
-# oMLiBQvzGHN0mheIhQ5f5MHt/bfcaQ8VVKYuIrcQfqHTM4GIXxWuXvxvKiBVar5+
-# urz3Y9cSDFQ0oxK306GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAzKlu1kQJdp4Mo7dlAdm6Smh0ejhMHbPFNaFvPlHeiuMA0GCSqG
+# SIb3DQEBAQUABIIBgCE5OGZeh5MrxjyIpmg177BO1CDsz1PCMzneqxTxXXjAFuJX
+# 5MyGU9Cdl35GmAF/Rbk4Wfz8OL4hV/D9TDeRb9lR8iDlyCj6xVTicO+aGcMHA7B7
+# xUOJ0llJzWTRg0ASXfKJScBAqaS7tTW5BxtSCrRlDPSo2VOPn5HCmY63IZxZR7BN
+# uCz0w+fyVWySphMc+lNv6tKReFH/jCl4TH1anUS002RuHTyRC7x/ts3poDSeQCno
+# S6L5X6lUJybZysNLmOKD6dNZUO9t07EfF/5PrZWjXBa//zMw9RtSlWN9dEK7ZfeW
+# lXCwzz83eoAEJgz0F9YWN7iPTmq+XNjOMZHTDQgqHMhLl44FFLpdxrqkSmb4LQ7G
+# iEiDq7g9mhXM2TDv/JLEL8hRhZ9w7Oh2zs9Q1b4SUMPe08xszlW53yKt7oj6tfe2
+# i++/hc+TJJ82tkmY/+yEcIzBcyhfNM51HgrxS76t1yThexB0blek6DeluL6L0YBp
+# 4CvHigGSrB8w1gbH8KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMzI1
-# MDZaMC8GCSqGSIb3DQEJBDEiBCDHfFbNtBgznLYUsy13FUqPOiQ83BlP4M0NRLpR
-# o/wptzANBgkqhkiG9w0BAQEFAASCAgAptrhQj6v3VpOTFu2Q/tojNCJdhrPPGMcp
-# d6CO1U/ZV38ER5b0TjX15ieXzMn1RlnvvfqV703hZ0/iIK+p8ZxfHwGdscDMdmCL
-# mUKh8UlHivsCCXTJL4GbQalbBOdEm+Q+XIBu96qdwFsYW7m1VsOY0cY9L/7kbE3P
-# 3tZAIVtc80hr7c4CHFO0QHdf3hi49T7f5VaF1OOoZVc4B8xmlZ9l8Gnc4Oz2oa8r
-# 8zS9zDZCR/Q9xCgs2lBWJooBFimvXHe+bjMBZpsgGBWwWrqJzto0uDdN8QmFUVb5
-# ry4RQWJo8AaEmRZtgk1QFLX2JzAbBzraULuQToP5FQHEgmEHw4ZyRvYvCGCSqhaD
-# S5alLS3UZFJt4LcGSOEKNY3UrnguCx1Bf7nE7omy4S62BlFI0ft2f0HA+rjN6rzs
-# 3ZwGi50y558oXQ7QHuxURd/DuXPbQ5NJY9js7KLR1A2b8Xw//5vg5D8IbuOOBNwF
-# Lq9wukEcQHPrVx3OkxGD/Y6Qm3VF+qGsA1O0Zn+lFwFhdxRj4n+gqZo9WxIUrLFH
-# LfP6kB9j5LAchi5TINROzk5LE6jJhNq70JfaRmL+YMBuHdcKWATpeh0kaGLMSliU
-# Lvm/6JM0zHYfthugXpJ7GO3H0jYIcZBBKEf1ifxFk2TY9vRWhN1nhko15l81ntUA
-# xd5WYjqmqw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTMxOTAx
+# NDNaMC8GCSqGSIb3DQEJBDEiBCC8S7Gw5n4eV9KKJAkIr1WWmZ9adc+YAjKFoBcF
+# u3iHXzANBgkqhkiG9w0BAQEFAASCAgBmb3vtHUIBZVaOM/KV8OLebKk9QD31uYol
+# TjXXsPz3z1jlBvoSx0ymsDLVmvpQoGoTZ/T3uqo2Nj8un9rYf8ZIt2ZcgPMlvowo
+# oOmMMqHKIl0dXT40OgvDjKhYPVhtaZTDICRgVJ7+5PM+ITBtE5zxVFl8BVTjSYik
+# 4Kvzew/JxirdOg2n+MO69WZmcv8fxVdxKi0N4acgAm6A/+w4B3xglBXAQpEr9Aae
+# uwMHkmuev4ouyk+2u8rp/cyIEAn5EzF85HoxMpi27vWpY+214aCjoJuBLXay6Lww
+# So87XhLWALwyfK0rh7n44zKSUNnnVc3kYdtmDVPQ3X7FEpmgtvz2FLcdgHJDTBCu
+# 83cbs3nTenfI8Nq47uqxDVOgmzBFWPyb4meQ78DiCptmWXBqfIBX3icjzr9bZH+P
+# 1XBQ7Emzs9auXLXvP/DrUs42KzOXbfOuw+F+wMeQuqaToeUtGp45FcDJy+fzbgb2
+# pH98ptXjUDyrlRYBlhbq+FRqYnklNbG7ibLdmtrjN6Euv0z6JqFaalQ+qC6ZN/CD
+# 9tZZwcnSCOOttrBSUJCVuD7JjUHTrxD4ieITXUjNNYO7waFH3PGSkyJdWXX4uI3m
+# spLp1JSJXAZEzFRjD5WocOwCk+5pwrO1fQEYWJ1t0HbqD0jpCsUKpgLbOddJMkhp
+# CKr6MERM2A==
 # SIG # End signature block

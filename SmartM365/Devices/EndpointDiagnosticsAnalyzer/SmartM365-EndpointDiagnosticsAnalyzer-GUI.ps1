@@ -3,7 +3,7 @@
     Smart Endpoint Diagnostics Analyzer.
 
 .VERSION
-    1.0.0
+    1.0.4
 
 .DESCRIPTION
     PowerShell/WPF analyzer for Microsoft Intune device diagnostics ZIP files
@@ -23,6 +23,7 @@ param(
     [string]$CollectionTempPath,
     [string]$ExportAnalysisClixmlPath,
     [string]$AnalysisProgressPath,
+    [string]$AnalysisExtractionPath,
     [switch]$KeepExtractedFiles,
     [string]$ExportHtmlPath,
     [string]$ExportAnonymizedZipPath,
@@ -82,6 +83,36 @@ function ConvertTo-SedaArgumentList {
     return [string[]]$args
 }
 
+function ConvertTo-SedaProcessArgument {
+    param([AllowEmptyString()][string]$Value)
+    if ([string]::IsNullOrEmpty($Value)) { return '""' }
+    if ($Value -notmatch '[\s"]') { return $Value }
+
+    $builder = New-Object System.Text.StringBuilder
+    [void]$builder.Append('"')
+    $backslashCount = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq '\') {
+            $backslashCount++
+            continue
+        }
+        if ($character -eq '"') {
+            if ($backslashCount -gt 0) { [void]$builder.Append((('\' * ($backslashCount * 2)) -join '')) }
+            [void]$builder.Append('\"')
+            $backslashCount = 0
+            continue
+        }
+        if ($backslashCount -gt 0) {
+            [void]$builder.Append((('\' * $backslashCount) -join ''))
+            $backslashCount = 0
+        }
+        [void]$builder.Append($character)
+    }
+    if ($backslashCount -gt 0) { [void]$builder.Append((('\' * ($backslashCount * 2)) -join '')) }
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
 function Protect-SedaElevationApiKey {
     param([Parameter(Mandatory)][string]$PlainText)
     $root = Join-Path $env:LOCALAPPDATA 'SmartM365\EndpointDiagnosticsAnalyzer\Temp'
@@ -125,7 +156,8 @@ function Start-SedaElevatedSelf {
     $argList.Add('-File')
     $argList.Add($PSCommandPath)
     foreach ($arg in (ConvertTo-SedaArgumentList -Parameters $forwardParameters)) { $argList.Add($arg) }
-    Start-Process -FilePath $runner -ArgumentList ([string[]]$argList) -Verb RunAs -WindowStyle Hidden
+    $argumentLine = @($argList | ForEach-Object { ConvertTo-SedaProcessArgument -Value ([string]$_) }) -join ' '
+    Start-Process -FilePath $runner -ArgumentList $argumentLine -Verb RunAs -WindowStyle Hidden
     [Environment]::Exit(0)
 }
 
@@ -133,7 +165,7 @@ Start-SedaElevatedSelf -Parameters $PSBoundParameters
 if ($AIApiKeyProtectedPath) { $AIApiKey = Get-SedaElevationApiKey $AIApiKeyProtectedPath }
 
 $script:AppName = 'Smart Endpoint Diagnostics Analyzer'
-$script:AppVersion = '1.0.0'
+$script:AppVersion = '1.0.4'
 $script:BasePath = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:LogoPath = Join-Path $script:BasePath 'WorkplaceCloudHub.ico'
 $script:WorkplaceLogoPath = Join-Path $script:BasePath 'WorkplaceCloudHub-lockup-WPF.png'
@@ -538,12 +570,17 @@ function Assert-SedaSafeZip {
         if ($archive.Entries.Count -gt 25000) { throw "ZIP contains too many entries: $($archive.Entries.Count)." }
         [long]$expandedBytes = 0
         $resolvedRoot = [IO.Path]::GetFullPath($DestinationRoot).TrimEnd('\') + '\'
+        $destinations = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
         foreach ($entry in $archive.Entries) {
             $entryName = ([string]$entry.FullName).Replace('/', '\')
+            foreach ($segment in ($entryName -split '\\')) {
+                if ($segment -and $segment -notin @('.','..') -and ($segment.EndsWith('.') -or $segment.EndsWith(' '))) { throw "Unsafe ZIP entry path: $entryName" }
+            }
             $destination = [IO.Path]::GetFullPath((Join-Path $DestinationRoot $entryName))
             if (-not $destination.StartsWith($resolvedRoot,[StringComparison]::OrdinalIgnoreCase)) {
                 throw "Unsafe ZIP entry path: $entryName"
             }
+            if ($entry.Name -and -not $destinations.Add($destination)) { throw "Conflicting ZIP entry path: $entryName" }
             $expandedBytes += [long]$entry.Length
             if ($entry.Length -gt 2GB) { throw "ZIP entry exceeds the 2 GB safety limit: $entryName" }
             if ($expandedBytes -gt 5GB) { throw 'Expanded ZIP content exceeds the 5 GB safety limit.' }
@@ -573,7 +610,7 @@ function Expand-SedaSelectedZipEntries {
             if ($extract) {
                 $parent = Split-Path -Parent $destination
                 if ($parent) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-                [IO.Compression.ZipFileExtensions]::ExtractToFile($entry,$destination,$true)
+                [IO.Compression.ZipFileExtensions]::ExtractToFile($entry,$destination,$false)
                 $extractedBytes += [long]$entry.Length
             } else {
                 $skippedBytes += [long]$entry.Length
@@ -590,7 +627,7 @@ function Expand-SedaSelectedZipEntries {
     }
 }
 function Expand-SedaDiagnosticZip {
-    param([Parameter(Mandatory)][string]$Path)
+    param([Parameter(Mandatory)][string]$Path,[string]$ExtractionPath)
     Write-SedaLog -Level INFO -Message "Expanding diagnostic ZIP: $Path"
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw "ZIP file not found: $Path"
@@ -598,8 +635,11 @@ function Expand-SedaDiagnosticZip {
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     Remove-SedaStaleExtractDirectories
-    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('seda_diag_' + [guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+    $tempRoot = if ($ExtractionPath) { [IO.Path]::GetFullPath($ExtractionPath) } else { Join-Path ([System.IO.Path]::GetTempPath()) ('seda_diag_' + [guid]::NewGuid().ToString('N')) }
+    $tempParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+    if (([IO.Path]::GetDirectoryName($tempRoot) -ne $tempParent) -or ([IO.Path]::GetFileName($tempRoot) -notmatch '^seda_diag_[0-9a-f]{32}$')) { throw 'Invalid analysis extraction path.' }
+    if (Test-Path -LiteralPath $tempRoot) { throw 'Analysis extraction path already exists.' }
+    New-Item -ItemType Directory -Path $tempRoot -ErrorAction Stop | Out-Null
     try {
         Assert-SedaSafeZip -Path $Path -DestinationRoot $tempRoot
         $extraction = Expand-SedaSelectedZipEntries -Path $Path -DestinationRoot $tempRoot
@@ -668,7 +708,57 @@ function Remove-SedaAnalysisExtraction {
     $resolved = [IO.Path]::GetFullPath($Path)
     if (-not $resolved.StartsWith($tempRoot,[StringComparison]::OrdinalIgnoreCase)) { return }
     if ([IO.Path]::GetFileName($resolved) -notlike 'seda_diag_*') { return }
-    Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction SilentlyContinue
+    # Never traverse an extraction root or ancestor redirected outside the temp tree.
+    $ancestor = $resolved
+    while ($ancestor.Length -ge $tempRoot.TrimEnd('\').Length) {
+        if (([IO.File]::GetAttributes($ancestor) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return }
+        if ($ancestor -eq $tempRoot.TrimEnd('\')) { break }
+        $ancestor = [IO.Path]::GetDirectoryName($ancestor)
+    }
+    function remove-extraction-tree([string]$Directory) {
+        foreach ($entry in [IO.Directory]::GetFileSystemEntries($Directory)) {
+            $attributes = [IO.File]::GetAttributes($entry)
+            if (($attributes -band [IO.FileAttributes]::Directory) -ne 0) {
+                if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { [IO.Directory]::Delete($entry,$false) }
+                else { remove-extraction-tree $entry }
+            } else {
+                if (($attributes -band [IO.FileAttributes]::ReadOnly) -ne 0 -and ($attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) {
+                    [IO.File]::SetAttributes($entry,($attributes -band (-bnot [IO.FileAttributes]::ReadOnly)))
+                }
+                [IO.File]::Delete($entry)
+            }
+        }
+        [IO.Directory]::Delete($Directory,$false)
+    }
+    try {
+        # Extended paths work with System.IO on .NET Framework, including CAB paths >260 chars.
+        $nativePath = if ($resolved.StartsWith('\\')) { '\\?\UNC\' + $resolved.Substring(2) } else { '\\?\' + $resolved }
+        remove-extraction-tree $nativePath
+    } catch {
+        Write-SedaLog -Level WARN -Message "Unable to remove analysis extraction: $resolved" -Exception $_.Exception
+    }
+}
+
+function ConvertFrom-SedaTerminalText {
+    param([AllowNull()][string]$Text)
+    # Strip terminal control sequences, retaining diagnostic text, Unicode and line breaks.
+    return [regex]::Replace([string]$Text,'\x1B(?:\][^\x07\x1B]*(?:\x07|\x1B\\)|\[[0-?]*[ -/]*[@-~])','')
+}
+
+function Get-SedaVisibleGrid {
+    param([object]$CurrentGrid,[object[]]$Grids)
+    if ($CurrentGrid -and $CurrentGrid.IsVisible -and $null -ne $CurrentGrid.ItemsSource) { return $CurrentGrid }
+    $visible = @($Grids | Where-Object { $_ -and $_.IsVisible -and $null -ne $_.ItemsSource })
+    foreach ($grid in $visible) { if ($grid.SelectedItem) { return $grid } }
+    if ($visible.Count -gt 0) { return $visible[0] }
+    return $null
+}
+
+function Set-SedaCurrentAnalysis {
+    param([AllowNull()][object]$Analysis)
+    $previous = $script:CurrentAnalysis
+    $script:CurrentAnalysis = $Analysis
+    if ($previous -and (-not $Analysis -or $previous.ExtractDir -ne $Analysis.ExtractDir)) { Remove-SedaAnalysisExtraction -Path $previous.ExtractDir }
 }
 
 function Remove-SedaStaleExtractDirectories {
@@ -2390,32 +2480,53 @@ function Expand-SedaCabFile {
         $result.Status = "CAB file not found: $CabPath"
         return $result
     }
-    if (-not $DestinationPath) {
-        $DestinationPath = Join-Path ([System.IO.Path]::GetTempPath()) ('seda_cab_' + [guid]::NewGuid().ToString('N'))
-    }
-    New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+    $stream = $null
+    try {
+        $stream = [IO.File]::OpenRead($CabPath)
+        $header = New-Object byte[] 36
+        if ($stream.Read($header,0,36) -ne 36 -or [Text.Encoding]::ASCII.GetString($header,0,4) -cne 'MSCF') { throw 'Invalid CAB header.' }
+        if ([BitConverter]::ToUInt32($header,8) -ne $stream.Length -or [BitConverter]::ToUInt16($header,26) -eq 0 -or [BitConverter]::ToUInt16($header,28) -eq 0) { throw 'Invalid or empty CAB structure.' }
+    } catch {
+        $result.Status = "CAB validation failed: $($_.Exception.Message)"
+        return $result
+    } finally { if ($stream) { $stream.Dispose() } }
+    if (-not $DestinationPath) { $DestinationPath = [IO.Path]::GetTempPath() }
+    $destination = Join-Path $DestinationPath ('seda_cab_' + [guid]::NewGuid().ToString('N'))
     $expand = Get-Command expand.exe -ErrorAction SilentlyContinue
     if (-not $expand) {
         $result.Status = 'expand.exe not available'
         return $result
     }
     try {
+        New-Item -ItemType Directory -Path $destination -ErrorAction Stop | Out-Null
         # Direct invocation preserves paths containing spaces on Windows PowerShell 5.1.
-        $nativeOutput = @(& $expand.Source '-F:*' $CabPath $DestinationPath 2>&1)
+        $nativeOutput = @(& $expand.Source '-F:*' $CabPath $destination 2>&1)
         $exitCode = $LASTEXITCODE
-        $files = @(Get-ChildItem -LiteralPath $DestinationPath -File -Recurse -Force -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
-        $result.Success = ($exitCode -eq 0 -or $files.Count -gt 0)
-        $result.ExtractPath = $DestinationPath
+        $files = @(Get-ChildItem -LiteralPath $destination -File -Recurse -Force -ErrorAction Stop | Select-Object -ExpandProperty FullName)
+        $result.Success = ($exitCode -eq 0 -and $files.Count -gt 0)
+        if ($result.Success -and $files.Count -eq 1 -and (Get-Item -LiteralPath $files[0]).Length -eq (Get-Item -LiteralPath $CabPath).Length) {
+            $hasher = [Security.Cryptography.SHA256]::Create()
+            try {
+                $inputStream = [IO.File]::OpenRead($CabPath)
+                try { $inputHash = [BitConverter]::ToString($hasher.ComputeHash($inputStream)) } finally { $inputStream.Dispose() }
+                $outputStream = [IO.File]::OpenRead($files[0])
+                try { $outputHash = [BitConverter]::ToString($hasher.ComputeHash($outputStream)) } finally { $outputStream.Dispose() }
+                if ($inputHash -eq $outputHash) { $result.Success = $false }
+            } finally { $hasher.Dispose() }
+        }
+        $result.ExtractPath = if ($result.Success) { $destination } else { '' }
         $result.Files = $files
         $result.Status = if ($result.Success) {
             "Extracted $($files.Count) file(s) from $([System.IO.Path]::GetFileName($CabPath))"
         } else {
             $detail = (@($nativeOutput | ForEach-Object { [string]$_ }) -join ' ').Trim()
             if ($detail.Length -gt 240) { $detail = $detail.Substring(0, 240) }
-            "expand.exe failed with exit code $exitCode$(if ($detail) { ": $detail" })"
+            "CAB extraction did not produce valid output (expand.exe exit code $exitCode)$(if ($detail) { ": $detail" })"
         }
     } catch {
         $result.Status = "CAB extraction failed: $($_.Exception.Message)"
+    } finally {
+        if (-not $result.Success -and (Test-Path -LiteralPath $destination)) { Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction SilentlyContinue }
     }
     return $result
 }
@@ -3455,7 +3566,8 @@ function Invoke-SedaAnalysis {
         }
         $analysisPhaseTimer.Restart()
     }
-    $zip = Expand-SedaDiagnosticZip -Path $Path
+    $zip = Expand-SedaDiagnosticZip -Path $Path -ExtractionPath $AnalysisExtractionPath
+    try {
     $inventory = $zip.Inventory
     complete-analysis-phase 1 'ZIP extraction and inventory'
     $substepTimer.Restart()
@@ -3626,6 +3738,10 @@ function Invoke-SedaAnalysis {
     $analysis | Add-Member -MemberType NoteProperty -Name AnalysisSubsteps -Value $analysisSubsteps.ToArray()
     Write-SedaLog -Level INFO -Message "Analysis completed: $($zip.ZipName); files=$($analysis.ZipInfo.TotalFiles); IME errors=$($analysis.ErrorSummary.ErrorCount); IME warnings=$($analysis.ErrorSummary.WarningCount); health errors=$($analysis.Health.ErrorCount); health warnings=$($analysis.Health.WarningCount); score=$($analysis.Insights.Score)."
     return $analysis
+    } catch {
+        Remove-SedaAnalysisExtraction -Path $zip.ExtractDir
+        throw
+    }
 }
 
 function Format-SedaSummaryText {
@@ -3771,13 +3887,13 @@ details{margin:8px 0}summary{cursor:pointer;font-weight:600;color:#1a6bb5}
 <html>
 <head>
 <meta charset="utf-8">
-<title>$(ConvertTo-SedaHtmlEncoded $script:AppName) v1.0.0 - $(ConvertTo-SedaHtmlEncoded $Analysis.ZipInfo.ZipName)</title>
+<title>$(ConvertTo-SedaHtmlEncoded $script:AppName) v$script:AppVersion - $(ConvertTo-SedaHtmlEncoded $Analysis.ZipInfo.ZipName)</title>
 <style>$css</style>
 </head>
 <body>
 <p class="alert">Summary report, not a full evidence export. Tables below show at most 1,000 IME/WU/MDM/event rows and 500 certificate rows; the timeline shows the most recent 300 entries. Event tables focus on errors and warnings. Full source files remain in the original ZIP; model records remain available in the application and CLI CLIXML export. Missing evidence is not a healthy result.</p>
 <header>
-<h1>$(ConvertTo-SedaHtmlEncoded $script:AppName) v1.0.0</h1>
+<h1>$(ConvertTo-SedaHtmlEncoded $script:AppName) v$script:AppVersion</h1>
 <p>Source: <strong>$(ConvertTo-SedaHtmlEncoded $Analysis.ZipInfo.ZipName)</strong> | Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm')</p>
 </header>
 <main>
@@ -3944,36 +4060,6 @@ function Export-SedaAnonymizedZip {
     return $output
 }
 
-function ConvertTo-SedaProcessArgument {
-    param([AllowEmptyString()][string]$Value)
-    if ([string]::IsNullOrEmpty($Value)) { return '""' }
-    if ($Value -notmatch '[\s"]') { return $Value }
-
-    $builder = New-Object System.Text.StringBuilder
-    [void]$builder.Append('"')
-    $backslashCount = 0
-    foreach ($character in $Value.ToCharArray()) {
-        if ($character -eq '\') {
-            $backslashCount++
-            continue
-        }
-        if ($character -eq '"') {
-            if ($backslashCount -gt 0) { [void]$builder.Append((('\' * ($backslashCount * 2)) -join '')) }
-            [void]$builder.Append('\"')
-            $backslashCount = 0
-            continue
-        }
-        if ($backslashCount -gt 0) {
-            [void]$builder.Append((('\' * $backslashCount) -join ''))
-            $backslashCount = 0
-        }
-        [void]$builder.Append($character)
-    }
-    if ($backslashCount -gt 0) { [void]$builder.Append((('\' * ($backslashCount * 2)) -join '')) }
-    [void]$builder.Append('"')
-    return $builder.ToString()
-}
-
 function Stop-SedaProcessTree {
     param([Parameter(Mandatory)][int]$ProcessId)
     $taskKill = Join-Path $env:WINDIR 'System32\taskkill.exe'
@@ -4007,12 +4093,81 @@ function Test-SedaAnalysisCompletion {
     )
 
     $exitCodeAvailable = -not [string]::IsNullOrWhiteSpace([string]$ExitCode)
-    if ($exitCodeAvailable -and [int]$ExitCode -ne 0) { return $false }
-    return $ResultExists
+    return ($exitCodeAvailable -and [int]$ExitCode -eq 0 -and $ResultExists)
 }
 
 
 
+function Get-SedaAnalysisErrorText {
+    param([Parameter(Mandatory)][string]$Path)
+    # Isolated analysis workers write UTF-8; archive text keeps its separate encoding detection.
+    $text = [IO.File]::ReadAllText($Path, [Text.UTF8Encoding]::new($false, $true))
+    return (ConvertFrom-SedaTerminalText $text)
+}
+
+function Start-SedaAnalysisProcess {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [Parameter(Mandatory)][string]$StandardOutputPath,
+        [Parameter(Mandatory)][string]$StandardErrorPath
+    )
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $process.StartInfo.FileName = $FilePath
+    $process.StartInfo.Arguments = (@($ArgumentList | ForEach-Object { ConvertTo-SedaProcessArgument -Value ([string]$_) }) -join ' ')
+    $process.StartInfo.UseShellExecute = $false
+    $process.StartInfo.CreateNoWindow = $true
+    $process.StartInfo.RedirectStandardOutput = $true
+    $process.StartInfo.RedirectStandardError = $true
+    $process.StartInfo.EnvironmentVariables['NO_COLOR'] = '1'
+    $outputStream = $null
+    $errorStream = $null
+    $started = $false
+    try {
+        $outputStream = [IO.File]::Open($StandardOutputPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
+        $errorStream = [IO.File]::Open($StandardErrorPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
+        if (-not $process.Start()) { throw "Unable to start analysis process: $FilePath" }
+        $started = $true
+        # Process.Start retains the native handle, including for fast-exiting PS5.1 children.
+        $outputTask = $process.StandardOutput.BaseStream.CopyToAsync($outputStream)
+        $errorTask = $process.StandardError.BaseStream.CopyToAsync($errorStream)
+        return [pscustomobject]@{
+            Process=$process; OutputStream=$outputStream; ErrorStream=$errorStream
+            OutputTask=$outputTask; ErrorTask=$errorTask
+        }
+    } catch {
+        if ($started) {
+            Stop-SedaProcessTree -ProcessId $process.Id
+            [void]$process.WaitForExit(5000)
+        }
+        if ($outputStream) { $outputStream.Dispose() }
+        if ($errorStream) { $errorStream.Dispose() }
+        $process.Dispose()
+        throw
+    }
+}
+
+function Complete-SedaAnalysisProcess {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Worker)
+
+    if (-not $Worker.Process.HasExited) { throw 'Analysis process is still running.' }
+    try {
+        $Worker.Process.WaitForExit()
+        [void]$Worker.OutputTask.GetAwaiter().GetResult()
+        [void]$Worker.ErrorTask.GetAwaiter().GetResult()
+        $rawExitCode = $Worker.Process.ExitCode
+        if ($null -eq $rawExitCode) { throw 'Analysis process exit code is unavailable.' }
+        return [int]$rawExitCode
+    } finally {
+        $Worker.OutputStream.Dispose()
+        $Worker.ErrorStream.Dispose()
+        $Worker.Process.Dispose()
+    }
+}
 function Invoke-SedaProcessWithTimeout {
     [CmdletBinding()]
     param(
@@ -4740,7 +4895,7 @@ function Start-SedaGui {
         </Grid>
         <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Top">
           <Border Background="#143657" BorderBrush="#24577F" BorderThickness="1" Padding="12,6" CornerRadius="0" HorizontalAlignment="Right">
-            <TextBlock x:Name="ProductVersionText" Text="v1.0.0" Foreground="#D9F6FF" FontWeight="SemiBold"/>
+            <TextBlock x:Name="ProductVersionText" Text="v$script:AppVersion" Foreground="#D9F6FF" FontWeight="SemiBold"/>
           </Border>
           <Border Background="#143657" BorderBrush="#24577F" BorderThickness="1" Padding="12,10" CornerRadius="0" Margin="0,10,0,0" MinWidth="300">
             <StackPanel>
@@ -5506,15 +5661,13 @@ function Start-SedaGui {
     }
 
     function get-selected-grid {
-        if ($script:CurrentGrid -and $script:CurrentGrid.ItemsSource) { return $script:CurrentGrid }
-        foreach ($name in @(
+        $grids = @(foreach ($name in @(
             'EventLogGrid','ImeGrid','AppsGrid','AutopatchGrid','CollectionErrorsGrid','WingetGrid','DriversGrid','WifiGrid','MdmPoliciesGrid','MdmBlockedGpsGrid','MdmUnmanagedGrid','MdmSourcesGrid','MdmCabFilesGrid',
             'WuEventsGrid','WuHistoryGrid','WuPoliciesGrid','WuInfoGrid','HealthGrid','InsightsGrid','DeviceGrid','ComplianceGrid','EnrollmentsGrid','BatteryGrid','FirewallGrid','CertGrid','SearchGrid','ZipFilesGrid','Win11Grid'
         )) {
-            $grid = $controls[$name]
-            if ($grid -and $grid.SelectedItem) { return $grid }
-        }
-        return $null
+            $controls[$name]
+        })
+        return Get-SedaVisibleGrid -CurrentGrid $script:CurrentGrid -Grids $grids
     }
 
     function export-grid-csv([object]$Grid, [string]$Path) {
@@ -5889,6 +6042,7 @@ function Start-SedaGui {
         show-overlay 'Analyzing diagnostics ZIP' 'Starting the isolated analysis process...'
         set-status 'Starting diagnostics ZIP analysis...' $true
         $operationId = [guid]::NewGuid().ToString('N')
+        $extractionPath = Join-Path ([IO.Path]::GetTempPath()) ('seda_diag_' + $operationId)
         $resultPath = Join-Path ([IO.Path]::GetTempPath()) ('seda_analysis_' + $operationId + '.clixml')
         $stdoutPath = Join-Path ([IO.Path]::GetTempPath()) ('seda_analysis_' + $operationId + '.stdout.txt')
         $stderrPath = Join-Path ([IO.Path]::GetTempPath()) ('seda_analysis_' + $operationId + '.stderr.txt')
@@ -5899,14 +6053,14 @@ function Start-SedaGui {
         $analysisRuntimeLabel = if ($analysisUsesWindowsPowerShell) { 'Analyzer runtime: Windows PowerShell 5.1' } else { 'Analyzer runtime: PowerShell 7' }
         $controls.OverlayStep.Text = "$analysisRuntimeLabel - starting analysis..."
         Write-SedaLog -Level INFO -Message "$analysisRuntimeLabel; executable=$runner"
-        $childArguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-Cli','-ZipPath',$Path,'-ExportAnalysisClixmlPath',$resultPath,'-AnalysisProgressPath',$progressPath,'-KeepExtractedFiles')
+        $childArguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-Cli','-ZipPath',$Path,'-ExportAnalysisClixmlPath',$resultPath,'-AnalysisProgressPath',$progressPath,'-AnalysisExtractionPath',$extractionPath,'-KeepExtractedFiles')
         # Both supported runtimes scan EVTX; explicit user skips remain visible in coverage.
-        $argumentLine = @($childArguments | ForEach-Object { ConvertTo-SedaProcessArgument -Value ([string]$_) }) -join ' '
-        $process = Start-Process -FilePath $runner -ArgumentList $argumentLine -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -ErrorAction Stop
+        $worker = Start-SedaAnalysisProcess -FilePath $runner -ArgumentList $childArguments -StandardOutputPath $stdoutPath -StandardErrorPath $stderrPath
+        $process = $worker.Process
         $timer = New-Object System.Windows.Threading.DispatcherTimer
         $timer.Interval = [TimeSpan]::FromMilliseconds(500)
         $script:SedaAnalysisContext = [pscustomobject]@{
-            Process=$process; Timer=$timer; ZipPath=$Path; ResultPath=$resultPath; ProgressPath=$progressPath; StdOutPath=$stdoutPath; StdErrPath=$stderrPath
+            Process=$process; Worker=$worker; Timer=$timer; ZipPath=$Path; ExtractionPath=$extractionPath; ResultPath=$resultPath; ProgressPath=$progressPath; StdOutPath=$stdoutPath; StdErrPath=$stderrPath
             StartedAt=Get-Date; CompletionStatus=$CompletionStatus; RuntimeLabel=$analysisRuntimeLabel
         }
         Write-SedaLog -Level INFO -Message "GUI isolated ZIP analysis started. ProcessId=$($process.Id); Zip=$Path"
@@ -5933,25 +6087,17 @@ function Start-SedaGui {
                 return
             }
             $context.Timer.Stop()
-            $context.Process.WaitForExit()
-            $rawExitCode = $null
-            try { $rawExitCode = $context.Process.ExitCode } catch {}
-            $exitCodeAvailable = -not [string]::IsNullOrWhiteSpace([string]$rawExitCode)
-            $exitCode = if ($exitCodeAvailable) { [int]$rawExitCode } else { $null }
-            $exitCodeText = if ($exitCodeAvailable) { [string]$exitCode } else { 'unavailable' }
-            $context.Process.Dispose()
-            $stderrText = if (Test-Path -LiteralPath $context.StdErrPath) { Get-Content -LiteralPath $context.StdErrPath -Raw -ErrorAction SilentlyContinue } else { '' }
-            $resultExists = Test-Path -LiteralPath $context.ResultPath -PathType Leaf
-            $analysisSucceeded = Test-SedaAnalysisCompletion -ExitCode $exitCode -ResultExists $resultExists
-            $completionStatus = [string]$context.CompletionStatus
             $script:SedaAnalysisContext = $null
             try {
+                $exitCode = Complete-SedaAnalysisProcess -Worker $context.Worker
+                $exitCodeText = [string]$exitCode
+                $stderrText = if (Test-Path -LiteralPath $context.StdErrPath) { Get-SedaAnalysisErrorText -Path $context.StdErrPath } else { '' }
+                $resultExists = Test-Path -LiteralPath $context.ResultPath -PathType Leaf
+                $analysisSucceeded = Test-SedaAnalysisCompletion -ExitCode $exitCode -ResultExists $resultExists
+                $completionStatus = [string]$context.CompletionStatus
                 if (-not $analysisSucceeded) {
                     $message = if ([string]::IsNullOrWhiteSpace([string]$stderrText)) { "Analysis process failed with exit code $exitCodeText." } else { [string]$stderrText }
                     throw $message
-                }
-                if (-not $exitCodeAvailable) {
-                    Write-SedaLog -Level WARN -Message 'Isolated ZIP analysis exit code is unavailable; accepting the completed analysis CLIXML result.'
                 }
                 $controls.OverlayStep.Text = 'Finalization 2/3 - Loading complete results (no records discarded)'
                 $controls.StatusText.Text = $controls.OverlayStep.Text
@@ -5961,7 +6107,7 @@ function Start-SedaGui {
                 $analysis = Import-Clixml -LiteralPath $context.ResultPath -ErrorAction Stop
                 $loadTimer.Stop()
                 Write-SedaLog -Level INFO -Message ("Finalization 2/3 completed: loading results; duration={0:F3}s." -f $loadTimer.Elapsed.TotalSeconds)
-                $script:CurrentAnalysis = $analysis
+                Set-SedaCurrentAnalysis -Analysis $analysis
                 $controls.OverlayStep.Text = 'Finalization 3/3 - Displaying results'
                 $controls.StatusText.Text = $controls.OverlayStep.Text
                 $window.Dispatcher.Invoke([Action]{},[System.Windows.Threading.DispatcherPriority]::Render)
@@ -5977,6 +6123,7 @@ function Start-SedaGui {
                 set-status 'Analysis failed.' $false
                 [System.Windows.MessageBox]::Show($_.Exception.Message, 'Analysis Error', 'OK', 'Error') | Out-Null
             } finally {
+                if (-not $script:CurrentAnalysis -or $script:CurrentAnalysis.ExtractDir -ne $context.ExtractionPath) { Remove-SedaAnalysisExtraction -Path $context.ExtractionPath }
                 Remove-Item -LiteralPath $context.ResultPath,$context.ProgressPath,$context.StdOutPath,$context.StdErrPath -Force -ErrorAction SilentlyContinue
                 hide-overlay
             }
@@ -6186,7 +6333,7 @@ function Start-SedaGui {
             show-overlay 'Exporting redacted text ZIP' 'Redacting common identifiers and writing ZIP...'
             Export-SedaAnonymizedZip -SourceZip $script:CurrentAnalysis.SourceZipPath -OutputZip $dialog.FileName | Out-Null
             hide-overlay
-            [System.Windows.MessageBox]::Show("Anonymized ZIP saved:`n$($dialog.FileName)`n`nReview before sharing.", 'Anonymized ZIP exported', 'OK', 'Information') | Out-Null
+            [System.Windows.MessageBox]::Show("Redacted text ZIP saved:`n$($dialog.FileName)`n`nIdentifiers may remain. Manually review all content and filenames before sharing; anonymity is not guaranteed.", 'Redacted text ZIP exported', 'OK', 'Information') | Out-Null
         } catch {
             Write-SedaLog -Level ERROR -Message 'Anonymized ZIP export failed.' -Exception $_.Exception
             hide-overlay
@@ -6245,8 +6392,7 @@ function Start-SedaGui {
     })
 
     $controls.BtnReset.Add_Click({
-        if ($script:CurrentAnalysis) { Remove-SedaAnalysisExtraction -Path $script:CurrentAnalysis.ExtractDir }
-        $script:CurrentAnalysis = $null
+        Set-SedaCurrentAnalysis -Analysis $null
         $script:EventRowsFull = @()
         $script:ImeRowsFull = @()
         $script:AppsRowsFull = @()
@@ -6303,8 +6449,17 @@ function Start-SedaGui {
             Stop-SedaProcessTree -ProcessId $context.Process.Id
         }
         $analysisContext = $script:SedaAnalysisContext
-        if ($analysisContext -and -not $analysisContext.Process.HasExited) {
-            Stop-SedaProcessTree -ProcessId $analysisContext.Process.Id
+        if ($analysisContext) {
+            $analysisContext.Timer.Stop()
+            if (-not $analysisContext.Process.HasExited) {
+                Stop-SedaProcessTree -ProcessId $analysisContext.Process.Id
+                [void]$analysisContext.Process.WaitForExit(5000)
+            }
+            try { [void](Complete-SedaAnalysisProcess -Worker $analysisContext.Worker) }
+            catch { Write-SedaLog -Level WARN -Message 'Unable to finalize the analysis worker during close.' -Exception $_.Exception }
+            Remove-SedaAnalysisExtraction -Path $analysisContext.ExtractionPath
+            Remove-Item -LiteralPath $analysisContext.ResultPath,$analysisContext.ProgressPath,$analysisContext.StdOutPath,$analysisContext.StdErrPath -Force -ErrorAction SilentlyContinue
+            $script:SedaAnalysisContext = $null
         }
         if ($script:CurrentAnalysis) { Remove-SedaAnalysisExtraction -Path $script:CurrentAnalysis.ExtractDir }
     })
@@ -6334,7 +6489,13 @@ if ($CollectLocal) {
 }
 
 if ($Cli) {
+    if ($ExportAnalysisClixmlPath) {
+        # Match the GUI reader even when the inherited Windows console uses an OEM code page.
+        [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+    }
     if (-not $ZipPath) { throw 'Use -ZipPath with -Cli, or use -CollectLocal.' }
+    $analysis = $null
+    $analysisCompleted = $false
     try {
         $analysis = Invoke-SedaAnalysis -Path $ZipPath
         if ($ExportAnalysisClixmlPath) {
@@ -6363,23 +6524,27 @@ if ($Cli) {
             Write-Output ''
             Write-SedaLog -Level INFO -Message 'CLI AI analysis completed.'
         }
+        Format-SedaSummaryText -Analysis $analysis
+        $analysisCompleted = $true
     } catch {
         Write-SedaLog -Level ERROR -Message 'CLI analysis failed.' -Exception $_.Exception
         throw
+    } finally {
+        if ($analysis -and (-not $KeepExtractedFiles -or -not $analysisCompleted)) { Remove-SedaAnalysisExtraction -Path $analysis.ExtractDir }
     }
-    Format-SedaSummaryText -Analysis $analysis
-    if (-not $KeepExtractedFiles) { Remove-SedaAnalysisExtraction -Path $analysis.ExtractDir }
     exit 0
 }
 
 Write-SedaLog -Level INFO -Message 'Starting GUI.'
 Start-SedaGui
 
+
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCUCF9HmzI1soON
-# PQYHf/K3UEliIFx1kl5gZgnsolt2HaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDqIruEStjinAeV
+# Hv2z/Wh2OoRheiyzbvOUBIRhNLk4oqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6512,31 +6677,31 @@ Start-SedaGui
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBj8ySvO57lMLyrKIjJNFsEg6G4HAvytg+7VaGWSQNJLMA0GCSqG
-# SIb3DQEBAQUABIIBgGjo/Z7r1RDcZ0a/Oh+h/t3Pm4c9s8g5gtKtPke6xk1E26Za
-# I9xlO3xCqSJhTKzSSMY0DXCT2JY0v74622nu/KoDbN2JbXMiOvNAXugQ9GaNaKMo
-# laPQ0h1EKKDlvwb378Y3DfXAsgK8piPPWPyxpdEh7EjVMCf6sxHp/+PNwg5D/EuS
-# YuDYa5fdeycsVUCIJ7D+6BD5qEFnYT7JWhQLT3gJHvSA+QWv3JWFflUfYkqskt0k
-# 80ATkPxwdu2CdfO0oi9B2eioq7RcqbTzt9nq7cGNeBfnbjYsujmxft663tKLL2Rv
-# s4k3vn6I/C1cchJCrcFOxZKKaaQCxL7UqvcMql/rrVSItC/eabuVeelxqnnfih6U
-# Tu+t1XgIxPhumY0jLInP+OxAzqwUT9RFmsgbC03X9yNgUjG+hj7M7t/SfZ6vIZtc
-# UTCR7+H7f6ZcR032l4ZDm25DoFowu9H2fDJWeralrbbCL4BBdwRueIglsxxC2Fr/
-# +7vWIBSYHk6t6ydX5aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIC5GyVy8oQoXnuYNqkVcG47l5bV8e6ND2K7ZidAAzsLfMA0GCSqG
+# SIb3DQEBAQUABIIBgCfsute5olhenDxJFRReFe7EHlKSRWBuZK1f1nkc06x0J71z
+# Oj7yQqs1WZpzjQZPwJaGY1m7gUiZ1Dm8l1NC+2N83MvnOn2bm2Hxywfw8jSLAh4u
+# uqSeGiBL9NPuFcg7akw313xOiuUlCXxI6ikBEXEQp+UYx07KaKUMqMwTkwvKRfgf
+# utOl5OkiYIjMZO7pnMLgH+BjIf6eVUpkqJ5JJS9yRIPXrz2DCh0caQkBDXdNhA0k
+# 0h/vmubgzL/OoQJvknJbRax1UXtWLz5iqad9quIQYr1FPC+psXHlQSOMo4fiC+i+
+# 1crz4cjTcnOUjtacBaAY9GJAMjBfHZx0OY6Gde33zBBXbS9NJiBoakX+voKx7zbO
+# 5fHEFUeXOpRG8OwacX1H3UzpmeqHdQtKmZ6ktFnoTYlkp0RcUIIzdX/nY+Mar12T
+# lsOTGQrW33eVfEhzaCcYzhqZzUIjBU5df81tnAz4juubL7rfq4zjsExIPQpt/raE
+# /p0Ij7+yf3Z3yW8ZlKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQwMTE2
-# NTNaMC8GCSqGSIb3DQEJBDEiBCAj1Goq6wFFs3Fe0o0HBh+1y3BqalyGr8tkpWTG
-# ieR/azANBgkqhkiG9w0BAQEFAASCAgBRRYJL0qG6mmHoV5GiQmukeZmzwcXYpt3T
-# UVkJEQBF2JbQZKz0lQIaWZaelofWf3M6DTNB3jSssLLwDdlZR4kEQJKho769ToEQ
-# J66laTxlm8MZXplhDiJduUFHKCwQJuGJsHPufHV2PiYYn0rmLo+1pMHXkDu5naba
-# P5PeQeHmvHtD3aiRXf9yjkXPXNi/D/ljAEcXkj1wby+bhebrDOrmBC6j6YfliOhn
-# jdRWEpUoSG5Gko+PU5izzlvDdmcIXJyCAi5YK8qgKLa6FqaHSD4A2S3KNTHNDCw5
-# 7X+C2CGk0nl4wCBEDvnIeU2F4ewFwf4p4VdrMBXa0F1UpocHSnHpgky7faiAlDgQ
-# y5lAEvzIfTkpv3GN1Kn3zL4RFA0pejH5qmYnai3mfxkDYLfkRRwnhZnOkhn/OAlD
-# ejqjiN29F27ukIADln/ckNDgPH5jBwQUvy7Ar0OyTu/w+B2GZ/nnQDgDsKswr6lc
-# U8zD6f8LhXbHzXvcsbuY72H+ROhRR4gbKiTel/Uiw1G1ab6BoDADjWrCG+SWrVwh
-# MBJ0TGjkulJEJ+C5G3mwAzA7w/3s1EBlE0NmwEQ8ALhkdndynJRKMFr94oIlCUhk
-# D3IdQH9aCoYfL0mJ1DpmitU1nw1stsAuivaYj0kajJy9V6ej5M/zR9NVHhBXS5bk
-# SUEEHSno2A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTUyMzEy
+# MDJaMC8GCSqGSIb3DQEJBDEiBCCUucnHZZoFO8+ASmzZT2E3Qg2A/Pl2ukbC9lon
+# PNwTDzANBgkqhkiG9w0BAQEFAASCAgAuOJs+7bsBMCUVz4cDiHCU/f63KwyxKLnb
+# Ky2H4TC4u8puusuFqlOI/qtmFLI5K54DepkGZCiNx9ZPMCFpoOItpF5JmMkIJ36w
+# xhXDMLswllrwY2SOgOQ6nqAnnmFQjVsrCowUtnuxOEjMo9iUeONFEdhGhRjzBwH8
+# aLpASb3MyBrZSQfX8RH+kom2ZyWQo5VyMCmOUbz7qndP2MpYs2PI9lOf/Ar/QGC5
+# OJxCZ/J/KD9XbsHogJaQDV6mICjdEDFlzDsR0+H2PBzF0UqZmZqG5FPuoc+42sm/
+# yV1ocszFXdb1yXGkbri66eWBqLo3RkJUkdKu26OQm76y1vfj1AMg4z1guWezgTif
+# WMAoWsQTvbQM17UF70rPuntVn9lP2Le4gFcmFh2bUOqx+2RkNABUjWnEuge2R7dk
+# U/q8HsiJoXkimbzuqK+8ySddAu6rzS1IxjZVfr3qKVkpSIdl8aWF/1NLdLvsiK93
+# qLbsafsyWDizXSgbEIuhe5/7YZemQmW0MlXHbv8BHi8rImWcFoSMH2xtASOzc511
+# JG2SS50kR9swp0XwRu6NGaBB/J2cEDJM+acdC7wDjuN1PzYklZQYPoujE/6b1rrw
+# o07HjwqIIgBt70raSMRGDS84pOgJgQuwPMYop0Fe1SlcCg7S4+i+PAFJlPa74URN
+# z3eUVK9law==
 # SIG # End signature block

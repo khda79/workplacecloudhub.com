@@ -1,7 +1,7 @@
 {
   "SchemaVersion": 1,
   "ProductName": "Smart Endpoint Diagnostics Analyzer",
-  "PackageVersion": "1.0.0",
-  "ModuleVersion": "1.0.0",
+  "PackageVersion": "1.0.4",
+  "ModuleVersion": "1.0.4",
   "Prerelease": ""
 }

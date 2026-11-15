@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validates or packages the complete application runtime, including offline demo dependencies.
 .VERSION
-1.0.3
+1.0.4
 #>
 
 [CmdletBinding()]
@@ -36,11 +36,15 @@ $installPath = Join-Path $testRoot 'Install'
 $module = $null
 try {
     $version = Get-Content -LiteralPath (Join-Path $applicationRoot 'SmartM365-EndpointDiagnosticsAnalyzer.version.json.txt') -Raw | ConvertFrom-Json
-    Assert-True ([string]$version.PackageVersion -eq '1.0.0') 'Unexpected package version.'
+    $parsedVersion = $null
+    Assert-True ([version]::TryParse([string]$version.PackageVersion,[ref]$parsedVersion)) 'Package version is not valid.'
+    Assert-True ([string]$version.ModuleVersion -eq [string]$version.PackageVersion) 'Package and module versions differ.'
+    $moduleData = Import-PowerShellDataFile -LiteralPath (Join-Path $applicationRoot 'PowerShellGallery\Module\SmartM365.EndpointDiagnosticsAnalyzer.psd1')
+    Assert-True ([string]$moduleData.ModuleVersion -eq [string]$version.PackageVersion) 'Gallery manifest version differs from runtime metadata.'
 
     $guiPath = Join-Path $applicationRoot 'SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1'
     $guiContent = Get-Content -LiteralPath $guiPath -Raw
-    Assert-True ($guiContent -match "AppVersion = '1\.0\.0'") 'GUI version is not aligned with the current 1.0.0 release.'
+    Assert-True ($guiContent.Contains("`$script:AppVersion = '" + [string]$version.PackageVersion + "'")) 'GUI version differs from package metadata.'
     Assert-True ($guiContent -match 'LocalDataRoot = Join-Path .*LOCALAPPDATA.*SmartM365\\EndpointDiagnosticsAnalyzer') 'Local data root is not under LocalAppData.'
     Assert-True ($guiContent -match 'api_key_dpapi') 'DPAPI-backed AI configuration is missing.'
     Assert-True ($guiContent -notmatch 'api_key\s*=\s*\$Config\.ApiKey') 'Plaintext AI key persistence is present.'
@@ -159,11 +163,12 @@ finally {
     }
 }
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCx/KbMBabu9gxb
-# gXpTY+Yqp+j3+KdaaCJZ/aDzEOs9wKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCkob686rGdIU84
+# B1XZtBlvkNVSmiZQ2oBGFFyygrl0zqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -296,31 +301,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICGQWefiTINTgD4Qsn2u9rCxCVq1KPnip2Q0vGHSaIfiMA0GCSqG
-# SIb3DQEBAQUABIIBgHppuyZm6++hBiw03BX0aGETMtSQwYxCY8lqU8IvUQUjumtY
-# XAATWmJCAyb/LlisNUWZk/iLuIzhHaYSXd6oKOmqXSbI3bQWU4cLvmHpg7/J8qJu
-# TQ12IwZF+tYRa1mmbvq/mK4+Ak5YFzl3jtGpkxukgjPUPYqC+VY+37C4yYUxrr3u
-# 6qLvgwb57mcfYpI/5QqO2a5kfq6CL3Qw62v8A2UoRCnhgjyXOpVnoJdi2x8Nwi68
-# hAAsk4hiqNdwqwwPOWUX5+X43snecnA0E0JDtWS2cGvbz/llZetMwd8NL+J3maU9
-# d1NQJgUAALJ5MkPX9vVhOGRbgCoNc6KQshqJXoJlC/0Tv1OqHlhWQpyg6MF8RuTc
-# CwuZqKcaVEODZexGig+3kvQuPXoO6EWZm56WZdWQLZTfY5dCE0OlAj+zMKuSUshG
-# cHx8OVTm0IFRWtrmQXoWF0j/aNCDkxS9d3X6J6eYC6Fr34/Fl/2+9l0PnS2HqyhB
-# /Bzs9nzPoPw+7rQzhqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPQE7osCSZqTFwYfSFg0YC0DbcU5rLAx6HET2eX0h3iUMA0GCSqG
+# SIb3DQEBAQUABIIBgHE9mO1l27Yz0MB00kZeh4Qa/HvEeKtBKyMck46evrBiQItj
+# F/S5Ko5POSeC8XvtV5PeUksrfN4AwBOp2Wm5ja/Eozs819F6SXHbTMUB723HikN+
+# smgIt46cf73H7+8PDsQ/zAPMnI2o+o/wdW8F7kH0rqBMGEWIY1FdPtaZGhf122xf
+# RzX83U1fX9/kwBD3SWVEaj1Qc4y+9/ioeFcz/1rmJmUSwHErtRIIJwToaSMS4tcG
+# ds80pP5NVrvIPJhYIL+Ua2JOUwRMPMTl/s4yDHLgy9B5rgYgDn/dS4l7DeugLrHu
+# Bwpk1L/h6dL73ZXIK2iE+9RLaWgzIktcA+d3o190Yk8xUCz+62SPmo+JoNKHj1LE
+# GuNy+mAGWL4p4N/sDxPRlHmJkPZHV++oxb6qL49V5m9BsC1rMGx+5GyF1NwCx4F7
+# 1FTTfOmdpz2DHtmJ8jmJk3ZUZgqjzZxchBFRUw76TojQoUqrnBMnedxi3nlFilww
+# igrcS/A6Kd/HUH1rxKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTMxMDQz
-# MzRaMC8GCSqGSIb3DQEJBDEiBCBgCPMcVoqxsWKQVgKukFxZdGqbpSGMyuCUDFVg
-# T6exXjANBgkqhkiG9w0BAQEFAASCAgBlTajSxeGFiOl0Ei3vHjmYJhOc7Fgu0NXH
-# cVoNTDpnHnW2Ex6KVHYzzp/mjmfxzVUuH6MJ3c0b1a7qWStGq0Xnu9H4xeogFgC1
-# fA7rH0QUbNb3Sg792b6Zl/iRTwmAT9fcNpD+tXVPB6svOFZojSNqdrFXIHOOiTou
-# 3FT1kny8r7A9t89PCGjoCOxQ12yWvR7cxs6oqSzZmjI1W42gTCEwqMzOYjDmSiLy
-# dPx06HLu3DnORlzD8ZHKeqnW1wcUyokLgYoCkSPrru/SKqKMApJeyVlPNMAlfKaC
-# w9YC7p3NURWJiUm+olVku7xwaLk+ytgRKZiNsyTuPiW7U6tH1wTsohovyemjQMl6
-# YIw+8bNyNmE/FCX0fA2JqAqemujQEeTZb5beK4cDW0onR5+D4HtZeZJaPX+lnq4U
-# ZbUvR2aGpS54Fv6MzCKvbPtXBtHv3eXwFFsdYBxonWnunqdTCjr/Yd99gauM86MH
-# euOjikJnBwS2VPsMnBNWDUVKnxyuyU/2H53KGQ4cs6KrV8Xm9EJU/xiIBqEHvn0R
-# b+uQwrDNJRDczSFTEnuSCePCpXiTVQ7dxqE/sA68wCKxZS3psrM/Szv0eucPh3td
-# ZyxJ1QJkgd9MrflDzUG0DbXn6n1y5ekjtfbo1fcCUpoXU5fSsHnNNJoUJHB8q93H
-# 5phPCLVu8g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTMxOTAz
+# NDJaMC8GCSqGSIb3DQEJBDEiBCC54SIemM7iHqkxENNMZv69ygqDtMWz9NlcBf/V
+# O7YoWjANBgkqhkiG9w0BAQEFAASCAgCDZGzBIXUxawvMobBgskJxT5B77Xc3QAyw
+# JGqtdRegx7ZARb1R/XWYGho+OAWtaaKSfO6TMGHzmYgCBUWjHLTB3owUvY6Mjuxg
+# gyKmFfostAWK53LqSpssatrrdS0Dmjd6NjUf3kfTC47MeD2cpR39teZguCJlnYZ8
+# O3hpoEsJy5NY9eGZFtSalfbXhxt6GfyUE4jdbPF1G8eKaZ7uxq7N6SeUSnzNTNDY
+# jQVghXsgDgqqk1ou+AL3BS7SEmHtza8hRjs85/Y008QinibjzCe0aa7EfgHQ5Bbj
+# StG6Of3cfSnDSEkTAYGa1lU3C7kAjeF9Dmsxd3GbKn3gQjIRnvHSChaB/Sp2o5r3
+# 7EOtrotrtF6249lh+oKUy6qgEeaiDRshpQrOOFbCui+KySVvP6C19RMSMK5Jp4Wm
+# M/1SsnAoWYM0p93yKLvcrd/ol5Qcn0nxlQcPfrcMMY8d+MGCFOJpmA/eV4P6+ZMs
+# ZFCLC2slbPqNduXS1u69KxbVgMsCtx3719PNZ8uAlXlIZhHpfIkqZC8sR84WH/p0
+# DmfMMcmCLxW5HHFAKPGDxHNmuYmFJr0WXmyUVmeUEv4oNqWJqS/lanXKIeRemQks
+# W5Dfmxp2yIBhHqDZBrj7ZlODRdVwfahLauW24eJvdP4jx2olLtRSRgwG/JOxWwl/
+# E7a2GpQtAw==
 # SIG # End signature block
