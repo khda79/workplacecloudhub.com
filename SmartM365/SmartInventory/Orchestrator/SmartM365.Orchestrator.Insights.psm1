@@ -977,7 +977,7 @@ $script:SwiFileProducers = [ordered]@{
     'SmartM365-Exchange-Hybrid-FreeBusy-Inventory.ps1' = @('Exchange_Hybrid_FreeBusy_Findings.csv', 'Exchange_Hybrid_FreeBusy_Summary.csv')
     'SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1' = @('Exchange_OnPrem_HealthChecker_Findings.csv', 'Exchange_OnPrem_HealthChecker_Summary.csv', 'Exchange_OnPrem_Infrastructure_PerServerSummary.csv', 'Exchange_OnPrem_MailboxDatabases_Paths.csv', 'Exchange_OnPrem_MigrationReadiness_Config.csv', 'Exchange_OnPrem_Servers_Compute.csv', 'Exchange_OnPrem_Servers_DiskDrives.csv', 'Exchange_OnPrem_Servers_Inventory.csv', 'Exchange_OnPrem_Servers_Inventory_Summary.csv', 'Exchange_OnPrem_Servers_LogicalDisks.csv', 'Exchange_OnPrem_Servers_RemoteAccess.csv', 'Exchange_OnPrem_Servers_ServiceHealth.csv')
     'SmartM365-Intune-EndpointSecurityHealth-Inventory.ps1' = @('Intune_EndpointSecurity_DefenderAgents.csv', 'Intune_EndpointSecurity_FirewallStatus.csv')
-    'SmartM365-Licences-Inventory.ps1' = @('M365_Licenses_ReportAssignmentIssues.csv', 'M365_Licenses_ReportCandidates.csv', 'M365_Licenses_ReportGaps.csv', 'M365_Licenses_ReportSkuCandidates.csv', 'M365_Licenses_ReportSkuCapacity.csv', 'M365_Licenses_ReportSnapshot.json.txt', 'M365_Licenses_ReportSources.csv', 'M365_Licenses_ReportSummary.csv')
+    'SmartM365-Licences-Inventory.ps1' = @('M365_Licenses_ReportAssignmentIssues.csv', 'M365_Licenses_ReportCandidates.csv', 'M365_Licenses_ReportGaps.csv', 'M365_Licenses_ReportSkuCandidates.csv', 'M365_Licenses_ReportSkuCapacity.csv', 'M365_Licenses_ReportSnapshot.json.txt', 'M365_Licenses_ReportSnapshotIntegrity.csv', 'M365_Licenses_ReportSources.csv', 'M365_Licenses_ReportSummary.csv')
     'SmartM365-LicensePricing-Inventory.ps1' = @('M365_License_Prices.csv')
     'SmartM365-M365-BackupPolicyScope-Inventory.ps1' = @('M365_BackupPolicyScope_GroupMembers.csv', 'M365_BackupPolicyScope_MailboxCoverage.csv')
     'SmartM365-M365-BackupProtectedMailboxes-Inventory.ps1' = @('M365_Backup_ProtectedMailboxes.csv')
@@ -990,6 +990,12 @@ $script:SwiFileProducers = [ordered]@{
     'SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.ps1' = @('SharePoint_OnPrem_ContentDatabases.csv', 'SharePoint_OnPrem_Farms.csv', 'SharePoint_OnPrem_Servers.csv', 'SharePoint_OnPrem_ServiceApplications.csv', 'SharePoint_OnPrem_WebApplicationZones.csv', 'SharePoint_OnPrem_WebApplications.csv')
     'SmartM365-Teams-Inventory.ps1' = @('M365_Teams_Channels.csv')
     'SmartM365-WinUpdate_Status_From_Intune.ps1' = @('Intune_WindowsUpdate_Status.csv')
+}
+
+# SWI inputs imported once by an operator script, without an inventory job. They stay optional in
+# the SWI contracts and are reported apart instead of as inputs without a producer job.
+$script:SwiOperatorSuppliedFiles = [ordered]@{
+    'Endpoint_Windows11_HistoricalReadiness.csv' = 'SmartWorkplaceIntelligence/scripts/Initialize-HistoricalWindowsReadinessSource.ps1'
 }
 
 function Get-SmartM365OrchestratorLatestFolderPath {
@@ -1161,6 +1167,7 @@ function Get-SmartM365OrchestratorSwiValidity {
         [pscustomobject]@{
             File = $rule.File; Kind = $rule.Kind; Basis = $basis; LimitHours = $rule.LimitHours; Optional = [bool]$optional
             Producer = if ($producerByFile.ContainsKey($rule.File)) { $producerByFile[$rule.File] } else { '' }
+            OperatorSupplied = $script:SwiOperatorSuppliedFiles.Contains($rule.File)
             TimestampUtc = $timestamp; ExpiresAtUtc = $expires; HoursLeft = $hoursLeft; State = $state
             # An incomplete or unqualified Intune group is still refused although the group is optional.
             Blocks = ((-not $optional -and $state -notin @('Valid', 'Aging')) -or ($rule.Kind -eq 'IntuneReceipt' -and $state -in @('Incomplete group', 'Receipt not completed')))
@@ -1203,7 +1210,8 @@ function Get-SmartM365OrchestratorSwiValidity {
     }
     [pscustomobject]@{
         Rows = @($rows); Inputs = @($evaluations)
-        Unmapped = @($evaluations | Where-Object { -not $_.Producer -or -not $jobsByScript.ContainsKey($_.Producer) } | ForEach-Object File | Sort-Object -Unique)
+        Unmapped = @($evaluations | Where-Object { -not $_.OperatorSupplied -and (-not $_.Producer -or -not $jobsByScript.ContainsKey($_.Producer)) } | ForEach-Object File | Sort-Object -Unique)
+        OperatorSupplied = @($evaluations | Where-Object OperatorSupplied | ForEach-Object File | Sort-Object -Unique)
         MaxSourceAgeHours = $settings.MaxSourceAgeHours; SettingsSource = $settings.Source
         LatestFolderPath = $LatestFolderPath; EvaluatedAtUtc = $NowUtc
     }

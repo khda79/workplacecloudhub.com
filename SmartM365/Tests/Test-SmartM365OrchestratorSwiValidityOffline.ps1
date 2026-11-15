@@ -4,7 +4,7 @@
 Offline tests of the SWI validity shown in the orchestrator GUI (Jobs and Planning). Real SWI
 contracts, CMDB source registry and jobs template; synthetic DATA-LAST files and receipts only.
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 param()
@@ -61,7 +61,15 @@ try {
     $intuneFiles = @($intune.groups | ForEach-Object { $_.files.file })
     $contractFiles = @(@($source.currentFiles) + @($source.optionalCurrentFiles.file) + @($artifact.currentFiles) + @($artifact.optionalCurrentFiles.file) + @($native.sources.file) + $intuneFiles | Sort-Object -Unique)
     $mappedFiles = @($map.Values | ForEach-Object { $_ })
-    $missing = @($contractFiles | Where-Object { $_ -notin $mappedFiles -and $_ -notin $registryFiles -and $_ -notin $intuneFiles })
+    $operatorMap = & $insights { $script:SwiOperatorSuppliedFiles }
+    $operatorFiles = @($operatorMap.Keys)
+    $optionalContractFiles = @(@($source.optionalCurrentFiles.file) + @($artifact.optionalCurrentFiles.file))
+    foreach ($file in $operatorFiles) {
+        Assert-Case ($file -in $optionalContractFiles) "Operator-supplied input $file is not an optional SWI contract file."
+        Assert-Case ($file -notin $mappedFiles -and $file -notin $registryFiles -and $file -notin $intuneFiles) "Operator-supplied input $file also has a producer job."
+        Assert-Case (Test-Path -LiteralPath (Join-Path $repoRoot $operatorMap[$file]) -PathType Leaf) "Operator import script not found for ${file}: $($operatorMap[$file])"
+    }
+    $missing = @($contractFiles | Where-Object { $_ -notin $mappedFiles -and $_ -notin $registryFiles -and $_ -notin $intuneFiles -and $_ -notin $operatorFiles })
     Assert-Case ($missing.Count -eq 0) ("SWI inputs without a producer: {0}" -f ($missing -join ', '))
     Assert-Case (@($mappedFiles | Where-Object { $_ -in $registryFiles -or $_ -in $intuneFiles }).Count -eq 0) 'A receipt producer file is also in the manual map.'
     Assert-Case (@($mappedFiles | Group-Object | Where-Object Count -gt 1).Count -eq 0) 'A file is mapped to two producers.'
@@ -84,6 +92,8 @@ try {
     $empty = Invoke-Validity
     Assert-Case ($empty.MaxSourceAgeHours -eq 336 -and $empty.SettingsSource -like 'Prepare template*') 'The Prepare template limit was not used without a local configuration.'
     Assert-Case (@($empty.Unmapped).Count -eq 0) 'Unmapped inputs with the real contracts.'
+    Assert-Case ((@($empty.OperatorSupplied) -join '|') -eq ((@($operatorFiles | Sort-Object)) -join '|')) 'Operator-supplied inputs are not reported apart.'
+    Assert-Case (@($empty.Inputs | Where-Object { $_.OperatorSupplied -and (-not $_.Optional -or $_.Blocks) }).Count -eq 0) 'A missing operator-supplied input blocks SWI.'
     Assert-Case ((Get-Row $empty 'M365-SecureScore-Inventory').Swi -eq 'Missing - blocks SWI') 'A missing required file does not block SWI.'
     Assert-Case ((Get-Row $empty 'AD-HealthCheck').Swi -eq 'Missing (optional)') 'A missing optional-only input blocks SWI.'
     Assert-Case ((Get-Row $empty 'Intune-Configurations-Inventory').Swi -eq 'Not collected (optional)') 'An absent Intune group is not optional.'
