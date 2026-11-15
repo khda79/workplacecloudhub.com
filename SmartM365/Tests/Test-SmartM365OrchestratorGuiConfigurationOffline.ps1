@@ -8,7 +8,7 @@ description points to a vanished key, then reads a synthetic Config folder: tran
 lock respect without writing, effective values and sources, template differences, sensitive
 masking, filtering, the background refresh contract and the absence of values in GUI logs.
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 param()
@@ -78,7 +78,8 @@ Write-Json (Join-Path $config 'SmartM365.global.local.json.txt') $globalDoc
 $secret = 'C0FFEE00C0FFEE00C0FFEE00C0FFEE00C0FFEE00'
 $tenantDoc = Get-Content -LiteralPath (Join-Path $config 'Tenants/tenant.local.json.template') -Raw | ConvertFrom-Json
 $tenantDoc.ProfileKey = 'contoso'; $tenantDoc.Thumbprint = $secret; $tenantDoc.Thumb = $secret; $tenantDoc.From = 'tenant-sender@contoso.example'; $tenantDoc.Cc = ''
-$tenantDoc.TeamsAlertsWebhookUrl = 'https://contoso.example/hook?sig=SECRETSIGNATURE123'
+# Teams webhooks left the tenant template (10/11); an old runtime file may still carry one and it must stay masked.
+$tenantDoc | Add-Member -NotePropertyName 'TeamsAlertsWebhookUrl' -NotePropertyValue 'https://contoso.example/hook?sig=SECRETSIGNATURE123'
 $tenantDoc.AdComputerNameCountryPrefixes = [pscustomobject]@{ FRP = 'France' }
 $tenantDoc.PSObject.Properties.Remove('RemoteRoutingDomain')
 $tenantDoc | Add-Member -NotePropertyName 'LegacyExtraKey' -NotePropertyValue 'extra'
