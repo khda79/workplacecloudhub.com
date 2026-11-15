@@ -5,9 +5,10 @@ Offline regression tests for the Discovered Apps AppInvRawData relation source.
 Loads the actual collector helpers through AST. The export job, the export file,
 Graph relation pages and log sinks are synthetic; no authentication, tenant config
 or CSV publication. Checks strict export parsing, catalog filtering, the Graph
-verification sample, byte-identical relation rows and fallback triggers.
+verification sample, catalog-gap completion (1.43), byte-identical relation rows
+and fallback triggers.
 .VERSION
-1.0.0
+1.1.0
 #>
 [CmdletBinding()]
 param()
@@ -23,7 +24,7 @@ foreach ($name in @('Get-ShortGraphErrorMessage', 'Get-DiscoveredAppsGraphHttpEr
     'Get-DiscoveredAppsAppDeviceCount', 'Get-DiscoveredAppsCsvDataRowCount', 'Write-DiscoveredAppsCsvRows',
     'Invoke-DiscoveredAppsGraphSingleRequest', 'Get-DiscoveredAppsRelationExportCsv', 'Read-DiscoveredAppsRelationExportCsv',
     'Select-DiscoveredAppsRandomItems', 'Test-DiscoveredAppsRelationExportSample', 'Write-DiscoveredAppsRelationExportRows',
-    'Invoke-DiscoveredAppsRelationExportSource')) {
+    'Invoke-DiscoveredAppsRelationExportSource', 'Add-DiscoveredAppsCatalogGapApps')) {
     $node = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
     if ($null -eq $node) { throw "Missing collector helper: $name" }
     Invoke-Expression $node.Extent.Text
@@ -63,6 +64,7 @@ function Reset-Graph {
     $script:exportText = ''
     $script:exportExtraFile = $false
     $script:downloadCount = 0
+    $script:graphIdOverride = @{}
 }
 function Invoke-MgGraphRequest {
     [CmdletBinding()]
@@ -94,7 +96,10 @@ function Invoke-MgGraphRequest {
     }
     elseif ($Uri -match '/detectedApps/([^/?]+)\?') {
         $appId = [uri]::UnescapeDataString($Matches[1])
-        if ($script:graphDevices.ContainsKey($appId)) { $result = [pscustomobject]@{ id = $appId } } else { $status = 404; $result = [pscustomobject]@{ error = [pscustomobject]@{ message = 'not found' } } }
+        if ($script:graphDevices.ContainsKey($appId)) {
+            $graphId = if ($script:graphIdOverride.ContainsKey($appId)) { $script:graphIdOverride[$appId] } else { $appId }
+            $result = [pscustomobject]@{ id = $graphId; displayName = "name-$appId"; version = '2'; publisher = 'pub'; deviceCount = 7; platform = 'windows' }
+        } else { $status = 404; $result = [pscustomobject]@{ error = [pscustomobject]@{ message = 'not found' } } }
     }
     else { throw "Unexpected synthetic Graph request: $Method $Uri" }
     Set-Variable -Name $StatusCodeVariable -Value $status -Scope 1
@@ -139,6 +144,7 @@ try {
     Check (@($read.DevicesByAppId.Keys) -ccontains 'app-a') 'Device lists must be keyed by the canonical catalog id.'
     Check ($read.DevicesByAppId['app-c'].Count -eq 0) 'Catalog apps absent from the export must have an empty list.'
     Check ($read.UnknownKeys.Count -eq 1 -and $read.UnknownKeys[0] -eq 'app-unknown') 'Non-catalog keys must be reported.'
+    Check ($read.UnknownDevicesByKey['app-unknown'].Count -eq 2) 'Relations of non-catalog keys must be kept for Graph resolution.'
 
     [IO.File]::WriteAllText($csv, (New-ExportText -Pairs ([ordered]@{ 'app-a' = $d1 }) -Header '"DeviceId","ApplicationKey"' -DeviceFirst), [Text.UTF8Encoding]::new($false))
     Check ((Read-DiscoveredAppsRelationExportCsv -Path $csv -CatalogAppIds @('app-a')).AcceptedRows -eq 3) 'Column order must follow the header.'
@@ -207,15 +213,17 @@ try {
     }
     function Get-FixtureDevices {
         [IO.File]::WriteAllText($csv, (New-ExportText -Pairs $script:exportPairs))
-        (Read-DiscoveredAppsRelationExportCsv -Path $csv -CatalogAppIds ([string[]]@($script:apps | ForEach-Object { $_.id }))).DevicesByAppId
+        $script:lastRead = Read-DiscoveredAppsRelationExportCsv -Path $csv -CatalogAppIds ([string[]]@($script:apps | ForEach-Object { $_.id }))
+        $script:lastRead.DevicesByAppId
     }
-    function Invoke-Sample { param($Devices, [int]$Random = 100, [int]$MaxAbsent = 500)
-        Test-DiscoveredAppsRelationExportSample -Apps $script:apps.ToArray() -DevicesByAppId $Devices -UnknownKeys @('gone-key') -RandomApps $Random -TopApps 3 -MismatchApps 2 -MaxAbsentApps $MaxAbsent -Seed 42
+    function Invoke-Sample { param($Devices, [int]$Random = 100, [int]$MaxAbsent = 500, [int]$MaxUnknown = 500)
+        Test-DiscoveredAppsRelationExportSample -Apps $script:apps.ToArray() -DevicesByAppId $Devices -UnknownKeys $script:lastRead.UnknownKeys -UnknownDevicesByKey $script:lastRead.UnknownDevicesByKey `
+            -RandomApps $Random -TopApps 3 -MismatchApps 2 -MaxAbsentApps $MaxAbsent -MaxUnknownKeys $MaxUnknown -Seed 42
     }
 
     New-Fixture
     $sample = Invoke-Sample (Get-FixtureDevices)
-    Check ($sample.Passed -and $sample.CheckedApps -eq 31 -and $sample.AbsentApps -eq 1 -and $sample.CheckedUnknownKeys -eq 1) "Identical export and Graph must pass ($($sample.Reason))."
+    Check ($sample.Passed -and $sample.CheckedApps -eq 31 -and $sample.AbsentApps -eq 1 -and $sample.CheckedUnknownKeys -eq 1 -and $sample.StaleUnknownKeys -eq 1 -and @($sample.CatalogAdditions).Count -eq 0) "Identical export and Graph must pass; a 404 key is dropped ($($sample.Reason))."
     $partial = Invoke-Sample (Get-FixtureDevices) -Random 0
     Check ($partial.Passed -and $partial.CheckedApps -eq 6) "Absent, top and mismatch apps are always checked ($($partial.CheckedApps))."
 
@@ -234,14 +242,59 @@ try {
     $sample = Invoke-Sample (Get-FixtureDevices) -Random 0
     Check (-not $sample.Passed -and $sample.Reason -match 'AppId=app-empty; Check=AbsentFromExport') "A catalog app absent from the export but present in Graph must fail ($($sample.Reason))."
 
+    # Catalog gap: Graph knows the key (HTTP 200) and returns exactly the export devices -> added, not rejected.
+    New-Fixture
+    $script:graphDevices['gone-key'] = @($script:exportPairs['gone-key'])
+    $sample = Invoke-Sample (Get-FixtureDevices) -Random 0
+    $gap = @($sample.CatalogAdditions)
+    Check ($sample.Passed -and $gap.Count -eq 1 -and $gap[0].id -eq 'gone-key' -and $gap[0].displayName -eq 'name-gone-key' -and $gap[0].version -eq '2' -and $sample.StaleUnknownKeys -eq 0) "A Graph-verified catalog gap must be added ($($sample.Reason))."
+    Check (@($script:requests | Where-Object { $_ -like '*detectedApps/gone-key?$select=id,displayName,version,publisher,deviceCount,platform' }).Count -eq 1) 'The catalog gap record must be read with the catalog fields.'
+
+    New-Fixture
+    $script:graphDevices['gone-key'] = @($script:exportPairs['gone-key']) + (New-Guids 1)
+    $sample = Invoke-Sample (Get-FixtureDevices) -Random 0
+    Check (-not $sample.Passed -and $sample.Reason -match '^Mismatch: AppId=gone-key; Check=CatalogGap;.*OnlyGraph=1; OnlyExport=0' -and @($sample.CatalogAdditions).Count -eq 0) "A catalog gap whose devices differ from Graph must fail ($($sample.Reason))."
+
     New-Fixture
     $script:graphDevices['gone-key'] = @()
     $sample = Invoke-Sample (Get-FixtureDevices) -Random 0
-    Check (-not $sample.Passed -and $sample.Reason -match '^UnknownKey: .*HTTP 200') "A non-catalog key known to Graph must fail ($($sample.Reason))."
+    Check (-not $sample.Passed -and $sample.Reason -match 'Check=CatalogGap;.*GraphDevices=0; ExportDevices=2') "A known key without Graph devices must fail ($($sample.Reason))."
+
+    New-Fixture
+    $script:graphDevices['gone-key'] = @($script:exportPairs['gone-key'])
+    $script:graphIdOverride['gone-key'] = 'other-key'
+    $sample = Invoke-Sample (Get-FixtureDevices) -Random 0
+    Check (-not $sample.Passed -and $sample.Reason -match "^UnknownKey: export key gone-key returned HTTP 200 with application id 'other-key'") "A different Graph id must fail ($($sample.Reason))."
+
+    New-Fixture
+    $script:exportPairs['gone-key-2'] = New-Guids 1
+    $sample = Invoke-Sample (Get-FixtureDevices) -Random 0 -MaxUnknown 1
+    Check (-not $sample.Passed -and $sample.Reason -match '^Coverage: 2 export key' -and $sample.CheckedApps -eq 0) 'Too many non-catalog keys must fail before any Graph read.'
+
+    New-Fixture
+    $script:exportPairs['gone-key-2'] = New-Guids 3
+    $sample = Invoke-Sample (Get-FixtureDevices) -Random 0
+    Check ($sample.Passed -and $sample.CheckedUnknownKeys -eq 2 -and $sample.StaleUnknownKeys -eq 2) 'Every non-catalog key must be resolved, not sampled.'
 
     New-Fixture
     $sample = Invoke-Sample (Get-FixtureDevices) -MaxAbsent 0
     Check (-not $sample.Passed -and $sample.Reason -match '^Coverage' -and $sample.CheckedApps -eq 0) 'Too many absent catalog apps must fail before any Graph read.'
+
+    # --- Catalog gap merge: catalog id order, Summary rows, duplicate refusal ---
+    $catalogIds = [string[]]@('0000b2', '0000A1', 'zz-app', '0000a3', 'Abc', 'abd' | Sort-Object -CaseSensitive)
+    $mergeApps = @($catalogIds | ForEach-Object { New-App -Id $_ -Count 1 })
+    $mergeSummary = [Collections.Generic.List[psobject]]::new()
+    foreach ($mergeApp in $mergeApps) { $mergeSummary.Add([pscustomobject]@{ AppId = $mergeApp.id; AppName = $mergeApp.displayName }) }
+    $noGap = Add-DiscoveredAppsCatalogGapApps -Apps $mergeApps -SummaryRecords $mergeSummary -GapApps @() -CollectedAtUtc '2026-11-15T17:00:00Z' -RelationCollectionScope 'All'
+    Check ((@($noGap.Apps | ForEach-Object id) -join ',') -ceq ($catalogIds -join ',')) 'The merge must keep the catalog snapshot id order unchanged.'
+    $gapApp = [pscustomobject]@{ id = '0000a2'; displayName = 'Gap'; version = '3'; publisher = 'pub'; deviceCount = 2; platform = 'windows' }
+    $merged = Add-DiscoveredAppsCatalogGapApps -Apps $mergeApps -SummaryRecords $mergeSummary -GapApps @($gapApp) -CollectedAtUtc '2026-11-15T17:00:00Z' -RelationCollectionScope 'All'
+    $expectedIds = [string[]]@(@($catalogIds) + '0000a2' | Sort-Object -CaseSensitive)
+    Check ((@($merged.Apps | ForEach-Object id) -join ',') -ceq ($expectedIds -join ',')) 'A catalog gap app must take its catalog id position.'
+    Check ((@($merged.SummaryRecords | ForEach-Object AppId) -join ',') -ceq ($expectedIds -join ',') -and $merged.SummaryRecords.Count -eq 7 -and $mergeSummary.Count -eq 6) 'Summary rows must follow the same order without changing the input list.'
+    $gapRow = @($merged.SummaryRecords | Where-Object AppId -eq '0000a2')[0]
+    Check ($gapRow.AppName -eq 'Gap' -and $gapRow.AppVersion -eq '3' -and $gapRow.DeviceCount -eq 2 -and $gapRow.CollectionScope -eq 'AllPlatforms' -and $gapRow.CollectedAtUtc -eq '2026-11-15T17:00:00Z' -and $gapRow.RelationCollectionScope -eq 'All' -and $gapRow.RelationEvidenceStatus -eq 'Pending') 'A catalog gap Summary row must carry the catalog fields.'
+    Assert-Throws { Add-DiscoveredAppsCatalogGapApps -Apps $mergeApps -SummaryRecords $mergeSummary -GapApps @([pscustomobject]@{ id = 'ABC'; displayName = 'x'; version = '1'; publisher = 'p'; deviceCount = 1; platform = 'windows' }) -CollectedAtUtc 'x' -RelationCollectionScope 'All' } 'already in the catalog' 'A gap id already in the catalog must be refused.'
 
     # --- Relation rows are byte-identical to the Graph path writer ------------
     New-Fixture
@@ -269,6 +322,19 @@ try {
     Check ($source.Passed -and $source.JobId -eq 'AppInvRawData_job1' -and $source.DevicesByAppId['app-01'].Count -gt 0) "End-to-end export source must pass ($($source.Reason))."
     Check ($script:downloadCount -eq 1 -and $script:jobPolls -eq 2) 'The job must be polled until completed, then downloaded once.'
     Check ($after -eq $before) 'Temporary export files must be removed.'
+    Check (@($source.CatalogAdditions).Count -eq 0 -and -not $source.DevicesByAppId.ContainsKey('gone-key')) 'A stale export key must not reach the relations.'
+
+    New-Fixture
+    $script:graphDevices['gone-key'] = @($script:exportPairs['gone-key'])
+    $script:exportText = New-ExportText -Pairs $script:exportPairs
+    $source = Invoke-DiscoveredAppsRelationExportSource -Apps $script:apps.ToArray() -TimeoutSeconds 60 -RandomApps 5 -TopApps 2 -MismatchApps 1 -Seed 3
+    Check ($source.Passed -and @($source.CatalogAdditions).Count -eq 1 -and $source.DevicesByAppId['gone-key'].Count -eq 2) "A verified catalog gap must join the export relations ($($source.Reason))."
+    Check (@($script:logs | Where-Object { $_ -like 'INFO|Catalog gap completed from the export: AppId=gone-key;*Devices=2 (Graph-verified).' }).Count -eq 1) 'A catalog gap completion must be logged.'
+    $gapApps = @($script:apps.ToArray()) + @($source.CatalogAdditions)
+    $gapPath = Join-Path $testRoot 'gap.partial.csv'
+    Write-DiscoveredAppsCsvRows -Path $gapPath -Rows @()
+    $gapWritten = Write-DiscoveredAppsRelationExportRows -Path $gapPath -Apps $gapApps -DevicesByAppId $source.DevicesByAppId -TenantKey 'tenant-test'
+    Check ($gapWritten.CountsByAppId['gone-key'] -eq 2 -and $gapWritten.CountsByAppId.Count -eq $gapApps.Count) 'A catalog gap app must be written with its relations.'
 
     New-Fixture
     $script:exportText = New-ExportText -Pairs $script:exportPairs

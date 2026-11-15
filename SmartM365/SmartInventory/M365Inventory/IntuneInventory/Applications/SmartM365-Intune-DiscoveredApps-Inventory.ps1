@@ -44,18 +44,20 @@
 
 .PARAMETER RelationSource
     Graph (default) reads every app/device relation from Graph. Export reads them from
-    the Intune AppInvRawData export (ApplicationKey and DeviceId only), keeps only keys
-    of the stable Graph catalog, then compares a Graph sample set by set: every catalog
-    app absent from the export, the largest apps, catalog count mismatches, random apps
-    and absent catalog keys. Any difference or failure falls back to the Graph method in
-    the same run; nothing from the export is published then. Local key: RelationSource.
+    the Intune AppInvRawData export (ApplicationKey and DeviceId only), then compares a
+    Graph sample set by set: every catalog app absent from the export, the largest apps,
+    catalog count mismatches and random apps. Every export key absent from the catalog is
+    resolved by Graph: 404 = stale key (dropped); 200 = an app the catalog listing missed,
+    added to the catalog only when its device set equals Graph exactly (1.43). Any other
+    difference or failure falls back to the Graph method in the same run; nothing from the
+    export is published then. Local key: RelationSource.
 
 .PARAMETER RelationExportVerifyRandomApps
     Number of random apps compared with Graph in Export mode (default 50).
-    Version : 1.42
+    Version : 1.43
 
 .VERSION
-1.42
+1.43
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -64,7 +66,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.42
+    Version : 1.43
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -233,7 +235,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.42"
+$ScriptVersion = "1.43"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -2007,6 +2009,9 @@ function Read-DiscoveredAppsRelationExportCsv {
         $devicesByAppId[$catalogAppId] = [Collections.Generic.List[string]]::new()
     }
     $unknownKeys = [Collections.Generic.Dictionary[string, int64]]::new([StringComparer]::OrdinalIgnoreCase)
+    # Relations of keys absent from the stable catalog are kept apart: Graph decides later whether each key is a
+    # stale export key (404, dropped) or an application the catalog listing missed (verified, then added).
+    $unknownDevicesByKey = [Collections.Generic.Dictionary[string, Collections.Generic.List[string]]]::new([StringComparer]::OrdinalIgnoreCase)
     $fieldPattern = '"(?:[^"]|"")*"|[^",]*'
     $linePattern = [regex]::new('^(' + $fieldPattern + '),(' + $fieldPattern + ')$', [Text.RegularExpressions.RegexOptions]::Compiled)
     $guidPattern = [regex]::new('^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$', [Text.RegularExpressions.RegexOptions]::Compiled)
@@ -2048,10 +2053,11 @@ function Read-DiscoveredAppsRelationExportCsv {
                 $acceptedRows++
             }
             else {
-                # Keys absent from the stable Graph catalog are never published (Graph returns 404 for them).
                 $previousRows = 0L
                 [void]$unknownKeys.TryGetValue($key, [ref]$previousRows)
                 $unknownKeys[$key] = $previousRows + 1
+                if ($previousRows -eq 0) { $unknownDevicesByKey[$key] = [Collections.Generic.List[string]]::new() }
+                $unknownDevicesByKey[$key].Add($deviceId)
                 $unknownKeyRows++
             }
         }
@@ -2060,7 +2066,7 @@ function Read-DiscoveredAppsRelationExportCsv {
         $reader.Dispose()
     }
 
-    foreach ($entry in $devicesByAppId.GetEnumerator()) {
+    foreach ($entry in @($devicesByAppId.GetEnumerator()) + @($unknownDevicesByKey.GetEnumerator())) {
         $deviceIds = $entry.Value
         $deviceIds.Sort([StringComparer]::OrdinalIgnoreCase)
         for ($index = 1; $index -lt $deviceIds.Count; $index++) {
@@ -2076,6 +2082,7 @@ function Read-DiscoveredAppsRelationExportCsv {
         AcceptedRows   = $acceptedRows
         UnknownKeyRows = $unknownKeyRows
         UnknownKeys    = [string[]]@($unknownKeys.Keys)
+        UnknownDevicesByKey = $unknownDevicesByKey
     }
 }
 
@@ -2105,10 +2112,11 @@ function Test-DiscoveredAppsRelationExportSample {
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Apps,
         [Parameter(Mandatory = $true)]$DevicesByAppId,
         [AllowEmptyCollection()][string[]]$UnknownKeys = @(),
+        $UnknownDevicesByKey = $null,
         [ValidateRange(0, 100000)][int]$RandomApps = 50,
         [ValidateRange(0, 100000)][int]$TopApps = 10,
         [ValidateRange(0, 100000)][int]$MismatchApps = 20,
-        [ValidateRange(0, 100000)][int]$UnknownKeyChecks = 20,
+        [ValidateRange(0, 100000)][int]$MaxUnknownKeys = 500,
         [ValidateRange(0, 100000)][int]$MaxAbsentApps = 500,
         [Parameter(Mandatory = $true)][int]$Seed
     )
@@ -2119,9 +2127,13 @@ function Test-DiscoveredAppsRelationExportSample {
     foreach ($app in $Apps) {
         if ($DevicesByAppId[[string]$app.id].Count -eq 0) { $absentApps.Add($app) } else { $presentApps.Add($app) }
     }
-    $result = [ordered]@{ Passed = $false; Reason = ''; Seed = $Seed; AbsentApps = $absentApps.Count; CheckedApps = 0; CheckedPairs = 0L; CheckedUnknownKeys = 0 }
+    $result = [ordered]@{ Passed = $false; Reason = ''; Seed = $Seed; AbsentApps = $absentApps.Count; CheckedApps = 0; CheckedPairs = 0L; CheckedUnknownKeys = 0; StaleUnknownKeys = 0; CatalogAdditions = @() }
     if ($absentApps.Count -gt $MaxAbsentApps) {
         $result.Reason = "Coverage: $($absentApps.Count) catalog app(s) are absent from the export (limit $MaxAbsentApps)."
+        return [pscustomobject]$result
+    }
+    if (@($UnknownKeys).Count -gt $MaxUnknownKeys) {
+        $result.Reason = "Coverage: $(@($UnknownKeys).Count) export key(s) are absent from the catalog (limit $MaxUnknownKeys)."
         return [pscustomobject]$result
     }
 
@@ -2154,18 +2166,86 @@ function Test-DiscoveredAppsRelationExportSample {
         }
     }
 
-    foreach ($key in @(Select-DiscoveredAppsRandomItems -Items @($UnknownKeys) -Count $UnknownKeyChecks -Random $random)) {
-        $lookup = Invoke-DiscoveredAppsGraphSingleRequest -Method GET -Uri ('https://graph.microsoft.com/v1.0/deviceManagement/detectedApps/' + [uri]::EscapeDataString([string]$key) + '?$select=id') -AcceptedStatusCodes @(404)
+    # Every export key absent from the catalog is resolved by Graph, never sampled:
+    # 404 = stale export key (dropped); 200 = an application the catalog listing missed (paging drift or an app
+    # published after the listing). Its device set must then equal Graph exactly before it is added to the catalog.
+    $additions = [Collections.Generic.List[object]]::new()
+    foreach ($key in @(@($UnknownKeys) | Sort-Object -CaseSensitive)) {
+        $lookup = Invoke-DiscoveredAppsGraphSingleRequest -Method GET -Uri ('https://graph.microsoft.com/v1.0/deviceManagement/detectedApps/' + [uri]::EscapeDataString([string]$key) + '?$select=id,displayName,version,publisher,deviceCount,platform') -AcceptedStatusCodes @(404)
         $result.CheckedUnknownKeys++
-        if ($lookup.StatusCode -ne 404) {
-            $result.Reason = "UnknownKey: export key $key is absent from the catalog but Graph returned HTTP $($lookup.StatusCode)."
+        if ($lookup.StatusCode -eq 404) { $result.StaleUnknownKeys++; continue }
+        $record = $lookup.Body
+        $graphId = if ($null -ne $record -and $record.PSObject.Properties['id']) { [string]$record.id } else { '' }
+        if (-not [string]::Equals($graphId, [string]$key, [StringComparison]::OrdinalIgnoreCase)) {
+            $result.Reason = "UnknownKey: export key $key returned HTTP $($lookup.StatusCode) with application id '$graphId'."
             return [pscustomobject]$result
         }
+        # Direct assignment: an if-expression would unroll a one-item list into a string.
+        $exportDevices = $null
+        if ($null -ne $UnknownDevicesByKey) { $exportDevices = $UnknownDevicesByKey[[string]$key] }
+        if ($null -eq $exportDevices) {
+            $result.Reason = "UnknownKey: export key $key has no relation list to verify."
+            return [pscustomobject]$result
+        }
+        $uri = 'https://graph.microsoft.com/v1.0/deviceManagement/detectedApps/' + [uri]::EscapeDataString($graphId) + '/managedDevices?$top=999&$select=id'
+        $graphIds = [string[]]@(Get-DiscoveredAppsStableDeviceIds -Devices @(Invoke-GraphPagedRequest -InitialUri $uri) -AppId $graphId -InitialUri $uri)
+        $graphSet = [Collections.Generic.HashSet[string]]::new($graphIds, [StringComparer]::OrdinalIgnoreCase)
+        $exportSet = [Collections.Generic.HashSet[string]]::new([string[]]@($exportDevices), [StringComparer]::OrdinalIgnoreCase)
+        $result.CheckedPairs += $graphSet.Count
+        if (-not $graphSet.SetEquals($exportSet)) {
+            $onlyGraph = 0; foreach ($id in $graphSet) { if (-not $exportSet.Contains($id)) { $onlyGraph++ } }
+            $onlyExport = 0; foreach ($id in $exportSet) { if (-not $graphSet.Contains($id)) { $onlyExport++ } }
+            $result.Reason = "Mismatch: AppId=$graphId; Check=CatalogGap; GraphDevices=$($graphSet.Count); ExportDevices=$($exportSet.Count); OnlyGraph=$onlyGraph; OnlyExport=$onlyExport."
+            return [pscustomobject]$result
+        }
+        $additions.Add([pscustomobject]@{
+            id          = $graphId
+            displayName = $record.displayName
+            version     = $record.version
+            publisher   = $record.publisher
+            deviceCount = $record.deviceCount
+            platform    = $record.platform
+        })
     }
+    $result.CatalogAdditions = $additions.ToArray()
 
     $result.Passed = $true
     $result.Reason = 'Verified'
     return [pscustomobject]$result
+}
+
+function Add-DiscoveredAppsCatalogGapApps {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Apps,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][Collections.Generic.List[psobject]]$SummaryRecords,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$GapApps,
+        [Parameter(Mandatory = $true)][string]$CollectedAtUtc,
+        [Parameter(Mandatory = $true)][string]$RelationCollectionScope
+    )
+
+    # Applications the catalog listing missed, confirmed by Graph with an identical device set, join the catalog
+    # in the same id order as the catalog snapshot (Summary, relations and every gate then count them).
+    $knownIds = [Collections.Generic.HashSet[string]]::new([string[]]@($Apps | ForEach-Object { [string]$_.id }), [StringComparer]::OrdinalIgnoreCase)
+    $records = [Collections.Generic.List[psobject]]::new([psobject[]]@($SummaryRecords))
+    foreach ($gapApp in $GapApps) {
+        if (-not $knownIds.Add([string]$gapApp.id)) { throw "Catalog gap AppId is already in the catalog: $($gapApp.id)." }
+        $records.Add([pscustomobject]@{
+            AppId        = $gapApp.id
+            AppName      = $gapApp.displayName
+            AppVersion   = $gapApp.version
+            AppPublisher = $gapApp.publisher
+            Platform     = $gapApp.platform
+            DeviceCount  = $gapApp.deviceCount
+            CollectionScope = 'AllPlatforms'
+            CollectedAtUtc = $CollectedAtUtc
+            RelationCollectionScope = $RelationCollectionScope
+            RelationEvidenceStatus = 'Pending'
+        })
+    }
+    $sortedApps = @(@($Apps) + @($GapApps) | Sort-Object -Property @{ Expression = { [string]$_.id } } -CaseSensitive)
+    $sortedRecords = [Collections.Generic.List[psobject]]::new([psobject[]]@($records | Sort-Object -Property @{ Expression = { [string]$_.AppId } } -CaseSensitive))
+    return [pscustomobject]@{ Apps = $sortedApps; SummaryRecords = $sortedRecords }
 }
 
 function Write-DiscoveredAppsRelationExportRows {
@@ -2229,13 +2309,23 @@ function Invoke-DiscoveredAppsRelationExportSource {
     }
     WriteLog -Message ("Relation export read: DataRows={0}; CatalogRows={1}; NonCatalogRows={2}; NonCatalogKeys={3}." -f $read.DataRows, $read.AcceptedRows, $read.UnknownKeyRows, $read.UnknownKeys.Count) 'INFO'
 
-    $verification = Test-DiscoveredAppsRelationExportSample -Apps $Apps -DevicesByAppId $read.DevicesByAppId -UnknownKeys $read.UnknownKeys -RandomApps $RandomApps -TopApps $TopApps -MismatchApps $MismatchApps -Seed $Seed
-    WriteLog -Message ("Relation export Graph verification: Passed={0}; Seed={1}; AbsentApps={2}; CheckedApps={3}; CheckedPairs={4}; CheckedNonCatalogKeys={5}; Result={6}" -f $verification.Passed, $verification.Seed, $verification.AbsentApps, $verification.CheckedApps, $verification.CheckedPairs, $verification.CheckedUnknownKeys, $verification.Reason) $(if ($verification.Passed) { 'INFO' } else { 'WARNING' })
+    $verification = Test-DiscoveredAppsRelationExportSample -Apps $Apps -DevicesByAppId $read.DevicesByAppId -UnknownKeys $read.UnknownKeys -UnknownDevicesByKey $read.UnknownDevicesByKey -RandomApps $RandomApps -TopApps $TopApps -MismatchApps $MismatchApps -Seed $Seed
+    $catalogAdditions = @($verification.CatalogAdditions)
+    WriteLog -Message ("Relation export Graph verification: Passed={0}; Seed={1}; AbsentApps={2}; CheckedApps={3}; CheckedPairs={4}; CheckedNonCatalogKeys={5}; StaleNonCatalogKeys={6}; CatalogGapApps={7}; Result={8}" -f $verification.Passed, $verification.Seed, $verification.AbsentApps, $verification.CheckedApps, $verification.CheckedPairs, $verification.CheckedUnknownKeys, $verification.StaleUnknownKeys, $catalogAdditions.Count, $verification.Reason) $(if ($verification.Passed) { 'INFO' } else { 'WARNING' })
+    if ($verification.Passed) {
+        foreach ($addition in $catalogAdditions) {
+            $additionDevices = [Collections.Generic.List[string]]::new([string[]]$read.UnknownDevicesByKey[[string]$addition.id].ToArray())
+            $read.DevicesByAppId[[string]$addition.id] = $additionDevices
+            WriteLog -Message ("Catalog gap completed from the export: AppId={0}; Name={1}; Version={2}; Devices={3} (Graph-verified)." -f $addition.id, $addition.displayName, $addition.version, $additionDevices.Count) 'INFO'
+        }
+    }
+    else { $catalogAdditions = @() }
     return [pscustomobject]@{
-        Passed         = [bool]$verification.Passed
-        Reason         = [string]$verification.Reason
-        JobId          = $exportFile.JobId
-        DevicesByAppId = $read.DevicesByAppId
+        Passed           = [bool]$verification.Passed
+        Reason           = [string]$verification.Reason
+        JobId            = $exportFile.JobId
+        DevicesByAppId   = $read.DevicesByAppId
+        CatalogAdditions = $catalogAdditions
     }
 }
 # ==========================================================
@@ -2512,8 +2602,24 @@ try {
                     $relationExport = Invoke-DiscoveredAppsRelationExportSource -Apps $detailApps -TimeoutSeconds $script:RelationExportJobTimeoutSeconds `
                         -RandomApps $RelationExportVerifyRandomApps -TopApps $script:RelationExportVerifyTopApps -MismatchApps $script:RelationExportVerifyMismatchApps -Seed $relationExportSeed
                     if ($relationExport.Passed) {
-                        $relationTenantKey = [string](@([pscustomobject]@{ AppId = 'tenant-key'; DeviceId = 'tenant-key' } | Add-SmartM365TenantKey)[0].TenantKey)
+                        # From here a failure stops the run: scope and partial CSV are no longer those of the Graph path.
                         $relationExportWriteStarted = $true
+                        $catalogGapApps = @($relationExport.CatalogAdditions)
+                        if ($catalogGapApps.Count -gt 0) {
+                            # Applications the catalog listing missed but Graph confirmed with an identical device set
+                            # join the catalog scope: Summary, relations and every publication gate count them.
+                            $completedCatalog = Add-DiscoveredAppsCatalogGapApps -Apps @($windowsApps) -SummaryRecords $summaryRecords -GapApps $catalogGapApps `
+                                -CollectedAtUtc $appsCollectedAtUtc -RelationCollectionScope $DeviceDetailMode
+                            $windowsApps = @($completedCatalog.Apps)
+                            $summaryRecords = $completedCatalog.SummaryRecords
+                            $detailApps = @($windowsApps)
+                            $script:Stat_AppsTotal = $windowsApps.Count
+                            $script:Stat_AppsWindows = @($windowsApps | Where-Object platform -eq 'windows').Count
+                            $script:Stat_DetailAppsTargeted = $detailApps.Count
+                            $detailTargetAppIdsHash = Get-DiscoveredAppsTargetAppIdsHash -AppIds @($detailApps | ForEach-Object { [string]$_.id })
+                            WriteLog -Message ("Catalog completed from the relation export: {0} Graph-verified app(s) added; catalog scope is now {1} apps." -f $catalogGapApps.Count, $windowsApps.Count) 'INFO'
+                        }
+                        $relationTenantKey = [string](@([pscustomobject]@{ AppId = 'tenant-key'; DeviceId = 'tenant-key' } | Add-SmartM365TenantKey)[0].TenantKey)
                         $relationExportRows = Write-DiscoveredAppsRelationExportRows -Path $script:DeviceDetailPartialPath -Apps $detailApps -DevicesByAppId $relationExport.DevicesByAppId -TenantKey $relationTenantKey
                         foreach ($exportApp in $detailApps) {
                             $exportAppId = [string]$exportApp.id
@@ -2523,7 +2629,7 @@ try {
                         $script:Stat_AppsProcessed += $detailApps.Count
                         $script:Stat_DeviceDetailRows += $relationExportRows.Rows
                         $relationExportUsed = $true
-                        $script:RelationSourceUsed = "AppInvRawData (JobId=$($relationExport.JobId); Graph-verified)"
+                        $script:RelationSourceUsed = "AppInvRawData (JobId=$($relationExport.JobId); Graph-verified; catalog gaps completed: $($catalogGapApps.Count))"
                         WriteLog -Message ("Relation export published to the partial CSV: Apps={0}; Rows={1}; JobId={2}." -f $detailApps.Count, $relationExportRows.Rows, $relationExport.JobId) 'INFO'
                     }
                     else {
