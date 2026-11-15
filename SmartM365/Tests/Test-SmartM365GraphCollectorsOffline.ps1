@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.28
+1.0.29
 #>
 [CmdletBinding()]
 param(
@@ -169,6 +169,20 @@ try {
     Test-OfflineCase 'SharePoint pager rejects repeated nextLink' {
         $m=Import-OfflineFunctions $paths.SharePoint @('Get-SpoPropertyValue','ConvertTo-SpoText','Get-SpoGraphPagedValues')
         try{&$m {$script:n=0};$caught=$false;try{&$m {Get-SpoGraphPagedValues -Uri p1 -RequestInvoker {$script:n++;if($script:n-ge4){throw 'synthetic safety stop'};[pscustomobject]@{value=@();'@odata.nextLink'='p1'}}}|Out-Null}catch{$caught=$_.Exception.Message-match'repeated'};Assert-Offline $caught 'SharePoint cycle was not rejected.'}finally{Remove-Module $m -Force}
+    }
+    Test-OfflineCase 'SharePoint site URL lookup failure fails the run instead of discovering 0 sites' {
+        $m=Import-OfflineFunctions $paths.SharePoint @('Get-SpoPropertyValue','ConvertTo-SpoText','Get-SpoGraphSiteLookupByReportId')
+        try{
+            &$m {function script:Write-SpoLog{param($Message,$Level)};function script:Get-SpoGraphPagedValues{param($Uri,$Operation) throw 'Synthetic GatewayTimeout'};$script:TenantName='contoso.onmicrosoft.com'}
+            $caught=$false;try{&$m {Get-SpoGraphSiteLookupByReportId}|Out-Null}catch{$caught=$_.Exception.Message-match'incomplete' -and $_.Exception.Message-match'Synthetic GatewayTimeout'}
+            Assert-Offline $caught 'A failed Graph sites search lookup was swallowed.'
+            &$m {function script:Get-SpoGraphPagedValues{param($Uri,$Operation) @([pscustomobject]@{id='contoso.sharepoint.com,11111111-1111-1111-1111-111111111111,22222222-2222-2222-2222-222222222222'})}}
+            $lookup=&$m {Get-SpoGraphSiteLookupByReportId}
+            Assert-Offline ($lookup.ContainsKey('11111111-1111-1111-1111-111111111111')) 'A successful Graph sites search lookup was not indexed by site id.'
+        }finally{Remove-Module $m -Force}
+        $source=Get-Content -LiteralPath (Join-Path $SourceRoot $paths.SharePoint) -Raw
+        Assert-Offline ($source -match 'if \(\$tenantSites\.Count -eq 0 -and @\(\$tenantSiteReportRows\)\.Count -gt 0\) \{\s*throw') 'An empty site discovery from a non-empty usage report is not rejected.'
+        Assert-Offline ($source -notmatch '-SiteUrls @\(\$siteArrayForTenant\.SiteUrl\)') 'Tenant capacity still enumerates SiteUrl on a possibly empty array under StrictMode.'
     }
 
     Test-OfflineCase 'Compliance pager rejects malformed page' {

@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the bounded Teams Graph collector audit.
 .VERSION
-1.0.6
+1.0.7
 #>
 [CmdletBinding()]
 param(
@@ -360,6 +360,25 @@ try {
         $source = Get-Content -LiteralPath $teamsPath -Raw
         Assert-Offline ($source -notmatch 'catch\{WriteLog -Message \(\"Team details unavailable') 'A team-details failure is still logged and converted to a default value.'
         Assert-Offline ($source -notmatch 'catch\{WriteLog -Message \(\"Channels unavailable') 'A channel failure is still logged and converted to an empty collection.'
+    }
+
+    Test-OfflineCase 'Teams 404 team resource is excluded and other detail errors still fail' {
+        $notFoundModule = Import-OfflineFunctions -Path $teamsPath -Names @('Test-TeamsGraphNotFound')
+        try {
+            $classify = { param($Exception) try { throw $Exception } catch { Test-TeamsGraphNotFound -ErrorRecord $_ } }
+            Assert-Offline (& $notFoundModule $classify ([Exception]::new('Response status code does not indicate success: NotFound (Not Found).'))) 'A Graph NotFound error was not classified as 404.'
+            Assert-Offline (-not (& $notFoundModule $classify ([Exception]::new('Response status code does not indicate success: Forbidden (Forbidden).')))) 'A Forbidden error was classified as 404.'
+            Assert-Offline (-not (& $notFoundModule $classify ([Exception]::new('Response status code does not indicate success: InternalServerError.')))) 'A server error was classified as 404.'
+        }
+        finally { Remove-Module $notFoundModule -Force -ErrorAction SilentlyContinue }
+        $source = Get-Content -LiteralPath $teamsPath -Raw
+        $detailCall = [regex]::Match($source, "try\{\`$details=Invoke-Graph -Uri \(""https://graph\.microsoft\.com/v1\.0/teams/\{0\}"" -f \`$teamId\) -Operation 'Get team details'\}catch\{(?<body>.+?)continue\}\}")
+        Assert-Offline $detailCall.Success 'The team-details 404 handler was not found.'
+        $body = $detailCall.Groups['body'].Value
+        Assert-Offline ($body -match '^if\(-not\(Test-TeamsGraphNotFound -ErrorRecord \$_\)\)\{throw\}') 'Non-404 team-details errors are no longer rethrown first.'
+        Assert-Offline ($body -match 'Add-Alert \$teamId \$teamName Warning TeamResourceNotFound') 'An excluded 404 team is not reported as an alert.'
+        Assert-Offline ($body -match '-Level WARNING') 'An excluded 404 team is not logged as a warning.'
+        Assert-Offline ($source.IndexOf($detailCall.Value) -lt $source.IndexOf("[void]`$TeamsRows.Add(")) 'The 404 exclusion happens after the Teams row is added.'
     }
 
     Test-OfflineCase 'Teams Phone pagination returns all pages' {

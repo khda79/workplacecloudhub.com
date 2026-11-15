@@ -58,7 +58,7 @@
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
-0.48
+0.49
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel. PnP.PowerShell enables tenant capacity collection and optional sharing scans.
@@ -128,7 +128,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.48"
+$ScriptVersion = "0.49"
 $TenantCapacityEnabled = -not [bool]$SkipPnPTenantCapacity -and ([bool]$UsePnPTenantCapacity -or [bool](Get-Module -ListAvailable PnP.PowerShell | Select-Object -First 1))
 $CurrentOperation = 'Initialize'
 
@@ -866,7 +866,9 @@ function Get-SpoGraphSiteLookupByReportId {
         Write-SpoLog -Message ("Graph sites search lookup loaded: {0} site ids." -f $lookup.Count) -Level INFO
     }
     catch {
-        Write-SpoLog -Message ("Graph sites search lookup unavailable: {0}" -f $_.Exception.Message) -Level INFO
+        # The usage report hides site URLs; without this lookup those sites cannot be named and the
+        # inventory would be silently incomplete (2026-11-13: Graph search 504 -> 0 sites discovered).
+        throw ("Graph sites search lookup unavailable, so usage-report sites without a URL cannot be resolved and the SPO inventory would be incomplete: {0}" -f $_.Exception.Message)
     }
     return $lookup
 }
@@ -1411,6 +1413,11 @@ try {
     }
     if ($MaxSites -gt 0) { $tenantSites = @($tenantSites | Select-Object -First $MaxSites) }
 
+    $unresolvedReportSites = @($tenantSiteReportRows).Count - @($siteSeeds.ToArray() | Where-Object { -not [bool]$_.IsOneDrive }).Count
+    if ($unresolvedReportSites -gt 0) { Write-SpoLog -Message ("SharePoint usage report rows without a resolvable site URL: {0}/{1}." -f $unresolvedReportSites, @($tenantSiteReportRows).Count) -Level INFO }
+    if ($tenantSites.Count -eq 0 -and @($tenantSiteReportRows).Count -gt 0) {
+        throw ("No tenant site could be resolved from {0} SharePoint usage report rows; the SPO inventory would be empty." -f @($tenantSiteReportRows).Count)
+    }
     Write-SpoLog -Message ("Tenant sites discovered through Graph reports: {0}" -f $tenantSites.Count) -Level SUCCESS
     $processed = 0
 
@@ -1522,7 +1529,7 @@ try {
     $siteArrayForTenant = @($siteRows.ToArray())
     $usedMeasureForTenant = $siteArrayForTenant | Measure-Object -Property StorageUsedGB -Sum
     $storageUsedGbForTenant = if ($siteArrayForTenant.Count -gt 0 -and $null -ne $usedMeasureForTenant.Sum) { [Math]::Round([double]$usedMeasureForTenant.Sum, 2) } else { 0 }
-    $tenantRows.Add((Get-SpoTenantCapacityRow -RunId $RunId -RunDateUtc $RunDateUtc -TenantName $TenantName -StorageUsedGB $storageUsedGbForTenant -Config $ScriptLocalConfig -SiteUrls @($siteArrayForTenant.SiteUrl) -Enabled:$TenantCapacityEnabled -Interactive:$InteractiveAuth -PartialInventory:($MaxSites -gt 0 -or (Test-SmartM365MaxItemsMode)) -CriticalPercent $QuotaCriticalPercent)) | Out-Null
+    $tenantRows.Add((Get-SpoTenantCapacityRow -RunId $RunId -RunDateUtc $RunDateUtc -TenantName $TenantName -StorageUsedGB $storageUsedGbForTenant -Config $ScriptLocalConfig -SiteUrls @($siteArrayForTenant | ForEach-Object { [string]$_.SiteUrl }) -Enabled:$TenantCapacityEnabled -Interactive:$InteractiveAuth -PartialInventory:($MaxSites -gt 0 -or (Test-SmartM365MaxItemsMode)) -CriticalPercent $QuotaCriticalPercent)) | Out-Null
     $CurrentOperation = 'Export CSV files'
     $siteColumns = @('RunId','RunDateUtc','TenantName','SiteUrl','Title','Template','CreatedUtc','LastActivityUtc','DaysSinceLastActivity','Owner','LockState','SharingCapability','ExternalSharingEnabled','StorageQuotaMB','StorageUsedMB','StorageQuotaPercent','StorageQuotaGB','StorageUsedGB','IsOneDrive','IsHubSite','HubSiteId','RelatedGroupId','IsInactive','IsOrphaned','Status','NumericValue','TextValue','Threshold','UnavailableFields','Details')
     $listColumns = @('RunId','RunDateUtc','TenantName','SiteUrl','ListId','ListTitle','ListUrl','BaseTemplate','BaseType','Hidden','ItemCount','SizeMB','VersioningEnabled','MajorVersionLimit','Status','NumericValue','TextValue','Threshold','UnavailableFields','Details')
