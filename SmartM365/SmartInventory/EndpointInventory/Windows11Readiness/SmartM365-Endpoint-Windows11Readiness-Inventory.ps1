@@ -8,6 +8,8 @@
     A partial run produces timestamped evidence and errors but never promotes latest
     or weekly history. The Microsoft result and diagnostic log are retained per row.
     Windows PowerShell 5.1 is used on endpoints; this inventory entry requires PS 7.
+.VERSION
+    1.0.1
 .PARAMETER ComputerListPath
     Text file containing one DNS computer name per line; # starts a comment line.
 .PARAMETER Tenant

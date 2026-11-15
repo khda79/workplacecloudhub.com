@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for shared inventory identity and atomic persistence.
 .VERSION
-1.1.16
+1.1.17
 #>
 [CmdletBinding()]
 param(
@@ -642,7 +642,7 @@ try {
             }
         }
         # This count guards the scope of the mail audit; update it when a mail-capable producer is added or removed.
-        Assert-Offline ($mailFiles.Count -eq 25) "Expected 25 SmartInventory mail-capable scripts, found $($mailFiles.Count)."
+        Assert-Offline ($mailFiles.Count -eq 26) "Expected 26 SmartInventory mail-capable scripts, found $($mailFiles.Count)."
         Assert-Offline ($directBypasses.Count -eq 0) ("Direct mail transports bypass shared normalization: {0}" -f ($directBypasses -join '; '))
         foreach ($mailFile in $mailFiles) {
             $mailSource = [IO.File]::ReadAllText($mailFile)
