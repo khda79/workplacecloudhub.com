@@ -110,7 +110,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.91
+1.5.92
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -123,7 +123,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.91
+    Version : 1.5.92
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
@@ -160,7 +160,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.91"
+$ScriptVersion = "1.5.92"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -1680,7 +1680,14 @@ function Get-OrchestratorSharedDependencyStatus {
     # The latest scheduled occurrence can also be satisfied by a later manual recovery run.
     $expected = Get-LatestPastOccurrence -Job $Job -Now $Now
     if ($null -eq $expected) { return 'Waiting' }
-    $record = Get-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $script:Settings.ElectionClaimsPath -JobName $Job.Name -Occurrence $expected
+    try { $record = Get-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $script:Settings.ElectionClaimsPath -JobName $Job.Name -Occurrence $expected }
+    catch {
+        # A peer still replacing the claim after the module retries: wait for the next tick
+        # instead of stopping the resident scheduler (1.5.92). Invalid claims still throw.
+        if (-not (Test-SmartM365OrchestratorFileLockError -Exception $_.Exception)) { throw }
+        Write-OrchestratorLog -Message ("Dependency {0}: its shared claim is still locked by another server after retries; dependents wait for the next tick: {1}" -f $Job.Name, $_.Exception.Message) -Level WARNING
+        return 'Waiting'
+    }
     $status = 'Waiting'
     if ($null -ne $record -and $null -ne $record.Claim) {
         $claim = $record.Claim

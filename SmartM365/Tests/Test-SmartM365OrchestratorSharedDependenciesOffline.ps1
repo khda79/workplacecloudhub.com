@@ -2,7 +2,7 @@
 .SYNOPSIS
 Offline tests for the orchestrator shared dependency gate (latest occurrence, overlap coverage) and mixed-capability election.
 .VERSION
-1.1
+1.2
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -55,6 +55,30 @@ try {
     $rejected=$false;try{Status|Out-Null}catch{$rejected=$true}
     Check $rejected 'Invalid preferred dependency claim accepted.'
     [IO.File]::WriteAllBytes($current.ClaimPath,$bytes)
+
+    # 1.5.92 / Distributed 1.1.27: a claim locked by a peer is retried, then deferred; never fatal.
+    $distributed=Get-Module SmartM365.Orchestrator.Distributed
+    $retry=& $distributed {
+        $script:readCalls=0
+        # Local stub: dynamic scoping makes module functions called from this block see it; it vanishes with the block.
+        function Read-SmartM365JsonDocument {param($Path) $script:readCalls++; if($script:readCalls -le 2){throw [IO.IOException]::new('synthetic sharing violation',-2147024864)}; [pscustomobject]@{Document=[pscustomobject]@{Ok=$true}}}
+        $r=Read-DistributedJsonDocument -Path 'synthetic' -RetryDelaysMilliseconds @(1,1,1); [pscustomobject]@{Calls=$script:readCalls;Ok=$r.Document.Ok}
+    }
+    Check ($retry.Calls -eq 3 -and $retry.Ok) 'A transient sharing violation on a claim read was not retried.'
+    $notRetried=& $distributed {
+        $script:readCalls=0
+        function Read-SmartM365JsonDocument {param($Path) $script:readCalls++; throw [IO.FileNotFoundException]::new('synthetic missing claim')}
+        $thrown=$false
+        try { Read-DistributedJsonDocument -Path 'synthetic' -RetryDelaysMilliseconds @(1,1,1)|Out-Null } catch { $thrown=$true }
+        [pscustomobject]@{Calls=$script:readCalls;Thrown=$thrown}
+    }
+    Check ($notRetried.Calls -eq 1 -and $notRetried.Thrown) 'A missing claim was retried or swallowed as a lock.'
+    Check ((& $distributed {(Get-Command Read-SmartM365JsonDocument).Source}) -ne 'SmartM365.Orchestrator.Distributed') 'A synthetic claim reader leaked into the module.'
+    & $gate {$script:LockWarnings=[Collections.Generic.List[string]]::new(); function script:Write-OrchestratorLog {param($Message,$Level) if($Level -eq 'WARNING'){$script:LockWarnings.Add([string]$Message)}}}
+    $peerLock=[IO.File]::Open($current.ClaimPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
+    try { Check ((Status) -eq 'Waiting') 'A claim locked by a peer did not defer the dependency.' } finally { $peerLock.Dispose() }
+    Check (@(& $gate {$script:LockWarnings}).Count -eq 1) 'A deferred locked claim was not logged once as WARNING.'
+    Check ((Status) -eq 'Ready') 'A released claim lock did not restore readiness.'
     $job.Schedule=[pscustomobject]@{Type='Weekly';Times=@('03:00');DaysOfWeek=@('Sunday')}
     Check ((Status) -eq 'Ready') 'Weekly dependency did not select latest weekly occurrence.'
     $job.Schedule=[pscustomobject]@{Type='Manual';Times=@();DaysOfWeek=@()}

@@ -1,7 +1,35 @@
 ﻿Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 
-$script:DistributedModuleVersion = '1.1.26'
+$script:DistributedModuleVersion = '1.1.27'
+
+function Test-SmartM365OrchestratorFileLockError {
+    # Win32 32 (sharing violation) or 33 (lock violation): another server is replacing the shared
+    # file right now. Only these are worth a short retry; missing or invalid files still surface.
+    param([AllowNull()][Exception]$Exception)
+    for ($current = $Exception; $null -ne $current; $current = $current.InnerException) {
+        if ($current -is [System.IO.IOException] -and $current.HResult -in @(-2147024864, -2147024863)) { return $true }
+    }
+    return $false
+}
+
+function Read-DistributedJsonDocument {
+    # Claims, leases and heartbeats are replaced atomically by peers while this server reads them
+    # (2026-11-14: a sharing violation on a claim stopped the resident orchestrator).
+    param(
+        [Parameter(Mandatory = $true, Position = 0)][string]$Path,
+        [int[]]$RetryDelaysMilliseconds = @(250, 500, 1000)
+    )
+    $attempt = 0
+    while ($true) {
+        try { return Read-SmartM365JsonDocument -Path $Path }
+        catch {
+            if ($attempt -ge $RetryDelaysMilliseconds.Count -or -not (Test-SmartM365OrchestratorFileLockError -Exception $_.Exception)) { throw }
+            Start-Sleep -Milliseconds $RetryDelaysMilliseconds[$attempt]
+            $attempt++
+        }
+    }
+}
 
 function Resolve-DistributedJsonPath {
     param([Parameter(Mandatory)][string]$Path)
@@ -10,7 +38,7 @@ function Resolve-DistributedJsonPath {
     $parent = [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($names.Legacy))
     $existing = Get-SmartM365JsonReadPath -Path $Path -Optional
     $isLease = $false
-    if ($existing) { $isLease = $null -ne (Read-SmartM365JsonDocument $Path).Document.PSObject.Properties['LeaseId'] }
+    if ($existing) { $isLease = $null -ne (Read-DistributedJsonDocument $Path).Document.PSObject.Properties['LeaseId'] }
     $owner = if ($isLease) { 'Orchestrator concurrency lease' } else { 'Orchestrator distributed state' }
     $compatibleOwners = if ($isLease) { @('Orchestrator distributed state') } else { @() }
     Resolve-SmartM365OwnedJsonPath -Path $Path -Owner $owner -CompatibleJournalOwners $compatibleOwners -Validate {
@@ -680,7 +708,7 @@ function Get-SmartM365OrchestratorPythonCommand {
        where the job reads it; python when the file or the key is absent. #>
     $path = ConvertTo-SmartM365InventoryConfigLocation -Path (Join-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -ChildPath 'PreparedEvidence\SmartM365-WorkplaceEvidence-Prepare.local.json')
     if (-not (Get-SmartM365JsonReadPath -Path $path -Optional)) { return 'python' }
-    $config = (Read-SmartM365JsonDocument -Path $path).Document
+    $config = (Read-DistributedJsonDocument -Path $path).Document
     if ($null -ne $config -and $config.PSObject.Properties['PreparedPythonCommand'] -and -not [string]::IsNullOrWhiteSpace([string]$config.PreparedPythonCommand)) {
         return ([string]$config.PreparedPythonCommand).Trim()
     }
@@ -1279,7 +1307,7 @@ function Get-SmartM365OrchestratorOccurrenceClaim {
     $occurrenceUtc = $Occurrence.ToUniversalTime()
     $claimPath = Join-Path -Path $jobFolder -ChildPath ($occurrenceUtc.ToString('yyyyMMddTHHmmssfffZ') + '.json'); $claimPath = Resolve-DistributedJsonPath $claimPath
     if (-not (Test-Path -LiteralPath $claimPath -PathType Leaf)) { return $null }
-    $claim = (Read-SmartM365JsonDocument $claimPath).Document
+    $claim = (Read-DistributedJsonDocument $claimPath).Document
     return [pscustomobject]@{
         ClaimPath = $claimPath
         Claim = $claim
@@ -1352,7 +1380,7 @@ function Enter-SmartM365OrchestratorOccurrenceClaim {
     }
     catch [System.IO.IOException] {
         try {
-            $existingDocument = Read-SmartM365JsonDocument $claimPath
+            $existingDocument = Read-DistributedJsonDocument $claimPath
             $existing = $existingDocument.Document
             $sameOwner = [string]$existing.OwnerServer -eq $OwnerServer.ToUpperInvariant()
             $sameOrchestratorProcess = $false
@@ -1380,7 +1408,7 @@ function Enter-SmartM365OrchestratorOccurrenceClaim {
                 $heartbeatFresh = $false
                 try {
                     $heartbeatPath = Join-Path -Path (Join-Path -Path $HeartbeatRootPath -ChildPath ([string]$existing.OwnerServer)) -ChildPath 'Orchestrator-Heartbeat.json'
-                    $heartbeat = if(Get-SmartM365JsonReadPath $heartbeatPath -Optional){(Read-SmartM365JsonDocument $heartbeatPath).Document}else{$null}
+                    $heartbeat = if(Get-SmartM365JsonReadPath $heartbeatPath -Optional){(Read-DistributedJsonDocument $heartbeatPath).Document}else{$null}
                     $heartbeatAgeMinutes = if($heartbeat){([datetime]::UtcNow - ([datetime]$heartbeat.Timestamp).ToUniversalTime()).TotalMinutes}else{[double]::PositiveInfinity}
                     $heartbeatFresh = $heartbeatAgeMinutes -le [math]::Max(1, $HeartbeatStaleMinutes)
                 }
@@ -1394,7 +1422,7 @@ function Enter-SmartM365OrchestratorOccurrenceClaim {
                     $takeoverStream = $null
                     try {
                         $takeoverStream = [System.IO.File]::Open($takeoverLockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-                        $confirmed = (Read-SmartM365JsonDocument $claimPath).Document
+                        $confirmed = (Read-DistributedJsonDocument $claimPath).Document
                         $confirmedSafeUntilUtc = ([datetime]$confirmed.SafeUntilUtc).ToUniversalTime()
                         if ([string]$confirmed.ClaimId -eq [string]$existing.ClaimId -and
                             [string]$confirmed.Status -notin @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'Cancelled') -and
@@ -1438,7 +1466,7 @@ function Set-SmartM365OrchestratorOccurrenceClaim {
     )
 
     $ClaimPath = Resolve-DistributedJsonPath $ClaimPath
-    $claimDocument = Read-SmartM365JsonDocument $ClaimPath
+    $claimDocument = Read-DistributedJsonDocument $ClaimPath
     $claim = $claimDocument.Document
     if ([string]$claim.OwnerServer -ne $OwnerServer) {
         throw "Claim owner mismatch for $ClaimPath. Expected $OwnerServer, found $($claim.OwnerServer)."
@@ -1466,7 +1494,7 @@ function Get-SmartM365OrchestratorConcurrencyLease {
 
     $leasePath = Join-Path -Path $LeasesRootPath -ChildPath ((ConvertTo-SafeFileName $ConcurrencyKey) + '.json'); $leasePath = Resolve-DistributedJsonPath $leasePath
     if (-not (Test-Path -LiteralPath $leasePath -PathType Leaf)) { return $null }
-    $lease = (Read-SmartM365JsonDocument $leasePath).Document
+    $lease = (Read-DistributedJsonDocument $leasePath).Document
     return [pscustomobject]@{
         LeasePath = $leasePath
         Lease = $lease
@@ -1510,7 +1538,7 @@ function Enter-SmartM365OrchestratorConcurrencyLease {
     }
     catch [System.IO.IOException] {
         try {
-            $existing = (Read-SmartM365JsonDocument $leasePath).Document
+            $existing = (Read-DistributedJsonDocument $leasePath).Document
             $sameOwner = [string]$existing.OwnerServer -eq $owner
             $sameProcess = $false
             try { $sameProcess = [int]$existing.OrchestratorPid -eq $PID } catch { $sameProcess = $false }
@@ -1528,7 +1556,7 @@ function Enter-SmartM365OrchestratorConcurrencyLease {
                 if (-not [string]::IsNullOrWhiteSpace($HeartbeatRootPath)) {
                     try {
                         $heartbeatPath = Join-Path -Path (Join-Path -Path $HeartbeatRootPath -ChildPath ([string]$existing.OwnerServer)) -ChildPath 'Orchestrator-Heartbeat.json'
-                        $heartbeat = if(Get-SmartM365JsonReadPath $heartbeatPath -Optional){(Read-SmartM365JsonDocument $heartbeatPath).Document}else{$null}
+                        $heartbeat = if(Get-SmartM365JsonReadPath $heartbeatPath -Optional){(Read-DistributedJsonDocument $heartbeatPath).Document}else{$null}
                         $heartbeatAgeMinutes = if($heartbeat){([datetime]::UtcNow - ([datetime]$heartbeat.Timestamp).ToUniversalTime()).TotalMinutes}else{[double]::PositiveInfinity}
                         $heartbeatFresh = $heartbeatAgeMinutes -le [math]::Max(1, $HeartbeatStaleMinutes)
                     }
@@ -1545,7 +1573,7 @@ function Enter-SmartM365OrchestratorConcurrencyLease {
                             Remove-Item -LiteralPath $takeoverLockPath -Force -ErrorAction SilentlyContinue
                         }
                         $takeoverStream = [System.IO.File]::Open($takeoverLockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-                        $confirmed = (Read-SmartM365JsonDocument $leasePath).Document
+                        $confirmed = (Read-DistributedJsonDocument $leasePath).Document
                         $confirmedSafeUntilUtc = ([datetime]$confirmed.SafeUntilUtc).ToUniversalTime()
                         if ([string]$confirmed.LeaseId -eq [string]$existing.LeaseId -and [datetime]::UtcNow -gt $confirmedSafeUntilUtc) {
                             $archivePath = '{0}.stale.{1}.json' -f (Get-SmartM365JsonNames $leasePath).Legacy, [string]$confirmed.LeaseId
@@ -1601,7 +1629,7 @@ function Set-SmartM365OrchestratorConcurrencyLease {
         }
 
         if (-not (Test-Path -LiteralPath $LeasePath -PathType Leaf)) { return $false }
-        $current = (Read-SmartM365JsonDocument $LeasePath).Document
+        $current = (Read-DistributedJsonDocument $LeasePath).Document
         if ([string]$current.LeaseId -ne $LeaseId -or [string]$current.OwnerServer -ne $OwnerServer.ToUpperInvariant()) {
             return $false
         }
@@ -1657,11 +1685,11 @@ function Exit-SmartM365OrchestratorConcurrencyLease {
             }
         }
         if (-not (Test-Path -LiteralPath $LeasePath -PathType Leaf)) { return $true }
-        $current = (Read-SmartM365JsonDocument $LeasePath).Document
+        $current = (Read-DistributedJsonDocument $LeasePath).Document
         if ([string]$current.LeaseId -ne $LeaseId -or [string]$current.OwnerServer -ne $OwnerServer.ToUpperInvariant()) {
             return $false
         }
-        $consumedLease = Read-SmartM365JsonDocument $LeasePath
+        $consumedLease = Read-DistributedJsonDocument $LeasePath
         if ($consumedLease.Document.LeaseId -ne $LeaseId -or $consumedLease.Document.OwnerServer -ne $OwnerServer.ToUpperInvariant()) { return $false }
         Complete-SmartM365JsonConsumption -Path $LeasePath -Owner 'Orchestrator concurrency lease' -ExpectedSHA256 $consumedLease.SHA256
         return $true
@@ -1698,7 +1726,7 @@ function Get-SmartM365OrchestratorFreshProducerReceipt {
         if (-not $readPath) { return $null }
         if ((Get-Item -LiteralPath $readPath).Attributes -band [IO.FileAttributes]::ReparsePoint) { return $null }
         $receiptHash = (Get-FileHash -LiteralPath $readPath -Algorithm SHA256).Hash
-        $receipt = (Read-SmartM365JsonDocument -Path $readPath).Document
+        $receipt = (Read-DistributedJsonDocument -Path $readPath).Document
         foreach ($field in @('Owner','Status','TenantKey','Producer','RunId','StartedAtUtc','CompletedAtUtc','Errors','IsPartialInventory','Files')) {
             if (-not $receipt.PSObject.Properties[$field]) { return $null }
         }
@@ -1723,7 +1751,7 @@ function Get-SmartM365OrchestratorFreshProducerReceipt {
         if ($runReadPath) {
             if ((Get-Item -LiteralPath $runReadPath).Attributes -band [IO.FileAttributes]::ReparsePoint) { return $null }
             $runHash = (Get-FileHash -LiteralPath $runReadPath -Algorithm SHA256).Hash
-            $run = (Read-SmartM365JsonDocument -Path $runPath).Document
+            $run = (Read-DistributedJsonDocument -Path $runPath).Document
             if ($run.Owner -cne 'SmartInventory-SourceRun' -or $run.ContractVersion -cne '1.0' -or
                 $run.Status -notin @('Collecting','Publishing','Completed','Failed') -or
                 $run.PublicationStarted -isnot [bool] -or $run.UnqualifiedPublication -isnot [bool] -or
@@ -1806,7 +1834,7 @@ function Get-SmartM365OrchestratorPinnedDependencyReadiness {
             if ((Get-Item -LiteralPath $path).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Linked dependency state is not accepted.' }
             $before[$path] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
         }
-        $heartbeat = (Read-SmartM365JsonDocument $heartbeatPath).Document
+        $heartbeat = (Read-DistributedJsonDocument $heartbeatPath).Document
         $nowUtc = $Now.ToUniversalTime()
         $stamp = ConvertTo-DistributedEvidenceUtc $heartbeat.Timestamp
         if ($stamp.UtcDateTime -gt $nowUtc.AddMinutes(1) -or ($nowUtc - $stamp.UtcDateTime).TotalMinutes -gt $HeartbeatStaleMinutes -or
@@ -1815,7 +1843,7 @@ function Get-SmartM365OrchestratorPinnedDependencyReadiness {
             $result.Detail = 'Pinned owner heartbeat is stale, unhealthy or belongs to another profile'
             return [pscustomobject]$result
         }
-        $state = (Read-SmartM365JsonDocument $statePath).Document
+        $state = (Read-DistributedJsonDocument $statePath).Document
         if ($state.SchemaVersion -ne 1) { throw 'Unsupported dependency state schema.' }
         $entry = $state.Jobs.PSObject.Properties[[string]$Job.Name]
         if (-not $entry) { return [pscustomobject]$result }
@@ -1870,7 +1898,7 @@ function Get-SmartM365OrchestratorSourceRunState {
         $readPath = Get-SmartM365JsonReadPath -Path $runPath -Optional
         if (-not $readPath) { $result.Detail = 'Producer run state is absent'; return [pscustomobject]$result }
         if ((Get-Item -LiteralPath $readPath).Attributes -band [IO.FileAttributes]::ReparsePoint) { return [pscustomobject]$result }
-        $run = (Read-SmartM365JsonDocument -Path $runPath).Document
+        $run = (Read-DistributedJsonDocument -Path $runPath).Document
         if ([string]$run.Owner -cne 'SmartInventory-SourceRun' -or [string]$run.Producer -cne $scriptName -or
             [string]$run.Status -notin @('Collecting', 'Publishing', 'Completed', 'Failed')) { $result.Detail = 'Producer run state is invalid'; return [pscustomobject]$result }
         $staged = $run.PSObject.Properties['StagedPublication']
@@ -1921,7 +1949,7 @@ function Get-SmartM365OrchestratorDependencyActivity {
             $stamp = $Matches[1]
             if (-not $claimed.Add($stamp)) { continue }
             if ($occurrenceUtc -gt $nowUtc -or $occurrenceUtc -lt $nowUtc.AddDays(-8)) { continue }
-            $claim = (Read-SmartM365JsonDocument -Path (Join-Path -Path $folder -ChildPath ($stamp + '.json'))).Document
+            $claim = (Read-DistributedJsonDocument -Path (Join-Path -Path $folder -ChildPath ($stamp + '.json'))).Document
             if ([string]$claim.JobName -ne [string]$DependencyJob.Name) { throw "Dependency claim identity mismatch: $($file.Name)" }
             if ([string]$claim.Status -notin @('Claimed', 'Running', 'RetryScheduled')) { continue }
             # An expired non-terminal claim belongs to a lost owner; claim takeover handles it.
@@ -1958,6 +1986,7 @@ function Get-SmartM365OrchestratorDependencyActivity {
 }
 
 Export-ModuleMember -Function @(
+    'Test-SmartM365OrchestratorFileLockError',
     'Get-SmartM365OrchestratorServerCapability',
     'Test-SmartM365OrchestratorCapabilityComponentMissing',
     'Test-SmartM365OrchestratorCapabilityMatch',

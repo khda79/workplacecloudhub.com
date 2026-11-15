@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic lifecycle regression tests; no orchestrator entry point is executed.
 .VERSION
-1.0.6
+1.0.7
 #>
 [CmdletBinding()]
 param([string]$SourceRoot, [string]$ResultPath)
@@ -264,7 +264,7 @@ try {
         $dt=$null; $de=$null
         $distributedAst=[Management.Automation.Language.Parser]::ParseFile($distributedPath,[ref]$dt,[ref]$de)
         if($de.Count){throw 'Distributed module parse failed.'}
-        $leaseDefinitions=foreach($functionName in @('ConvertTo-SafeFileName','Resolve-DistributedJsonPath','Write-JsonAtomically','Enter-SmartM365OrchestratorConcurrencyLease','Set-SmartM365OrchestratorConcurrencyLease','Exit-SmartM365OrchestratorConcurrencyLease')){
+        $leaseDefinitions=foreach($functionName in @('ConvertTo-SafeFileName','Test-SmartM365OrchestratorFileLockError','Read-DistributedJsonDocument','Resolve-DistributedJsonPath','Write-JsonAtomically','Enter-SmartM365OrchestratorConcurrencyLease','Set-SmartM365OrchestratorConcurrencyLease','Exit-SmartM365OrchestratorConcurrencyLease')){
             $fn=$distributedAst.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $functionName},$true)
             if(-not $fn){throw "Missing lease function $functionName"}
             $fn.Extent.Text
