@@ -35,8 +35,10 @@
   the previous day because the Prepared build follows this run); it is never recomputed here. Licenses come from this
   run, and a Strong candidate whose owner signed in after the batch or is no longer found is shown as changed.
   The gain overlaps recovery candidates; the workbook adds a Shared conversion tab.
+  A summary email already queued for the orchestrator report mail queue is reported as queued for scheduled delivery
+  (1.78), no longer as pending or uncertain; the queue sends it and the gate still allows one email per period.
 .VERSION
-1.77
+1.78
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -44,7 +46,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-     Version : 1.77
+     Version : 1.78
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -3194,7 +3196,8 @@ function Enter-LicensesDailyMailGate {
       if ($state -and $samePeriod -and -not $Force) {
         $period = if ($Frequency -eq 'Weekly') { "this week ($stateDay)" } else { $day }
         $reason = if ([string]$state.Status -eq 'Sent') { "already sent on $period" }
-                  elseif ([string]$state.Status -in @('Pending','Queued')) { "delivery is pending or uncertain on $period" }
+                  elseif ([string]$state.Status -eq 'Queued') { "already queued on $period for scheduled delivery by the orchestrator report mail queue" }
+                  elseif ([string]$state.Status -eq 'Pending') { "delivery is pending or uncertain on $period" }
                   else { throw "License summary mail state has an unknown status: $Path" }
         $stream.Dispose()
         return [pscustomobject]@{ Skip=$true; Reason=$reason; Stream=$null; Day=$day; PreviousBytes=$previous }
@@ -5288,7 +5291,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.77"
+$ScriptVersion = "1.78"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''

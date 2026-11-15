@@ -2,7 +2,7 @@
 .SYNOPSIS
   Offline checks for the license overview and recovery email.
 .VERSION
-1.1.10
+1.1.11
 #>
 
 [CmdletBinding()]
@@ -276,6 +276,12 @@ Assert-Equal $mondayGate.Skip $false 'Weekly email is sent on Monday'
 Assert-Equal $mondayGate.Day '2026-10-26' 'Weekly gate records the Paris day'
 $weeklyPending = Enter-WeeklyGate $weekPath '2026-10-28T08:00:00Z'
 Assert-Equal $weeklyPending.Skip $true 'Pending weekly delivery prevents a duplicate later in the week'
+if ($weeklyPending.Reason -notmatch 'pending or uncertain on this week \(2026-10-26\)') { throw "Pending weekly reason is unclear: $($weeklyPending.Reason)" }
+# A summary queued for the orchestrator report mail queue (1.78) is reported as queued, not as uncertain.
+[IO.File]::WriteAllText($weekPath, '{"TenantKey":"prod","LocalDate":"2026-10-26","Status":"Queued"}')
+$weeklyQueued = Enter-WeeklyGate $weekPath '2026-10-28T08:00:00Z'
+Assert-Equal $weeklyQueued.Skip $true 'Queued weekly delivery prevents a duplicate later in the week'
+if ($weeklyQueued.Reason -notmatch 'already queued on this week \(2026-10-26\) for scheduled delivery' -or $weeklyQueued.Reason -match 'uncertain') { throw "Queued weekly reason is unclear: $($weeklyQueued.Reason)" }
 Set-SyntheticSent $weekPath '2026-10-26'
 Assert-Equal (Enter-WeeklyGate $weekPath '2026-10-27T08:00:00Z').Skip $true 'Weekly email is not sent again on Tuesday'
 Assert-Equal (Enter-WeeklyGate $weekPath '2026-11-01T20:00:00Z').Skip $true 'Weekly email is not sent again on Sunday evening'
