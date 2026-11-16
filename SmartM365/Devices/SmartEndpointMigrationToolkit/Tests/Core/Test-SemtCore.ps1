@@ -928,6 +928,13 @@ $script:HostLines.Clear()
     Test-Step 'Run engine: report names omit the Wave name; a cycle HTML report failure never fails the Run' {
         $engineText -match "'SEMT_\{0\}_cycle\{1\}_\{2\}\.csv' -f \`$Campaign,\`$cycle" -and $engineText -match "'SEMT_\{0\}_\{1\}_final\.html' -f \`$Campaign,\`$script:RunId" -and $engineText -match 'HTML report update failed' -and $engineText -match 'Final report failed'
     }
+    # Field 2026-11-16: the end of a 1,500-PC Run rendered the same HTML report three times (about 4 minutes each).
+    Test-Step 'Run engine: the last cycle skips the live HTML rewrite; the Run report is a copy of the final report' {
+        $engineText -match '(?s)\$runEndsAfterCycle = \(\(Get-SemtCancellationState\)\.Requested -or \(\(Opt ''MaxCycles''\) -gt 0 -and \$cycle -ge \(Opt ''MaxCycles''\)\)\)\s*if \(-not \$runEndsAfterCycle\) \{\s*try \{ \[void\]\(Write-SemtRunHtmlReport -State \$script:Report -CycleNumber \$cycle -IsLive\) \}' -and
+        $engineText -match '(?s)Write-SemtRunHtmlReport -State \$script:Report -CycleNumber \$cycle -Path \$finalPath\)\s*#[^\n]*\n\s*Copy-Item -LiteralPath \$finalPath -Destination \$script:Report\.HtmlPath -Force -ErrorAction Stop' -and
+        ([regex]::Matches($engineText,'Write-SemtRunHtmlReport -State \$script:Report -CycleNumber \$cycle\)')).Count -eq 0 -and
+        ([regex]::Matches($engineText,"Stop-SemtWorkerProcessTree -LeasePath \`$item\.LeasePath\)\)\.TrimEnd\('\.'\)")).Count -eq 2
+    }
     Test-Step 'SHA256 works on a path longer than 260 characters' {
         $deep = $tempRoot
         while ($deep.Length -lt 300) { $deep = Join-Path $deep ('segment-' + ('x' * 30)) }

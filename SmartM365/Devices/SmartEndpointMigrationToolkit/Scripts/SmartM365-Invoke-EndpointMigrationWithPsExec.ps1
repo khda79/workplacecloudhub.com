@@ -47,7 +47,7 @@
     Resolves options, rules and component integrity, writes nothing on targets and exits.
 
 .VERSION
-    1.0.4
+    1.0.5
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -73,7 +73,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:LauncherVersion = '1.0.4'
+$script:LauncherVersion = '1.0.5'
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected argument(s): {0}. Pass options with -Option @{{ Name = Value }} and PsExec with -PsExecPath." -f ($UnexpectedArguments -join ' '))
@@ -651,7 +651,7 @@ try {
                     }
                 }
                 if ($null -eq $verdict -and $script:Gate.LeaseTimeoutMinutes -gt 0 -and $elapsedMinutes -ge ($script:Gate.LeaseTimeoutMinutes + 15)) {
-                    $verdict = [pscustomobject]@{ Status = 'LOCAL_WORKER_TIMEOUT'; NextAction = 'VERIFY_REMOTE_STATE_BEFORE_RELAUNCH'; Detail = ('The local worker was still running after {0:N0} minute(s), beyond its own timeouts, and was stopped. {1} The endpoint attempt may still be running.' -f $elapsedMinutes,(Stop-SemtWorkerProcessTree -LeasePath $item.LeasePath)) }
+                    $verdict = [pscustomobject]@{ Status = 'LOCAL_WORKER_TIMEOUT'; NextAction = 'VERIFY_REMOTE_STATE_BEFORE_RELAUNCH'; Detail = ('The local worker was still running after {0:N0} minute(s), beyond its own timeouts, and was stopped. {1}. The endpoint attempt may still be running.' -f $elapsedMinutes,([string](Stop-SemtWorkerProcessTree -LeasePath $item.LeasePath)).TrimEnd('.')) }
                 }
                 if ($null -ne $verdict) {
                     $hung[[string]$item.Job.Id] = $verdict
@@ -674,7 +674,7 @@ try {
                     foreach ($item in @($running | Where-Object { $_.Job.State -eq 'Running' })) {
                         if (-not $forced.ContainsKey([string]$item.Job.Id)) {
                             $forced[[string]$item.Job.Id] = $true
-                            Write-Host ("Forcing the local stop of {0}: {1}. The remote endpoint may already be running." -f $item.Computer,(Stop-SemtWorkerProcessTree -LeasePath $item.LeasePath)) -ForegroundColor Red
+                            Write-Host ("Forcing the local stop of {0}: {1}. The remote endpoint may already be running." -f $item.Computer,([string](Stop-SemtWorkerProcessTree -LeasePath $item.LeasePath)).TrimEnd('.')) -ForegroundColor Red
                         }
                         Stop-Job -Job $item.Job -ErrorAction SilentlyContinue
                     }
@@ -781,8 +781,13 @@ try {
         Add-SemtReportAttemptRows -State $script:Report -Rows $rows
         [void]$script:Report.ProgressRows.Add((New-SemtProgressRow -CycleNumber $cycle -CycleStart $cycleStart -Total ($computers.Count + $preRows.Count) -Queued $computers.Count -Completed $rows.Count -Running 0 -ComputerListStats $listStats))
         # The HTML report is a view of the results already saved in the cycle CSV: its failure never fails the Run.
-        try { [void](Write-SemtRunHtmlReport -State $script:Report -CycleNumber $cycle -IsLive) }
-        catch { Write-Host ("WARNING: Cycle {0}: HTML report update failed: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
+        # When the Run ends after this cycle, the final report written below shows the same results: the
+        # live rewrite is skipped (field 2026-11-16: each write of a 1,500-PC report took about 4 minutes).
+        $runEndsAfterCycle = ((Get-SemtCancellationState).Requested -or ((Opt 'MaxCycles') -gt 0 -and $cycle -ge (Opt 'MaxCycles')))
+        if (-not $runEndsAfterCycle) {
+            try { [void](Write-SemtRunHtmlReport -State $script:Report -CycleNumber $cycle -IsLive) }
+            catch { Write-Host ("WARNING: Cycle {0}: HTML report update failed: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
+        }
         Write-Host ("Cycle {0} report: {1}" -f $cycle,$csvPath) -ForegroundColor Green
         foreach ($group in @($rows | Group-Object -Property Status | Sort-Object Count -Descending)) { Write-Host ("  {0,-48} {1,5}" -f $group.Name,$group.Count) }
         $lastCycleRows = $rows
@@ -809,7 +814,8 @@ finally {
             # A report failure must not prevent the Run history and active state updates below.
             try {
                 [void](Write-SemtRunHtmlReport -State $script:Report -CycleNumber $cycle -Path $finalPath)
-                [void](Write-SemtRunHtmlReport -State $script:Report -CycleNumber $cycle)
+                # Same content: the Run report becomes a copy of the final report instead of a second rendering.
+                Copy-Item -LiteralPath $finalPath -Destination $script:Report.HtmlPath -Force -ErrorAction Stop
                 Write-Host ("Final report: {0}" -f $finalPath) -ForegroundColor Green
             }
             catch { Microsoft.PowerShell.Utility\Write-Host ("Final report failed: {0}" -f $_.Exception.Message) }

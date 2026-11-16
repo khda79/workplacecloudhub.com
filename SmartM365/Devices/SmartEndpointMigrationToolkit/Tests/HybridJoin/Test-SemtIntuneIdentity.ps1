@@ -208,6 +208,55 @@ Write-Host 'PASS: unlicensed audit preserves the device diagnostic and skips pos
 }
 Write-Host 'PASS: missing Graph sign-in is reported explicitly and the Entra export is not started'
 
+# Field 2026-11-16 (DE): after a controlled stop the post-cycle confirmation returned silently and 8
+# SUCCESS results stayed INTUNE_CLOUD_CONFIRMATION_PENDING. A controlled stop keeps it; a forced stop
+# skips it and says so.
+$coreModule = (Get-Command Get-SemtCancellationState).Module
+$stopBase = Join-Path ([IO.Path]::GetTempPath()) ('SEMT-stop-'+[guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path (Join-Path $stopBase 'Inventory') -Force | Out-Null
+$stopSignal = Join-Path $stopBase 'StopRequested.json.txt'
+$savedCancellation = & $coreModule { Get-Variable -Name SemtCancellation -Scope Script -ValueOnly -ErrorAction SilentlyContinue }
+try {
+    & $coreModule { param($path) $script:SemtCancellation = [pscustomobject]@{ SignalPath = $path } } $stopSignal
+    $stopResults = & $module {
+        param($base,$signal)
+        $marker = Join-Path $base 'intune-started.txt'
+        $exporter = Join-Path $base 'Intune-Marker.ps1'
+        Set-Content -LiteralPath $exporter -Encoding ASCII -Value @('param([string]$OutputPath,[switch]$ForceRefresh,[string]$ComputerListPath,[string]$PageSize,[string]$TenantId,[string]$DeviceIdListPath)',("Add-Content -LiteralPath '{0}' -Value started" -f $marker),'exit 5')
+        $options = [ordered]@{
+            'HybridJoin.PostCycleCloudInventoryRefresh' = [pscustomobject]@{ Value = $true }
+            'IntuneTenantId' = [pscustomobject]@{ Value = '' }
+            'IntuneInventoryPageSize' = [pscustomobject]@{ Value = 999 }
+        }
+        $messages = New-Object System.Collections.Generic.List[string]
+        $context = [pscustomobject]@{
+            PackageRoot = $base; DryRun = $false; CycleNumber = 1; Options = $options
+            Log = { param($text,$color) $messages.Add([string]$text) }.GetNewClosure()
+            RunContext = [pscustomobject]@{ InventoryRoot = (Join-Path $base 'Inventory') }
+            ExportScripts = [pscustomobject]@{ Intune = $exporter; Entra = $exporter }
+            Inventory = @{ Intune = [pscustomobject]@{ SharedPath = (Join-Path $base 'DevicesIntune.csv'); Map = @{} }; Entra = [pscustomobject]@{ SharedPath = (Join-Path $base 'DevicesEntra.csv'); Map = @{} } }
+        }
+        $out = @{}
+        foreach ($force in @($false,$true)) {
+            Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
+            $messages.Clear()
+            Set-Content -LiteralPath $signal -Encoding ASCII -Value ('{{"Source":"Test","Force":{0}}}' -f $force.ToString().ToLowerInvariant())
+            $row = [pscustomobject]@{ ComputerName = 'PC-STOP'; Status = 'SUCCESS'; NextAction = 'NO_ACTION_ALREADY_INTUNE_OR_HEALTHY'; UserLicensePreflightState = 'Unknown'; InteractiveUserSid = ''; Dsreg_TenantId = ''; Dsreg_DeviceId = '' }
+            Invoke-HybridJoinPostCycle -Context $context -Rows @($row)
+            $out[[string]$force] = [pscustomobject]@{ Exported = (Test-Path -LiteralPath $marker); Log = (@($messages) -join ' | '); Status = $row.Status }
+        }
+        $out
+    } $stopBase $stopSignal
+}
+finally {
+    & $coreModule { param($saved) $script:SemtCancellation = $saved } $savedCancellation
+    Remove-Item -LiteralPath $stopBase -Recurse -Force -ErrorAction SilentlyContinue
+}
+$controlled = $stopResults['False']; $forcedStop = $stopResults['True']
+if (-not $controlled.Exported -or $controlled.Log -notmatch 'controlled stop: the post-cycle Graph confirmation still runs for 1 result') { throw ("A controlled stop skipped the post-cycle confirmation: {0}" -f $controlled.Log) }
+if ($forcedStop.Exported -or $forcedStop.Log -notmatch 'post-cycle Graph confirmation skipped: forced stop; 1 result\(s\) stay unconfirmed' -or $forcedStop.Status -ne 'INTUNE_CLOUD_CONFIRMATION_PENDING') { throw ("A forced stop did not skip the confirmation with a reason: {0}" -f $forcedStop.Log) }
+Write-Host 'PASS: a controlled stop keeps the post-cycle Intune confirmation; a forced stop skips it and logs why'
+
 # With WAM, Disconnect-MgGraph signs the account out of the broker for every process: an export or a
 # Run already reading Graph then needs an interactive sign-in it cannot show. No exporter disconnects.
 foreach ($name in @('Export-AutomaticGraphInventories','Export-IntuneDevicesCsv','Export-EntraDevicesCsv','Export-UserLicensesCsv','Get-UserLicense')) {

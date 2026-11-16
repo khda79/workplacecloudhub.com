@@ -355,7 +355,12 @@ function Invoke-HybridJoinPostCycle {
     $log = $Context.Log
     if ($cloudRows.Count -eq 0) { & $log ('Cycle {0}: post-cycle Graph confirmation skipped: no result could have changed Intune or Entra.' -f $Context.CycleNumber) 'DarkGray'; return }
     if (-not (Get-SemtOption -Options $Context.Options -Name 'HybridJoin.PostCycleCloudInventoryRefresh')) { & $log ('Cycle {0}: post-cycle Graph confirmation disabled by option.' -f $Context.CycleNumber) 'DarkGray'; return }
-    if ((Get-SemtCancellationState).Requested) { return }
+    # A controlled stop keeps the confirmation (about two minutes of Graph reads): without it, finished
+    # SUCCESS results stayed INTUNE_CLOUD_CONFIRMATION_PENDING with no reason in the log (field 2026-11-16).
+    # Only a forced stop skips it.
+    $stopState = Get-SemtCancellationState
+    if ($stopState.Force) { & $log ('Cycle {0}: post-cycle Graph confirmation skipped: forced stop; {1} result(s) stay unconfirmed.' -f $Context.CycleNumber,$cloudRows.Count) 'Yellow'; return }
+    if ($stopState.Requested) { & $log ('Cycle {0}: controlled stop: the post-cycle Graph confirmation still runs for {1} result(s).' -f $Context.CycleNumber,$cloudRows.Count) 'DarkGray' }
     $scopePath = Join-Path -Path $Context.RunContext.InventoryRoot -ChildPath ('Cycle{0}_CloudRefreshScope.txt' -f $Context.CycleNumber)
     Write-SemtTextLinesAtomic -Path $scopePath -Lines @($cloudRows | ForEach-Object { [string]$_.ComputerName } | Select-Object -Unique)
     $scoped = @($cloudRows | ForEach-Object { [string]$_.ComputerName })
@@ -415,7 +420,7 @@ function Invoke-HybridJoinPostCycle {
         return
     }
 
-    if ((Get-SemtCancellationState).Requested) { return }
+    if ((Get-SemtCancellationState).Force) { & $log ('Cycle {0}: post-cycle Entra confirmation skipped: forced stop.' -f $Context.CycleNumber) 'Yellow'; return }
     $entraExport = Invoke-SemtInventoryExport -Kind Entra -ExportScriptPath $Context.ExportScripts.Entra -OutputPath (Join-Path $Context.RunContext.InventoryRoot ("DevicesEntra_Cycle{0}PostCycle_{1}.csv" -f $Context.CycleNumber,$stamp)) -LogPath (Join-Path $Context.RunContext.InventoryRoot ("DevicesEntra_Cycle{0}PostCycle_{1}.log" -f $Context.CycleNumber,$stamp)) -ComputerListPath $scopePath -TenantId (Get-SemtOption -Options $Context.Options -Name 'IntuneTenantId') -PageSize (Get-SemtOption -Options $Context.Options -Name 'IntuneInventoryPageSize') -SharedInventoryPath $Context.Inventory['Entra'].SharedPath -DeviceIdListPath $deviceIdPath
     foreach ($row in $cloudRows) {
         Set-SemtResultField -Result $row -Name 'PostCycleEntraInventoryChecked' -Value $true
