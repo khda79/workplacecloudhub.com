@@ -5,7 +5,7 @@ Offline regression tests for discovered application catalog identity and coverag
 Loads the actual collector helpers through AST. Graph responses, relation pages
 and log sinks are synthetic; no authentication, tenant config or CSV publication.
 .VERSION
-1.0.1
+1.1.0
 #>
 [CmdletBinding()]
 param()
@@ -126,6 +126,30 @@ Test-Case 'Persistent identity-set drift fails at the four-snapshot bound' {
     Add-Page @((New-App -Id app-b))
     Assert-Rejected { Get-DiscoveredAppsStableCatalog -Uri catalog } 'did not stabilize'
     Assert-True ($script:requests.Count -eq 4) 'Unbounded catalog requests.'
+}
+Test-Case 'Clean, drifted, clean reads agree across the drifted read' {
+    Add-Page @((New-App), (New-App -Name 'EXAMPLE APP' -Count 1), (New-App -Id app-b), (New-App -Id app-c))
+    Add-Page @((New-App), (New-App -Name 'EXAMPLE APP' -Count 1), (New-App -Id app-b), (New-App -Id app-b))
+    Add-Page @((New-App), (New-App -Name 'EXAMPLE APP' -Count 1), (New-App -Id app-b), (New-App -Id app-c))
+    $result = Get-DiscoveredAppsStableCatalog -Uri catalog
+    Assert-True ($result.SnapshotCount -eq 3 -and $result.Apps.Count -eq 3 -and $result.RequiresFreshRelations) 'Two agreeing clean reads around paging drift were refused.'
+    Assert-True (($script:logs -join "`n") -match 'Catalog snapshot 3 matches snapshot 1;') 'Non-consecutive agreement not logged.'
+}
+Test-Case 'A read in between with an app outside the scope blocks non-consecutive agreement' {
+    Add-Page @((New-App), (New-App -Name 'EXAMPLE APP' -Count 1), (New-App -Id app-b))
+    Add-Page @((New-App), (New-App -Name 'EXAMPLE APP' -Count 1), (New-App -Id app-b), (New-App -Id app-d), (New-App -Id app-d))
+    Add-Page @((New-App), (New-App -Name 'EXAMPLE APP' -Count 1), (New-App -Id app-b))
+    Add-Page @((New-App), (New-App -Name 'EXAMPLE APP' -Count 1), (New-App -Id app-b), (New-App -Id app-e))
+    Assert-Rejected { Get-DiscoveredAppsStableCatalog -Uri catalog } 'did not stabilize'
+    Assert-True ($script:requests.Count -eq 4) 'A read with a new app was bridged.'
+}
+Test-Case 'A read in between without extra repetition blocks non-consecutive agreement' {
+    Add-Page @((New-App), (New-App -Name 'EXAMPLE APP' -Count 1), (New-App -Id app-b))
+    Add-Page @((New-App), (New-App -Name 'EXAMPLE APP' -Count 1))
+    Add-Page @((New-App), (New-App -Name 'EXAMPLE APP' -Count 1), (New-App -Id app-b))
+    Add-Page @((New-App), (New-App -Name 'EXAMPLE APP' -Count 1), (New-App -Id app-b), (New-App -Id app-e))
+    Assert-Rejected { Get-DiscoveredAppsStableCatalog -Uri catalog } 'did not stabilize'
+    Assert-True ($script:requests.Count -eq 4) 'A genuine scope change was bridged.'
 }
 Test-Case 'Metadata drift across snapshots requires consecutive agreement' {
     Add-Page @((New-App), (New-App))

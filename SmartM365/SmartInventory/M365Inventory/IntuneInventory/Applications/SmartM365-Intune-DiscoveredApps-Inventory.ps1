@@ -54,10 +54,14 @@
 
 .PARAMETER RelationExportVerifyRandomApps
     Number of random apps compared with Graph in Export mode (default 50).
-    Version : 1.43
+
+    Catalog listing: when a read repeats rows, the catalog is accepted only once two complete
+    reads agree. Since 1.44 they need not be consecutive, provided every read in between only
+    repeated rows of the agreed scope (more duplicates, no app outside it).
+    Version : 1.44
 
 .VERSION
-1.43
+1.44
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -66,7 +70,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.43
+    Version : 1.44
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -235,7 +239,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.43"
+$ScriptVersion = "1.44"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -634,7 +638,7 @@ function Get-DiscoveredAppsStableCatalog {
         [Parameter(Mandatory)][string]$Uri,
         [ValidateRange(2,4)][int]$MaxSnapshots = 4
     )
-    $previous = $null
+    $snapshots = [Collections.Generic.List[object]]::new()
     $requiresStability = $false
     $variantIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     for ($attempt = 1; $attempt -le $MaxSnapshots; $attempt++) {
@@ -644,10 +648,28 @@ function Get-DiscoveredAppsStableCatalog {
         foreach ($id in $snapshot.VariantIds) { [void]$variantIds.Add($id) }
         $requiresStability = $requiresStability -or $snapshot.DuplicateIds -gt 0
         WriteLog -Message ("Catalog snapshot {0}: RawRows={1}; UniqueApps={2}; DuplicateIds={3}; VariantIds={4}." -f $attempt, $snapshot.RawCount, $snapshot.Apps.Count, $snapshot.DuplicateIds, $snapshot.VariantIds.Count) 'INFO'
-        if (-not $requiresStability -or ($null -ne $previous -and $snapshot.Fingerprint -ceq $previous.Fingerprint)) {
+        $agreed = -not $requiresStability
+        if (-not $agreed) {
+            $currentIds = [Collections.Generic.HashSet[string]]::new([string[]]@($snapshot.Apps | ForEach-Object { [string]$_.id }), [StringComparer]::OrdinalIgnoreCase)
+            # Walk back to an earlier identical read. A read in between may only be paging drift:
+            # more repeated rows than this read and no app outside this scope. Anything else stops the walk.
+            for ($index = $snapshots.Count - 1; $index -ge 0; $index--) {
+                $earlier = $snapshots[$index]
+                if ($earlier.Fingerprint -ceq $snapshot.Fingerprint) {
+                    $agreed = $true
+                    if ($index -lt $snapshots.Count - 1) {
+                        WriteLog -Message ("Catalog snapshot {0} matches snapshot {1}; the reads in between only repeated rows of this scope (paging drift)." -f $attempt, ($index + 1)) 'INFO'
+                    }
+                    break
+                }
+                if ($earlier.DuplicateIds -le $snapshot.DuplicateIds -or
+                    @($earlier.Apps | Where-Object { -not $currentIds.Contains([string]$_.id) }).Count -gt 0) { break }
+            }
+        }
+        if ($agreed) {
             return [pscustomobject]@{ Apps=$snapshot.Apps; RawCount=$snapshot.RawCount; SnapshotCount=$attempt; RequiresFreshRelations=($variantIds.Count -gt 0) }
         }
-        $previous = $snapshot
+        $snapshots.Add($snapshot)
         if ($attempt -lt $MaxSnapshots) { WriteLog -Message 'Catalog repetition or coverage drift detected; reading the complete catalog again before accepting its scope.' 'INFO' }
     }
     throw "Discovered application catalog did not stabilize after $MaxSnapshots complete snapshots; refusing to publish incomplete or drifting coverage."
