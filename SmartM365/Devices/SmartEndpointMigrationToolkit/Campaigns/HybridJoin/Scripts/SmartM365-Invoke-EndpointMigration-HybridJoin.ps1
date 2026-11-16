@@ -97,7 +97,7 @@ Campaign runtime folder. Defaults to C:\ProgramData\WCH\SmartM365\SmartEndpointM
 Attempt identifier supplied by the technician worker. A local run generates one.
 
 .VERSION
-1.0.1
+1.0.2
 
 .EXITCODES
 0 = Success (AzureAdJoined=YES, device auth is healthy, and Intune enrollment is present or was restored)
@@ -142,7 +142,7 @@ if ([string]$PSVersionTable['PSEdition'] -eq 'Core' -or $PSVersionTable['PSVersi
     Write-Output ('FINAL_STATUS=UNSUPPORTED_POWERSHELL_HOST; EXIT_CODE=3; NEXT_ACTION=RUN_WITH_WINDOWS_POWERSHELL_5_1; CORRELATION_ID={0}; DETAIL={1} {2} is not supported; run this script with powershell.exe (Windows PowerShell 5.1).' -f [string]$CorrelationId,[string]$PSVersionTable['PSEdition'],[string]$PSVersionTable['PSVersion'])
     exit 3
 }
-$ScriptVersion = "1.0.1"
+$ScriptVersion = "1.0.2"
 $script:SemtCampaign = "HybridJoin"
 if ($RebootDelaySeconds -lt 60) { $RebootDelaySeconds = 60 }
 if ($StaleCleanupDelaySeconds -lt 0) { $StaleCleanupDelaySeconds = 0 }
@@ -3458,18 +3458,45 @@ function Stop-ComputerSystemQueryFailed {
 }
 
 function Invoke-BoundedRetryUntilIntuneEnrollment {
+    <#
+    Waits for a confirmed local Intune enrollment. With -StopEvidenceSince, the wait also stops as
+    soon as Entra ID logs a refusal that no wait can fix: an MFA requirement on Microsoft Intune
+    Enrollment (-StopOnMfa) or a KDFV1 device-key rejection (-StopOnKdfV1). The AAD event usually
+    comes a few minutes after the trigger; the full wait (25 minutes by default) only held a worker
+    slot. The evidence is read once a minute during each sleep.
+    #>
     param(
         [Parameter(Mandatory=$true)][int]$SleepMinutes,
         [Parameter(Mandatory=$true)][int]$MaxRetries,
-        [Parameter(Mandatory=$true)][string]$ContextLabel
+        [Parameter(Mandatory=$true)][string]$ContextLabel,
+        [Nullable[datetime]]$StopEvidenceSince = $null,
+        [switch]$StopOnMfa,
+        [switch]$StopOnKdfV1
     )
 
     $attempt = 0
+    $checkStop = ($null -ne $StopEvidenceSince -and ($StopOnMfa -or $StopOnKdfV1))
 
     while ($attempt -lt $MaxRetries) {
         $attempt++
         Write-RunLog ("{0}: Intune retry attempt {1}/{2}. Sleeping {3} minutes before re-check." -f $ContextLabel, $attempt, $MaxRetries, $SleepMinutes)
-        Start-Sleep -Seconds ($SleepMinutes * 60)
+        if (-not $checkStop) {
+            Start-Sleep -Seconds ($SleepMinutes * 60)
+        }
+        else {
+            $sleepUntil = (Get-Date).AddMinutes($SleepMinutes)
+            while ((Get-Date) -lt $sleepUntil) {
+                $slice = [math]::Min(60, [math]::Ceiling(($sleepUntil - (Get-Date)).TotalSeconds))
+                if ($slice -gt 0) { Start-Sleep -Seconds $slice }
+                $stopReason = ""
+                if ($StopOnKdfV1 -and (Get-RecentAadKdfV1Rejection -Since ([datetime]$StopEvidenceSince))) { $stopReason = "KDFV1 device-key rejection (AADSTS5000611)" }
+                elseif ($StopOnMfa -and (Get-RecentAadEnrollmentMfaRequirement -Since ([datetime]$StopEvidenceSince))) { $stopReason = "MFA requirement on Microsoft Intune Enrollment" }
+                if ($stopReason) {
+                    Write-RunLog ("{0}: Entra ID logged a {1} during attempt {2}/{3}; the rest of the Intune confirmation wait is skipped." -f $ContextLabel, $stopReason, $attempt, $MaxRetries)
+                    return [PSCustomObject]@{ Success=$false; Attempts=$attempt; StoppedEarly=$true }
+                }
+            }
+        }
 
         $detected = Get-IntuneEnrollmentDetected
         Write-RunLog ("{0}: Intune enrollment detected={1}" -f $ContextLabel, $detected)
@@ -5292,10 +5319,15 @@ try {
                             -StatusValue "INTUNE_ENROLLMENT_PENDING_CONFIRMATION" `
                             -DetailValue ("{0}. Waiting up to {1} minute(s) for confirmed local Intune enrollment before final status." -f $intuneAutoEnrollTriggerText,($IntuneRetrySleepMinutes * $IntuneRetryMaxRetries))
 
+                        # A failed trigger can be answered by Entra ID a few minutes later (KDFV1 rejection,
+                        # or MFA after 0x8018002A): the wait stops as soon as that event is logged.
                         $r3 = Invoke-BoundedRetryUntilIntuneEnrollment `
                             -SleepMinutes $IntuneRetrySleepMinutes `
                             -MaxRetries $IntuneRetryMaxRetries `
-                            -ContextLabel "intune_auto_enroll"
+                            -ContextLabel "intune_auto_enroll" `
+                            -StopEvidenceSince $(if (-not $enrollStart.Success) { $intuneAutoEnrollTriggeredAt } else { $null }) `
+                            -StopOnMfa:$enrollMfaExitCode `
+                            -StopOnKdfV1:(-not $enrollStart.Success)
                     }
 
                     if ($r3 -and $r3.Success) {

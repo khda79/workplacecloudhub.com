@@ -78,6 +78,15 @@ Stopping is three separate actions:
    `CANCELLED_BY_OPERATOR_REMOTE_RUNNING` or `CANCELLED_BY_OPERATOR_REMOTE_STATE_UNCONFIRMED`,
    and the next Run reads the attempt result.
 
+Hung local workers are stopped by the launcher itself (launcher 1.0.4), checked once a minute:
+
+- **No worker log 15 minutes after the start**: the worker froze before its first log line, which
+  comes before any remote action. The job is stopped and reported as `LOCAL_WORKER_START_HUNG`
+  (NextAction `SAFE_TO_RELAUNCH`).
+- **Older than the reservation age plus 15 minutes** (PsExec timeout + communication-lost wait +
+  30 minutes): the worker should have ended on its own timeouts. Its PsExec tree and job are stopped
+  and reported as `LOCAL_WORKER_TIMEOUT` (NextAction `VERIFY_REMOTE_STATE_BEFORE_RELAUNCH`).
+
 ## Target-side guards
 
 The shared region in both endpoint scripts provides:

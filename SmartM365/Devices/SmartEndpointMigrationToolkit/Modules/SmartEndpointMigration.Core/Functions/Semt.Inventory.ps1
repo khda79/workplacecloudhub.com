@@ -263,7 +263,8 @@ function Enable-SemtGraphSingleToken {
         }
         Connect-MgGraph -AccessToken (ConvertTo-SecureString -String $token -AsPlainText -Force) -NoWelcome -ErrorAction Stop | Out-Null
         $global:SemtGraphTokenPin = @{ Context = $saved; RefreshAfterUtc = $expiresUtc.AddMinutes(-10); ReconnectParameters = $ReconnectParameters; ProbeUri = $ProbeUri }
-        Write-Host ('Graph access token pinned for this process until {0:HH:mm} UTC (no broker request per page).' -f $expiresUtc)
+        # Continuous access evaluation tokens can last about 24 hours: the date is part of the expiry.
+        Write-Host ('Graph access token pinned for this process until {0:yyyy-MM-dd HH:mm} local time ({1:HH:mm} UTC; no broker request per page).' -f $expiresUtc.ToLocalTime(),$expiresUtc)
         return $true
     }
     catch {

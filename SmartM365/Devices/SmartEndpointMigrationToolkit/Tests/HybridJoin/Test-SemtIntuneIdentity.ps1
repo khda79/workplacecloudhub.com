@@ -495,7 +495,7 @@ if ($null -ne (Get-RecentAadEnrollmentMfaRequirement -Since ([datetime]'2026-11-
 Remove-Item Function:\Get-WinEvent
 if ($hjEndpointText -notmatch '"INTUNE_ENROLLMENT_MFA_REQUIRED" \{ return "FIX_CONDITIONAL_ACCESS_MFA_FOR_INTUNE_ENROLLMENT" \}' -or $hjEndpointText -notmatch '\$mfaRequirement = if \(\$enrollMfaExitCode -and -not \$kdfRejection\) \{ Get-RecentAadEnrollmentMfaRequirement -Since \$intuneAutoEnrollTriggeredAt \}' -or $hjEndpointText -notmatch '(?s)elseif \(\$mfaRequirement\) \{\s+Write-RunLog' -or $hjEndpointText -notmatch '\$status = "INTUNE_ENROLLMENT_MFA_REQUIRED"') { throw 'Endpoint does not report the Intune Enrollment MFA requirement as a review status without the confirmation wait.' }
 # Strong evidence only: the MFA event counts with deviceenroller 0x8018002A, in both lookups; 0x8018002A alone keeps the wait.
-if ($hjEndpointText -notmatch '\$enrollMfaExitCode = \(-not \$enrollStart\.Success -and \[string\]\$enrollStart\.ExitCode -eq "-2145910742"\)' -or $hjEndpointText -notmatch 'if \(\$enrollMfaExitCode -and -not \$kdfRejection -and -not \$mfaRequirement\) \{ \$mfaRequirement = Get-RecentAadEnrollmentMfaRequirement' -or ([regex]::Matches($hjEndpointText,'Get-RecentAadEnrollmentMfaRequirement -Since')).Count -ne 2) { throw 'The MFA status is not limited to deviceenroller 0x8018002A plus an MFA event.' }
+if ($hjEndpointText -notmatch '\$enrollMfaExitCode = \(-not \$enrollStart\.Success -and \[string\]\$enrollStart\.ExitCode -eq "-2145910742"\)' -or $hjEndpointText -notmatch 'if \(\$enrollMfaExitCode -and -not \$kdfRejection -and -not \$mfaRequirement\) \{ \$mfaRequirement = Get-RecentAadEnrollmentMfaRequirement' -or ([regex]::Matches($hjEndpointText,'Get-RecentAadEnrollmentMfaRequirement -Since')).Count -ne 3) { throw 'The MFA status is not limited to deviceenroller 0x8018002A plus an MFA event.' }
 # Never a bypass: no other token or credential is tried after the MFA prompt.
 $mfaBranch = [regex]::Match($hjEndpointText,'(?s)elseif \(\$mfaRequirement\) \{\s+\$status = "INTUNE_ENROLLMENT_MFA_REQUIRED".{0,1200}?\n\s+\}').Value
 if (-not $mfaBranch -or $mfaBranch -match 'deviceenroller|Invoke-|Start-') { throw 'The MFA status branch does more than report.' }
@@ -504,6 +504,40 @@ if ((& $module { Get-HybridJoinCooldownHours -Status 'INTUNE_ENROLLMENT_MFA_REQU
 # The wait is skipped only on that event: the retry loop runs when neither KDFV1 nor MFA was seen.
 if ($hjEndpointText -notmatch '(?s)elseif \(\$mfaRequirement\) \{.{0,400}\}\s+else \{\s+Write-ProvisionalRunState') { throw 'The Intune confirmation wait is no longer the default after a failed trigger.' }
 Write-Host 'PASS: an MFA requirement on Microsoft Intune Enrollment is a review status, without the Intune confirmation wait'
+
+# Field 2026-11-15 (DE): the AAD MFA event came 4 minutes after the trigger, but the endpoint only read it
+# after the full 25-minute wait (21 PCs at 27 minutes each). The wait now stops at the first check that
+# finds the MFA or KDFV1 event; without stop evidence it keeps the plain wait.
+$definition=$ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-BoundedRetryUntilIntuneEnrollment' },$true)
+if (-not $definition) { throw 'Endpoint function missing: Invoke-BoundedRetryUntilIntuneEnrollment' }
+. ([scriptblock]::Create($definition.Extent.Text))
+$script:FakeClock = [datetime]'2026-11-15 20:53:07'
+$script:FakeSleeps = New-Object System.Collections.Generic.List[int]
+$script:FakeMfaAfter = $script:FakeClock.AddMinutes(4)
+$script:FakeLog = New-Object System.Collections.Generic.List[string]
+function Get-Date { return $script:FakeClock }
+function Start-Sleep { param([int]$Seconds) $script:FakeSleeps.Add($Seconds); $script:FakeClock = $script:FakeClock.AddSeconds($Seconds) }
+function Write-RunLog { param($Message) $script:FakeLog.Add([string]$Message) }
+function Get-IntuneEnrollmentDetected { return $false }
+function Get-RecentAadKdfV1Rejection { param([datetime]$Since) return $null }
+function Get-RecentAadEnrollmentMfaRequirement { param([datetime]$Since) if ($script:FakeClock -ge $script:FakeMfaAfter) { return [pscustomobject]@{ Code='AADSTS50079' } } return $null }
+$trigger = $script:FakeClock
+$early = Invoke-BoundedRetryUntilIntuneEnrollment -SleepMinutes 5 -MaxRetries 5 -ContextLabel 'intune_auto_enroll' -StopEvidenceSince $trigger -StopOnMfa -StopOnKdfV1
+$waited = ($script:FakeClock - $trigger).TotalMinutes
+if ($early.Success -or -not $early.StoppedEarly -or $early.Attempts -ne 1 -or $waited -gt 5) { throw ("The MFA event did not stop the Intune wait early (waited {0} min, attempts {1})." -f $waited,$early.Attempts) }
+if (-not (@($script:FakeLog) -match 'MFA requirement on Microsoft Intune Enrollment during attempt 1/5')) { throw 'The early stop is not logged.' }
+# No stop evidence (successful trigger): the plain 5 x 5-minute wait, one sleep per attempt.
+$script:FakeSleeps.Clear(); $start = $script:FakeClock
+$plain = Invoke-BoundedRetryUntilIntuneEnrollment -SleepMinutes 5 -MaxRetries 5 -ContextLabel 'intune_auto_enroll' -StopEvidenceSince $null -StopOnMfa:$false -StopOnKdfV1:$false
+if ($plain.Success -or $plain.Attempts -ne 5 -or $script:FakeSleeps.Count -ne 5 -or (($script:FakeClock - $start).TotalMinutes) -ne 25) { throw 'The wait without stop evidence changed.' }
+# 0x8018002A without any MFA event: the full wait, checked once a minute, and no early stop.
+$script:FakeMfaAfter = [datetime]::MaxValue; $start = $script:FakeClock
+$full = Invoke-BoundedRetryUntilIntuneEnrollment -SleepMinutes 5 -MaxRetries 5 -ContextLabel 'intune_auto_enroll' -StopEvidenceSince $start -StopOnMfa -StopOnKdfV1
+if ($full.Success -or $full.Attempts -ne 5 -or ($full.PSObject.Properties['StoppedEarly'] -and $full.StoppedEarly) -or [math]::Round(($script:FakeClock - $start).TotalMinutes) -ne 25) { throw 'Without an AAD refusal the full Intune wait is no longer kept.' }
+foreach ($name in @('Get-Date','Start-Sleep','Write-RunLog','Get-IntuneEnrollmentDetected','Get-RecentAadKdfV1Rejection','Get-RecentAadEnrollmentMfaRequirement')) { Remove-Item ("Function:\" + $name) -ErrorAction SilentlyContinue }
+# The call site passes the stop evidence only for a failed trigger; MFA only with 0x8018002A.
+if ($hjEndpointText -notmatch '-StopEvidenceSince \$\(if \(-not \$enrollStart\.Success\) \{ \$intuneAutoEnrollTriggeredAt \} else \{ \$null \}\)' -or $hjEndpointText -notmatch '-StopOnMfa:\$enrollMfaExitCode' -or $hjEndpointText -notmatch '-StopOnKdfV1:\(-not \$enrollStart\.Success\)') { throw 'The Intune wait does not get the stop evidence for a failed trigger.' }
+Write-Host 'PASS: the Intune confirmation wait stops at the first check that finds the MFA (or KDFV1) refusal'
 
 # Enrollment backups: reg.exe export cannot write past MAX_PATH (260), which blocked every stub removal.
 $backupNameDefinition=$ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-EnrollmentRegistryBackupFileName' },$true)

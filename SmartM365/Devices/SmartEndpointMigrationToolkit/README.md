@@ -244,7 +244,9 @@ Intune Enrollment (`AADSTS50072`/`50074`/`50076`/`50078`/`50079` for app
 `d4ebce55-015a-49b5-a083-c84d1797ae8c` in event 1098; `deviceenroller.exe` then returns `0x8018002A`),
 SYSTEM cannot answer the prompt: the status is `INTUNE_ENROLLMENT_MFA_REQUIRED` (NextAction
 `FIX_CONDITIONAL_ACCESS_MFA_FOR_INTUNE_ENROLLMENT`), without the confirmation wait when the prompt
-follows a failed trigger. Exclude Microsoft Intune Enrollment from that Conditional Access MFA
+follows a failed trigger. Entra ID often logs the prompt a few minutes after the trigger: the
+confirmation wait then reads event 1098 once a minute and stops at the first MFA (or KDFV1) refusal
+instead of waiting its full 25 minutes (HybridJoin endpoint 1.0.2). Exclude Microsoft Intune Enrollment from that Conditional Access MFA
 requirement (or require a hybrid-joined device instead), or have the user register MFA and sign in
 with it, then rerun the repair. When the tool
 returns `0x8018000A` (already enrolled) but the only local Intune traces are incomplete stubs left by

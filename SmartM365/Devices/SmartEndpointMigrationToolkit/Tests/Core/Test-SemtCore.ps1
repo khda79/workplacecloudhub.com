@@ -894,6 +894,37 @@ $script:HostLines.Clear()
         $reboot = $w11EndpointText.IndexOf('$rebootResult = Invoke-ControlledRebootWhenNoUser -Reason $RebootReason')
         $check -gt 0 -and $reboot -gt $check -and $w11EndpointText -match "RetryAfterRebootTaskMissing" -and $w11EndpointText -match "outcome\.NextAction = 'RUN_PREREQUISITES_CAMPAIGN'"
     }
+    # Field 2026-11-15: one background worker froze at start (no log) and kept its Run waiting 13 hours.
+    Test-Step 'Run engine: a worker with no log after 15 min is stopped as LOCAL_WORKER_START_HUNG (safe relaunch); one past its own timeouts as LOCAL_WORKER_TIMEOUT' {
+        $hungAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:PackageRoot 'Scripts\SmartM365-Invoke-EndpointMigrationWithPsExec.ps1'), [ref]$null, [ref]$null)
+        $hungAssign = $hungAst.Find({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$stopHungWorkers' }, $true)
+        $hungBlock = [scriptblock]::Create($hungAssign.Right.Extent.Text.Trim().TrimStart('{').TrimEnd('}'))
+        $hungLogRoot = Join-Path $tempRoot ('HungLogs-' + [guid]::NewGuid().ToString('N'))
+        [void](New-Item -ItemType Directory -Path $hungLogRoot -Force)
+        $savedRunContext = $script:RunContext; $savedGate = $script:Gate
+        $script:RunContext = [pscustomobject]@{ PsExecLogRoot = $hungLogRoot }
+        $script:Gate = [pscustomobject]@{ LeaseTimeoutMinutes = 275 }
+        $cycle = 1
+        $script:StoppedJobs = New-Object System.Collections.Generic.List[string]
+        function Stop-Job { param($Job, $ErrorAction) $script:StoppedJobs.Add([string]$Job.Id) }
+        function Stop-SemtWorkerProcessTree { param($LeasePath) 'PsExec tree stopped.' }
+        function Write-Host { param($Object, $ForegroundColor) }
+        $now = Get-Date
+        $noLog = [pscustomobject]@{ Job = [pscustomobject]@{ Id = 1; State = 'Running' }; Computer = 'pc-nolog.example.test'; StartedAt = $now.AddMinutes(-16); LeasePath = '' }
+        $young = [pscustomobject]@{ Job = [pscustomobject]@{ Id = 2; State = 'Running' }; Computer = 'pc-young.example.test'; StartedAt = $now.AddMinutes(-5); LeasePath = '' }
+        $busy = [pscustomobject]@{ Job = [pscustomobject]@{ Id = 3; State = 'Running' }; Computer = 'pc-busy.example.test'; StartedAt = $now.AddMinutes(-120); LeasePath = '' }
+        $old = [pscustomobject]@{ Job = [pscustomobject]@{ Id = 4; State = 'Running' }; Computer = 'pc-old.example.test'; StartedAt = $now.AddMinutes(-291); LeasePath = 'x' }
+        foreach ($withLog in @($busy,$old)) { Set-Content -LiteralPath (Join-Path $hungLogRoot ('{0}_C1_20261115-203800.log' -f (Get-SemtComputerPathKey -ComputerName $withLog.Computer))) -Value 'Worker started.' }
+        $running = New-Object System.Collections.ArrayList
+        foreach ($i in @($noLog,$young,$busy,$old)) { [void]$running.Add($i) }
+        $hung = @{}; $forced = @{}; $lastHungCheck = [datetime]::MinValue
+        . $hungBlock
+        $firstCheck = $lastHungCheck
+        . $hungBlock
+        Remove-Item Function:\Stop-Job,Function:\Stop-SemtWorkerProcessTree,Function:\Write-Host
+        $script:RunContext = $savedRunContext; $script:Gate = $savedGate
+        $hung.Count -eq 2 -and $hung['1'].Status -eq 'LOCAL_WORKER_START_HUNG' -and $hung['1'].NextAction -eq 'SAFE_TO_RELAUNCH' -and $hung['4'].Status -eq 'LOCAL_WORKER_TIMEOUT' -and $hung['4'].NextAction -eq 'VERIFY_REMOTE_STATE_BEFORE_RELAUNCH' -and $hung['4'].Detail -match 'PsExec tree stopped' -and (($script:StoppedJobs -join ',') -eq '1,4') -and $lastHungCheck -eq $firstCheck -and $engineText -match '\. \$stopHungWorkers' -and $engineText -match 'elseif \(\$hung\.ContainsKey\(\[string\]\$item\.Job\.Id\)\)'
+    }
     Test-Step 'Run engine: report names omit the Wave name; a cycle HTML report failure never fails the Run' {
         $engineText -match "'SEMT_\{0\}_cycle\{1\}_\{2\}\.csv' -f \`$Campaign,\`$cycle" -and $engineText -match "'SEMT_\{0\}_\{1\}_final\.html' -f \`$Campaign,\`$script:RunId" -and $engineText -match 'HTML report update failed' -and $engineText -match 'Final report failed'
     }

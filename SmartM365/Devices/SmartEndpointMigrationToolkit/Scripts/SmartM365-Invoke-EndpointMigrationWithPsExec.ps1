@@ -47,7 +47,7 @@
     Resolves options, rules and component integrity, writes nothing on targets and exits.
 
 .VERSION
-    1.0.3
+    1.0.4
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -73,7 +73,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:LauncherVersion = '1.0.3'
+$script:LauncherVersion = '1.0.4'
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected argument(s): {0}. Pass options with -Option @{{ Name = Value }} and PsExec with -PsExecPath." -f ($UnexpectedArguments -join ' '))
@@ -540,6 +540,8 @@ try {
 
         $running = New-Object System.Collections.ArrayList
         $forced = @{}
+        $hung = @{}
+        $lastHungCheck = [datetime]::MinValue
         $cancelObservedAt = $null
         $next = 0
         $lastProgressLog = Get-Date
@@ -580,6 +582,10 @@ try {
                 catch { $jobErrors.Add($_.Exception.Message) }
                 $row = $null
                 if ($received.Count -gt 0) { $row = $received[-1] }
+                elseif ($hung.ContainsKey([string]$item.Job.Id)) {
+                    $hungInfo = $hung[[string]$item.Job.Id]
+                    $row = New-EngineResult -Computer $item.Computer -CycleNumber $cycle -Status $hungInfo.Status -NextAction $hungInfo.NextAction -Detail $hungInfo.Detail
+                }
                 elseif ($forced.ContainsKey([string]$item.Job.Id)) {
                     $remote = $null
                     try {
@@ -622,6 +628,37 @@ try {
                 $running.Remove($item)
             }
             & $pollInterim
+        }
+        # Hung local workers (field 2026-11-15: one background job froze at start, wrote no log and kept
+        # its Run waiting for 13 hours after its reservation was recovered as HeartbeatStale).
+        # - No worker log 15 minutes after the start: the worker never reached the endpoint (its first
+        #   log line comes before any remote action). Stopped; safe to relaunch.
+        # - Older than the reservation age (PsExec timeout + communication-lost wait + 30 min) plus
+        #   15 minutes: the worker should have ended on its own timeouts. Its PsExec tree and job are
+        #   stopped; the remote state is unknown.
+        $stopHungWorkers = {
+            if (((Get-Date) - $lastHungCheck).TotalSeconds -lt 60) { return }
+            $lastHungCheck = Get-Date
+            foreach ($item in @($running | Where-Object { $_.Job.State -eq 'Running' -and -not $hung.ContainsKey([string]$_.Job.Id) -and -not $forced.ContainsKey([string]$_.Job.Id) })) {
+                $elapsedMinutes = ((Get-Date) - $item.StartedAt).TotalMinutes
+                $verdict = $null
+                if ($elapsedMinutes -ge 15) {
+                    $workerLogs = @()
+                    try { $workerLogs = @(Get-ChildItem -LiteralPath $script:RunContext.PsExecLogRoot -Filter ('{0}_C{1}_*.log' -f (Get-SemtComputerPathKey -ComputerName $item.Computer),$cycle) -File -ErrorAction Stop | Where-Object { $_.LastWriteTime -ge $item.StartedAt.AddMinutes(-1) }) }
+                    catch { $workerLogs = @([pscustomobject]@{ Unknown = $true }) }
+                    if ($workerLogs.Count -eq 0) {
+                        $verdict = [pscustomobject]@{ Status = 'LOCAL_WORKER_START_HUNG'; NextAction = 'SAFE_TO_RELAUNCH'; Detail = ('The local worker wrote no log {0:N0} minute(s) after its start and was stopped; the endpoint was not contacted.' -f $elapsedMinutes) }
+                    }
+                }
+                if ($null -eq $verdict -and $script:Gate.LeaseTimeoutMinutes -gt 0 -and $elapsedMinutes -ge ($script:Gate.LeaseTimeoutMinutes + 15)) {
+                    $verdict = [pscustomobject]@{ Status = 'LOCAL_WORKER_TIMEOUT'; NextAction = 'VERIFY_REMOTE_STATE_BEFORE_RELAUNCH'; Detail = ('The local worker was still running after {0:N0} minute(s), beyond its own timeouts, and was stopped. {1} The endpoint attempt may still be running.' -f $elapsedMinutes,(Stop-SemtWorkerProcessTree -LeasePath $item.LeasePath)) }
+                }
+                if ($null -ne $verdict) {
+                    $hung[[string]$item.Job.Id] = $verdict
+                    Write-Host ("{0}: {1} {2}" -f $verdict.Status,$item.Computer,$verdict.Detail) -ForegroundColor Red
+                    try { Stop-Job -Job $item.Job -ErrorAction Stop } catch { Write-Host ("WARNING: stopping the hung worker job of {0} failed: {1}" -f $item.Computer,$_.Exception.Message) -ForegroundColor Yellow }
+                }
+            }
         }
         while ($next -lt $computers.Count -or $running.Count -gt 0) {
             $cancel = Get-SemtCancellationState
@@ -719,6 +756,7 @@ try {
                     catch { Write-Host ("WARNING: live report update failed: {0}" -f $_.Exception.Message) -ForegroundColor Yellow }
                 }
                 & $pollInterim
+                . $stopHungWorkers
                 Start-Sleep -Seconds 2
                 continue
             }
