@@ -172,6 +172,7 @@ qualification remain separate.
 - `M365Inventory/Licensing/SmartM365-LicensePricing-Inventory.ps1`: normalization of governed license prices (`M365_License_Prices.csv`) and optional Windows 10 ESU prices (`Windows_ESU_Prices.csv`). The versioned France public-list baseline `M365_License_Prices_Public-France.csv` (every row estimated) is merged with an optional private override; see [License pricing](#license-pricing).
 - `SmartInventory.cmd`: the single entry point (see [Running jobs and manual launches](#running-jobs-and-manual-launches)).
 - `Maintenance/Remove-SmartM365-ExpiredTimestampedCsv.ps1`: one-time cleanup of the timestamped run copies that WeeklyHistory already covers (see below).
+- `Maintenance/Publish-SmartM365-DataAllBackfill.ps1`: one-time upload to SharePoint of the DATA-ALL files written while DATA-ALL uploads were disabled (see below).
 - `Maintenance/Import-SmartM365-LegacyDailyStats.ps1`: one-time import of legacy AD and Exchange on-premises daily statistics into the SmartInventory daily CSVs (see below).
 - `Maintenance/Invoke-SmartM365-ServerDataCleanup.ps1`: complete tenant DATA inventory with preview and verified server-only cleanup. It reports every file, groups decisions by area, preserves compact Discovered Apps summaries, keeps the prepared-batch history unless `-RetireLinkedPreparedBatches` is passed (then with audit receipts), retires old orphan atomic-write temporaries, retires unrecorded timestamped CSVs left in daily capture roots once older than the seven-day window (only when a recorded capture still holds the same export, under the capture retention locks), retires unrecorded CSVs of their run folders such as the Usage and Copilot runs and removes run folders left empty, never lets the timestamped-CSV or duplicate Usage run rules touch a daily capture root, and leaves unproven categories for review. Without `-DataRootPath` it uses the parent of the tenant `DataAllRootPath`; without `-ReportDirectory` it reports to a dated TEMP folder and removes its own default report folders older than `-ReportRetentionDays` (30). The orchestrator job `Maintenance-ServerDataCleanup` (group Maintenance, weekly on Sunday 06:00, `-Execute`, Elected on a `SharedRuntime` server) ships disabled: enable it once a manual Preview has been reviewed.
 - `Launchers/` and `LaunchersByOrchestrator/`: one-line aliases of the former `.cmd` launchers, kept for one version (see below).
@@ -318,6 +319,26 @@ its reason in the CSV report.
 # Preview, then delete (synchronized SharePoint copy or UNC DATA-ALL)
 .\Maintenance\Remove-SmartM365-ExpiredTimestampedCsv.ps1 -DataAllRootPath "<...>\SMART-M365\DATA\DATA-ALL"
 .\Maintenance\Remove-SmartM365-ExpiredTimestampedCsv.ps1 -DataAllRootPath "<...>\SMART-M365\DATA\DATA-ALL" -Execute
+```
+
+## DATA-ALL upload backfill
+
+Turning `EnableSharePointUploadDataAll` back on only uploads the next runs.
+`Maintenance/Publish-SmartM365-DataAllBackfill.ps1` (1.0) uploads the gap once, with the
+SmartM365.Core upload of the collectors. It takes the DATA-ALL files written since
+`-Since`, except the Orchestrator folder, hidden folders, lock and temporary files, files
+written less than `-MinimumAgeMinutes` (30) ago, and timestamped run copies older than
+`-TimestampedDays` (7): the collectors delete those from SharePoint at their next upload.
+A file already on SharePoint with the same name and size is skipped. Without `-Execute` it
+only reads (server files and SharePoint folder listings) and prints the plan; `-Execute`
+uploads oldest first, is refused when the tenant does not enable DATA-ALL uploads, and
+`-MaximumFiles` splits a long backfill into passes. Every decision is in the CSV report.
+Run it on a collection server with the orchestrator task account. It never deletes.
+
+```powershell
+# Preview, then upload (DATA-ALL root from the tenant profile)
+pwsh -NoProfile -File .\Maintenance\Publish-SmartM365-DataAllBackfill.ps1 -Since 2026-10-24
+pwsh -NoProfile -File .\Maintenance\Publish-SmartM365-DataAllBackfill.ps1 -Since 2026-10-24 -Execute
 ```
 
 ## Legacy daily statistics import
