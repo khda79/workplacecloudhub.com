@@ -12,6 +12,10 @@ A file is planned for upload when all of these hold:
 - it is under DATA-ALL, outside the Orchestrator folder (mirrored by the orchestrator itself) and
   outside hidden folders (.staging, .locks...);
 - it is not a lock, temporary or partial file;
+- it is not in a folder that no collector uploads (NotPublishedByCollector): the Intune remediation
+  script exports (Intune\Remediations\Exports, script sources stay on the server), the Windows Update
+  status work folder (Intune\WindowsUpdate\Status\Work) and the daily capture metadata
+  (DailyCaptureRecords, any depth);
 - it was written on or after -Since and at least -MinimumAgeMinutes ago (a file still being written
   by a running collector is left to that collector);
 - for a timestamped run copy (<prefix>_yyyyMMdd_HHmmss.csv or .xlsx), its run timestamp is within
@@ -61,7 +65,8 @@ pwsh -NoProfile -File .\Publish-SmartM365-DataAllBackfill.ps1 -Since 2026-10-24 
 Uploads them.
 
 .VERSION
-1.0
+1.1 - NotPublishedByCollector: remediation exports, Windows Update Work folder, DailyCaptureRecords.
+1.0 - First version.
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
@@ -94,7 +99,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.0'
+$ScriptVersion = '1.1'
 
 function Get-DataAllBackfillPlan {
     # Pure selection of the local files; SharePoint presence is checked afterwards.
@@ -107,6 +112,11 @@ function Get-DataAllBackfillPlan {
     $namePattern = '^(?<Prefix>.+)_(?<Stamp>\d{8}[-_]\d{6})\.(csv|xlsx)$'
     $stampFormats = [string[]]@('yyyyMMdd_HHmmss', 'yyyyMMdd-HHmmss')
     $transientPattern = '(?i)\.(lock|tmp|partial|part)$|^~\$'
+    # Folders that no collector uploads: copying them would publish what the pipeline keeps local.
+    $notPublishedPrefixes = @(
+        @('Intune', 'Remediations', 'Exports'),
+        @('Intune', 'WindowsUpdate', 'Status', 'Work')
+    )
     $plan = [Collections.Generic.List[object]]::new()
     foreach ($file in @(Get-ChildItem -LiteralPath $DataAllRoot -Recurse -File -Force -ErrorAction Stop)) {
         if ($file.LastWriteTime -lt $Since) { continue }
@@ -115,6 +125,10 @@ function Get-DataAllBackfillPlan {
         $reason = ''
         if ($segments.Count -and $segments[0] -ieq 'Orchestrator') { $reason = 'OrchestratorFolder' }
         elseif (@($segments | Where-Object { $_.StartsWith('.') }).Count) { $reason = 'HiddenFolder' }
+        elseif (@($segments | Where-Object { $_ -ieq 'DailyCaptureRecords' }).Count -or @($notPublishedPrefixes | Where-Object {
+                $prefix = $_
+                $segments.Count -ge $prefix.Count -and -not @(0..($prefix.Count - 1) | Where-Object { $segments[$_] -ine $prefix[$_] }).Count
+            }).Count) { $reason = 'NotPublishedByCollector' }
         elseif ($file.Name -match $transientPattern -or $file.Name.StartsWith('.')) { $reason = 'TransientFile' }
         elseif ($file.LastWriteTime -gt $NewestAllowed) { $reason = 'TooRecent' }
         else {

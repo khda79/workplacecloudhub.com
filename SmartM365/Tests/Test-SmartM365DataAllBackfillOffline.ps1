@@ -3,7 +3,7 @@
 Offline checks of Publish-SmartM365-DataAllBackfill.ps1 (file selection, preview default, guards).
 
 .VERSION
-1.0.0
+1.1.0
 #>
 #requires -Version 7.2
 Set-StrictMode -Version Latest
@@ -22,7 +22,7 @@ Check ($null -ne $planFunction) 'Get-DataAllBackfillPlan not found.'
 
 $text = Get-Content -LiteralPath $scriptPath -Raw
 Check ($ast.ParamBlock.Parameters.Name.VariablePath.UserPath -contains 'Execute') 'No -Execute switch.'
-Check ($text -match '\.VERSION\s+1\.0') 'Help .VERSION missing.'
+Check ($text -match '\.VERSION\s+1\.1 ') 'Help .VERSION missing.'
 Check ($text -match "if \(\`$Execute -and -not \`$policy\.Enabled\) \{ throw") 'Execute is not refused when DATA-ALL uploads are disabled.'
 Check ($text -match "Invoke-SmartM365SharePointCsvUpload -LocalFilePath \`$entry\.FullName -Enabled \`$true -EnsureParentFolders") 'Upload does not reuse the Core upload.'
 Check ($text -notmatch 'Remove-SmartM365SharePoint') 'The backfill must never delete on SharePoint.'
@@ -49,6 +49,15 @@ try {
     New-TestFile 'Intune\.staging\Devices.csv' $now.AddDays(-1)
     New-TestFile 'Intune\Devices\Devices.csv.lock' $now.AddDays(-1)
     New-TestFile 'Intune\Devices\Devices_20261117_095000.csv' $now.AddMinutes(-10)
+    New-TestFile 'Intune\Remediations\Exports\20261115-043032\Scripts\Fix_0001\detect.ps1' $now.AddDays(-2)
+    New-TestFile 'Intune\Remediations\Exports\WeeklyHistory\2026-W46\Remediations.csv' $now.AddDays(-2)
+    New-TestFile 'Intune\Remediations\Remediations.csv' $now.AddDays(-2)
+    New-TestFile 'Intune\Remediations\ExportsArchive\Remediations.csv' $now.AddDays(-2)
+    New-TestFile 'Intune\WindowsUpdate\Status\Work\Extract_20261116_020016_abc\part.csv' $now.AddDays(-1)
+    New-TestFile 'Intune\WindowsUpdate\Status\Status.csv' $now.AddDays(-1)
+    New-TestFile 'Exchange\Work\Mailboxes.csv' $now.AddDays(-1)
+    New-TestFile 'M365\Licensing\Licenses\DailyCaptureRecords\SmartM365-Licences-Inventory\record.json.txt' $now.AddDays(-1)
+    New-TestFile 'M365\Licensing\Licenses\DailyCaptures\0da4e1ada690\Licenses.csv' $now.AddDays(-1)
 
     $plan = @(Get-DataAllBackfillPlan -DataAllRoot $dataAll -Since ([datetime]'2026-10-24') -TimestampedCutoff $now.AddDays(-7) -NewestAllowed $now.AddMinutes(-30))
     $byName = @{}; foreach ($entry in $plan) { $byName[$entry.Folder + '|' + $entry.Name] = $entry }
@@ -67,6 +76,15 @@ try {
     Expect 'Intune\.staging|Devices.csv' 'Skip' 'HiddenFolder'
     Expect 'Intune\Devices|Devices.csv.lock' 'Skip' 'TransientFile'
     Expect 'Intune\Devices|Devices_20261117_095000.csv' 'Skip' 'TooRecent'
+    Expect 'Intune\Remediations\Exports\20261115-043032\Scripts\Fix_0001|detect.ps1' 'Skip' 'NotPublishedByCollector'
+    Expect 'Intune\Remediations\Exports\WeeklyHistory\2026-W46|Remediations.csv' 'Skip' 'NotPublishedByCollector'
+    Expect 'Intune\Remediations|Remediations.csv' 'Upload' ''
+    Expect 'Intune\Remediations\ExportsArchive|Remediations.csv' 'Upload' ''
+    Expect 'Intune\WindowsUpdate\Status\Work\Extract_20261116_020016_abc|part.csv' 'Skip' 'NotPublishedByCollector'
+    Expect 'Intune\WindowsUpdate\Status|Status.csv' 'Upload' ''
+    Expect 'Exchange\Work|Mailboxes.csv' 'Upload' ''
+    Expect 'M365\Licensing\Licenses\DailyCaptureRecords\SmartM365-Licences-Inventory|record.json.txt' 'Skip' 'NotPublishedByCollector'
+    Expect 'M365\Licensing\Licenses\DailyCaptures\0da4e1ada690|Licenses.csv' 'Upload' ''
     $ordered = @($plan | ForEach-Object LastWriteTime)
     Check ((@($ordered | Sort-Object) -join '|') -eq ($ordered -join '|')) 'Plan is not ordered oldest first.'
 }
