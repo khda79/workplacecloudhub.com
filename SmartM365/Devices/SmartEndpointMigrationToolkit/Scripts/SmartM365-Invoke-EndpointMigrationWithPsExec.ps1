@@ -47,7 +47,7 @@
     Resolves options, rules and component integrity, writes nothing on targets and exits.
 
 .VERSION
-    1.0.6
+    1.0.7
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -73,7 +73,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:LauncherVersion = '1.0.6'
+$script:LauncherVersion = '1.0.7'
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected argument(s): {0}. Pass options with -Option @{{ Name = Value }} and PsExec with -PsExecPath." -f ($UnexpectedArguments -join ' '))
@@ -568,9 +568,10 @@ try {
                 $jobErrors = New-Object System.Collections.Generic.List[string]
                 $received = @()
                 try {
-                    $receiveErrors = @()
-                    $received = @(Receive-Job -Job $item.Job -ErrorAction SilentlyContinue -ErrorVariable receiveErrors | Where-Object { $_ -and $_.PSObject.Properties['CorrelationId'] -and [string]$_.CorrelationId -eq $item.CorrelationId })
-                    foreach ($errorRecord in @($receiveErrors)) { $jobErrors.Add($errorRecord.ToString()) }
+                    # Not Receive-Job: in PowerShell 5.1 it replays every worker warning (task steps, already
+                    # in the worker log) on this console. The errors are read from the child jobs below
+                    # (Receive-Job also listed them a second time in JOB_ERROR details).
+                    $received = @(Get-SemtJobOutput -Job $item.Job | Where-Object { $_ -and $_.PSObject.Properties['CorrelationId'] -and [string]$_.CorrelationId -eq $item.CorrelationId })
                     foreach ($child in @($item.Job.ChildJobs)) {
                         foreach ($childError in @($child.Error)) { $jobErrors.Add($childError.ToString()) }
                         if ($child.JobStateInfo.Reason) {

@@ -937,6 +937,24 @@ $script:HostLines.Clear()
     }
     # Field 2026-11-16: the live report rewritten every 60 s took up to 4 minutes at 1,500 PCs and blocked
     # the dispatch loop (an unreachable PC went from 0.8 to 4 minutes over the night).
+    # Field 2026-11-17: each task step (Connect, Register, Run) of every worker was printed as a warning
+    # on the launcher console by Receive-Job, whatever the warning preference.
+    Test-Step 'Run engine: worker results are read without Receive-Job, so worker warnings stay out of the console' {
+        $coreManifest = Join-Path $script:PackageRoot 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1'
+        $probe = Join-Path $tempRoot ('JobWarnings-' + [guid]::NewGuid().ToString('N') + '.ps1')
+        Set-Content -LiteralPath $probe -Encoding ASCII -Value @(
+            'param($Manifest)',
+            'Import-Module $Manifest -Force',
+            '$job = Start-Job { $inner = Start-Job { Write-Warning ''SEMT_TASK_STEP: Connect''; ''inner'' }; [void](Wait-Job $inner); [void](Receive-Job $inner -WarningAction SilentlyContinue); [pscustomobject]@{ CorrelationId = ''c1''; Value = 1 }; Write-Error ''worker error'' }',
+            '[void](Wait-Job $job -Timeout 120)',
+            '$out = @(Get-SemtJobOutput -Job $job)',
+            '''OUT={0};CORR={1};ERR={2}'' -f $out.Count,$out[0].CorrelationId,@($job.ChildJobs[0].Error).Count',
+            'Remove-Job $job -Force')
+        $console = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $probe -Manifest $coreManifest 2>&1 3>&1 | ForEach-Object { [string]$_ })
+        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+        (@($console | Where-Object { $_ -match 'SEMT_TASK_STEP' }).Count -eq 0) -and (@($console) -contains 'OUT=1;CORR=c1;ERR=1') -and
+        $engineText -match '\$received = @\(Get-SemtJobOutput -Job \$item\.Job \|' -and $engineText -notmatch 'Receive-Job -Job \$item\.Job'
+    }
     Test-Step 'Run engine: the live HTML report waits five times its last write time (at least 60 s), even after a failed write' {
         $engineText -match '(?s)\$lastHtml = \[datetime\]::MinValue\s*\$lastHtmlRenderSeconds = 0' -and
         $engineText -match '(?s)if \(\(\(Get-Date\) - \$lastHtml\)\.TotalSeconds -ge \[math\]::Max\(60, 5 \* \$lastHtmlRenderSeconds\)\) \{\s*\$htmlWatch = \[System\.Diagnostics\.Stopwatch\]::StartNew\(\)\s*try \{.*?Write-SemtRunHtmlReport -State \$script:Report -CycleNumber \$cycle -IsLive -CurrentCycleRows.*?\}\s*catch \{ Write-Host \("WARNING: live report update failed[^\n]*\n\s*\$lastHtmlRenderSeconds = \$htmlWatch\.Elapsed\.TotalSeconds\s*\$lastHtml = Get-Date\s*\}' -and

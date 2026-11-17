@@ -590,6 +590,24 @@ function Stop-SemtWorkerProcessTree {
     catch { return ("Local PsExec process tree stop failed: {0}" -f $_.Exception.Message) }
 }
 
+function Get-SemtJobOutput {
+    <#
+    Returns the output objects of a finished background job without Receive-Job. In Windows
+    PowerShell 5.1, Receive-Job writes the job warning records (SEMT_TASK_STEP, SEMT_RPC_*, already
+    copied into the worker log) to the launcher console whatever -WarningAction, the warning
+    preference or a 3> redirection say. The job errors stay in ChildJobs[].Error.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Job)
+
+    $output = New-Object System.Collections.Generic.List[object]
+    foreach ($child in @($Job.ChildJobs)) {
+        if ($null -eq $child -or -not $child.PSObject.Properties['Output'] -or $null -eq $child.Output) { continue }
+        foreach ($item in @($child.Output.ReadAll())) { $output.Add($item) }
+    }
+    return ,($output.ToArray())
+}
+
 #endregion
 
 # SIG # Begin signature block
