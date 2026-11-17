@@ -314,7 +314,9 @@ function Invoke-SemtGraphPageRequest {
     One page of a paged Graph GET. A page that does not answer within Get-SemtGraphPageTimeoutSeconds
     ends the process with GRAPH_SIGN_IN_REQUIRED (exit code 7); a sign-in error thrown by the SDK
     becomes GRAPH_SIGN_IN_REQUIRED with the page reached; any other error keeps its message with the
-    page context. Never retried under another credential.
+    page context. A request that never reached Graph (network send failure, for example a pooled
+    connection closed by a proxy after an idle time) is sent once more after 5 s with the same token;
+    HTTP errors, sign-in errors and timeouts are never retried. Never retried under another credential.
     #>
     [CmdletBinding()]
     param(
@@ -332,20 +334,39 @@ function Invoke-SemtGraphPageRequest {
     $hint = 'A hidden export cannot show the sign-in window. Refresh the inventories again; if it repeats, run Connect-MgGraph in a visible Windows PowerShell first.'
     try { Update-SemtGraphSingleToken }
     catch { throw ("GRAPH_SIGN_IN_REQUIRED: {0} export: renewing the Graph access token failed at page {1} ({2} item(s) already read). {3} Detail: {4}" -f $Label,$Page,$ItemsRead,$hint,$_.Exception.Message) }
-    Start-SemtGraphWatchdog -Seconds $timeout -Message ("GRAPH_SIGN_IN_REQUIRED: {0} export stopped: Microsoft Graph did not answer page {1} within {2} s ({3} item(s) already read, {4} s after the connection; request {5}); the Graph SDK is most likely waiting for an interactive sign-in. No CSV was written. {6}" -f $Label,$Page,$timeout,$ItemsRead,($elapsed + $timeout),$target,$hint)
-    try {
-        $request = @{ Method = 'GET'; Uri = $Uri; ErrorAction = 'Stop' }
-        if ($Headers) { $request.Headers = $Headers }
-        return (Invoke-MgGraphRequest @request)
-    }
-    catch {
-        $detail = $_.Exception.Message
-        if ($detail -match 'InteractiveBrowserCredential|User canceled|AuthenticationFailed|MsalUiRequired|interaction_required|AADSTS') {
-            throw ("GRAPH_SIGN_IN_REQUIRED: {0} export: Microsoft Graph asked for a new interactive sign-in at page {1} ({2} item(s) already read, {3} s after the connection; request {4}). {5} Detail: {6}" -f $Label,$Page,$ItemsRead,$(if ($ConnectedAt -is [datetime]) { [int]((Get-Date) - $ConnectedAt).TotalSeconds } else { -1 }),$target,$hint,$detail)
+    $request = @{ Method = 'GET'; Uri = $Uri; ErrorAction = 'Stop' }
+    if ($Headers) { $request.Headers = $Headers }
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+        if ($attempt -gt 1) { Start-Sleep -Seconds 5 }
+        Start-SemtGraphWatchdog -Seconds $timeout -Message ("GRAPH_SIGN_IN_REQUIRED: {0} export stopped: Microsoft Graph did not answer page {1} within {2} s ({3} item(s) already read, {4} s after the connection; request {5}); the Graph SDK is most likely waiting for an interactive sign-in. No CSV was written. {6}" -f $Label,$Page,$timeout,$ItemsRead,($elapsed + $timeout),$target,$hint)
+        try {
+            return (Invoke-MgGraphRequest @request)
         }
-        throw ("{0} Graph request failed at page {1} ({2} item(s) already read; request {3}): {4}" -f $Label,$Page,$ItemsRead,$target,$detail)
+        catch {
+            $detail = $_.Exception.Message
+            if ($detail -match 'InteractiveBrowserCredential|User canceled|AuthenticationFailed|MsalUiRequired|interaction_required|AADSTS') {
+                throw ("GRAPH_SIGN_IN_REQUIRED: {0} export: Microsoft Graph asked for a new interactive sign-in at page {1} ({2} item(s) already read, {3} s after the connection; request {4}). {5} Detail: {6}" -f $Label,$Page,$ItemsRead,$(if ($ConnectedAt -is [datetime]) { [int]((Get-Date) - $ConnectedAt).TotalSeconds } else { -1 }),$target,$hint,$detail)
+            }
+            # Send failure only: an HTTP answer (it has a Response or a status code) is never retried.
+            $sendFailure = $false
+            $hasResponse = $false
+            for ($e = $_.Exception; $null -ne $e; $e = $e.InnerException) {
+                if ($e.PSObject.Properties['Response'] -and $null -ne $e.Response) { $hasResponse = $true }
+                if ($e.PSObject.Properties['StatusCode'] -and $null -ne $e.StatusCode) { $hasResponse = $true }
+                # By type name: System.Net.Http is not always loaded in Windows PowerShell 5.1.
+                for ($t = $e.GetType(); $null -ne $t; $t = $t.BaseType) {
+                    if ($t.FullName -in @('System.Net.Http.HttpRequestException','System.IO.IOException','System.Net.Sockets.SocketException')) { $sendFailure = $true; break }
+                }
+            }
+            if ($attempt -eq 1 -and $sendFailure -and -not $hasResponse) {
+                Write-Host ("{0}: page {1} was not sent ({2}); sending it once more in 5 s with the same token." -f $Label,$Page,$detail) -ForegroundColor Yellow
+                continue
+            }
+            $retried = if ($attempt -gt 1) { ' after one retry' } else { '' }
+            throw ("{0} Graph request failed at page {1}{2} ({3} item(s) already read; request {4}): {5}" -f $Label,$Page,$retried,$ItemsRead,$target,$detail)
+        }
+        finally { Stop-SemtGraphWatchdog }
     }
-    finally { Stop-SemtGraphWatchdog }
 }
 
 function Get-SemtSharedInventoryPath {

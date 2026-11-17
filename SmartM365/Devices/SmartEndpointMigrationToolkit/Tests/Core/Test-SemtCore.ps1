@@ -777,6 +777,40 @@ $script:HostLines.Clear()
         Test-Step ("{0} export: every Graph page is read and reported on one short line without its URL" -f $exporterName) { $paging.Count -eq 9 -and ($paging.Lines -join '|') -eq 'Graph page 1: 3 device(s) read so far.|Graph page 2: 6 device(s) read so far.|Graph page 3: 9 device(s) read so far.' }
         Test-Step ("{0} export: per-computer lookups are quiet" -f $exporterName) { $paging.QuietLines -eq 0 }
     }
+    # Field 2026-11-17: the users export failed at page 1 with a send failure after a 6-minute idle time.
+    Add-Type -AssemblyName System.Net.Http
+    if (-not ('SemtFakeGraphHttpResponseException' -as [type])) {
+        Add-Type -ReferencedAssemblies System.Net.Http -TypeDefinition 'public class SemtFakeGraphHttpResponseException : System.Net.Http.HttpRequestException { public SemtFakeGraphHttpResponseException(string m) : base(m) {} public object Response { get { return "403"; } } }'
+    }
+    $graphRetry = & $coreModule {
+        $script:FakeGraphCalls = 0
+        $script:FakeGraphPlan = @()
+        function script:Invoke-MgGraphRequest { param($Method,$Uri,$ErrorAction,$Headers) $script:FakeGraphCalls++; $step = $script:FakeGraphPlan[[Math]::Min($script:FakeGraphCalls, $script:FakeGraphPlan.Count) - 1]; if ($step -is [Exception]) { throw $step }; return $step }
+        function script:Start-Sleep { param($Seconds) }
+        function script:Write-Host { param([object]$Object,$ForegroundColor) }
+        $run = {
+            param($plan)
+            $script:FakeGraphCalls = 0; $script:FakeGraphPlan = $plan
+            $outcome = try { [string](Invoke-SemtGraphPageRequest -Uri 'https://graph.microsoft.com/v1.0/users?$top=1' -Label 'Users and licenses').value } catch { 'ERROR: ' + $_.Exception.Message }
+            [pscustomobject]@{ Calls = $script:FakeGraphCalls; Outcome = $outcome }
+        }
+        try {
+            $sendFailure = New-Object System.Net.Http.HttpRequestException('An error occurred while sending the request.', (New-Object System.IO.IOException('connection closed')))
+            [pscustomobject]@{
+                Recovered = & $run @($sendFailure, @{ value = 'ok' })
+                TwiceFailed = & $run @($sendFailure, $sendFailure, @{ value = 'late' })
+                HttpError = & $run @((New-Object SemtFakeGraphHttpResponseException('Response status code does not indicate success: Forbidden')), @{ value = 'late' })
+                SignIn = & $run @((New-Object System.Exception('AADSTS50076: interaction_required')), @{ value = 'late' })
+            }
+        }
+        finally { Remove-Item -Path Function:\Invoke-MgGraphRequest,Function:\Start-Sleep,Function:\Write-Host -ErrorAction SilentlyContinue }
+    }
+    Test-Step 'Graph page: a send failure is sent once more with the same token; a second failure, an HTTP error or a sign-in error is not retried' {
+        $graphRetry.Recovered.Calls -eq 2 -and $graphRetry.Recovered.Outcome -eq 'ok' -and
+        $graphRetry.TwiceFailed.Calls -eq 2 -and $graphRetry.TwiceFailed.Outcome -match '^ERROR: Users and licenses Graph request failed at page 1 after one retry ' -and
+        $graphRetry.HttpError.Calls -eq 1 -and $graphRetry.HttpError.Outcome -match 'failed at page 1 \(.*Forbidden' -and
+        $graphRetry.SignIn.Calls -eq 1 -and $graphRetry.SignIn.Outcome -match '^ERROR: GRAPH_SIGN_IN_REQUIRED'
+    }
     Test-Step 'Run inventory refresh searches every forest domain (AdDomain is a DNS suffix only)' { $engineText -match 'Invoke-SemtInventoryExport -Kind \$Kind' -and $engineText -notmatch "-Domain \(Opt 'AdDomain'\)" }
     #endregion
 
