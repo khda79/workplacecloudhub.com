@@ -47,7 +47,7 @@
     Resolves options, rules and component integrity, writes nothing on targets and exits.
 
 .VERSION
-    1.0.5
+    1.0.6
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -73,7 +73,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:LauncherVersion = '1.0.5'
+$script:LauncherVersion = '1.0.6'
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected argument(s): {0}. Pass options with -Option @{{ Name = Value }} and PsExec with -PsExecPath." -f ($UnexpectedArguments -join ' '))
@@ -546,6 +546,7 @@ try {
         $next = 0
         $lastProgressLog = Get-Date
         $lastHtml = [datetime]::MinValue
+        $lastHtmlRenderSeconds = 0
         $cycleIgnoreGuard = [bool]((Opt 'IgnoreEndpointRunGuard') -and ($cycle -eq 1 -or (Opt 'IgnoreEndpointRunGuardEveryCycle')))
         # Optional campaign hooks: in-cycle confirmation of each result and a background interim
         # confirmation; both feed the archive rules at once and never block slots or dispatch.
@@ -747,13 +748,20 @@ try {
                     Write-Host ("Waiting for {0} worker(s); elapsed {1:N1} min; running: {2}" -f $running.Count,((Get-Date) - $cycleStart).TotalMinutes,((@($running) | ForEach-Object { '{0} ({1:N1}m)' -f $_.Computer,((Get-Date) - $_.StartedAt).TotalMinutes }) -join ', '))
                     $lastProgressLog = Get-Date
                 }
-                if (((Get-Date) - $lastHtml).TotalSeconds -ge 60) {
+                # The live report blocks this loop while it is written: no finished worker is collected
+                # and no computer starts. Its write time grows with the rows (field 2026-11-16: about
+                # 4 minutes at 1,500 PCs, and an unreachable PC then took 4 minutes instead of 0.8).
+                # The next write waits five times the last write time (at least 60 s), so the report
+                # never takes more than about a sixth of the launcher time. A failed write waits too.
+                if (((Get-Date) - $lastHtml).TotalSeconds -ge [math]::Max(60, 5 * $lastHtmlRenderSeconds)) {
+                    $htmlWatch = [System.Diagnostics.Stopwatch]::StartNew()
                     try {
                         $runningRows = @($running | ForEach-Object { [pscustomobject]@{ ComputerName = $_.Computer; ConnectionTarget = $_.Target; JobId = [string]$_.Job.Id; State = [string]$_.Job.State; Started = $_.StartedAt.ToString('yyyy-MM-dd HH:mm:ss'); ElapsedMinutes = [math]::Round(((Get-Date) - $_.StartedAt).TotalMinutes, 1) } })
                         [void](Write-SemtRunHtmlReport -State $script:Report -CycleNumber $cycle -IsLive -CurrentCycleRows @($cycleRows.ToArray()) -CurrentProgress (New-SemtProgressRow -CycleNumber $cycle -CycleStart $cycleStart -Total ($computers.Count + $preRows.Count) -Queued $next -Completed $cycleRows.Count -Running $running.Count -ComputerListStats $listStats) -RunningRows $runningRows)
-                        $lastHtml = Get-Date
                     }
                     catch { Write-Host ("WARNING: live report update failed: {0}" -f $_.Exception.Message) -ForegroundColor Yellow }
+                    $lastHtmlRenderSeconds = $htmlWatch.Elapsed.TotalSeconds
+                    $lastHtml = Get-Date
                 }
                 & $pollInterim
                 . $stopHungWorkers

@@ -935,6 +935,13 @@ $script:HostLines.Clear()
         ([regex]::Matches($engineText,'Write-SemtRunHtmlReport -State \$script:Report -CycleNumber \$cycle\)')).Count -eq 0 -and
         ([regex]::Matches($engineText,"Stop-SemtWorkerProcessTree -LeasePath \`$item\.LeasePath\)\)\.TrimEnd\('\.'\)")).Count -eq 2
     }
+    # Field 2026-11-16: the live report rewritten every 60 s took up to 4 minutes at 1,500 PCs and blocked
+    # the dispatch loop (an unreachable PC went from 0.8 to 4 minutes over the night).
+    Test-Step 'Run engine: the live HTML report waits five times its last write time (at least 60 s), even after a failed write' {
+        $engineText -match '(?s)\$lastHtml = \[datetime\]::MinValue\s*\$lastHtmlRenderSeconds = 0' -and
+        $engineText -match '(?s)if \(\(\(Get-Date\) - \$lastHtml\)\.TotalSeconds -ge \[math\]::Max\(60, 5 \* \$lastHtmlRenderSeconds\)\) \{\s*\$htmlWatch = \[System\.Diagnostics\.Stopwatch\]::StartNew\(\)\s*try \{.*?Write-SemtRunHtmlReport -State \$script:Report -CycleNumber \$cycle -IsLive -CurrentCycleRows.*?\}\s*catch \{ Write-Host \("WARNING: live report update failed[^\n]*\n\s*\$lastHtmlRenderSeconds = \$htmlWatch\.Elapsed\.TotalSeconds\s*\$lastHtml = Get-Date\s*\}' -and
+        $engineText -notmatch 'TotalSeconds -ge 60\) \{\s*try \{\s*\$runningRows'
+    }
     Test-Step 'SHA256 works on a path longer than 260 characters' {
         $deep = $tempRoot
         while ($deep.Length -lt 300) { $deep = Join-Path $deep ('segment-' + ('x' * 30)) }
