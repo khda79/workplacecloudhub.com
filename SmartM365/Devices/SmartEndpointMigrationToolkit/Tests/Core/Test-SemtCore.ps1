@@ -996,13 +996,15 @@ $script:HostLines.Clear()
         Set-Content -LiteralPath $probe -Encoding ASCII -Value @(
             'param($Manifest)',
             'Import-Module $Manifest -Force',
-            '$job = Start-Job { $inner = Start-Job { Write-Warning ''SEMT_TASK_STEP: Connect''; ''inner'' }; [void](Wait-Job $inner); [void](Receive-Job $inner -WarningAction SilentlyContinue); [pscustomobject]@{ CorrelationId = ''c1''; Value = 1 }; Write-Error ''worker error'' }',
+            '$job = Start-Job { $inner = Start-Job { Write-Warning ''SEMT_TASK_STEP: Connect''; ''inner'' }; [void](Wait-Job $inner); [void](Receive-Job $inner -WarningAction SilentlyContinue); ''worker text''; [pscustomobject]@{ CorrelationId = ''c1''; Value = 1 }; Write-Error ''worker error'' }',
             '[void](Wait-Job $job -Timeout 120)',
-            '$out = @(Get-SemtJobOutput -Job $job)',
+            '# Same filter as the launcher: one pipeline object per job output object.',
+            '$out = @(Get-SemtJobOutput -Job $job | Where-Object { $_ -and $_.PSObject.Properties[''CorrelationId''] -and [string]$_.CorrelationId -eq ''c1'' })',
             '''OUT={0};CORR={1};ERR={2}'' -f $out.Count,$out[0].CorrelationId,@($job.ChildJobs[0].Error).Count',
             'Remove-Job $job -Force')
         $console = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $probe -Manifest $coreManifest 2>&1 3>&1 | ForEach-Object { [string]$_ })
         Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+        # Field 2026-11-17 (CH, 1.0.8): the array was written as one object and Where-Object dropped every result (JOB_ERROR, empty detail).
         (@($console | Where-Object { $_ -match 'SEMT_TASK_STEP' }).Count -eq 0) -and (@($console) -contains 'OUT=1;CORR=c1;ERR=1') -and
         $engineText -match '\$received = @\(Get-SemtJobOutput -Job \$item\.Job \|' -and $engineText -notmatch 'Receive-Job -Job \$item\.Job'
     }

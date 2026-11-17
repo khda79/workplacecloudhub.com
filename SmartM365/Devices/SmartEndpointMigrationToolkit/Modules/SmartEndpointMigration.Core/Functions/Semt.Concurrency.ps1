@@ -596,16 +596,16 @@ function Get-SemtJobOutput {
     PowerShell 5.1, Receive-Job writes the job warning records (SEMT_TASK_STEP, SEMT_RPC_*, already
     copied into the worker log) to the launcher console whatever -WarningAction, the warning
     preference or a 3> redirection say. The job errors stay in ChildJobs[].Error.
+    Each object is written to the pipeline on its own, like Receive-Job: the launcher filters them with
+    Where-Object (an array written as one object hid every worker result, field 2026-11-17, 1.0.7-1.0.8).
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)]$Job)
 
-    $output = New-Object System.Collections.Generic.List[object]
     foreach ($child in @($Job.ChildJobs)) {
         if ($null -eq $child -or -not $child.PSObject.Properties['Output'] -or $null -eq $child.Output) { continue }
-        foreach ($item in @($child.Output.ReadAll())) { $output.Add($item) }
+        foreach ($item in @($child.Output.ReadAll())) { Write-Output $item }
     }
-    return ,($output.ToArray())
 }
 
 #endregion
