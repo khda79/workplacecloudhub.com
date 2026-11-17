@@ -324,10 +324,11 @@ its reason in the CSV report.
 ## DATA-ALL upload backfill
 
 Turning `EnableSharePointUploadDataAll` back on only uploads the next runs.
-`Maintenance/Publish-SmartM365-DataAllBackfill.ps1` (1.1) uploads the gap once, with the
+`Maintenance/Publish-SmartM365-DataAllBackfill.ps1` (1.2) uploads the gap once, with the
 SmartM365.Core upload of the collectors. It takes the DATA-ALL files written since
 `-Since`, except the Orchestrator folder, hidden folders, folders no collector uploads
-(`Intune\Remediations\Exports`, `Intune\WindowsUpdate\Status\Work`, `DailyCaptureRecords`),
+(`Intune\Remediations\Exports`, `Intune\WindowsUpdate\Status\Work` and `\Archive`,
+`Intune\Applications\DiscoveredApps\ResumeHistory`, `DailyCaptureRecords`),
 lock and temporary files, files
 written less than `-MinimumAgeMinutes` (30) ago, and timestamped run copies older than
 `-TimestampedDays` (7): the collectors delete those from SharePoint at their next upload.

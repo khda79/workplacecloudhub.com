@@ -14,7 +14,8 @@ A file is planned for upload when all of these hold:
 - it is not a lock, temporary or partial file;
 - it is not in a folder that no collector uploads (NotPublishedByCollector): the Intune remediation
   script exports (Intune\Remediations\Exports, script sources stay on the server), the Windows Update
-  status work folder (Intune\WindowsUpdate\Status\Work) and the daily capture metadata
+  status work and archive folders (Intune\WindowsUpdate\Status\Work and \Archive), the Discovered
+  Apps checkpoints (Intune\Applications\DiscoveredApps\ResumeHistory) and the daily capture metadata
   (DailyCaptureRecords, any depth);
 - it was written on or after -Since and at least -MinimumAgeMinutes ago (a file still being written
   by a running collector is left to that collector);
@@ -65,11 +66,14 @@ pwsh -NoProfile -File .\Publish-SmartM365-DataAllBackfill.ps1 -Since 2026-10-24 
 Uploads them.
 
 .VERSION
-1.1 - NotPublishedByCollector: remediation exports, Windows Update Work folder, DailyCaptureRecords.
-1.0 - First version.
+1.2
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
+1.2 - NotPublishedByCollector also covers the Windows Update status Archive and the Discovered Apps
+      ResumeHistory; .VERSION holds the number only.
+1.1 - NotPublishedByCollector: remediation exports, Windows Update Work folder, DailyCaptureRecords.
+1.0 - First version.
 #>
 #requires -Version 7.2
 
@@ -99,7 +103,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.1'
+$ScriptVersion = '1.2'
 
 function Get-DataAllBackfillPlan {
     # Pure selection of the local files; SharePoint presence is checked afterwards.
@@ -115,7 +119,9 @@ function Get-DataAllBackfillPlan {
     # Folders that no collector uploads: copying them would publish what the pipeline keeps local.
     $notPublishedPrefixes = @(
         @('Intune', 'Remediations', 'Exports'),
-        @('Intune', 'WindowsUpdate', 'Status', 'Work')
+        @('Intune', 'WindowsUpdate', 'Status', 'Work'),
+        @('Intune', 'WindowsUpdate', 'Status', 'Archive'),
+        @('Intune', 'Applications', 'DiscoveredApps', 'ResumeHistory')
     )
     $plan = [Collections.Generic.List[object]]::new()
     foreach ($file in @(Get-ChildItem -LiteralPath $DataAllRoot -Recurse -File -Force -ErrorAction Stop)) {
