@@ -248,6 +248,16 @@ try {
         (ConvertTo-SemtComputerName -Line '  # whole-line comment') -eq '' -and
         (ConvertTo-SemtComputerName -Line 'PC#0001') -ceq 'PC#0001'
     }
+    # Field 2026-11-17: a real ScheduledTask run recorded PsExec as 'SkippedDryRun' in RunManifest.
+    Test-Step 'PsExec evidence without a binary names the real reason: dry run, another remote execution mode, or not checked' {
+        $dry = Get-SemtPsExecSecurityEvidence -Path '' -DryRun -RemoteExecutionMode 'PsExec'
+        $task = Get-SemtPsExecSecurityEvidence -Path '' -RemoteExecutionMode 'ScheduledTask'
+        $none = Get-SemtPsExecSecurityEvidence -Path ''
+        $engineText = [IO.File]::ReadAllText((Join-Path $script:PackageRoot 'Scripts\SmartM365-Invoke-EndpointMigrationWithPsExec.ps1'))
+        $dry.CheckStatus -eq 'SkippedDryRun' -and $task.CheckStatus -eq 'SkippedNotUsed' -and $task.Detail -match 'ScheduledTask' -and $task.Detail -notmatch 'Dry run' -and
+        $none.CheckStatus -eq 'NotChecked' -and [bool]$task.IsCompliant -and
+        $engineText -match "Get-SemtPsExecSecurityEvidence -Path '' -DryRun:\(\[bool\]\(Opt 'DryRun'\)\) -RemoteExecutionMode"
+    }
     Test-Step 'short-name key matches FQDN and short name (used for target and run guard correlation)' { $fqdn = 'pc-0001.contoso.example'; $short = 'PC-0001'; (Get-SemtComputerKey -ComputerName $fqdn) -eq (Get-SemtComputerKey -ComputerName $short) }
     Test-Throws 'existing Wave is never overwritten' { New-SemtWave -PackageRoot $packageCopy -Campaign HybridJoin -Name 'WAVE-TEST-01' -Computers @('PC-9') -Source Manual } 'exist'
     Test-Throws 'invalid Wave name is rejected' { New-SemtWave -PackageRoot $packageCopy -Campaign HybridJoin -Name 'bad name&' -Computers @('PC-9') -Source Manual } '.'

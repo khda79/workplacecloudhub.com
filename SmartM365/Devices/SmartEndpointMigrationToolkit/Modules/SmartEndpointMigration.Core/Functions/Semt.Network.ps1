@@ -100,10 +100,17 @@ function Resolve-SemtPsExecPath {
 
 function Get-SemtPsExecSecurityEvidence {
     [CmdletBinding()]
-    param([AllowNull()][string]$Path)
+    param(
+        [AllowNull()][string]$Path,
+        [switch]$DryRun,
+        [AllowNull()][string]$RemoteExecutionMode
+    )
 
     if ([string]::IsNullOrWhiteSpace($Path)) {
-        return [pscustomobject]@{ CheckStatus = 'SkippedDryRun'; Path = ''; FileName = ''; LengthBytes = ''; SHA256 = ''; SignatureStatus = ''; SignerSubject = ''; SignerThumbprint = ''; FileVersion = ''; IsMicrosoftSigned = $true; IsExpectedFileName = $true; IsCompliant = $true; Detail = 'Dry run: PsExec is not required.' }
+        if ($DryRun) { $status = 'SkippedDryRun'; $detail = 'Dry run: PsExec is not required.' }
+        elseif (-not [string]::IsNullOrWhiteSpace($RemoteExecutionMode) -and $RemoteExecutionMode -ne 'PsExec') { $status = 'SkippedNotUsed'; $detail = ('Remote execution mode {0}: PsExec is not used.' -f $RemoteExecutionMode) }
+        else { $status = 'NotChecked'; $detail = 'PsExec was not checked.' }
+        return [pscustomobject]@{ CheckStatus = $status; Path = ''; FileName = ''; LengthBytes = ''; SHA256 = ''; SignatureStatus = ''; SignerSubject = ''; SignerThumbprint = ''; FileVersion = ''; IsMicrosoftSigned = $true; IsExpectedFileName = $true; IsCompliant = $true; Detail = $detail }
     }
     $item = Get-Item -LiteralPath $Path -ErrorAction Stop
     $signature = Get-AuthenticodeSignature -LiteralPath $item.FullName -ErrorAction Stop

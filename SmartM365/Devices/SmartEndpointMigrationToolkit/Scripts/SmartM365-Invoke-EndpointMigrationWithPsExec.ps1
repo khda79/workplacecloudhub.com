@@ -47,7 +47,7 @@
     Resolves options, rules and component integrity, writes nothing on targets and exits.
 
 .VERSION
-    1.0.7
+    1.0.8
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -73,7 +73,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:LauncherVersion = '1.0.7'
+$script:LauncherVersion = '1.0.8'
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected argument(s): {0}. Pass options with -Option @{{ Name = Value }} and PsExec with -PsExecPath." -f ($UnexpectedArguments -join ' '))
@@ -243,7 +243,7 @@ if ($ValidateOnly) {
 #region Run setup
 
 $script:ResolvedPsExec = ''
-$script:PsExecEvidence = Get-SemtPsExecSecurityEvidence -Path ''
+$script:PsExecEvidence = Get-SemtPsExecSecurityEvidence -Path '' -DryRun:([bool](Opt 'DryRun')) -RemoteExecutionMode ([string](Opt 'RemoteExecutionMode'))
 if (-not (Opt 'DryRun') -and (Opt 'RemoteExecutionMode') -eq 'PsExec') {
     $script:ResolvedPsExec = Resolve-SemtPsExecPath -Path $PsExecPath -PackageRoot $script:PackageRoot
     $script:PsExecEvidence = Get-SemtPsExecSecurityEvidence -Path $script:ResolvedPsExec
