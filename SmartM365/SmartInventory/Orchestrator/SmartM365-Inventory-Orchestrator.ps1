@@ -110,7 +110,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.94
+1.5.95
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -123,7 +123,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.94
+    Version : 1.5.95
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
@@ -160,7 +160,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.94"
+$ScriptVersion = "1.5.95"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -397,8 +397,29 @@ function Invoke-OrchestratorSharePointUpload {
         $script:SharePointTokenPausedSkips++
         return $false
     }
-    $tokenThumbprint = if ($global:Thumbprint) { $global:Thumbprint } else { $global:Thumb }
-    if (-not (Connect-SmartM365GraphForSharePointUpload -AppId $global:AppId -TenantId $global:TenantId -Thumbprint $tokenThumbprint)) {
+    # Connect-SmartM365GraphForSharePointUpload is internal to SmartM365.Core (not exported): call it in
+    # the module scope, where it also caches the token for the upload that follows. Any failure of this
+    # pre-check itself (not of the token) must never stop the orchestrator: the upload then runs as before.
+    $tokenReady = $true
+    try {
+        $tokenThumbprint = if ($global:Thumbprint) { $global:Thumbprint } else { $global:Thumb }
+        $coreModule = @(Get-Module -Name SmartM365.Core) | Select-Object -First 1
+        if ($null -ne $coreModule) {
+            $tokenResult = & $coreModule {
+                param($AppId, $TenantId, $Thumbprint)
+                Connect-SmartM365GraphForSharePointUpload -AppId $AppId -TenantId $TenantId -Thumbprint $Thumbprint
+            } $global:AppId $global:TenantId $tokenThumbprint
+            $tokenReady = [bool](@($tokenResult) | Select-Object -Last 1)
+        }
+    }
+    catch {
+        $tokenReady = $true
+        if (-not $script:SharePointTokenPrecheckWarned) {
+            $script:SharePointTokenPrecheckWarned = $true
+            Write-OrchestratorLog -Message ("SharePoint token pre-check unavailable; uploads continue without pause: {0}" -f $_.Exception.Message) -Level WARN
+        }
+    }
+    if (-not $tokenReady) {
         $script:SharePointTokenPausedUntilUtc = [datetime]::UtcNow.AddMinutes($script:SharePointTokenPauseMinutes)
         $script:SharePointTokenPausedSkips = 0
         Write-OrchestratorLog -Message ("SharePoint uploads paused for {0} minutes: Microsoft Graph token unavailable (first failure on {1}: '{2}'). Files stay on the shared storage; later passes upload them." -f $script:SharePointTokenPauseMinutes, $Reason, $fileInfo.FullName) -Level WARN
@@ -8592,6 +8613,7 @@ $script:SharePointEnsuredFolderState = @{}
 $script:SharePointTokenPausedUntilUtc = [datetime]::MinValue
 $script:SharePointTokenPauseMinutes = 15
 $script:SharePointTokenPausedSkips = 0
+$script:SharePointTokenPrecheckWarned = $false
 $script:LastSharePointUploadAttempt = [datetime]::MinValue
 $script:LastHeartbeatLogTime = [datetime]::MinValue
 $script:LastLongOperationHeartbeat = [datetime]::MinValue
