@@ -110,7 +110,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.93
+1.5.94
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -123,7 +123,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.93
+    Version : 1.5.94
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
@@ -160,7 +160,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.93"
+$ScriptVersion = "1.5.94"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -388,6 +388,25 @@ function Invoke-OrchestratorSharePointUpload {
     $signature = "{0}|{1}" -f $fileInfo.Length, $fileInfo.LastWriteTimeUtc.Ticks
     if (-not $Force -and $script:SharePointUploadedFileState.ContainsKey($key) -and $script:SharePointUploadedFileState[$key] -eq $signature) {
         return $true
+    }
+
+    # Every upload needs the same Graph token. When it cannot be obtained (endpoint unreachable), each
+    # further file would wait for the same retries again and hold the tick loop (stop request, heartbeat).
+    # Uploads pause for SharePointTokenPauseMinutes; the files stay on the share for a later pass.
+    if ([datetime]::UtcNow -lt $script:SharePointTokenPausedUntilUtc) {
+        $script:SharePointTokenPausedSkips++
+        return $false
+    }
+    $tokenThumbprint = if ($global:Thumbprint) { $global:Thumbprint } else { $global:Thumb }
+    if (-not (Connect-SmartM365GraphForSharePointUpload -AppId $global:AppId -TenantId $global:TenantId -Thumbprint $tokenThumbprint)) {
+        $script:SharePointTokenPausedUntilUtc = [datetime]::UtcNow.AddMinutes($script:SharePointTokenPauseMinutes)
+        $script:SharePointTokenPausedSkips = 0
+        Write-OrchestratorLog -Message ("SharePoint uploads paused for {0} minutes: Microsoft Graph token unavailable (first failure on {1}: '{2}'). Files stay on the shared storage; later passes upload them." -f $script:SharePointTokenPauseMinutes, $Reason, $fileInfo.FullName) -Level WARN
+        return $false
+    }
+    if ($script:SharePointTokenPausedSkips -gt 0) {
+        Write-OrchestratorLog -Message ("SharePoint uploads resumed: Microsoft Graph token available again; {0} upload(s) were skipped during the pause." -f $script:SharePointTokenPausedSkips)
+        $script:SharePointTokenPausedSkips = 0
     }
 
     try {
@@ -8570,6 +8589,9 @@ $script:State = $null
 $script:DependencyWaitLogState = @{}
 $script:SharePointUploadedFileState = @{}
 $script:SharePointEnsuredFolderState = @{}
+$script:SharePointTokenPausedUntilUtc = [datetime]::MinValue
+$script:SharePointTokenPauseMinutes = 15
+$script:SharePointTokenPausedSkips = 0
 $script:LastSharePointUploadAttempt = [datetime]::MinValue
 $script:LastHeartbeatLogTime = [datetime]::MinValue
 $script:LastLongOperationHeartbeat = [datetime]::MinValue
