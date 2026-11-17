@@ -3,12 +3,13 @@
     Wave computer list helpers.
 
 .DESCRIPTION
-    Parses Computers.txt (quotes trimmed, comments ignored, case-insensitive de-duplication),
+    Parses Computers.txt (quotes trimmed, comment lines and trailing " # ..." comments ignored,
+    case-insensitive de-duplication),
     computes short keys and moves completed computers to archive lists under an exclusive
     file lock shared by every process and session of the technician computer.
 
 .VERSION
-    1.0.0
+    1.0.1
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -18,7 +19,12 @@ function ConvertTo-SemtComputerName {
     [CmdletBinding()]
     param([AllowNull()][string]$Line)
 
-    $name = ([string]$Line).Trim().Trim([char]34).Trim().TrimEnd('.')
+    $name = [string]$Line
+    # Trailing comment after a blank ("PC-0001.contoso.example  # Intune enrolled ..."): a computer
+    # name never contains a blank or '#'.
+    $comment = $name.IndexOf('#')
+    if ($comment -gt 0 -and [char]::IsWhiteSpace($name[$comment - 1])) { $name = $name.Substring(0, $comment) }
+    $name = $name.Trim().Trim([char]34).Trim().TrimEnd('.')
     if ([string]::IsNullOrWhiteSpace($name) -or $name.StartsWith('#')) { return '' }
     return $name
 }
@@ -42,7 +48,10 @@ function Get-SemtComputerList {
     foreach ($line in @(Get-Content -LiteralPath $Path -ErrorAction Stop)) {
         # Same normalization as ConvertTo-SemtComputerName, inlined: one advanced-function call per
         # line made the Wave list (GUI Campaign change) slow for Waves of a thousand computers.
-        $name = ([string]$line).Trim().Trim([char]34).Trim().TrimEnd('.')
+        $name = [string]$line
+        $comment = $name.IndexOf('#')
+        if ($comment -gt 0 -and [char]::IsWhiteSpace($name[$comment - 1])) { $name = $name.Substring(0, $comment) }
+        $name = $name.Trim().Trim([char]34).Trim().TrimEnd('.')
         if ([string]::IsNullOrWhiteSpace($name) -or $name.StartsWith('#')) { continue }
         if ($seen.Add($name)) { $result.Add($name) }
     }

@@ -227,7 +227,7 @@ try {
     # Get-SemtComputerList inlines ConvertTo-SemtComputerName (speed): same names, same order as the
     # former per-line call, on UTF-8 (BOM) and UTF-16 (BOM) files.
     $accent = [string][char]0x00C9; $cyrillic = [string][char]0x0416 + [char]0x0444
-    $varied = [string[]]@('PC-0001.contoso.example', 'pc-0001', "`tPC-0002  ", '   ', '', '# comment', "  `t# indented comment", '"PC-0003"', ' "PC-0004." ', 'PC-0005...', 'PC-0002', 'pc-0002.CONTOSO.example.', ('PC-' + $accent + 'TE'), ('pc-' + $accent.ToLowerInvariant() + 'te'), ('SRV-' + $cyrillic), '\\PC-0006', '\\pc-0006', '""', '"#PC-0007"', 'PC-0008;x', 'PC-0001.contoso.example')
+    $varied = [string[]]@('PC-0001.contoso.example', 'pc-0001', "`tPC-0002  ", '   ', '', '# comment', "  `t# indented comment", '"PC-0003"', ' "PC-0004." ', 'PC-0005...', 'PC-0002', 'pc-0002.CONTOSO.example.', ('PC-' + $accent + 'TE'), ('pc-' + $accent.ToLowerInvariant() + 'te'), ('SRV-' + $cyrillic), '\\PC-0006', '\\pc-0006', '""', '"#PC-0007"', 'PC-0008;x', 'PC-0001.contoso.example', 'PC-0009.contoso.example  # Intune enrolled 2026-03-31 11:26 UTC', "PC-0010`t# note", 'pc-0010 # same computer')
     Test-Step 'computer list normalization is identical to ConvertTo-SemtComputerName per line, order included (FQDN, case, tabs, BOM, comments, duplicates, non-ASCII, \\ prefix)' {
         $ok = $true
         foreach ($encoding in @([Text.UTF8Encoding]::new($true), [Text.UnicodeEncoding]::new($false, $true))) {
@@ -237,9 +237,16 @@ try {
             $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
             foreach ($line in @(Get-Content -LiteralPath $listPath)) { $name = ConvertTo-SemtComputerName -Line $line; if (-not [string]::IsNullOrWhiteSpace($name) -and $seen.Add($name)) { $expected.Add($name) } }
             $actual = @(Get-SemtComputerList -Path $listPath)
-            if ($expected.Count -ne 11 -or ($actual -join '|') -cne ($expected -join '|')) { $ok = $false }
+            if ($expected.Count -ne 13 -or ($actual -notcontains 'PC-0009.contoso.example') -or ($actual -notcontains 'PC-0010') -or ($actual -join '|') -cne ($expected -join '|')) { $ok = $false }
         }
         $ok
+    }
+    # Field 2026-11-17: Computers.AlreadyEnrolled.txt carries the Intune enrollment date as a trailing comment.
+    Test-Step 'a trailing " # ..." comment is ignored; a # without a blank before it stays part of the name' {
+        (ConvertTo-SemtComputerName -Line 'FR-0001-A-001  # Intune enrolled 2026-03-31 11:26 UTC') -ceq 'FR-0001-A-001' -and
+        (Get-SemtComputerKey -ComputerName "pc-0001.contoso.example`t# note") -ceq 'PC-0001' -and
+        (ConvertTo-SemtComputerName -Line '  # whole-line comment') -eq '' -and
+        (ConvertTo-SemtComputerName -Line 'PC#0001') -ceq 'PC#0001'
     }
     Test-Step 'short-name key matches FQDN and short name (used for target and run guard correlation)' { $fqdn = 'pc-0001.contoso.example'; $short = 'PC-0001'; (Get-SemtComputerKey -ComputerName $fqdn) -eq (Get-SemtComputerKey -ComputerName $short) }
     Test-Throws 'existing Wave is never overwritten' { New-SemtWave -PackageRoot $packageCopy -Campaign HybridJoin -Name 'WAVE-TEST-01' -Computers @('PC-9') -Source Manual } 'exist'
