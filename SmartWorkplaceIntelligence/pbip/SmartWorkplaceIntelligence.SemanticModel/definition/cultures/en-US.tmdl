@@ -10837,6 +10837,16 @@ cultureInfo en-US
 			          "policy name": {
 			            "State": "Generated"
 			          }
+			        },
+			        {
+			          "Policy": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
 			        }
 			      ]
 			    },
@@ -27879,7 +27889,7 @@ cultureInfo en-US
 			          }
 			        },
 			        {
-			          "Licences M365": {
+			          "Licenses": {
 			            "State": "Suggested",
 			            "Source": {
 			              "Type": "External",
@@ -75378,6 +75388,16 @@ cultureInfo en-US
 			            "State": "Generated",
 			            "Weight": 0.97
 			          }
+			        },
+			        {
+			          "Device": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
 			        }
 			      ]
 			    },
@@ -76861,6 +76881,16 @@ cultureInfo en-US
 			          "selection": {
 			            "State": "Generated",
 			            "Weight": 0.97
+			          }
+			        },
+			        {
+			          "Group": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
 			          }
 			        }
 			      ]
@@ -79383,6 +79413,16 @@ cultureInfo en-US
 			            "State": "Generated",
 			            "Weight": 0.99
 			          }
+			        },
+			        {
+			          "AD Domain": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
 			        }
 			      ]
 			    },
@@ -79421,6 +79461,16 @@ cultureInfo en-US
 			        {
 			          "name": {
 			            "State": "Generated"
+			          }
+			        },
+			        {
+			          "Group": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
 			          }
 			        }
 			      ],
@@ -88636,6 +88686,16 @@ cultureInfo en-US
 			            "State": "Generated",
 			            "Weight": 0.99
 			          }
+			        },
+			        {
+			          "Application": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
 			        }
 			      ]
 			    },
@@ -90327,6 +90387,16 @@ cultureInfo en-US
 			          "part number label": {
 			            "State": "Generated",
 			            "Weight": 0.97
+			          }
+			        },
+			        {
+			          "Product": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
 			          }
 			        }
 			      ]
@@ -123406,6 +123476,16 @@ cultureInfo en-US
 			          "country name": {
 			            "State": "Generated"
 			          }
+			        },
+			        {
+			          "Country": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
 			        }
 			      ]
 			    },
@@ -141523,6 +141603,792 @@ cultureInfo en-US
 			      "Terms": [
 			        {
 			          "EXO Last Logon": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "global_device_inventory.device_360__encryption_comparison": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Encryption Comparison"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__expected_av_name": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Expected AV Name"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__expected_av_state": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Expected AV State"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__third_party_av_products": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Third Party AV Products"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__windows_update_reboot_required": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Windows Update Reboot Required"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__last_console_logon_utc_report": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Last Console Logon UTC (report)"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__ownership_report": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Ownership (report)"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__manufacturer": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Manufacturer"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__model": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Model"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__platform_report": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Platform (report)"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__device_name": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Device Name"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__secure_boot_state": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Secure Boot State"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__intune_encryption_state": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Intune Encryption State"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__bitlocker_os_protection": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · BitLocker OS Protection"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__bitlocker_os_conversion": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · BitLocker OS Conversion"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__cached_inventory_enrollment_risk_reasons": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Cached Inventory Enrollment Risk Reasons"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__cached_inventory_windows_11_deployment_risk": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Cached Inventory Windows 11 Deployment Risk"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__cached_inventory_windows_11_risk_reasons": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Cached Inventory Windows 11 Risk Reasons"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__cached_inventory_assessment_utc": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Cached Inventory Assessment UTC"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__loaded_batch_id": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Loaded Batch ID"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__system_drive_capacity_gb": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · System Drive Capacity (GB)"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__free_disk_space_gb": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Free Disk Space (GB)"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__free_disk_space_": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Free Disk Space (%)"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__system_freshness": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · System Freshness"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__system_observation_source": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · System Observation (source)"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__country_name": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Country Name"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__ad_domain": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · AD Domain"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__primary_user_report": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Primary User (report)"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__last_console_user_report": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Last Console User (report)"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__inventory_source": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Inventory Source"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__ad_match_qualification": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · AD Match Qualification"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__ad_to_intune_match": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · AD to Intune Match"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__entra_match": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Entra Match"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__compliance_state": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Compliance State"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__last_sync_datetime": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Last Sync DateTime"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__autopilot_link_status": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Autopilot link status"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__autopilot_serial_numbers": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Autopilot serial numbers"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__windows_11_upgrade_eligibility": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Windows 11 Upgrade Eligibility"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__windows_11_blocking_reasons": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Windows 11 Blocking Reasons"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__cached_inventory_enrollment_risk": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Cached Inventory Enrollment Risk"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__operating_system_version": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Operating System Version"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__windows_release": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Windows Release"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__ad_enabled": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · AD Enabled"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__entra_state_report": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Entra state (report)"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__intune_presence": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · Intune presence"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "global_device_inventory.device_360__system_data_quality_issues": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Global Device Inventory",
+			          "ConceptualProperty": "Device 360 · System Data Quality Issues"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "intune_managed_app_deployment_evidence.device_360_install_status": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Intune Managed App Deployment Evidence",
+			          "ConceptualProperty": "Device 360 Install Status"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "intune_managed_app_deployment_evidence.device_360_error_hex": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Intune Managed App Deployment Evidence",
+			          "ConceptualProperty": "Device 360 Error Hex"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Error code": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "intune_managed_app_deployment_evidence.device_360_managed_app_rows": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Intune Managed App Deployment Evidence",
+			          "ConceptualProperty": "Device 360 Managed App Rows"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Observations": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "native_device_application.device_360_detected_app_rows": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Native Device Application",
+			          "ConceptualProperty": "Device 360 Detected App Rows"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "device_360_properties.device_360_deployment_failed": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Device 360 Properties",
+			          "ConceptualProperty": "Device 360 Deployment Failed"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "device_360_properties.device_360_batch_footer": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Device 360 Properties",
+			          "ConceptualProperty": "Device 360 Batch Footer"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "device_360_properties.property": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Device 360 Properties",
+			          "ConceptualProperty": "Property"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "device_360_properties.device_360_property_value": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Device 360 Properties",
+			          "ConceptualProperty": "Device 360 Property Value"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "device_360_properties.device_360_policies_applied": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Device 360 Properties",
+			          "ConceptualProperty": "Device 360 Policies Applied"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "device_360_properties.device_360_disk_used": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Device 360 Properties",
+			          "ConceptualProperty": "Device 360 Disk Used"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "device_360_properties.device_360_last_sync_display": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Device 360 Properties",
+			          "ConceptualProperty": "Device 360 Last Sync Display"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "device_360_properties.device_360_disk_display": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Device 360 Properties",
+			          "ConceptualProperty": "Device 360 Disk Display"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "device_360_properties.device_360_hero": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Device 360 Properties",
+			          "ConceptualProperty": "Device 360 Hero"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "device_360_properties.device_360_source_coverage": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Device 360 Properties",
+			          "ConceptualProperty": "Device 360 Source Coverage"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "device_360_properties.device_360_app_coverage_note": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Device 360 Properties",
+			          "ConceptualProperty": "Device 360 App Coverage Note"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "device_360_properties.device_360_identity_intune": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Device 360 Properties",
+			          "ConceptualProperty": "Device 360 Identity Intune"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "device_360_properties.device_360_deployment_installed": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Device 360 Properties",
+			          "ConceptualProperty": "Device 360 Deployment Installed"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "device_360_properties.device_360_identity_autopilot": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Device 360 Properties",
+			          "ConceptualProperty": "Device 360 Identity Autopilot"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "device_360_properties.device_360_identity_ad": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Device 360 Properties",
+			          "ConceptualProperty": "Device 360 Identity AD"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "device_360_properties.device_360_identity_entra": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Device 360 Properties",
+			          "ConceptualProperty": "Device 360 Identity Entra"
+			        }
+			      },
+			      "State": "Generated"
+			    },
+			    "intune_managed_app_deployment_evidence.device_360_view_install_state": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Intune Managed App Deployment Evidence",
+			          "ConceptualProperty": "Device 360 View Install State"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Install state": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "device_360_properties.device_360_scoped_publisher": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Device 360 Properties",
+			          "ConceptualProperty": "Device 360 Scoped Publisher"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Publisher": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "device_360_properties.device_360_coverage_display": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Device 360 Properties",
+			          "ConceptualProperty": "Device 360 Coverage Display"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Detected application coverage note": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "device_360_properties.device_360_scoped_policy_state": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Device 360 Properties",
+			          "ConceptualProperty": "Device 360 Scoped Policy State"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "State": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "account_explorer_inventory.user_360_entra_group_membership": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Account Explorer Inventory",
+			          "ConceptualProperty": "User 360 Entra group membership"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Source": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "account_explorer_inventory.user_360_license_assignment": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Account Explorer Inventory",
+			          "ConceptualProperty": "User 360 License assignment"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Assignment": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "account_explorer_inventory.user_360_device_link": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Account Explorer Inventory",
+			          "ConceptualProperty": "User 360 Device link"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Link type": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "account_explorer_inventory.user_360_ad_group_membership": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Account Explorer Inventory",
+			          "ConceptualProperty": "User 360 AD group membership"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Source": {
 			            "State": "Suggested",
 			            "Source": {
 			              "Type": "External",
@@ -338536,4 +339402,3 @@ cultureInfo en-US
 			  }
 			}
 		contentType: json
-

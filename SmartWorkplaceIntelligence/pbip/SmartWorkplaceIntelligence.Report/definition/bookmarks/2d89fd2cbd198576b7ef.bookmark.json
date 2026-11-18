@@ -6,7 +6,6 @@
     "applyOnlyToTargetVisuals": true,
     "targetVisualNames": [
       "42ed423b8e40ab3597b7",
-      "f5f50e9b958ebac1ad9e",
       "194f5519ff62993efc58",
       "ad1c8760c7b52aff0a86",
       "5317b03cc5f50ec97842",
@@ -29,7 +28,6 @@
       "46a43759bfb5ba26affe",
       "014946aa584d2cd0e0ed",
       "15f7171401b4c225ce89",
-      "2d36d58bb1873b65640f",
       "e5975abe6163969783b6",
       "e958339bcb4cf1140e3a",
       "7f4cda3fc5cff392778a",
@@ -79,13 +77,6 @@
             "singleVisual": {}
           },
           "15f7171401b4c225ce89": {
-            "singleVisual": {
-              "display": {
-                "mode": "hidden"
-              }
-            }
-          },
-          "2d36d58bb1873b65640f": {
             "singleVisual": {
               "display": {
                 "mode": "hidden"
@@ -158,9 +149,6 @@
             "isHidden": true
           },
           "ec9f5a00cd7cbcb2ff2e": {
-            "isHidden": true
-          },
-          "f5f50e9b958ebac1ad9e": {
             "isHidden": true
           },
           "71540081d7e024e59ebd": {

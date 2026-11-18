@@ -61,6 +61,12 @@ table 'Intune Managed App Deployment Evidence'
 		isHidden
 		lineageTag: ae7c4969-f576-4cc2-8f7c-cb6bc2610e7e
 
+	measure 'Device 360 Managed App Rows' =
+			VAR I=[Device 360 Native Intune ID] VAR T=SELECTEDVALUE('Global Device Inventory'[TenantKey]) VAR B=SELECTEDVALUE('Global Device Inventory'[Loaded Batch ID])
+			RETURN IF(NOT ISBLANK(I),CALCULATE(COUNTROWS('Intune Managed App Deployment Evidence'),TREATAS({I},'Device Inventory Evidence'[Device Source ID]),TREATAS({T},'Device Inventory Evidence'[TenantKey]),TREATAS({B},'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: #,0
+		lineageTag: 1bdac71d-f5e5-4c9d-8898-38fe5c4319bd
+
 	/// Prepared IntuneManagedAppDeploymentEvidence.csv: TenantKey. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Tenant Key'
 		dataType: string
@@ -336,6 +342,33 @@ table 'Intune Managed App Deployment Evidence'
 		isHidden
 		lineageTag: 03c4ef94-7d10-424c-bd60-f73f856799e1
 
+	column 'Device 360 Install Order' = SWITCH('Intune Managed App Deployment Evidence'[Reported Deployment State],"ReportedFailure",1,"Pending",2,"ReportedNotInstalled",3,"Unknown",4,"NotApplicable",5,"ReportedInstalled",6,4)
+		dataType: int64
+		isHidden
+		lineageTag: 8481ebd3-3521-4768-9d11-f0813ba561dd
+
+	column 'Device 360 Install Status' = SWITCH('Intune Managed App Deployment Evidence'[Reported Deployment State],"ReportedFailure","Failed","Pending","Pending","ReportedNotInstalled","Not installed","NotApplicable","Not applicable","ReportedInstalled","Installed","Unknown")
+		dataType: string
+		lineageTag: 514b97ed-2286-4eb0-a15f-7707045af44c
+		sortByColumn: 'Device 360 Install Order'
+
+	column 'Device 360 Error Hex' =
+			VAR Raw=TRIM('Intune Managed App Deployment Evidence'[Error Code]) VAR N=IFERROR(VALUE(Raw),BLANK()) VAR HexDigits="0123456789ABCDEF" VAR Unsigned=MOD(N,4294967296)
+			RETURN SWITCH(TRUE(),LEN(Raw)=0,BLANK(),ISBLANK(N),Raw,N=0,BLANK(),N<-2147483648 || N>4294967295 || N<>INT(N),Raw,"0x"&CONCATENATEX(GENERATESERIES(0,7),MID(HexDigits,MOD(INT(DIVIDE(Unsigned,POWER(16,[Value]))),16)+1,1),"",[Value],DESC))
+		dataType: string
+		lineageTag: 4f526708-4f16-45b3-9279-b826c24383c7
+
+	column 'Device 360 View Install Order' = SWITCH('Intune Managed App Deployment Evidence'[Device 360 Install Status],"Failed",1,"Installed",2,"Not applicable",3,"Pending",4,"Not installed",5,6)
+		dataType: int64
+		isHidden
+		lineageTag: a921c342-5cd4-4430-930e-3021a1afac26
+
+	column 'Device 360 View Install State' = 'Intune Managed App Deployment Evidence'[Device 360 Install Status]
+		dataType: string
+		isHidden
+		lineageTag: 339f72e3-778b-48d8-98d1-e2325f383954
+		sortByColumn: 'Device 360 View Install Order'
+
 	partition 'Intune Managed App Deployment Evidence' = m
 		mode: import
 		source =
@@ -367,4 +400,3 @@ table 'Intune Managed App Deployment Evidence'
 				    WithDeviceKey)
 				in
 				    Readers[Finish](BusinessRows)
-

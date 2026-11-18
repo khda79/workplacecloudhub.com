@@ -10,8 +10,7 @@
     "tabOrder": 5000
   },
   "visualGroup": {
-    "displayName": "Account identity",
+    "displayName": "Account inventory",
     "groupMode": "ScaleMode"
-  },
-  "isHidden": true
+  }
 }

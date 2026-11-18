@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "5bbdb72859bb7beb9bb7",
   "position": {
-    "x": 1136,
+    "x": 1088,
     "y": 8,
     "z": 61000,
     "height": 80,
-    "width": 192,
+    "width": 240,
     "tabOrder": 21000
   },
   "visual": {
@@ -27,9 +27,9 @@
                 }
               },
               "queryRef": "Account License Selection.License Product",
-              "nativeQueryRef": "Licences M365",
+              "nativeQueryRef": "Licenses",
               "active": true,
-              "displayName": "Licences M365"
+              "displayName": "Licenses"
             }
           ]
         }
@@ -62,7 +62,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Licences'"
+                  "Value": "'Licenses'"
                 }
               }
             },
@@ -70,6 +70,17 @@
               "expr": {
                 "Literal": {
                   "Value": "11D"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
                 }
               }
             }
@@ -124,7 +135,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Evidence and active scope'"
+                  "Value": "'Licenses filter'"
                 }
               }
             }
@@ -184,7 +195,7 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#FFFFFF'"
+                      "Value": "'#E8F2FC'"
                     }
                   }
                 }
@@ -215,7 +226,7 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CCDCEC'"
+                      "Value": "'#A9C7E6'"
                     }
                   }
                 }

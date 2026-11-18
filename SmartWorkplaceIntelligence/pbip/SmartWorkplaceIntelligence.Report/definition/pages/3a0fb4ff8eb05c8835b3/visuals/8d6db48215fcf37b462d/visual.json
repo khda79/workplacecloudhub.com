@@ -6,7 +6,7 @@
     "y": 224,
     "z": 31000,
     "height": 45,
-    "width": 199.11111111111111,
+    "width": 225,
     "tabOrder": 52000
   },
   "visual": {
@@ -45,7 +45,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Account identity'"
+                  "Value": "'Account inventory'"
                 }
               }
             },
@@ -95,7 +95,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Account identity'"
+                  "Value": "'Account inventory'"
                 }
               }
             },
@@ -148,7 +148,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Account identity'"
+                  "Value": "'Account inventory'"
                 }
               }
             },
@@ -201,7 +201,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Account identity'"
+                  "Value": "'Account inventory'"
                 }
               }
             },
@@ -254,7 +254,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Account identity'"
+                  "Value": "'Account inventory'"
                 }
               }
             },
@@ -544,7 +544,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Account identity'"
+                  "Value": "'Account inventory'"
                 }
               }
             }
@@ -599,6 +599,5 @@
         }
       ]
     }
-  },
-  "isHidden": true
+  }
 }

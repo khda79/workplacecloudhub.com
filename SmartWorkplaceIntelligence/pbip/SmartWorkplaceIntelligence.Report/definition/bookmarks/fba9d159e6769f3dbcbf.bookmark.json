@@ -1,0 +1,154 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "fba9d159e6769f3dbcbf",
+  "displayName": "User 360 · Overview",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "1ea6d48376597ff88168",
+      "265909536030942bac7a",
+      "393fbbc019f2392b95e5",
+      "3dab401c08075d6b601e",
+      "40a51e6f97d9d75664a9",
+      "4602200f4e42ed0f995d",
+      "47192638f5b94477edb6",
+      "48a8e7a2f5fd9e9bff54",
+      "53fd44cda67743640165",
+      "615e751e3d45abc7ca91",
+      "63b229d74a39de1a7ff9",
+      "738a1a02d7fc858a831d",
+      "7d2c9c17ea16afe8de7a",
+      "8e867cc0d13c8b596429",
+      "99cec53e43f322d7aaf7",
+      "9c945117529f5dd4877b",
+      "ac99063242823ace29ce",
+      "aeaec7856260e390d7d6",
+      "d2c018ef70c56d77020c",
+      "faf6e361b7970caee80f"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "647c1e02d52a2acbc5c4",
+    "sections": {
+      "647c1e02d52a2acbc5c4": {
+        "visualContainers": {
+          "1ea6d48376597ff88168": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "265909536030942bac7a": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "393fbbc019f2392b95e5": {
+            "singleVisual": {}
+          },
+          "3dab401c08075d6b601e": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "40a51e6f97d9d75664a9": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "4602200f4e42ed0f995d": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "47192638f5b94477edb6": {
+            "singleVisual": {}
+          },
+          "48a8e7a2f5fd9e9bff54": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "53fd44cda67743640165": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "615e751e3d45abc7ca91": {
+            "singleVisual": {}
+          },
+          "63b229d74a39de1a7ff9": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "738a1a02d7fc858a831d": {
+            "singleVisual": {}
+          },
+          "7d2c9c17ea16afe8de7a": {
+            "singleVisual": {}
+          },
+          "8e867cc0d13c8b596429": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "99cec53e43f322d7aaf7": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "9c945117529f5dd4877b": {
+            "singleVisual": {}
+          },
+          "ac99063242823ace29ce": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "aeaec7856260e390d7d6": {
+            "singleVisual": {}
+          },
+          "d2c018ef70c56d77020c": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "faf6e361b7970caee80f": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

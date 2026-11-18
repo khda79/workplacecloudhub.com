@@ -2,7 +2,7 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "e03bdf75124eb3b5a650",
   "position": {
-    "x": 32,
+    "x": 192,
     "y": 1042,
     "z": 22000,
     "height": 28,
@@ -786,7 +786,18 @@
                 }
               }
             },
-            "tooltip": {"expr":{"Measure":{"Expression":{"SourceRef":{"Entity":"Mailbox Exploration Inventory"}},"Property":"Local Mailbox Collection Tooltip"}}},
+            "tooltip": {
+              "expr": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Local Mailbox Collection Tooltip"
+                }
+              }
+            },
             "showDefaultTooltip": {
               "expr": {
                 "Literal": {
@@ -801,8 +812,30 @@
                 }
               }
             },
-            "enabledTooltip": {"expr":{"Measure":{"Expression":{"SourceRef":{"Entity":"Mailbox Exploration Inventory"}},"Property":"Local Mailbox Collection Tooltip"}}},
-            "disabledTooltip": {"expr":{"Measure":{"Expression":{"SourceRef":{"Entity":"Mailbox Exploration Inventory"}},"Property":"Local Mailbox Collection Tooltip"}}}
+            "enabledTooltip": {
+              "expr": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Local Mailbox Collection Tooltip"
+                }
+              }
+            },
+            "disabledTooltip": {
+              "expr": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Local Mailbox Collection Tooltip"
+                }
+              }
+            }
           }
         }
       ]

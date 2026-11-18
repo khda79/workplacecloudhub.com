@@ -1,0 +1,522 @@
+/// Disconnected presentation rows for Device 360.
+table 'Device 360 Properties'
+	isHidden
+	lineageTag: 5f21d57a-fc69-49de-be0b-58376f931284
+
+	measure 'Device 360 Property Value' =
+			IF([Device 360 Single Selection]=1, VAR V = SWITCH(SELECTEDVALUE('Device 360 Properties'[Property]),
+			"Primary user", FORMAT(SELECTEDVALUE('Global Device Inventory'[Primary User (report)]),""),
+			"Last console user", FORMAT(SELECTEDVALUE('Global Device Inventory'[Last Console User (report)]),""),
+			"Last console logon (UTC)", FORMAT(SELECTEDVALUE('Global Device Inventory'[Last Console Logon UTC (report)]),"yyyy-MM-dd HH:mm"),
+			"Country", FORMAT(SELECTEDVALUE('Global Device Inventory'[Country Name]),""),
+			"AD domain", FORMAT(SELECTEDVALUE('Global Device Inventory'[AD Domain]),""),
+			"Manufacturer", FORMAT(SELECTEDVALUE('Global Device Inventory'[Manufacturer]),""),
+			"Model", FORMAT(SELECTEDVALUE('Global Device Inventory'[Model]),""),
+			"Platform", FORMAT(SELECTEDVALUE('Global Device Inventory'[Platform (report)]),""),
+			"OS version", FORMAT(SELECTEDVALUE('Global Device Inventory'[Operating System Version]),""),
+			"Windows release", FORMAT(SELECTEDVALUE('Global Device Inventory'[Windows Release]),""),
+			"AD account enabled", FORMAT(SELECTEDVALUE('Global Device Inventory'[AD Enabled]),""),
+			"Entra account state", FORMAT(SELECTEDVALUE('Global Device Inventory'[Entra state (report)]),""),
+			"Ownership", FORMAT(SELECTEDVALUE('Global Device Inventory'[Ownership (report)]),""),
+			"Secure Boot", FORMAT(SELECTEDVALUE('Global Device Inventory'[Secure Boot State]),""),
+			"Intune encryption", FORMAT(SELECTEDVALUE('Global Device Inventory'[Intune Encryption State]),""),
+			"BitLocker OS protection", FORMAT(SELECTEDVALUE('Global Device Inventory'[BitLocker OS Protection]),""),
+			"BitLocker conversion", FORMAT(SELECTEDVALUE('Global Device Inventory'[BitLocker OS Conversion]),""),
+			"Windows Update", FORMAT(SELECTEDVALUE('Global Device Inventory'[Windows Update State]),""),
+			"System evidence freshness", FORMAT(SELECTEDVALUE('Global Device Inventory'[System Freshness]),""),
+			"Windows 11 eligibility", FORMAT(SELECTEDVALUE('Global Device Inventory'[Windows 11 Upgrade Eligibility]),""),
+			"Deployment risk", FORMAT(SELECTEDVALUE('Global Device Inventory'[Cached Inventory Windows 11 Deployment Risk]),""),
+			"Blocking reasons", FORMAT(SELECTEDVALUE('Global Device Inventory'[Windows 11 Blocking Reasons]),""),
+			"Intune enrollment risk", FORMAT(SELECTEDVALUE('Global Device Inventory'[Cached Inventory Enrollment Risk]),""),
+			"Assessment scope", FORMAT(SELECTEDVALUE('Global Device Inventory'[Cached Inventory Enrollment Risk Reasons]),""),
+			"Recommended action", FORMAT(SELECTEDVALUE('Global Device Inventory'[Cached Inventory Enrollment Action]),""),
+			"Canonical device ID", FORMAT(SELECTEDVALUE('Global Device Inventory'[Canonical Device Key]),""),
+			"Tenant", FORMAT(SELECTEDVALUE('Global Device Inventory'[TenantKey]),""),
+			"Autopilot serial numbers", FORMAT(SELECTEDVALUE('Global Device Inventory'[Autopilot serial numbers]),""))
+			RETURN IF(LEN(V)=0, "Not observed", SWITCH(V, "FullyEncrypted","Fully encrypted", V)))
+		displayFolder: Device 360
+		lineageTag: 6c063ab1-eb2b-4e92-bf56-21cb33a7ffef
+
+	measure 'Device 360 Missing Value' = VAR V=[Device 360 Property Value] RETURN IF(NOT ISBLANK(V), LEFT(V,7)="Unknown" || V IN {"Not observed","Not resolved","Not assessed","Not applicable"})
+		displayFolder: Device 360
+		lineageTag: da0fc055-2b34-4742-865b-851397502605
+
+	measure 'Device 360 Property Color' = VAR V=[Device 360 Property Value] VAR P=SELECTEDVALUE('Device 360 Properties'[Property]) RETURN SWITCH(TRUE(), [Device 360 Missing Value], "#596676", P IN {"Secure Boot","Intune encryption","BitLocker OS protection","BitLocker conversion"} && V IN {"Enabled","Encrypted","On","Fully encrypted"}, "#126147", P IN {"Secure Boot","Intune encryption","BitLocker OS protection","BitLocker conversion"} && V IN {"Disabled","Not encrypted","Off"}, "#901F30", "#14253E")
+		displayFolder: Device 360
+		lineageTag: 89ff8b58-7863-49ee-9eb2-0c70f7a314cd
+
+	measure 'Device 360 Coverage' = IF([Device 360 Single Selection]=1, VAR Total=COUNTROWS('Device 360 Properties') VAR Obs=COUNTROWS(FILTER('Device 360 Properties',NOT CALCULATE([Device 360 Missing Value]))) RETURN COALESCE(Obs,0)&"/"&Total&" observed")
+		displayFolder: Device 360
+		lineageTag: 7d6eceb8-5946-48f2-a689-9158536c7fe6
+
+	measure 'Device 360 Hero' = IF([Device 360 Single Selection]=1, VAR Maker=SELECTEDVALUE('Global Device Inventory'[Manufacturer]) VAR ModelName=SELECTEDVALUE('Global Device Inventory'[Model]) VAR OS=COALESCE(SELECTEDVALUE('Global Device Inventory'[Windows Release]),SELECTEDVALUE('Global Device Inventory'[Platform (report)])) VAR Country=SELECTEDVALUE('Global Device Inventory'[Country Name]) RETURN CONCATENATEX(FILTER({TRIM(Maker&" "&ModelName),OS,IF(LEFT(Country,7)<>"Unknown",Country)},LEN([Value])>0),[Value]," · "))
+		displayFolder: Device 360
+		lineageTag: 9b76697b-08cb-4861-8839-864232554da5
+
+	measure 'Device 360 Source Coverage' = IF([Device 360 Single Selection]=1, VAR S=SELECTEDVALUE('Global Device Inventory'[Inventory Source]) VAR A=SELECTEDVALUE('Global Device Inventory'[Autopilot link status]) RETURN SWITCH(TRUE(),S="Entra only","Known in Entra only. AD, Intune and Autopilot details are unavailable for this device.",S="AD + Entra + Intune" && A="Not observed in Autopilot","Known in AD, Entra and Intune. Autopilot details were not observed for this device.",NOT ISBLANK(S),"Inventory source: "&S&" · Autopilot: "&COALESCE(A,"Not observed"),"Source coverage not observed"))
+		displayFolder: Device 360
+		lineageTag: f8349bfd-e50f-47e2-9639-ed6d5ce4defe
+
+	measure 'Device 360 Last Sync Display' = IF([Device 360 Single Selection]=1, VAR D=SELECTEDVALUE('Global Device Inventory'[Last Sync DateTime]) RETURN IF(ISBLANK(D),"Not observed",FORMAT(D,"yyyy-MM-dd HH:mm")&" UTC"))
+		displayFolder: Device 360
+		lineageTag: 699ef613-afcf-432b-b0c5-fef81ddaf000
+
+	measure 'Device 360 Disk Used' = IF([Device 360 Single Selection]=1, VAR F=SELECTEDVALUE('Global Device Inventory'[Free Disk Space (%)]) VAR C=SELECTEDVALUE('Global Device Inventory'[System Drive Capacity (GB)]) RETURN IF(C>0 && NOT ISBLANK(F) && F>=0 && F<=100,1-DIVIDE(F,100)))
+		formatString: 0.0%
+		displayFolder: Device 360
+		lineageTag: 79f7e6c5-e3e7-4c26-8b1f-90e863ffe902
+
+	measure 'Device 360 Disk Display' = IF([Device 360 Single Selection]=1, VAR U=[Device 360 Disk Used] VAR F=SELECTEDVALUE('Global Device Inventory'[Free Disk Space (GB)]) VAR C=SELECTEDVALUE('Global Device Inventory'[System Drive Capacity (GB)]) RETURN IF(ISBLANK(U),"Not observed",FORMAT(U,"0.0%")&" used"&IF(NOT ISBLANK(F)," · "&FORMAT(F,"0.0")&" GB free / "&FORMAT(C,"0.0")&" GB")))
+		displayFolder: Device 360
+		lineageTag: 9e7678ab-1cb6-4bc2-8da8-27dddde73457
+
+	measure 'Device 360 Identity AD' = IF([Device 360 Single Selection]=1, IF(NOT ISBLANK(SELECTEDVALUE('Global Device Inventory'[AD Computer Key])),"Matched","Not observed"))
+		displayFolder: Device 360
+		lineageTag: 765938f2-26fc-4c78-abfd-6bdf65a6f3d0
+
+	measure 'Device 360 Identity Entra' = IF([Device 360 Single Selection]=1, VAR E=SELECTEDVALUE('Global Device Inventory'[Entra Match]) RETURN IF(SELECTEDVALUE('Global Device Inventory'[Inventory Source])="Entra only","Observed",COALESCE(E,"Not observed")))
+		displayFolder: Device 360
+		lineageTag: 66a7bbe2-8975-44f4-96de-f48e02187797
+
+	measure 'Device 360 Identity Intune' = IF([Device 360 Single Selection]=1, VAR I=SELECTEDVALUE('Global Device Inventory'[Intune presence]) RETURN SWITCH(I,"In Intune","Matched","Not found in Intune","Not found",COALESCE(I,"Not observed")))
+		displayFolder: Device 360
+		lineageTag: ed37b410-2030-4f31-b967-c9e9fabf65a6
+
+	measure 'Device 360 Identity Autopilot' = IF([Device 360 Single Selection]=1, VAR A=SELECTEDVALUE('Global Device Inventory'[Autopilot link status]) RETURN IF(A="Not observed in Autopilot","Not observed",COALESCE(A,"Not observed")))
+		displayFolder: Device 360
+		lineageTag: 4409d20a-86d3-4bdc-8d10-a9018fab1c2f
+
+	measure 'Device 360 Batch Footer' = "Data as of batch "&COALESCE(SELECTEDVALUE('Global Device Inventory'[Loaded Batch ID]),"not observed")
+		displayFolder: Device 360
+		lineageTag: 28e919a8-c101-491c-bd8b-4162cceee308
+
+	measure 'Device 360 Intune Color' = VAR S=LOWER([Device 360 · Intune presence]) RETURN SWITCH(TRUE(),S IN {"in intune","compliant","encrypted","matched","observed","linked","enabled","on","fully encrypted"},"#126147",CONTAINSSTRING(S,"not found") || S IN {"failed","noncompliant","not compliant","not encrypted","unencrypted","disabled","off","error"},"#901F30",CONTAINSSTRING(S,"unknown") || CONTAINSSTRING(S,"ambiguous") || S IN {"not assessed","conflict","in grace period"},"#754600", S="not observed"||ISBLANK(S),"#596676","#2E4E82")
+		displayFolder: Device 360
+		lineageTag: 5a4a34bb-75f5-4e3d-bb44-90ebd16ddefd
+
+	measure 'Device 360 Compliance Color' = VAR S=LOWER([Device 360 · Compliance State]) RETURN SWITCH(TRUE(),S IN {"in intune","compliant","encrypted","matched","observed","linked","enabled","on","fully encrypted"},"#126147",CONTAINSSTRING(S,"not found") || S IN {"failed","noncompliant","not compliant","not encrypted","unencrypted","disabled","off","error"},"#901F30",CONTAINSSTRING(S,"unknown") || CONTAINSSTRING(S,"ambiguous") || S IN {"not assessed","conflict","in grace period"},"#754600", S="not observed"||ISBLANK(S),"#596676","#2E4E82")
+		displayFolder: Device 360
+		lineageTag: 0f9f44f4-1681-428e-b560-3fb9f606152b
+
+	measure 'Device 360 Encryption Color' = VAR S=LOWER([Device 360 · Intune Encryption State]) RETURN SWITCH(TRUE(),S IN {"in intune","compliant","encrypted","matched","observed","linked","enabled","on","fully encrypted"},"#126147",CONTAINSSTRING(S,"not found") || S IN {"failed","noncompliant","not compliant","not encrypted","unencrypted","disabled","off","error"},"#901F30",CONTAINSSTRING(S,"unknown") || CONTAINSSTRING(S,"ambiguous") || S IN {"not assessed","conflict","in grace period"},"#754600", S="not observed"||ISBLANK(S),"#596676","#2E4E82")
+		displayFolder: Device 360
+		lineageTag: d3a371e9-7375-45a7-8128-5d7d3ba0e4ed
+
+	measure 'Device 360 AD Color' = VAR S=LOWER([Device 360 Identity AD]) RETURN SWITCH(TRUE(),S IN {"in intune","compliant","encrypted","matched","observed","linked","enabled","on","fully encrypted"},"#126147",CONTAINSSTRING(S,"not found") || S IN {"failed","noncompliant","not compliant","not encrypted","unencrypted","disabled","off","error"},"#901F30",CONTAINSSTRING(S,"unknown") || CONTAINSSTRING(S,"ambiguous") || S IN {"not assessed","conflict","in grace period"},"#754600", S="not observed"||ISBLANK(S),"#596676","#2E4E82")
+		displayFolder: Device 360
+		lineageTag: 10135f58-b1a7-4135-aa50-10d24a64323a
+
+	measure 'Device 360 Entra Color' = VAR S=LOWER([Device 360 Identity Entra]) RETURN SWITCH(TRUE(),S IN {"in intune","compliant","encrypted","matched","observed","linked","enabled","on","fully encrypted"},"#126147",CONTAINSSTRING(S,"not found") || S IN {"failed","noncompliant","not compliant","not encrypted","unencrypted","disabled","off","error"},"#901F30",CONTAINSSTRING(S,"unknown") || CONTAINSSTRING(S,"ambiguous") || S IN {"not assessed","conflict","in grace period"},"#754600", S="not observed"||ISBLANK(S),"#596676","#2E4E82")
+		displayFolder: Device 360
+		lineageTag: d4df6a27-2b95-41ee-94e4-27c9f0a8f984
+
+	measure 'Device 360 Intune match Color' = VAR S=LOWER([Device 360 Identity Intune]) RETURN SWITCH(TRUE(),S IN {"in intune","compliant","encrypted","matched","observed","linked","enabled","on","fully encrypted"},"#126147",CONTAINSSTRING(S,"not found") || S IN {"failed","noncompliant","not compliant","not encrypted","unencrypted","disabled","off","error"},"#901F30",CONTAINSSTRING(S,"unknown") || CONTAINSSTRING(S,"ambiguous") || S IN {"not assessed","conflict","in grace period"},"#754600", S="not observed"||ISBLANK(S),"#596676","#2E4E82")
+		displayFolder: Device 360
+		lineageTag: 2726d0ee-ff19-4a04-bb14-4882a574062a
+
+	measure 'Device 360 Autopilot Color' = VAR S=LOWER([Device 360 Identity Autopilot]) RETURN SWITCH(TRUE(),S IN {"in intune","compliant","encrypted","matched","observed","linked","enabled","on","fully encrypted"},"#126147",CONTAINSSTRING(S,"not found") || S IN {"failed","noncompliant","not compliant","not encrypted","unencrypted","disabled","off","error"},"#901F30",CONTAINSSTRING(S,"unknown") || CONTAINSSTRING(S,"ambiguous") || S IN {"not assessed","conflict","in grace period"},"#754600", S="not observed"||ISBLANK(S),"#596676","#2E4E82")
+		displayFolder: Device 360
+		lineageTag: fed1bbaf-6c2b-46b8-9291-66958e0fe95e
+
+	measure 'Device 360 Native Intune ID' = IF([Device 360 Single Selection]=1, VAR K=SELECTEDVALUE('Global Device Inventory'[Native Device Key]) VAR T=SELECTEDVALUE('Global Device Inventory'[TenantKey]) VAR B=SELECTEDVALUE('Global Device Inventory'[Loaded Batch ID]) RETURN IF(NOT ISBLANK(K) && NOT ISBLANK(T) && NOT ISBLANK(B),CALCULATE(SELECTEDVALUE('Native Managed Device Evidence'[ManagedDeviceId]),TREATAS({K},'Native Managed Device Evidence'[TenantDeviceKey]),TREATAS({T},'Native Managed Device Evidence'[TenantKey]),TREATAS({B},'Native Managed Device Evidence'[Loaded Batch ID]))))
+		displayFolder: Device 360
+		lineageTag: a701a887-e33f-4658-8785-4cea7da8c131
+
+	measure 'Device 360 Deployment Failed' = VAR I=[Device 360 Native Intune ID] VAR T=SELECTEDVALUE('Global Device Inventory'[TenantKey]) VAR B=SELECTEDVALUE('Global Device Inventory'[Loaded Batch ID]) RETURN IF(NOT ISBLANK(I),CALCULATE([Intune Reported Failure Observations],TREATAS({I},'Device Inventory Evidence'[Device Source ID]),TREATAS({T},'Device Inventory Evidence'[TenantKey]),TREATAS({B},'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: #,0
+		displayFolder: Device 360
+		lineageTag: 4bb20d60-588a-4e81-a38a-000614fa5755
+
+	measure 'Device 360 Deployment Installed' = VAR I=[Device 360 Native Intune ID] VAR T=SELECTEDVALUE('Global Device Inventory'[TenantKey]) VAR B=SELECTEDVALUE('Global Device Inventory'[Loaded Batch ID]) RETURN IF(NOT ISBLANK(I),CALCULATE([Intune Reported Installed Observations],TREATAS({I},'Device Inventory Evidence'[Device Source ID]),TREATAS({T},'Device Inventory Evidence'[TenantKey]),TREATAS({B},'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: #,0
+		displayFolder: Device 360
+		lineageTag: 4ff9a7f4-ad30-476e-bcab-105fc748c2fb
+
+	measure 'Device 360 Policies Applied' = VAR I=[Device 360 Native Intune ID] VAR T=SELECTEDVALUE('Global Device Inventory'[TenantKey]) VAR B=SELECTEDVALUE('Global Device Inventory'[Loaded Batch ID]) RETURN IF(NOT ISBLANK(I),CALCULATE([Intune Configuration Applied Observations],TREATAS({I},'Device Inventory Evidence'[Device Source ID]),TREATAS({T},'Device Inventory Evidence'[TenantKey]),TREATAS({B},'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: #,0
+		displayFolder: Device 360
+		lineageTag: 782c9389-4e0f-4961-bcb0-f2d3c6a02364
+
+	measure 'Device 360 App Coverage Note' = IF([Device 360 Single Selection]=1, VAR Partial=CALCULATE(COUNTROWS(FILTER(SUMMARIZE('Native Discovered Application','Native Discovered Application'[TenantApplicationKey]),[Device 360 Detected App Rows]>0)),KEEPFILTERS('Native Discovered Application'[RelationshipCoverageStatus]<>"Complete")) RETURN IF(Partial>0,FORMAT(Partial,"0")&" detected app entries have partial device-link coverage at catalog level. The links shown are resolved for this PC.","Detected applications with a resolved link to this PC."))
+		displayFolder: Device 360
+		lineageTag: bf7a4d95-6614-4483-a441-6ef60c23c47a
+
+	measure 'Device 360 Search Prompt' = IF([Device 360 Single Selection]<>1,"Search and select a PC.")
+		displayFolder: Device 360 · Presentation
+		lineageTag: eb9e5d32-227a-494e-94a9-174bedd0f1ed
+
+	measure 'Device 360 Info Background' = VAR S=SELECTEDVALUE('Global Device Inventory'[Inventory Source]) VAR A=SELECTEDVALUE('Global Device Inventory'[Autopilot link status]) RETURN SWITCH(TRUE(),[Device 360 Single Selection]<>1,"#E7F0FB",S="AD + Entra + Intune" && A="Enrolled · explicit Intune match","#E7F0FB","#FFF0D4")
+		displayFolder: Device 360 · Presentation
+		lineageTag: a919e312-45e2-4fe4-bdbc-c0f1231e2582
+
+	measure 'Device 360 Intune Background' = SWITCH([Device 360 Intune Color],"#126147","#E0F3E9","#754600","#FFF0D4","#901F30","#FBE4E7","#596676","#EDF1F5","#E8EFF9")
+		displayFolder: Device 360 · Presentation
+		lineageTag: 2321fd81-09e0-4a69-9297-56a5066caaec
+
+	measure 'Device 360 Compliance Background' = SWITCH([Device 360 Compliance Color],"#126147","#E0F3E9","#754600","#FFF0D4","#901F30","#FBE4E7","#596676","#EDF1F5","#E8EFF9")
+		displayFolder: Device 360 · Presentation
+		lineageTag: a8106b01-8300-44de-8de4-0bea6e312144
+
+	measure 'Device 360 Encryption Background' = SWITCH([Device 360 Encryption Color],"#126147","#E0F3E9","#754600","#FFF0D4","#901F30","#FBE4E7","#596676","#EDF1F5","#E8EFF9")
+		displayFolder: Device 360 · Presentation
+		lineageTag: e90e193d-8f4e-47be-8dce-54c666220785
+
+	measure 'Device 360 AD Background' = SWITCH([Device 360 AD Color],"#126147","#E0F3E9","#754600","#FFF0D4","#901F30","#FBE4E7","#596676","#EDF1F5","#E8EFF9")
+		displayFolder: Device 360 · Presentation
+		lineageTag: a419961f-a86f-42d1-a5bb-aae3817de36d
+
+	measure 'Device 360 Entra Background' = SWITCH([Device 360 Entra Color],"#126147","#E0F3E9","#754600","#FFF0D4","#901F30","#FBE4E7","#596676","#EDF1F5","#E8EFF9")
+		displayFolder: Device 360 · Presentation
+		lineageTag: dd4467fa-70ce-4190-877d-5d17ca3e7a18
+
+	measure 'Device 360 Intune match Background' = SWITCH([Device 360 Intune match Color],"#126147","#E0F3E9","#754600","#FFF0D4","#901F30","#FBE4E7","#596676","#EDF1F5","#E8EFF9")
+		displayFolder: Device 360 · Presentation
+		lineageTag: e17ea981-ff0f-4c9b-8e24-61d3057accb0
+
+	measure 'Device 360 Autopilot Background' = SWITCH([Device 360 Autopilot Color],"#126147","#E0F3E9","#754600","#FFF0D4","#901F30","#FBE4E7","#596676","#EDF1F5","#E8EFF9")
+		displayFolder: Device 360 · Presentation
+		lineageTag: 67574ab3-bf45-4c8b-9c46-6464eccc9dd4
+
+	measure 'Device 360 Sync Background' = IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Last Sync DateTime])),"#EDF1F5","#E8EFF9")
+		displayFolder: Device 360 · Presentation
+		lineageTag: d5dc36ff-ad70-41c3-929d-24497d41a00f
+
+	measure 'Device 360 Background neutral empty' = IF([Device 360 Single Selection]=1,"#FFFFFF","#F4F7FB")
+		displayFolder: Device 360 · Presentation
+		lineageTag: ef83c95c-eb4b-4c71-8b5d-c681c4575b78
+
+	measure 'Device 360 Coverage Display' = IF([Device 360 Single Selection]=1, VAR N=[Device 360 App Coverage Note] RETURN IF(NOT ISBLANK([Device 360 Detected App Rows]) && CONTAINSSTRING(N,"partial"),"Some apps are also listed for devices that could not be identified. The list below includes only apps linked to this PC."))
+		displayFolder: Device 360 · Presentation
+		lineageTag: a85f1a5b-f0a3-467f-9934-bf97d021e246
+
+	measure 'Device 360 Detected Products Display' = IF([Device 360 Single Selection]=1, IF(NOT ISBLANK([Device 360 Detected App Rows]),COUNTROWS(FILTER(VALUES('Native Discovered Application'[Application product key]),NOT ISBLANK('Native Discovered Application'[Application product key]) && [Device 360 Detected App Rows]>0))))
+		formatString: #,0
+		displayFolder: Device 360 · Presentation
+		lineageTag: e0687394-68db-4253-a48f-a9abc77d7b11
+
+	measure 'Device 360 Distinct Failed' = VAR I=[Device 360 Native Intune ID] VAR T=SELECTEDVALUE('Global Device Inventory'[TenantKey]) VAR B=SELECTEDVALUE('Global Device Inventory'[Loaded Batch ID]) RETURN IF(NOT ISBLANK(I) && NOT ISBLANK([Device 360 Deployment Failed]),COALESCE(CALCULATE(DISTINCTCOUNTNOBLANK('Intune Managed App Deployment Evidence'[Application Key]),KEEPFILTERS('Intune Managed App Deployment Evidence'[Reported Deployment State]="ReportedFailure"),TREATAS({I},'Device Inventory Evidence'[Device Source ID]),TREATAS({T},'Device Inventory Evidence'[TenantKey]),TREATAS({B},'Device Inventory Evidence'[Loaded Batch ID])),0))
+		formatString: #,0
+		displayFolder: Device 360 · Presentation
+		lineageTag: b56e15ab-febd-4738-98ee-209b800405d5
+
+	measure 'Device 360 Distinct Installed' = VAR I=[Device 360 Native Intune ID] VAR T=SELECTEDVALUE('Global Device Inventory'[TenantKey]) VAR B=SELECTEDVALUE('Global Device Inventory'[Loaded Batch ID]) RETURN IF(NOT ISBLANK(I) && NOT ISBLANK([Device 360 Deployment Installed]),COALESCE(CALCULATE(DISTINCTCOUNTNOBLANK('Intune Managed App Deployment Evidence'[Application Key]),KEEPFILTERS('Intune Managed App Deployment Evidence'[Reported Deployment State]="ReportedInstalled"),TREATAS({I},'Device Inventory Evidence'[Device Source ID]),TREATAS({T},'Device Inventory Evidence'[TenantKey]),TREATAS({B},'Device Inventory Evidence'[Loaded Batch ID])),0))
+		formatString: #,0
+		displayFolder: Device 360 · Presentation
+		lineageTag: 73867b13-830f-4d24-9650-660c2c314b7b
+
+	measure 'Device 360 Distinct Applied' = VAR I=[Device 360 Native Intune ID] VAR T=SELECTEDVALUE('Global Device Inventory'[TenantKey]) VAR B=SELECTEDVALUE('Global Device Inventory'[Loaded Batch ID]) RETURN IF(NOT ISBLANK(I) && NOT ISBLANK([Device 360 Policies Applied]),COALESCE(CALCULATE(DISTINCTCOUNTNOBLANK('Intune Configuration Device Evidence'[Policy Key]),KEEPFILTERS('Intune Configuration Device Evidence'[Reported Application State]="ReportedApplied"),TREATAS({I},'Device Inventory Evidence'[Device Source ID]),TREATAS({T},'Device Inventory Evidence'[TenantKey]),TREATAS({B},'Device Inventory Evidence'[Loaded Batch ID])),0))
+		formatString: #,0
+		displayFolder: Device 360 · Presentation
+		lineageTag: 4079f062-f14a-4770-a997-76045e938a0e
+
+	measure 'Device 360 Policy Display' = IF([Device 360 Policy Rows]>0,SWITCH(SELECTEDVALUE('Intune Configuration Device Evidence'[Reported Application State]),"ReportedApplied","Applied","ReportedIssue","Issue reported","Pending","Pending","NotApplicable","Not applicable","Unknown","Unknown","Not observed"))
+		displayFolder: Device 360 · Presentation
+		lineageTag: 95e04140-5ddc-4a7d-b871-e366eeeed605
+
+	measure 'Device 360 Deployment Sort Display' = IF([Device 360 Managed App Rows]>0,SWITCH(SELECTEDVALUE('Intune Managed App Deployment Evidence'[Device 360 Install Status]),"Failed",1,"Installed",2,"Not applicable",3,"Pending",4,"Not installed",5,6))
+		displayFolder: Device 360 · Presentation
+		lineageTag: cdde9b31-2b00-46c2-b88a-20c4c869732b
+
+	measure 'Device 360 Panel Identity & user' =
+			IF([Device 360 Single Selection]=1, VAR R0 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Primary user")
+			VAR Value0 = IF(LEN(R0)=0,"Not observed", R0)
+			VAR Style0 = IF(LEFT(Value0,7)="Unknown" || Value0 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value0 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR R1 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Last console user")
+			VAR Value1 = IF(LEN(R1)=0,"Not observed", R1)
+			VAR Style1 = IF(LEFT(Value1,7)="Unknown" || Value1 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value1 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR R2 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Last console logon (UTC)")
+			VAR Value2 = IF(LEN(R2)=0,"Not observed", R2)
+			VAR Style2 = IF(LEFT(Value2,7)="Unknown" || Value2 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value2 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR R3 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Country")
+			VAR Value3 = IF(LEN(R3)=0,"Not observed", R3)
+			VAR Style3 = IF(LEFT(Value3,7)="Unknown" || Value3 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value3 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR R4 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="AD domain")
+			VAR Value4 = IF(LEN(R4)=0,"Not observed", R4)
+			VAR Style4 = IF(LEFT(Value4,7)="Unknown" || Value4 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value4 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR _Svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 326' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='598' height='324' rx='12' fill='#FFFFFF' stroke='#D7E1EC' stroke-width='2'/>" & "<text x='20' y='39' font-size='23' fill='#14253E' font-weight='600'>Identity &amp; user</text>" & "<line x1='20' y1='59' x2='580' y2='59' stroke='#DEE6EE'/>" & "<text x='20' y='85' font-size='18' fill='#526276' >Primary user</text>" & "<text x='254' y='85' font-size='18' " & Style0 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value0)>29,LEFT(Value0,28)&"…",Value0),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='104' x2='580' y2='104' stroke='#DEE6EE'/>" & "<text x='20' y='130' font-size='18' fill='#526276' >Last console user</text>" & "<text x='254' y='130' font-size='18' " & Style1 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value1)>29,LEFT(Value1,28)&"…",Value1),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='149' x2='580' y2='149' stroke='#DEE6EE'/>" & "<text x='20' y='175' font-size='18' fill='#526276' >Last console logon (UTC)</text>" & "<text x='254' y='175' font-size='18' " & Style2 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value2)>29,LEFT(Value2,28)&"…",Value2),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='194' x2='580' y2='194' stroke='#DEE6EE'/>" & "<text x='20' y='220' font-size='18' fill='#526276' >Country</text>" & "<text x='254' y='220' font-size='18' " & Style3 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value3)>29,LEFT(Value3,28)&"…",Value3),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='239' x2='580' y2='239' stroke='#DEE6EE'/>" & "<text x='20' y='265' font-size='18' fill='#526276' >AD domain</text>" & "<text x='254' y='265' font-size='18' " & Style4 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value4)>29,LEFT(Value4,28)&"…",Value4),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "</svg>"
+			RETURN "data:image/svg+xml;utf8," & SUBSTITUTE(SUBSTITUTE(_Svg,"%","%25"),"#","%23"),"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 326' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='598' height='324' rx='12' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='2'/><text x='20' y='39' font-size='23' fill='%2314253E' font-weight='600'>Identity &amp; user</text><line x1='20' y1='59' x2='580' y2='59' stroke='%23DEE6EE'/><text x='20' y='85' font-size='18' fill='%23526276' >Primary user</text><text x='254' y='85' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='104' x2='580' y2='104' stroke='%23DEE6EE'/><text x='20' y='130' font-size='18' fill='%23526276' >Last console user</text><text x='254' y='130' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='149' x2='580' y2='149' stroke='%23DEE6EE'/><text x='20' y='175' font-size='18' fill='%23526276' >Last console logon (UTC)</text><text x='254' y='175' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='194' x2='580' y2='194' stroke='%23DEE6EE'/><text x='20' y='220' font-size='18' fill='%23526276' >Country</text><text x='254' y='220' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='239' x2='580' y2='239' stroke='%23DEE6EE'/><text x='20' y='265' font-size='18' fill='%23526276' >AD domain</text><text x='254' y='265' font-size='18' fill='%23717D8D'>—</text></svg>")
+		displayFolder: Device 360 · Presentation
+		lineageTag: df66272a-08a3-434d-9696-f8687f37d9ea
+		dataCategory: ImageUrl
+
+	measure 'Device 360 Panel Hardware & OS' =
+			IF([Device 360 Single Selection]=1, VAR R0 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Manufacturer")
+			VAR Value0 = IF(LEN(R0)=0,"Not observed", R0)
+			VAR Style0 = IF(LEFT(Value0,7)="Unknown" || Value0 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value0 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR R1 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Model")
+			VAR Value1 = IF(LEN(R1)=0,"Not observed", R1)
+			VAR Style1 = IF(LEFT(Value1,7)="Unknown" || Value1 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value1 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR R2 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Platform")
+			VAR Value2 = IF(LEN(R2)=0,"Not observed", R2)
+			VAR Style2 = IF(LEFT(Value2,7)="Unknown" || Value2 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value2 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR R3 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="OS version")
+			VAR Value3 = IF(LEN(R3)=0,"Not observed", R3)
+			VAR Style3 = IF(LEFT(Value3,7)="Unknown" || Value3 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value3 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR R4 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Windows release")
+			VAR Value4 = IF(LEN(R4)=0,"Not observed", R4)
+			VAR Style4 = IF(LEFT(Value4,7)="Unknown" || Value4 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value4 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR _Svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 326' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='598' height='324' rx='12' fill='#FFFFFF' stroke='#D7E1EC' stroke-width='2'/>" & "<text x='20' y='39' font-size='23' fill='#14253E' font-weight='600'>Hardware &amp; OS</text>" & "<line x1='20' y1='59' x2='580' y2='59' stroke='#DEE6EE'/>" & "<text x='20' y='85' font-size='18' fill='#526276' >Manufacturer</text>" & "<text x='254' y='85' font-size='18' " & Style0 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value0)>29,LEFT(Value0,28)&"…",Value0),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='104' x2='580' y2='104' stroke='#DEE6EE'/>" & "<text x='20' y='130' font-size='18' fill='#526276' >Model</text>" & "<text x='254' y='130' font-size='18' " & Style1 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value1)>29,LEFT(Value1,28)&"…",Value1),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='149' x2='580' y2='149' stroke='#DEE6EE'/>" & "<text x='20' y='175' font-size='18' fill='#526276' >Platform</text>" & "<text x='254' y='175' font-size='18' " & Style2 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value2)>29,LEFT(Value2,28)&"…",Value2),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='194' x2='580' y2='194' stroke='#DEE6EE'/>" & "<text x='20' y='220' font-size='18' fill='#526276' >OS version</text>" & "<text x='254' y='220' font-size='18' " & Style3 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value3)>29,LEFT(Value3,28)&"…",Value3),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='239' x2='580' y2='239' stroke='#DEE6EE'/>" & "<text x='20' y='265' font-size='18' fill='#526276' >Windows release</text>" & "<text x='254' y='265' font-size='18' " & Style4 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value4)>29,LEFT(Value4,28)&"…",Value4),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "</svg>"
+			RETURN "data:image/svg+xml;utf8," & SUBSTITUTE(SUBSTITUTE(_Svg,"%","%25"),"#","%23"),"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 326' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='598' height='324' rx='12' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='2'/><text x='20' y='39' font-size='23' fill='%2314253E' font-weight='600'>Hardware &amp; OS</text><line x1='20' y1='59' x2='580' y2='59' stroke='%23DEE6EE'/><text x='20' y='85' font-size='18' fill='%23526276' >Manufacturer</text><text x='254' y='85' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='104' x2='580' y2='104' stroke='%23DEE6EE'/><text x='20' y='130' font-size='18' fill='%23526276' >Model</text><text x='254' y='130' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='149' x2='580' y2='149' stroke='%23DEE6EE'/><text x='20' y='175' font-size='18' fill='%23526276' >Platform</text><text x='254' y='175' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='194' x2='580' y2='194' stroke='%23DEE6EE'/><text x='20' y='220' font-size='18' fill='%23526276' >OS version</text><text x='254' y='220' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='239' x2='580' y2='239' stroke='%23DEE6EE'/><text x='20' y='265' font-size='18' fill='%23526276' >Windows release</text><text x='254' y='265' font-size='18' fill='%23717D8D'>—</text></svg>")
+		displayFolder: Device 360 · Presentation
+		lineageTag: e1284bb0-fe40-4cb9-a257-d19b7563d20f
+		dataCategory: ImageUrl
+
+	measure 'Device 360 Panel Directory & ownership' =
+			IF([Device 360 Single Selection]=1, VAR R0 = SWITCH(CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="AD account enabled"),"Yes","Enabled","No","Disabled",CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="AD account enabled"))
+			VAR Value0 = IF(LEN(R0)=0,"Not observed", R0)
+			VAR Style0 = IF(LEFT(Value0,7)="Unknown" || Value0 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value0 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR R1 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Entra account state")
+			VAR Value1 = IF(LEN(R1)=0,"Not observed", R1)
+			VAR Style1 = IF(LEFT(Value1,7)="Unknown" || Value1 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value1 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR R2 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Ownership")
+			VAR Value2 = IF(LEN(R2)=0,"Not observed", R2)
+			VAR Style2 = IF(LEFT(Value2,7)="Unknown" || Value2 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value2 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR _Svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 326' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='598' height='324' rx='12' fill='#FFFFFF' stroke='#D7E1EC' stroke-width='2'/>" & "<text x='20' y='39' font-size='23' fill='#14253E' font-weight='600'>Directory &amp; ownership</text>" & "<line x1='20' y1='59' x2='580' y2='59' stroke='#DEE6EE'/>" & "<text x='20' y='85' font-size='18' fill='#526276' >AD account</text>" & "<text x='254' y='85' font-size='18' " & Style0 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value0)>29,LEFT(Value0,28)&"…",Value0),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='104' x2='580' y2='104' stroke='#DEE6EE'/>" & "<text x='20' y='130' font-size='18' fill='#526276' >Entra account</text>" & "<text x='254' y='130' font-size='18' " & Style1 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value1)>29,LEFT(Value1,28)&"…",Value1),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='149' x2='580' y2='149' stroke='#DEE6EE'/>" & "<text x='20' y='175' font-size='18' fill='#526276' >Ownership</text>" & "<text x='254' y='175' font-size='18' " & Style2 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value2)>29,LEFT(Value2,28)&"…",Value2),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "</svg>"
+			RETURN "data:image/svg+xml;utf8," & SUBSTITUTE(SUBSTITUTE(_Svg,"%","%25"),"#","%23"),"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 326' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='598' height='324' rx='12' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='2'/><text x='20' y='39' font-size='23' fill='%2314253E' font-weight='600'>Directory &amp; ownership</text><line x1='20' y1='59' x2='580' y2='59' stroke='%23DEE6EE'/><text x='20' y='85' font-size='18' fill='%23526276' >AD account</text><text x='254' y='85' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='104' x2='580' y2='104' stroke='%23DEE6EE'/><text x='20' y='130' font-size='18' fill='%23526276' >Entra account</text><text x='254' y='130' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='149' x2='580' y2='149' stroke='%23DEE6EE'/><text x='20' y='175' font-size='18' fill='%23526276' >Ownership</text><text x='254' y='175' font-size='18' fill='%23717D8D'>—</text></svg>")
+		displayFolder: Device 360 · Presentation
+		lineageTag: 86e69981-8107-44a8-81ba-24e2d24b226b
+		dataCategory: ImageUrl
+
+	measure 'Device 360 Panel System protection' =
+			IF([Device 360 Single Selection]=1, VAR R0 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Secure Boot")
+			VAR Value0 = IF(LEN(R0)=0,"Not observed", R0)
+			VAR Chip0 = SWITCH(TRUE(),Value0 IN {"Enabled","Encrypted","On","Fully encrypted"},"#E0F3E9",Value0 IN {"Disabled","Not encrypted","Off","Fully decrypted","Protection off"},"#FCE4E7",Value0 IN {"Encrypting","Decrypting","Encryption in progress","Decryption in progress","Suspended","Encryption paused","Decryption paused"},"#FDF0D6",BLANK())
+			VAR Style0 = SWITCH(Chip0,"#E0F3E9","fill='#126147'","#FCE4E7","fill='#9A2434'","#FDF0D6","fill='#74440B'",IF(LEFT(Value0,7)="Unknown" || Value0 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'","fill='#14253E'"))
+			VAR R1 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Intune encryption")
+			VAR Value1 = IF(LEN(R1)=0,"Not observed", R1)
+			VAR Chip1 = SWITCH(TRUE(),Value1 IN {"Enabled","Encrypted","On","Fully encrypted"},"#E0F3E9",Value1 IN {"Disabled","Not encrypted","Off","Fully decrypted","Protection off"},"#FCE4E7",Value1 IN {"Encrypting","Decrypting","Encryption in progress","Decryption in progress","Suspended","Encryption paused","Decryption paused"},"#FDF0D6",BLANK())
+			VAR Style1 = SWITCH(Chip1,"#E0F3E9","fill='#126147'","#FCE4E7","fill='#9A2434'","#FDF0D6","fill='#74440B'",IF(LEFT(Value1,7)="Unknown" || Value1 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'","fill='#14253E'"))
+			VAR R2 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="BitLocker OS protection")
+			VAR Value2 = IF(LEN(R2)=0,"Not observed", R2)
+			VAR Chip2 = SWITCH(TRUE(),Value2 IN {"Enabled","Encrypted","On","Fully encrypted"},"#E0F3E9",Value2 IN {"Disabled","Not encrypted","Off","Fully decrypted","Protection off"},"#FCE4E7",Value2 IN {"Encrypting","Decrypting","Encryption in progress","Decryption in progress","Suspended","Encryption paused","Decryption paused"},"#FDF0D6",BLANK())
+			VAR Style2 = SWITCH(Chip2,"#E0F3E9","fill='#126147'","#FCE4E7","fill='#9A2434'","#FDF0D6","fill='#74440B'",IF(LEFT(Value2,7)="Unknown" || Value2 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'","fill='#14253E'"))
+			VAR R3 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="BitLocker conversion")
+			VAR Value3 = IF(LEN(R3)=0,"Not observed", R3)
+			VAR Chip3 = SWITCH(TRUE(),Value3 IN {"Enabled","Encrypted","On","Fully encrypted"},"#E0F3E9",Value3 IN {"Disabled","Not encrypted","Off","Fully decrypted","Protection off"},"#FCE4E7",Value3 IN {"Encrypting","Decrypting","Encryption in progress","Decryption in progress","Suspended","Encryption paused","Decryption paused"},"#FDF0D6",BLANK())
+			VAR Style3 = SWITCH(Chip3,"#E0F3E9","fill='#126147'","#FCE4E7","fill='#9A2434'","#FDF0D6","fill='#74440B'",IF(LEFT(Value3,7)="Unknown" || Value3 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'","fill='#14253E'"))
+			VAR R4 = VAR N=SELECTEDVALUE('Global Device Inventory'[Expected AV Name]) VAR S=SELECTEDVALUE('Global Device Inventory'[Expected AV State]) RETURN IF(LEN(N)=0,COALESCE(S,"Not observed"),N&IF(LEN(S)>0," · "&S))
+			VAR Value4 = IF(LEN(R4)=0,"Not observed", R4)
+			VAR Style4 = IF(LEFT(Value4,7)="Unknown" || Value4 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value4 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR R5 = SELECTEDVALUE('Global Device Inventory'[Third Party AV Products])
+			VAR Value5 = IF(LEN(R5)=0,"Not observed", R5)
+			VAR Style5 = IF(LEFT(Value5,7)="Unknown" || Value5 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value5 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR _Svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 908 344' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='906' height='342' rx='12' fill='#FFFFFF' stroke='#D7E1EC' stroke-width='2'/>" & "<text x='20' y='39' font-size='23' fill='#14253E' font-weight='600'>System protection</text>" & "<line x1='20' y1='59' x2='888' y2='59' stroke='#DEE6EE'/>" & "<text x='20' y='85' font-size='18' fill='#526276' >Secure Boot</text>" & IF(NOT ISBLANK(Chip0),"<rect x='332' y='64' width='" & FORMAT(25+10*LEN(Value0),"0") & "' height='29' rx='14.5' fill='" & Chip0 & "'/>","") & "<text x='345' y='85' font-size='18' " & Style0 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value0)>51,LEFT(Value0,50)&"…",Value0),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='102' x2='888' y2='102' stroke='#DEE6EE'/>" & "<text x='20' y='128' font-size='18' fill='#526276' >Intune encryption</text>" & IF(NOT ISBLANK(Chip1),"<rect x='332' y='107' width='" & FORMAT(25+10*LEN(Value1),"0") & "' height='29' rx='14.5' fill='" & Chip1 & "'/>","") & "<text x='345' y='128' font-size='18' " & Style1 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value1)>51,LEFT(Value1,50)&"…",Value1),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='145' x2='888' y2='145' stroke='#DEE6EE'/>" & "<text x='20' y='171' font-size='18' fill='#526276' >BitLocker OS protection</text>" & IF(NOT ISBLANK(Chip2),"<rect x='332' y='150' width='" & FORMAT(25+10*LEN(Value2),"0") & "' height='29' rx='14.5' fill='" & Chip2 & "'/>","") & "<text x='345' y='171' font-size='18' " & Style2 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value2)>51,LEFT(Value2,50)&"…",Value2),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='188' x2='888' y2='188' stroke='#DEE6EE'/>" & "<text x='20' y='214' font-size='18' fill='#526276' >BitLocker conversion</text>" & IF(NOT ISBLANK(Chip3),"<rect x='332' y='193' width='" & FORMAT(25+10*LEN(Value3),"0") & "' height='29' rx='14.5' fill='" & Chip3 & "'/>","") & "<text x='345' y='214' font-size='18' " & Style3 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value3)>51,LEFT(Value3,50)&"…",Value3),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='231' x2='888' y2='231' stroke='#DEE6EE'/>" & "<text x='20' y='257' font-size='18' fill='#526276' >Expected AV</text>" & "<text x='345' y='257' font-size='18' " & Style4 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value4)>51,LEFT(Value4,50)&"…",Value4),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='274' x2='888' y2='274' stroke='#DEE6EE'/>" & "<text x='20' y='300' font-size='18' fill='#526276' >Third-party AV</text>" & "<text x='345' y='300' font-size='18' " & Style5 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value5)>51,LEFT(Value5,50)&"…",Value5),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "</svg>"
+			RETURN "data:image/svg+xml;utf8," & SUBSTITUTE(SUBSTITUTE(_Svg,"%","%25"),"#","%23"),"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 908 344' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='906' height='342' rx='12' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='2'/><text x='20' y='39' font-size='23' fill='%2314253E' font-weight='600'>System protection</text><line x1='20' y1='59' x2='888' y2='59' stroke='%23DEE6EE'/><text x='20' y='85' font-size='18' fill='%23526276' >Secure Boot</text><text x='345' y='85' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='102' x2='888' y2='102' stroke='%23DEE6EE'/><text x='20' y='128' font-size='18' fill='%23526276' >Intune encryption</text><text x='345' y='128' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='145' x2='888' y2='145' stroke='%23DEE6EE'/><text x='20' y='171' font-size='18' fill='%23526276' >BitLocker OS protection</text><text x='345' y='171' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='188' x2='888' y2='188' stroke='%23DEE6EE'/><text x='20' y='214' font-size='18' fill='%23526276' >BitLocker conversion</text><text x='345' y='214' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='231' x2='888' y2='231' stroke='%23DEE6EE'/><text x='20' y='257' font-size='18' fill='%23526276' >Expected AV</text><text x='345' y='257' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='274' x2='888' y2='274' stroke='%23DEE6EE'/><text x='20' y='300' font-size='18' fill='%23526276' >Third-party AV</text><text x='345' y='300' font-size='18' fill='%23717D8D'>—</text></svg>")
+		displayFolder: Device 360 · Presentation
+		lineageTag: a7e29658-1c9d-490f-92e4-4e3bc5243a97
+		dataCategory: ImageUrl
+
+	measure 'Device 360 Panel Updates' =
+			IF([Device 360 Single Selection]=1, VAR R0 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Windows Update")
+			VAR Value0 = IF(LEN(R0)=0,"Not observed", R0)
+			VAR Style0 = IF(LEFT(Value0,7)="Unknown" || Value0 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value0 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR R1 = SWITCH(SELECTEDVALUE('Global Device Inventory'[Windows Update Reboot Required]),"True","Yes","False","No",SELECTEDVALUE('Global Device Inventory'[Windows Update Reboot Required]))
+			VAR Value1 = IF(LEN(R1)=0,"Not observed", R1)
+			VAR Style1 = IF(LEFT(Value1,7)="Unknown" || Value1 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value1 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR R2 = VAR F=SELECTEDVALUE('Global Device Inventory'[System Freshness]) RETURN IF(F="Policy not configured","No freshness threshold set",F)
+			VAR Value2 = IF(LEN(R2)=0,"Not observed", R2)
+			VAR Style2 = IF(LEFT(Value2,7)="Unknown" || Value2 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value2 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR _Svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 908 210' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='906' height='208' rx='12' fill='#FFFFFF' stroke='#D7E1EC' stroke-width='2'/>" & "<text x='20' y='39' font-size='23' fill='#14253E' font-weight='600'>Updates</text>" & "<line x1='20' y1='59' x2='888' y2='59' stroke='#DEE6EE'/>" & "<text x='20' y='85' font-size='18' fill='#526276' >Windows Update</text>" & "<text x='345' y='85' font-size='18' " & Style0 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value0)>51,LEFT(Value0,50)&"…",Value0),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='102' x2='888' y2='102' stroke='#DEE6EE'/>" & "<text x='20' y='128' font-size='18' fill='#526276' >Reboot required</text>" & "<text x='345' y='128' font-size='18' " & Style1 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value1)>51,LEFT(Value1,50)&"…",Value1),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='145' x2='888' y2='145' stroke='#DEE6EE'/>" & "<text x='20' y='171' font-size='18' fill='#526276' >System evidence age</text>" & "<text x='345' y='171' font-size='18' " & Style2 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value2)>51,LEFT(Value2,50)&"…",Value2),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "</svg>"
+			RETURN "data:image/svg+xml;utf8," & SUBSTITUTE(SUBSTITUTE(_Svg,"%","%25"),"#","%23"),"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 908 210' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='906' height='208' rx='12' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='2'/><text x='20' y='39' font-size='23' fill='%2314253E' font-weight='600'>Updates</text><line x1='20' y1='59' x2='888' y2='59' stroke='%23DEE6EE'/><text x='20' y='85' font-size='18' fill='%23526276' >Windows Update</text><text x='345' y='85' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='102' x2='888' y2='102' stroke='%23DEE6EE'/><text x='20' y='128' font-size='18' fill='%23526276' >Reboot required</text><text x='345' y='128' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='145' x2='888' y2='145' stroke='%23DEE6EE'/><text x='20' y='171' font-size='18' fill='%23526276' >System evidence age</text><text x='345' y='171' font-size='18' fill='%23717D8D'>—</text></svg>")
+		displayFolder: Device 360 · Presentation
+		lineageTag: b6fcd62f-7f27-4459-9618-a4fac3ffc2dd
+		dataCategory: ImageUrl
+
+	measure 'Device 360 Panel Windows 11 readiness' =
+			IF([Device 360 Single Selection]=1, VAR R0 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Windows 11 eligibility")
+			VAR Value0 = IF(LEN(R0)=0,"Not observed", R0)
+			VAR Style0 = IF(LEFT(Value0,7)="Unknown" || Value0 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value0 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR R1 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Windows release")
+			VAR Value1 = IF(LEN(R1)=0,"Not observed", R1)
+			VAR Style1 = IF(LEFT(Value1,7)="Unknown" || Value1 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value1 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR R2 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Deployment risk")
+			VAR Value2 = IF(LEN(R2)=0,"Not observed", R2)
+			VAR Style2 = IF(LEFT(Value2,7)="Unknown" || Value2 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value2 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR R3 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Blocking reasons")
+			VAR Value3 = IF(LEN(R3)=0,"Not observed", R3)
+			VAR Style3 = IF(LEFT(Value3,7)="Unknown" || Value3 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value3 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR _Svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 270' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='598' height='268' rx='12' fill='#FFFFFF' stroke='#D7E1EC' stroke-width='2'/>" & "<text x='20' y='39' font-size='23' fill='#14253E' font-weight='600'>Windows 11 readiness</text>" & "<line x1='20' y1='59' x2='580' y2='59' stroke='#DEE6EE'/>" & "<text x='20' y='85' font-size='18' fill='#526276' >Eligibility</text>" & "<text x='254' y='85' font-size='18' " & Style0 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value0)>29,LEFT(Value0,28)&"…",Value0),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='104' x2='580' y2='104' stroke='#DEE6EE'/>" & "<text x='20' y='130' font-size='18' fill='#526276' >Windows release</text>" & "<text x='254' y='130' font-size='18' " & Style1 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value1)>29,LEFT(Value1,28)&"…",Value1),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='149' x2='580' y2='149' stroke='#DEE6EE'/>" & "<text x='20' y='175' font-size='18' fill='#526276' >Deployment risk</text>" & "<text x='254' y='175' font-size='18' " & Style2 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value2)>29,LEFT(Value2,28)&"…",Value2),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='194' x2='580' y2='194' stroke='#DEE6EE'/>" & "<text x='20' y='220' font-size='18' fill='#526276' >Blocking reasons</text>" & "<text x='254' y='220' font-size='18' " & Style3 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value3)>29,LEFT(Value3,28)&"…",Value3),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "</svg>"
+			RETURN "data:image/svg+xml;utf8," & SUBSTITUTE(SUBSTITUTE(_Svg,"%","%25"),"#","%23"),"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 270' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='598' height='268' rx='12' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='2'/><text x='20' y='39' font-size='23' fill='%2314253E' font-weight='600'>Windows 11 readiness</text><line x1='20' y1='59' x2='580' y2='59' stroke='%23DEE6EE'/><text x='20' y='85' font-size='18' fill='%23526276' >Eligibility</text><text x='254' y='85' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='104' x2='580' y2='104' stroke='%23DEE6EE'/><text x='20' y='130' font-size='18' fill='%23526276' >Windows release</text><text x='254' y='130' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='149' x2='580' y2='149' stroke='%23DEE6EE'/><text x='20' y='175' font-size='18' fill='%23526276' >Deployment risk</text><text x='254' y='175' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='194' x2='580' y2='194' stroke='%23DEE6EE'/><text x='20' y='220' font-size='18' fill='%23526276' >Blocking reasons</text><text x='254' y='220' font-size='18' fill='%23717D8D'>—</text></svg>")
+		displayFolder: Device 360 · Presentation
+		lineageTag: e4aa6282-fffc-4f54-ab4d-ab6dca3f0721
+		dataCategory: ImageUrl
+
+	measure 'Device 360 Panel Enrollment' =
+			IF([Device 360 Single Selection]=1, VAR R0 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Intune enrollment risk")
+			VAR Value0 = IF(LEN(R0)=0,"Not observed", R0)
+			VAR Style0 = IF(LEFT(Value0,7)="Unknown" || Value0 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value0 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR R1 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Assessment scope")
+			VAR Value1 = IF(LEN(R1)=0,"Not observed", R1)
+			VAR Style1 = IF(LEFT(Value1,7)="Unknown" || Value1 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value1 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR R2 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Recommended action")
+			VAR Value2 = IF(LEN(R2)=0,"Not observed", R2)
+			VAR Style2 = IF(LEFT(Value2,7)="Unknown" || Value2 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value2 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR _Svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 270' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='598' height='268' rx='12' fill='#FFFFFF' stroke='#D7E1EC' stroke-width='2'/>" & "<text x='20' y='39' font-size='23' fill='#14253E' font-weight='600'>Enrollment</text>" & "<line x1='20' y1='59' x2='580' y2='59' stroke='#DEE6EE'/>" & "<text x='20' y='85' font-size='18' fill='#526276' >Enrollment risk</text>" & "<text x='254' y='85' font-size='18' " & Style0 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value0)>29,LEFT(Value0,28)&"…",Value0),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='104' x2='580' y2='104' stroke='#DEE6EE'/>" & "<text x='20' y='130' font-size='18' fill='#526276' >Assessment scope</text>" & "<text x='254' y='130' font-size='18' " & Style1 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value1)>29,LEFT(Value1,28)&"…",Value1),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='149' x2='580' y2='149' stroke='#DEE6EE'/>" & "<text x='20' y='175' font-size='18' fill='#526276' >Recommended action</text>" & "<text x='254' y='175' font-size='18' " & Style2 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value2)>29,LEFT(Value2,28)&"…",Value2),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "</svg>"
+			RETURN "data:image/svg+xml;utf8," & SUBSTITUTE(SUBSTITUTE(_Svg,"%","%25"),"#","%23"),"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 270' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='598' height='268' rx='12' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='2'/><text x='20' y='39' font-size='23' fill='%2314253E' font-weight='600'>Enrollment</text><line x1='20' y1='59' x2='580' y2='59' stroke='%23DEE6EE'/><text x='20' y='85' font-size='18' fill='%23526276' >Enrollment risk</text><text x='254' y='85' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='104' x2='580' y2='104' stroke='%23DEE6EE'/><text x='20' y='130' font-size='18' fill='%23526276' >Assessment scope</text><text x='254' y='130' font-size='18' fill='%23717D8D'>—</text><line x1='20' y1='149' x2='580' y2='149' stroke='%23DEE6EE'/><text x='20' y='175' font-size='18' fill='%23526276' >Recommended action</text><text x='254' y='175' font-size='18' fill='%23717D8D'>—</text></svg>")
+		displayFolder: Device 360 · Presentation
+		lineageTag: 3a242a22-309d-426a-bedc-9499f12ae035
+		dataCategory: ImageUrl
+
+	measure 'Device 360 Panel Technical identity' =
+			IF([Device 360 Single Selection]=1, VAR R0 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Canonical device ID")
+			VAR Value0 = IF(LEN(R0)=0,"Not observed", R0)
+			VAR Style0 = IF(LEFT(Value0,7)="Unknown" || Value0 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value0 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR R1 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Tenant")
+			VAR Value1 = IF(LEN(R1)=0,"Not observed", R1)
+			VAR Style1 = IF(LEFT(Value1,7)="Unknown" || Value1 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value1 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR R2 = CALCULATE([Device 360 Property Value],REMOVEFILTERS('Device 360 Properties'),'Device 360 Properties'[Property]="Autopilot serial numbers")
+			VAR Value2 = IF(LEN(R2)=0,"Not observed", R2)
+			VAR Style2 = IF(LEFT(Value2,7)="Unknown" || Value2 IN {"Not observed","Not resolved","Not assessed","Not applicable"},"font-style='italic' fill='#596676'",IF(Value2 IN {"Enabled","Encrypted","On","Fully encrypted","Success","Detected","No","Already upgraded"},"fill='#126147'","fill='#14253E'"))
+			VAR _Svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 270' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='598' height='268' rx='12' fill='#FFFFFF' stroke='#D7E1EC' stroke-width='2'/>" & "<text x='20' y='39' font-size='23' fill='#14253E' font-weight='600'>Technical identity</text>" & "<line x1='20' y1='59' x2='580' y2='59' stroke='#DEE6EE'/>" & "<text x='20' y='85' font-size='18' fill='#526276' >Device ID</text>" & "<text x='166' y='85' font-size='15' " & Style0 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value0)>48,LEFT(Value0,47)&"…",Value0),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='104' x2='580' y2='104' stroke='#DEE6EE'/>" & "<text x='20' y='130' font-size='18' fill='#526276' >Tenant</text>" & "<text x='166' y='130' font-size='15' " & Style1 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value1)>48,LEFT(Value1,47)&"…",Value1),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<line x1='20' y1='149' x2='580' y2='149' stroke='#DEE6EE'/>" & "<text x='20' y='175' font-size='18' fill='#526276' >Autopilot serial</text>" & "<text x='166' y='175' font-size='15' " & Style2 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(Value2)>48,LEFT(Value2,47)&"…",Value2),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "</svg>"
+			RETURN "data:image/svg+xml;utf8," & SUBSTITUTE(SUBSTITUTE(_Svg,"%","%25"),"#","%23"),"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 270' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='598' height='268' rx='12' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='2'/><text x='20' y='39' font-size='23' fill='%2314253E' font-weight='600'>Technical identity</text><line x1='20' y1='59' x2='580' y2='59' stroke='%23DEE6EE'/><text x='20' y='85' font-size='18' fill='%23526276' >Device ID</text><text x='166' y='85' font-size='15' fill='%23717D8D'>—</text><line x1='20' y1='104' x2='580' y2='104' stroke='%23DEE6EE'/><text x='20' y='130' font-size='18' fill='%23526276' >Tenant</text><text x='166' y='130' font-size='15' fill='%23717D8D'>—</text><line x1='20' y1='149' x2='580' y2='149' stroke='%23DEE6EE'/><text x='20' y='175' font-size='18' fill='%23526276' >Autopilot serial</text><text x='166' y='175' font-size='15' fill='%23717D8D'>—</text></svg>")
+		displayFolder: Device 360 · Presentation
+		lineageTag: c3c4de1d-cc1d-4114-868e-2d09b43ab7cb
+		dataCategory: ImageUrl
+
+	measure 'Device 360 Panel System drive' =
+			IF([Device 360 Single Selection]=1, VAR U=[Device 360 Disk Used] VAR _DriveCaption=[Device 360 Disk Display]
+			VAR _Shade=SWITCH(TRUE(),ISBLANK(U),"#64748B",U>=0.90,"#C63643",U>=0.80,"#CD830E","#188661")
+			VAR _BarWidth=IF(ISBLANK(U),0,ROUND(860*U,0))
+			VAR _Svg="<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 908 123' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='906' height='121' rx='12' fill='#FFFFFF' stroke='#D7E1EC' stroke-width='2'/><text x='20' y='35' font-size='23' font-weight='600' fill='#14253E'>System drive</text><text x='20' y='68' font-size='19' " & IF(_DriveCaption="Not observed","font-style='italic' fill='#596676'","fill='#14253E'") & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(_DriveCaption,"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & IF(NOT ISBLANK(U),"<rect x='20' y='88' width='860' height='12' rx='6' fill='#E4ECF4'/><rect x='20' y='88' width='" & FORMAT(_BarWidth,"0") & "' height='12' rx='6' fill='" & _Shade & "'/>") & "</svg>"
+			RETURN "data:image/svg+xml;utf8," & SUBSTITUTE(SUBSTITUTE(_Svg,"%","%25"),"#","%23"),"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 908 123' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='906' height='121' rx='12' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='2'/><text x='20' y='35' font-size='23' font-weight='600' fill='%2314253E'>System drive</text><text x='20' y='68' font-size='19' fill='%23717D8D'>—</text></svg>")
+		displayFolder: Device 360 · Presentation
+		lineageTag: abab9432-d284-4470-9549-c293f5df99b1
+		dataCategory: ImageUrl
+
+	measure 'Device 360 Profile artwork' =
+			IF([Device 360 Single Selection]=1, VAR _UserName=[Device 360 · Primary User (report)]
+			VAR _FriendlyName=[Device 360 · Device Name]
+			VAR _Detail=[Device 360 Hero]
+			VAR _Svg="<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1840 109' font-family='Segoe UI, sans-serif'>" & "<rect x='1' y='1' width='1838' height='107' rx='11' fill='" & "#FFFFFF" & "' stroke='#D7E1EC' stroke-width='1.4'/>" & "<text x='22' y='49' font-size='35' font-weight='600' fill='" & "#14253E" & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(_FriendlyName,"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "<text x='22' y='84' font-size='20' font-weight='400' fill='" & "#526276" & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(_Detail,"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "<line x1='1310' x2='1310' y1='19' y2='90' stroke='#D7E1EC'/>" & "<text x='1332' y='40' font-size='17' font-weight='400' fill='" & "#526276" & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE("Primary user","&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "<text x='1332' y='74' font-size='20' font-weight='600' fill='" & IF(_UserName IN {"Not resolved","Not observed"},"#596676","#14253E") & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(_UserName)>52,LEFT(_UserName,51)&"…",_UserName),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "</svg>"
+			RETURN "data:image/svg+xml;utf8," & SUBSTITUTE(SUBSTITUTE(_Svg,"%","%25"),"#","%23"),"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1840 109' font-family='Segoe UI'><rect x='1' y='1' width='1838' height='55' rx='11' fill='%23E7F0FB'/><text x='20' y='35' font-size='20' fill='%232E4E82'>Search and select a PC.</text></svg>")
+		displayFolder: Device 360 · Presentation
+		lineageTag: a67bcb9b-1d39-4aa2-a099-09564ba2e6ce
+		dataCategory: ImageUrl
+
+	measure 'Device 360 Status artwork' =
+			IF([Device 360 Single Selection]=1, VAR _Svg="<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1840 77' font-family='Segoe UI, sans-serif'>" & "<rect x='1' y='1' width='449' height='75' rx='11' fill='" & [Device 360 Intune Background] & "' stroke='none' stroke-width='1.4'/>" & "<text x='17' y='28' font-size='16' font-weight='400' fill='" & "#526276" & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE("Intune","&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "<text x='17' y='56' font-size='21' font-weight='600' fill='" & [Device 360 Intune Color] & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(COALESCE([Device 360 · Intune presence],"Not observed"),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<rect x='464' y='1' width='449' height='75' rx='11' fill='" & [Device 360 Compliance Background] & "' stroke='none' stroke-width='1.4'/>" & "<text x='480' y='28' font-size='16' font-weight='400' fill='" & "#526276" & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE("Compliance","&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "<text x='480' y='56' font-size='21' font-weight='600' fill='" & [Device 360 Compliance Color] & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(COALESCE([Device 360 · Compliance State],"Not observed"),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<rect x='927' y='1' width='449' height='75' rx='11' fill='" & [Device 360 Encryption Background] & "' stroke='none' stroke-width='1.4'/>" & "<text x='943' y='28' font-size='16' font-weight='400' fill='" & "#526276" & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE("Encryption","&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "<text x='943' y='56' font-size='21' font-weight='600' fill='" & [Device 360 Encryption Color] & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(COALESCE([Device 360 · Intune Encryption State],"Not observed"),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<rect x='1390' y='1' width='449' height='75' rx='11' fill='" & [Device 360 Sync Background] & "' stroke='none' stroke-width='1.4'/>" & "<text x='1406' y='28' font-size='16' font-weight='400' fill='" & "#526276" & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE("Last sync","&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "<text x='1406' y='56' font-size='21' font-weight='600' fill='" & IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Last Sync DateTime])),"#596676","#2E4E82") & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(COALESCE([Device 360 Last Sync Display],"Not observed"),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "</svg>"
+			RETURN "data:image/svg+xml;utf8," & SUBSTITUTE(SUBSTITUTE(_Svg,"%","%25"),"#","%23"),"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1840 77' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='449' height='75' rx='11' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='1.4'/><text x='17' y='28' font-size='16' fill='%23526276'>Intune</text><text x='17' y='56' font-size='20' fill='%23717D8D'>—</text><rect x='464' y='1' width='449' height='75' rx='11' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='1.4'/><text x='480' y='28' font-size='16' fill='%23526276'>Compliance</text><text x='480' y='56' font-size='20' fill='%23717D8D'>—</text><rect x='927' y='1' width='449' height='75' rx='11' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='1.4'/><text x='943' y='28' font-size='16' fill='%23526276'>Encryption</text><text x='943' y='56' font-size='20' fill='%23717D8D'>—</text><rect x='1390' y='1' width='449' height='75' rx='11' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='1.4'/><text x='1406' y='28' font-size='16' fill='%23526276'>Last sync</text><text x='1406' y='56' font-size='20' fill='%23717D8D'>—</text></svg>")
+		displayFolder: Device 360 · Presentation
+		lineageTag: f6891d4e-5dab-47df-94d3-3bebad2f5347
+		dataCategory: ImageUrl
+
+	measure 'Device 360 Identity artwork' =
+			IF([Device 360 Single Selection]=1, VAR _Svg="<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1840 77' font-family='Segoe UI, sans-serif'>" & "<rect x='1' y='1' width='449' height='75' rx='11' fill='" & [Device 360 AD Background] & "' stroke='none' stroke-width='1.4'/>" & "<text x='17' y='28' font-size='16' font-weight='400' fill='" & "#526276" & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE("AD","&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "<text x='17' y='56' font-size='21' font-weight='600' fill='" & [Device 360 AD Color] & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(COALESCE([Device 360 Identity AD],"Not observed"),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<rect x='464' y='1' width='449' height='75' rx='11' fill='" & [Device 360 Entra Background] & "' stroke='none' stroke-width='1.4'/>" & "<text x='480' y='28' font-size='16' font-weight='400' fill='" & "#526276" & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE("Entra","&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "<text x='480' y='56' font-size='21' font-weight='600' fill='" & [Device 360 Entra Color] & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(COALESCE([Device 360 Identity Entra],"Not observed"),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<rect x='927' y='1' width='449' height='75' rx='11' fill='" & [Device 360 Intune match Background] & "' stroke='none' stroke-width='1.4'/>" & "<text x='943' y='28' font-size='16' font-weight='400' fill='" & "#526276" & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE("Intune","&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "<text x='943' y='56' font-size='21' font-weight='600' fill='" & [Device 360 Intune match Color] & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(COALESCE([Device 360 Identity Intune],"Not observed"),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<rect x='1390' y='1' width='449' height='75' rx='11' fill='" & [Device 360 Autopilot Background] & "' stroke='none' stroke-width='1.4'/>" & "<text x='1406' y='28' font-size='16' font-weight='400' fill='" & "#526276" & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE("Autopilot","&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "<text x='1406' y='56' font-size='21' font-weight='600' fill='" & [Device 360 Autopilot Color] & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(COALESCE([Device 360 Identity Autopilot],"Not observed"),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "</svg>"
+			RETURN "data:image/svg+xml;utf8," & SUBSTITUTE(SUBSTITUTE(_Svg,"%","%25"),"#","%23"),"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1840 77' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='449' height='75' rx='11' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='1.4'/><text x='17' y='28' font-size='16' fill='%23526276'>AD</text><text x='17' y='56' font-size='20' fill='%23717D8D'>—</text><rect x='464' y='1' width='449' height='75' rx='11' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='1.4'/><text x='480' y='28' font-size='16' fill='%23526276'>Entra</text><text x='480' y='56' font-size='20' fill='%23717D8D'>—</text><rect x='927' y='1' width='449' height='75' rx='11' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='1.4'/><text x='943' y='28' font-size='16' fill='%23526276'>Intune</text><text x='943' y='56' font-size='20' fill='%23717D8D'>—</text><rect x='1390' y='1' width='449' height='75' rx='11' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='1.4'/><text x='1406' y='28' font-size='16' fill='%23526276'>Autopilot</text><text x='1406' y='56' font-size='20' fill='%23717D8D'>—</text></svg>")
+		displayFolder: Device 360 · Presentation
+		lineageTag: 40a987fa-3bcd-4e3c-ba1b-b58c6bfcd92a
+		dataCategory: ImageUrl
+
+	measure 'Device 360 Information artwork' =
+			IF([Device 360 Single Selection]=1,VAR _InfoText=IF([Device 360 Single Selection]=1,[Device 360 Source Coverage],"Search and select a PC.")
+			VAR _InfoFill=[Device 360 Info Background]
+			VAR _Svg="<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1840 54' font-family='Segoe UI, sans-serif'>" & "<rect x='1' y='1' width='1838' height='52' rx='11' fill='" & _InfoFill & "' stroke='none' stroke-width='1.4'/>" & "<text x='19' y='34' font-size='20' font-weight='400' fill='" & IF(_InfoFill="#FFF0D4","#754600","#2E4E82") & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(_InfoText,"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "</svg>"
+			RETURN "data:image/svg+xml;utf8," & SUBSTITUTE(SUBSTITUTE(_Svg,"%","%25"),"#","%23"),"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/>")
+		displayFolder: Device 360 · Presentation
+		lineageTag: 4cb9cfef-b9fe-4c90-ae09-f8b829229672
+		dataCategory: ImageUrl
+
+	measure 'Device 360 KPI artwork' =
+			IF([Device 360 Single Selection]=1, VAR _Svg="<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1840 77' font-family='Segoe UI, sans-serif'>" & "<rect x='1' y='1' width='449' height='75' rx='11' fill='" & "#FFFFFF" & "' stroke='none' stroke-width='1.4'/>" & "<text x='17' y='28' font-size='16' font-weight='400' fill='" & "#526276" & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE("Detected apps","&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "<text x='17' y='56' font-size='21' " & IF(ISBLANK([Device 360 Detected Products Display]),"font-weight='400' font-style='italic' fill='#596676'","font-weight='600' fill='#14253E'") & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(COALESCE(IF(ISBLANK([Device 360 Detected Products Display]),"Not observed",FORMAT([Device 360 Detected Products Display],"#,0")),"Not observed"),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<rect x='464' y='1' width='449' height='75' rx='11' fill='" & "#FFFFFF" & "' stroke='none' stroke-width='1.4'/>" & "<text x='480' y='28' font-size='16' font-weight='400' fill='" & "#526276" & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE("Managed apps failed","&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "<text x='480' y='56' font-size='21' " & IF(ISBLANK([Device 360 Distinct Failed]),"font-weight='400' font-style='italic' fill='#596676'","font-weight='600' fill='#14253E'") & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(COALESCE(IF(ISBLANK([Device 360 Distinct Failed]),"Not observed",FORMAT([Device 360 Distinct Failed],"#,0")),"Not observed"),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<rect x='927' y='1' width='449' height='75' rx='11' fill='" & "#FFFFFF" & "' stroke='none' stroke-width='1.4'/>" & "<text x='943' y='28' font-size='16' font-weight='400' fill='" & "#526276" & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE("Managed apps installed","&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "<text x='943' y='56' font-size='21' " & IF(ISBLANK([Device 360 Distinct Installed]),"font-weight='400' font-style='italic' fill='#596676'","font-weight='600' fill='#14253E'") & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(COALESCE(IF(ISBLANK([Device 360 Distinct Installed]),"Not observed",FORMAT([Device 360 Distinct Installed],"#,0")),"Not observed"),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>"
+			 & "<rect x='1390' y='1' width='449' height='75' rx='11' fill='" & "#FFFFFF" & "' stroke='none' stroke-width='1.4'/>" & "<text x='1406' y='28' font-size='16' font-weight='400' fill='" & "#526276" & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE("Policies applied","&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "<text x='1406' y='56' font-size='21' " & IF(ISBLANK([Device 360 Distinct Applied]),"font-weight='400' font-style='italic' fill='#596676'","font-weight='600' fill='#14253E'") & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(COALESCE(IF(ISBLANK([Device 360 Distinct Applied]),"Not observed",FORMAT([Device 360 Distinct Applied],"#,0")),"Not observed"),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "</svg>"
+			RETURN "data:image/svg+xml;utf8," & SUBSTITUTE(SUBSTITUTE(_Svg,"%","%25"),"#","%23"),"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1840 77' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='449' height='75' rx='11' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='1.4'/><text x='17' y='28' font-size='16' fill='%23526276'>Detected apps</text><text x='17' y='56' font-size='20' fill='%23717D8D'>—</text><rect x='464' y='1' width='449' height='75' rx='11' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='1.4'/><text x='480' y='28' font-size='16' fill='%23526276'>Managed apps failed</text><text x='480' y='56' font-size='20' fill='%23717D8D'>—</text><rect x='927' y='1' width='449' height='75' rx='11' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='1.4'/><text x='943' y='28' font-size='16' fill='%23526276'>Managed apps installed</text><text x='943' y='56' font-size='20' fill='%23717D8D'>—</text><rect x='1390' y='1' width='449' height='75' rx='11' fill='%23FFFFFF' stroke='%23D7E1EC' stroke-width='1.4'/><text x='1406' y='28' font-size='16' fill='%23526276'>Policies applied</text><text x='1406' y='56' font-size='20' fill='%23717D8D'>—</text></svg>")
+		displayFolder: Device 360 · Presentation
+		lineageTag: 2c697016-6ae1-418a-a45c-b5afd15e58f3
+		dataCategory: ImageUrl
+
+	measure 'Device 360 Scoped Publisher' = IF([Device 360 Detected App Rows]>0,VAR _Publishers=FILTER(VALUES('Native Discovered Application'[Publisher]),[Device 360 Detected App Rows]>0) VAR _Raw=CONCATENATEX(_Publishers,'Native Discovered Application'[Publisher]," · ",'Native Discovered Application'[Publisher],ASC) VAR _Comma=FIND(",",_Raw,1,0) VAR _Friendly=IF(LEFT(_Raw,3)="CN=",IF(_Comma>3,MID(_Raw,4,_Comma-4),MID(_Raw,4,LEN(_Raw))),_Raw) RETURN IF(LEN(_Friendly)=0,"Not observed",IF(LEN(_Friendly)>42,LEFT(_Friendly,41)&"…",_Friendly)))
+		displayFolder: Device 360 · Presentation
+		lineageTag: 4bd355db-627a-495f-8d0a-a9588247f207
+
+	measure 'Device 360 Scoped Policy State' = IF([Device 360 Policy Rows]>0,VAR I=[Device 360 Native Intune ID] VAR T=SELECTEDVALUE('Global Device Inventory'[TenantKey]) VAR B=SELECTEDVALUE('Global Device Inventory'[Loaded Batch ID]) RETURN CALCULATE(CONCATENATEX(VALUES('Intune Configuration Device Evidence'[Device 360 View Policy State]),'Intune Configuration Device Evidence'[Device 360 View Policy State]," · ",'Intune Configuration Device Evidence'[Device 360 View Policy State],ASC),TREATAS({I},'Device Inventory Evidence'[Device Source ID]),TREATAS({T},'Device Inventory Evidence'[TenantKey]),TREATAS({B},'Device Inventory Evidence'[Loaded Batch ID])))
+		displayFolder: Device 360 · Presentation
+		lineageTag: 5d4dc5df-5d1d-426c-84d0-bc6b29810dad
+
+	column Section
+		dataType: string
+		lineageTag: a5b218ee-f9aa-51d0-826b-3930f0bde8ca
+		summarizeBy: none
+		isNameInferred
+		sourceColumn: [Section]
+
+	column Property
+		dataType: string
+		lineageTag: 33aaca11-da0a-5f52-a9fa-80c1bb4a57cd
+		summarizeBy: none
+		isNameInferred
+		sourceColumn: [Property]
+		sortByColumn: SortOrder
+
+	column SortOrder
+		dataType: int64
+		lineageTag: ef03c78b-e17d-5cc2-88b0-798e49e0b9b8
+		summarizeBy: none
+		isNameInferred
+		sourceColumn: [SortOrder]
+
+	partition 'Device 360 Properties' = calculated
+		mode: import
+		source =
+				DATATABLE("Section", STRING, "Property", STRING, "SortOrder", INTEGER, {
+				{ "Identity & user", "Primary user", 1 },
+				{ "Identity & user", "Last console user", 2 },
+				{ "Identity & user", "Last console logon (UTC)", 3 },
+				{ "Identity & user", "Country", 4 },
+				{ "Identity & user", "AD domain", 5 },
+				{ "Hardware & operating system", "Manufacturer", 6 },
+				{ "Hardware & operating system", "Model", 7 },
+				{ "Hardware & operating system", "Platform", 8 },
+				{ "Hardware & operating system", "OS version", 9 },
+				{ "Hardware & operating system", "Windows release", 10 },
+				{ "Directory & ownership", "AD account enabled", 11 },
+				{ "Directory & ownership", "Entra account state", 12 },
+				{ "Directory & ownership", "Ownership", 13 },
+				{ "System protection", "Secure Boot", 14 },
+				{ "System protection", "Intune encryption", 15 },
+				{ "System protection", "BitLocker OS protection", 16 },
+				{ "System protection", "BitLocker conversion", 17 },
+				{ "Update & evidence", "Windows Update", 18 },
+				{ "Update & evidence", "System evidence freshness", 19 },
+				{ "Windows 11 readiness", "Windows 11 eligibility", 20 },
+				{ "Windows 11 readiness", "Windows release", 10 },
+				{ "Windows 11 readiness", "Deployment risk", 21 },
+				{ "Windows 11 readiness", "Blocking reasons", 22 },
+				{ "Enrollment", "Intune enrollment risk", 23 },
+				{ "Enrollment", "Assessment scope", 24 },
+				{ "Enrollment", "Recommended action", 25 },
+				{ "Technical identity", "Canonical device ID", 26 },
+				{ "Technical identity", "Tenant", 27 },
+				{ "Technical identity", "Autopilot serial numbers", 28 }
+				})

@@ -1032,6 +1032,240 @@ table 'Global Device Inventory'
 		formatString: #,0
 		lineageTag: 69b21128-2fbf-4aa6-a971-e38eb885c79f
 
+	measure 'Device 360 Single Selection' = IF(ISFILTERED('Global Device Inventory'[Device 360 Selection]) && HASONEVALUE('Global Device Inventory'[Device 360 Selection]) && NOT ISBLANK(SELECTEDVALUE('Global Device Inventory'[Canonical Device Key])),1,BLANK())
+		formatString: 0
+		lineageTag: adc3018d-be75-4c27-a9ac-37972337ba4f
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Device Name' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Device Name])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Device Name]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 115acf79-04e7-4c4c-978f-43c04da76e40
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Country Name' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Country Name])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Country Name]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 24131ddc-2b7f-4663-93c9-1c46482592f1
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · AD Domain' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[AD Domain])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[AD Domain]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 9ebbeae6-6ee4-4ada-b5d6-063839e05997
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Primary User (report)' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Primary User (report)])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Primary User (report)]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 26982757-3295-485d-af7c-0e323aabd249
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Last Console User (report)' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Last Console User (report)])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Last Console User (report)]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 130b5b4d-944d-42d8-b7c0-54028fb8d5e5
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Last Console Logon UTC (report)' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Last Console Logon UTC (report)])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Last Console Logon UTC (report)]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 5c3efe7e-4658-4b2d-9217-74e444e205be
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Ownership (report)' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Ownership (report)])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Ownership (report)]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 2a75a63a-f222-4340-b322-595a0c00f25e
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Manufacturer' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Manufacturer])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Manufacturer]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 9d60a9ef-e851-48d9-8f29-31039e6e019b
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Model' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Model])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Model]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 987706bd-9f3d-42b2-92fd-cf3376a7b32e
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Platform (report)' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Platform (report)])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Platform (report)]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 6008ea82-7401-4e55-8b05-9a0dd414dc3d
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Operating System Version' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Operating System Version])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Operating System Version]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 5f1ca4c2-2e6a-4522-8f60-325a2d89bd0c
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Windows Release' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Windows Release])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Windows Release]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 2ff7ca64-58b6-4777-85f6-90dc26ec17c7
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · AD Enabled' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[AD Enabled])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[AD Enabled]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: acd3f6e1-c7b5-4fe6-b0c8-12bdef25a59b
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Entra state (report)' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Entra state (report)])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Entra state (report)]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 3c75e4f5-b894-49cb-9fbc-f5491febae24
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Intune presence' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Intune presence])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Intune presence]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 9ed349e7-bf62-4344-89e0-b27fc241f758
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Compliance State' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Compliance State])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Compliance State]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: cc3b2f4d-2187-4515-a55d-51f8c237770b
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Last Sync DateTime' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Last Sync DateTime])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Last Sync DateTime]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 821f0459-7f3b-496e-976a-9d069f6702bc
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Secure Boot State' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Secure Boot State])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Secure Boot State]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: a9a8eb33-b685-4812-9580-fa03bf10c342
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Intune Encryption State' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Intune Encryption State])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Intune Encryption State]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: c83ac35c-8b98-4fcf-aa0d-9ee08ba9b53e
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · BitLocker OS Protection' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[BitLocker OS Protection])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[BitLocker OS Protection]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 716f134e-f32f-4f8a-b226-70f64cb2bc44
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · BitLocker OS Conversion' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[BitLocker OS Conversion])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[BitLocker OS Conversion]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 8d87a9a7-7b75-44d7-be0d-84294636b1a1
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Encryption Comparison' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Encryption Comparison])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Encryption Comparison]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: aea126f1-7ef8-4724-8060-3e290d9f8f55
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Expected AV Name' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Expected AV Name])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Expected AV Name]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 1a7bd5d0-f93b-4b65-aca3-ef6e525d154f
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Expected AV State' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Expected AV State])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Expected AV State]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: eaee07f6-1e4b-4281-b805-e34257d43a6e
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Third Party AV Products' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Third Party AV Products])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Third Party AV Products]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: d53973cd-ef42-43ff-834d-5dd219c82bf4
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Windows Update Reboot Required' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Windows Update Reboot Required])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Windows Update Reboot Required]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: cdb72041-c10f-456b-bb50-868c9fb5868e
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · System Drive Capacity (GB)' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[System Drive Capacity (GB)])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[System Drive Capacity (GB)]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 34476f6a-c477-41bd-8c94-8e045e453622
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Free Disk Space (GB)' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Free Disk Space (GB)])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Free Disk Space (GB)]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 36658424-db31-4af1-ac11-e6e037bad3f2
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Free Disk Space (%)' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Free Disk Space (%)])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Free Disk Space (%)]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 8f650eb5-34a1-456b-9576-b6a5e497be12
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · System Freshness' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[System Freshness])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[System Freshness]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 525214b8-4591-43c9-bc32-20a11ce4d693
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · System Observation (source)' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[System Observation (source)])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[System Observation (source)]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: e80b21a9-cac8-4551-af27-7ed9de4844fe
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · System Data Quality Issues' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[System Data Quality Issues])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[System Data Quality Issues]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 16c021e8-7ca9-4959-acd1-09c6e62c76b8
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Inventory Source' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Inventory Source])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Inventory Source]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 23d7d69c-622b-4481-87a6-5a9b3bb5616f
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · AD Match Qualification' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[AD Match Qualification])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[AD Match Qualification]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: e7936f75-85e6-45d4-8895-0e7f98a4fa81
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · AD to Intune Match' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[AD to Intune Match])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[AD to Intune Match]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 6a7cda38-55f4-4cbc-8366-3308e041a0ff
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Entra Match' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Entra Match])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Entra Match]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 50e59af0-b1d0-4845-b0ec-65f3efd6c7e8
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Autopilot link status' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Autopilot link status])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Autopilot link status]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: e049d8f1-b1b0-4d39-839c-6c5f8704ec58
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Autopilot serial numbers' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Autopilot serial numbers])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Autopilot serial numbers]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 52e0623c-6a96-4fd2-9d7e-4b9982075f63
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Windows 11 Upgrade Eligibility' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Windows 11 Upgrade Eligibility])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Windows 11 Upgrade Eligibility]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: d70842e0-fea0-494b-bdec-6c2cb9d4a1b2
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Windows 11 Blocking Reasons' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Windows 11 Blocking Reasons])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Windows 11 Blocking Reasons]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: f7070dcc-49b1-4301-ac2e-94283c0c9882
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Cached Inventory Enrollment Risk' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Cached Inventory Enrollment Risk])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Cached Inventory Enrollment Risk]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 5cd0c9f9-a0c7-451b-ae3d-b11076e452c9
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Cached Inventory Enrollment Risk Reasons' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Cached Inventory Enrollment Risk Reasons])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Cached Inventory Enrollment Risk Reasons]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 7476ef3f-17ac-4daf-996f-10115478852f
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Cached Inventory Windows 11 Deployment Risk' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Cached Inventory Windows 11 Deployment Risk])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Cached Inventory Windows 11 Deployment Risk]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: e20a8dc1-532e-4782-947d-1125b64ec855
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Cached Inventory Windows 11 Risk Reasons' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Cached Inventory Windows 11 Risk Reasons])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Cached Inventory Windows 11 Risk Reasons]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 6572bf72-16f9-411f-b273-0e54bddd1152
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Cached Inventory Assessment UTC' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Cached Inventory Assessment UTC])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Cached Inventory Assessment UTC]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: 3cacdef1-7587-46fc-82d8-de004067eb52
+
+	/// Device-level observation; blank without an unambiguous selection.
+	measure 'Device 360 · Loaded Batch ID' = IF([Device 360 Single Selection] = 1, IF(ISBLANK(SELECTEDVALUE('Global Device Inventory'[Loaded Batch ID])), "Not observed", FORMAT(SELECTEDVALUE('Global Device Inventory'[Loaded Batch ID]), "")), BLANK())
+		displayFolder: Device 360
+		lineageTag: bad89215-7495-4d85-9016-a24a3b2c19f5
+
 	column 'Device Source ID'
 		lineageTag: 5c638206-060f-4738-9e94-8da204c0e51a
 		isNameInferred
@@ -1773,6 +2007,30 @@ table 'Global Device Inventory'
 		dataType: string
 		lineageTag: 4b3d1362-7cd9-4962-adda-7a342c175965
 
+	/// Identity-qualified device selection; name alone is not unique.
+	column 'Device 360 Selection' =
+			VAR B='Global Device Inventory'[Device 360 Label Base] VAR T='Global Device Inventory'[TenantKey] VAR Tail='Global Device Inventory'[Device 360 ID Suffix]
+			VAR BaseCount=CALCULATE(COUNTROWS('Global Device Inventory'),ALLEXCEPT('Global Device Inventory','Global Device Inventory'[Device 360 Label Base]))
+			VAR TenantCount=CALCULATE(DISTINCTCOUNT('Global Device Inventory'[TenantKey]),ALLEXCEPT('Global Device Inventory','Global Device Inventory'[Device 360 Label Base]))
+			VAR SameTenantCount=CALCULATE(COUNTROWS('Global Device Inventory'),ALLEXCEPT('Global Device Inventory','Global Device Inventory'[Device 360 Label Base],'Global Device Inventory'[TenantKey]))
+			VAR SuffixCount=CALCULATE(COUNTROWS('Global Device Inventory'),ALLEXCEPT('Global Device Inventory','Global Device Inventory'[Device 360 Label Base],'Global Device Inventory'[TenantKey],'Global Device Inventory'[Device 360 ID Suffix]))
+			RETURN B & IF(BaseCount>1 && TenantCount>1," · "&COALESCE(T,"Unknown tenant")) & IF(BaseCount>1 && SameTenantCount>1," · "&IF(SuffixCount=1,"…"&Tail,'Global Device Inventory'[Canonical Device Key]))
+		dataType: string
+		lineageTag: cbf6071f-e707-4c0d-9ba3-bd8f7fa0a85c
+		summarizeBy: none
+
+	column 'Device 360 Label Base' =
+			VAR N='Global Device Inventory'[Device Name] VAR O='Global Device Inventory'[Ownership (report)] VAR D='Global Device Inventory'[AD Domain]
+			RETURN COALESCE(N,"Unknown device") & " · " & COALESCE(O,"Unknown ownership") & IF(NOT ISBLANK(D) && D<>"Unknown"," · "&D)
+		dataType: string
+		isHidden
+		lineageTag: cd82e66c-ed9b-4212-a76d-6fabc3b9053d
+
+	column 'Device 360 ID Suffix' = UPPER(RIGHT('Global Device Inventory'[Canonical Device Key],8))
+		dataType: string
+		isHidden
+		lineageTag: 0b70cbf0-faa7-4104-9336-2d558be2e30e
+
 	partition 'Global Device Inventory' = calculated
 		mode: import
 		source =
@@ -1855,4 +2113,3 @@ table 'Global Device Inventory'
 				"AD Computer Key",[AD Computer Key],
 				"Primary User Source ID",[Primary User Source ID],
 				"Primary User SAM",[Primary User SAM])
-

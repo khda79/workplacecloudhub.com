@@ -84,7 +84,6 @@
       "displayName": "User Explorer views",
       "children": [
         "9b2ced68c50bee8805d6",
-        "4626c235bb182321e704",
         "b8c8b03edcc9c670007b",
         "0f94d154b3962e799b1c",
         "2d89fd2cbd198576b7ef",
@@ -552,6 +551,26 @@
         "c0de3600000000000004",
         "c0de3600000000000005",
         "c0de3600000000000006"
+      ]
+    },
+    {
+      "name": "8128e313a8f30333811e",
+      "displayName": "Device 360 views",
+      "children": [
+        "cf5f7e9df9ddab306736",
+        "ded25ffba1c42a7cdfb6",
+        "7a0ca18dda34ac3b063a",
+        "298f549593a7bce1e572"
+      ]
+    },
+    {
+      "name": "49a647ca6d34fc9c6a7e",
+      "displayName": "User 360 views",
+      "children": [
+        "fba9d159e6769f3dbcbf",
+        "37b058fa1df4315669c7",
+        "a868d930184aa11ef3f6",
+        "b10e62f2a180187940a8"
       ]
     }
   ]

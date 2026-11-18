@@ -22,10 +22,8 @@
       "b2adfbb09196d33da6d2",
       "e11fbb34b4e2b18f67ad",
       "ec9f5a00cd7cbcb2ff2e",
-      "f5f50e9b958ebac1ad9e",
       "e958339bcb4cf1140e3a",
       "8d6db48215fcf37b462d",
-      "2d36d58bb1873b65640f",
       "417f2b45c937ea402076",
       "f6624e5f2e516546df6c",
       "014946aa584d2cd0e0ed",
@@ -98,22 +96,12 @@
           "ec9f5a00cd7cbcb2ff2e": {
             "isHidden": true
           },
-          "f5f50e9b958ebac1ad9e": {
-            "isHidden": true
-          },
           "e958339bcb4cf1140e3a": {
             "isHidden": false
           }
         },
         "visualContainers": {
           "8d6db48215fcf37b462d": {
-            "singleVisual": {
-              "display": {
-                "mode": "hidden"
-              }
-            }
-          },
-          "2d36d58bb1873b65640f": {
             "singleVisual": {
               "display": {
                 "mode": "hidden"

@@ -135,6 +135,11 @@
           "type": "CustomTheme"
         },
         {
+          "name": "swi-home-background.png",
+          "path": "swi-home-background.png",
+          "type": "Image"
+        },
+        {
           "name": "swi-section-applications-20261028.png",
           "path": "swi-section-applications-20261028.png",
           "type": "Image"

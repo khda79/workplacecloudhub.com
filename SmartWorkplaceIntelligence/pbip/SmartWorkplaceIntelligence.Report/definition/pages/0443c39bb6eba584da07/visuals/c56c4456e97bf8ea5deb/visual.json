@@ -12,5 +12,6 @@
   "visualGroup": {
     "displayName": "By country",
     "groupMode": "ScaleMode"
-  }
+  },
+  "isHidden": true
 }

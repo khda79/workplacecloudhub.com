@@ -2365,7 +2365,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Account identity · AD/Entra accounts'"
+                  "Value": "'Account inventory · AD/Entra accounts'"
                 }
               }
             },

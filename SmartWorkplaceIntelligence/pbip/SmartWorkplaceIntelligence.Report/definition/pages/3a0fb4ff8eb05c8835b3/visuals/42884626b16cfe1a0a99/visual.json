@@ -12,5 +12,6 @@
   "visualGroup": {
     "displayName": "Data quality & coverage",
     "groupMode": "ScaleMode"
-  }
+  },
+  "isHidden": true
 }

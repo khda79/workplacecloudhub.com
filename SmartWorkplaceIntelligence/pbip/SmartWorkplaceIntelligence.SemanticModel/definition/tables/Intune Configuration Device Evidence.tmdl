@@ -50,6 +50,12 @@ table 'Intune Configuration Device Evidence'
 		isHidden
 		lineageTag: 76baf8de-520f-41ad-bbc2-42ca82e8465c
 
+	measure 'Device 360 Policy Rows' =
+			VAR I=[Device 360 Native Intune ID] VAR T=SELECTEDVALUE('Global Device Inventory'[TenantKey]) VAR B=SELECTEDVALUE('Global Device Inventory'[Loaded Batch ID])
+			RETURN IF(NOT ISBLANK(I),CALCULATE(COUNTROWS('Intune Configuration Device Evidence'),TREATAS({I},'Device Inventory Evidence'[Device Source ID]),TREATAS({T},'Device Inventory Evidence'[TenantKey]),TREATAS({B},'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: #,0
+		lineageTag: cc6009c2-6de9-40d8-81fc-b237e3d74205
+
 	/// Prepared IntuneConfigurationDeviceEvidence.csv: TenantKey. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Tenant Key'
 		dataType: string
@@ -314,6 +320,11 @@ table 'Intune Configuration Device Evidence'
 		displayFolder: Report identity context
 		lineageTag: 38d44367-4420-45d4-9187-2084c0c0ee9d
 
+	column 'Device 360 View Policy State' = SWITCH('Intune Configuration Device Evidence'[Reported Application State],"ReportedApplied","Applied","ReportedIssue","Issue reported","Pending","Pending","NotApplicable","Not applicable","Unknown","Unknown","Not observed")
+		dataType: string
+		isHidden
+		lineageTag: 689f55bd-28c2-477c-b25b-8b2dae5fbf2e
+
 	partition 'Intune Configuration Device Evidence' = m
 		mode: import
 		source =
@@ -345,4 +356,3 @@ table 'Intune Configuration Device Evidence'
 				    WithDeviceKey)
 				in
 				    Readers[Finish](BusinessRows)
-

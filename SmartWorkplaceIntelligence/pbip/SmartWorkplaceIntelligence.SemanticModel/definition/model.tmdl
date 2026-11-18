@@ -248,6 +248,6 @@ ref table 'Historical Windows Readiness'
 ref table 'Shared Mailbox License Evidence'
 ref table 'Shared Mailbox License Detail'
 ref table 'Mailbox Shared Conversion Evidence'
+ref table 'Device 360 Properties'
 
 ref cultureInfo en-US
-

@@ -1,0 +1,174 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "298f549593a7bce1e572",
+  "displayName": "Device 360 · Identity & readiness",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "05db562f6d4781a1d531",
+      "07938afb0a44926cea42",
+      "113ae3b75cc6ebdd6c9b",
+      "16a42bfeadfa68971837",
+      "1707ad842271b6195d91",
+      "17274ef020f25dea75f1",
+      "29a355c0db07ae6948cf",
+      "2bf46cc6fc982e306716",
+      "42fd720b1e95059abb61",
+      "533bfb2c8fec7a1cc1eb",
+      "54604db310f49b0ee6ab",
+      "579ca3cf69467b59f222",
+      "659d40c182cee1454394",
+      "703c923fe1c81aeae20d",
+      "7353c9eeacf2dd8bba9c",
+      "74d7ff628110781c5dca",
+      "7e1aaef982f4ed4e13d2",
+      "989a285f28ebf6652ea0",
+      "a6837ef6323d8620163c",
+      "ac36d612e08261e11b79",
+      "bc672617c44a0a1dbd08",
+      "d10d95e68d23ed03904b",
+      "e769e70fff96d0f70b0d"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "c98d6964babc23de82ab",
+    "sections": {
+      "c98d6964babc23de82ab": {
+        "visualContainers": {
+          "05db562f6d4781a1d531": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "07938afb0a44926cea42": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "113ae3b75cc6ebdd6c9b": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "16a42bfeadfa68971837": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "1707ad842271b6195d91": {
+            "singleVisual": {}
+          },
+          "17274ef020f25dea75f1": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "29a355c0db07ae6948cf": {
+            "singleVisual": {}
+          },
+          "2bf46cc6fc982e306716": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "42fd720b1e95059abb61": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "533bfb2c8fec7a1cc1eb": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "54604db310f49b0ee6ab": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "579ca3cf69467b59f222": {
+            "singleVisual": {}
+          },
+          "659d40c182cee1454394": {
+            "singleVisual": {}
+          },
+          "703c923fe1c81aeae20d": {
+            "singleVisual": {}
+          },
+          "7353c9eeacf2dd8bba9c": {
+            "singleVisual": {}
+          },
+          "74d7ff628110781c5dca": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "7e1aaef982f4ed4e13d2": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "989a285f28ebf6652ea0": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "a6837ef6323d8620163c": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "ac36d612e08261e11b79": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "bc672617c44a0a1dbd08": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "d10d95e68d23ed03904b": {
+            "singleVisual": {}
+          },
+          "e769e70fff96d0f70b0d": {
+            "singleVisual": {}
+          }
+        }
+      }
+    }
+  }
+}
