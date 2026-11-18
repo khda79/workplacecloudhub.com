@@ -13,7 +13,10 @@ Import-Module (Join-Path $base 'SmartM365.Orchestrator.Insights.psm1') -Force
 $tokens = $null; $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $base 'SmartM365-Inventory-Orchestrator.ps1'), [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw 'Orchestrator source does not parse.' }
-$definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-OrchestratorDependencyFreshStatus' }, $true).Extent.Text
+$definition = (@('Get-OrchestratorDependencyFreshStatus', 'Get-OrchestratorFormerJobNames', 'Get-OrchestratorClaimOccurrenceUtc', 'ConvertTo-OrchestratorUtcTime') | ForEach-Object {
+    $functionName = $_
+    $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true).Extent.Text
+}) -join [Environment]::NewLine
 $gate = New-Module -ScriptBlock ([scriptblock]::Create($definition))
 $root = Join-Path $env:TEMP ('fresh-receipt-' + [guid]::NewGuid().ToString('N'))
 $shared = Join-Path $root 'DATA-ALL/Orchestrator'
@@ -114,6 +117,26 @@ try {
     [IO.File]::WriteAllText($runPath, ($run | ConvertTo-Json -Depth 6))
     & $gate { $script:DependencyFreshCache = @{} }
     Check ((GateStatus) -eq 'Waiting') 'Foreign publication fence was accepted.'
+
+    # 1.5.98: a success claim under a former job name (template RenamedJobs) releases the renamed job.
+    Remove-Item -LiteralPath $receiptPath, $runPath -Force
+    $renamed = [pscustomobject]@{ Name = 'Renamed-Inventory'; ScriptPath = 'Inventory/SmartM365-Other-Inventory.ps1'; Enabled = $true; AssignmentMode = 'Elected'; TimeoutMinutes = 60 }
+    $writeClaim = { param($folderName, $claimName, $status, $updated)
+        $folder = Join-Path $claims $folderName; New-Item -ItemType Directory $folder -Force | Out-Null
+        $claim = [ordered]@{ SchemaVersion = 1; JobName = $claimName; OccurrenceUtc = '2026-10-07T23:35:00Z'; Status = $status; UpdatedAtUtc = $updated }
+        [IO.File]::WriteAllText((Join-Path $folder '20261007T233500000Z.json.txt'), ($claim | ConvertTo-Json), [Text.UTF8Encoding]::new($false)) }
+    $renamedStatus = { & $gate { param($dependency, $time, $former) $script:FormerJobNamesByJob = $former; $script:DependencyFreshCache = @{}; Get-OrchestratorDependencyFreshStatus -DependencyJob $dependency -MaxAgeHours 48 -Now $time } $renamed $now $args[0] }
+    & $writeClaim 'Former-Inventory' 'Former-Inventory' 'Success' '2026-10-08T00:41:03Z'
+    Check ((& $renamedStatus @{}) -eq 'Waiting') 'A former-name claim was accepted without a rename.'
+    Check ((& $renamedStatus @{ 'Renamed-Inventory' = @('Former-Inventory') }) -eq 'Ready') 'A fresh success claim under the former name did not release the renamed job.'
+    & $writeClaim 'Former-Inventory' 'Former-Inventory' 'Failed' '2026-10-08T00:41:03Z'
+    Check ((& $renamedStatus @{ 'Renamed-Inventory' = @('Former-Inventory') }) -eq 'Waiting') 'A failed former-name claim was accepted.'
+    & $writeClaim 'Former-Inventory' 'Other-Inventory' 'Success' '2026-10-08T00:41:03Z'
+    Check ((& $renamedStatus @{ 'Renamed-Inventory' = @('Former-Inventory') }) -eq 'Waiting') 'A claim whose JobName differs from its folder was accepted.'
+    & $writeClaim 'Former-Inventory' 'Former-Inventory' 'Success' '2026-10-05T00:41:03Z'
+    Check ((& $renamedStatus @{ 'Renamed-Inventory' = @('Former-Inventory') }) -eq 'Waiting') 'A stale former-name claim was accepted.'
+    & $writeClaim 'Renamed-Inventory' 'Renamed-Inventory' 'CompletedWithWarnings' '2026-10-08T01:00:00Z'
+    Check ((& $renamedStatus @{ 'Renamed-Inventory' = @('Former-Inventory') }) -eq 'Ready') 'A fresh claim under the new name was not accepted.'
     "Fresh receipt offline checks passed: $script:passed"
 }
 finally {

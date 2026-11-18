@@ -17,7 +17,7 @@ Import-Module (Join-Path $base 'SmartM365.Orchestrator.Distributed.psm1') -Force
 Import-Module (Join-Path $base 'SmartM365.Orchestrator.Insights.psm1') -Force
 $transport = Get-Module SmartM365.JsonTransport
 $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $base 'SmartM365-Inventory-Orchestrator.ps1'), [ref]$null, [ref]$null)
-$defs = foreach ($name in @('Get-JobOccurrencesInWindow', 'Get-LatestPastOccurrence', 'Get-OrchestratorDependencyActivity', 'Get-OrchestratorDependencyMaxAge', 'Get-OrchestratorDependencyFreshStatus', 'Get-OrchestratorClaimOccurrenceUtc', 'ConvertTo-OrchestratorUtcTime')) {
+$defs = foreach ($name in @('Get-JobOccurrencesInWindow', 'Get-LatestPastOccurrence', 'Get-OrchestratorDependencyActivity', 'Get-OrchestratorDependencyMaxAge', 'Get-OrchestratorDependencyFreshStatus', 'Get-OrchestratorFormerJobNames', 'Get-OrchestratorClaimOccurrenceUtc', 'ConvertTo-OrchestratorUtcTime')) {
     $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true).Extent.Text
 }
 $gate = New-Module -ScriptBlock ([scriptblock]::Create($defs -join "`n"))

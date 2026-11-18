@@ -14,7 +14,7 @@ Import-Module (Join-Path $base 'SmartM365.Orchestrator.Insights.psm1') -Force
 $parseErrors=$null; $tokens=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $base 'SmartM365-Inventory-Orchestrator.ps1'),[ref]$tokens,[ref]$parseErrors)
 if ($parseErrors.Count) { throw 'Orchestrator does not parse.' }
-$definitions=foreach($name in @('Get-OrchestratorEffectiveDependencyMode','Get-OrchestratorDependencyFreshStatus','Get-OrchestratorExternalDependencyStatus','Get-OrchestratorDependencyMaxAge','Get-JobOccurrencesInWindow','Get-OrchestratorDependencyActivityText')) {
+$definitions=foreach($name in @('Get-OrchestratorEffectiveDependencyMode','Get-OrchestratorDependencyFreshStatus','Get-OrchestratorFormerJobNames','Get-OrchestratorExternalDependencyStatus','Get-OrchestratorDependencyMaxAge','Get-JobOccurrencesInWindow','Get-OrchestratorDependencyActivityText')) {
     $ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true).Extent.Text
 }
 # Execute the real scheduled branch in a minimal loop; never execute the entry script.

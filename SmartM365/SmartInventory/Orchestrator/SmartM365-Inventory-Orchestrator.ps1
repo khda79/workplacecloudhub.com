@@ -110,7 +110,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.97
+1.5.98
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -123,7 +123,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.97
+    Version : 1.5.98
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
@@ -160,7 +160,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.97"
+$ScriptVersion = "1.5.98"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -1920,6 +1920,32 @@ function Get-OrchestratorDependencyMaxAge {
     return [math]::Max(($maxGapHours + 2.0), [double][math]::Max(0, $OverrideHours))
 }
 
+function Get-OrchestratorFormerJobNames {
+    # Former names of a job from the template RenamedJobs map (read once per orchestrator start, 1.5.98).
+    param([Parameter(Mandatory = $true)][string]$JobName)
+    if ($null -eq $script:FormerJobNamesByJob) {
+        $map = @{}
+        try {
+            $templatePath = if ($PSScriptRoot) { Join-Path -Path $PSScriptRoot -ChildPath 'Orchestrator-Jobs.json.template' } else { '' }
+            if ($templatePath -and (Test-Path -LiteralPath $templatePath -PathType Leaf)) {
+                $template = Read-SmartM365OrchestratorJson -Path $templatePath
+                if ($template.PSObject.Properties['RenamedJobs'] -and $null -ne $template.RenamedJobs) {
+                    foreach ($property in @($template.RenamedJobs.PSObject.Properties)) {
+                        $oldName = ([string]$property.Name).Trim(); $newName = ([string]$property.Value).Trim()
+                        if (-not $oldName -or -not $newName -or $oldName -ieq $newName) { continue }
+                        if (-not $map.ContainsKey($newName)) { $map[$newName] = [Collections.Generic.List[string]]::new() }
+                        $map[$newName].Add($oldName) | Out-Null
+                    }
+                }
+            }
+        }
+        catch { Write-OrchestratorLog -Message ("Former job names could not be read from the template: {0}" -f $_.Exception.Message) -Level WARN }
+        $script:FormerJobNamesByJob = $map
+    }
+    if ($script:FormerJobNamesByJob.ContainsKey($JobName)) { return @($script:FormerJobNamesByJob[$JobName]) }
+    return @()
+}
+
 function Get-OrchestratorDependencyFreshStatus {
     # FreshSuccess accepts a recent successful claim or a qualified producer receipt.
     param(
@@ -1950,33 +1976,37 @@ function Get-OrchestratorDependencyFreshStatus {
         return 'Ready'
     }
 
-    $jobFolder = Join-Path -Path $script:Settings.ElectionClaimsPath -ChildPath ([string]$DependencyJob.Name)
-    if (-not (Test-Path -LiteralPath $jobFolder -PathType Container)) { return 'Waiting' }
     $nowUtc = $Now.ToUniversalTime()
     $freshnessCutoffUtc = $nowUtc.AddHours(-1 * $MaxAgeHours)
     # A claim's occurrence precedes its completion by at most the job timeout.
     $occurrenceCutoffUtc = $freshnessCutoffUtc.AddMinutes(-1 * [math]::Max(0, [int]$DependencyJob.TimeoutMinutes))
-    $stamps = @(Get-ChildItem -LiteralPath $jobFolder -File -Force -ErrorAction Stop |
-        ForEach-Object {
-            $occurrenceUtc = Get-OrchestratorClaimOccurrenceUtc -FileName $_.Name
-            if ($null -ne $occurrenceUtc -and $occurrenceUtc -ge $occurrenceCutoffUtc -and $occurrenceUtc -le $nowUtc) { $_.Name.Substring(0, 19) }
-        } |
-        Sort-Object -Unique -Descending)
+    # Claims of a renamed job stay under its former names (template RenamedJobs); they count too (1.5.98).
+    $claimJobNames = @([string]$DependencyJob.Name) + @(Get-OrchestratorFormerJobNames -JobName ([string]$DependencyJob.Name))
+    foreach ($claimJobName in $claimJobNames) {
+        $jobFolder = Join-Path -Path $script:Settings.ElectionClaimsPath -ChildPath $claimJobName
+        if (-not (Test-Path -LiteralPath $jobFolder -PathType Container)) { continue }
+        $stamps = @(Get-ChildItem -LiteralPath $jobFolder -File -Force -ErrorAction Stop |
+            ForEach-Object {
+                $occurrenceUtc = Get-OrchestratorClaimOccurrenceUtc -FileName $_.Name
+                if ($null -ne $occurrenceUtc -and $occurrenceUtc -ge $occurrenceCutoffUtc -and $occurrenceUtc -le $nowUtc) { $_.Name.Substring(0, 19) }
+            } |
+            Sort-Object -Unique -Descending)
 
-    foreach ($stamp in $stamps) {
-        $claimPath = Join-Path -Path $jobFolder -ChildPath ($stamp + '.json')
-        if (-not (Get-SmartM365JsonReadPath $claimPath -Optional)) { continue }
-        try { $claim = (Read-SmartM365JsonDocument $claimPath).Document }
-        catch { continue }
-        if ([string]$claim.JobName -ne [string]$DependencyJob.Name -or [string]$claim.Status -notin @('Success', 'CompletedWithWarnings')) { continue }
-        $completedUtc = ConvertTo-OrchestratorUtcTime -Value $claim.UpdatedAtUtc
-        if ($null -eq $completedUtc) { continue }
-        if ($completedUtc.UtcDateTime -ge $freshnessCutoffUtc) {
-            $readyUntil = $Now.AddMinutes(10)
-            $expiresAt = $completedUtc.UtcDateTime.AddHours($MaxAgeHours).ToLocalTime()
-            if ($expiresAt -lt $readyUntil) { $readyUntil = $expiresAt }
-            $script:DependencyFreshCache[$cacheKey] = @{ Status = 'Ready'; Until = $readyUntil }
-            return 'Ready'
+        foreach ($stamp in $stamps) {
+            $claimPath = Join-Path -Path $jobFolder -ChildPath ($stamp + '.json')
+            if (-not (Get-SmartM365JsonReadPath $claimPath -Optional)) { continue }
+            try { $claim = (Read-SmartM365JsonDocument $claimPath).Document }
+            catch { continue }
+            if ([string]$claim.JobName -ne $claimJobName -or [string]$claim.Status -notin @('Success', 'CompletedWithWarnings')) { continue }
+            $completedUtc = ConvertTo-OrchestratorUtcTime -Value $claim.UpdatedAtUtc
+            if ($null -eq $completedUtc) { continue }
+            if ($completedUtc.UtcDateTime -ge $freshnessCutoffUtc) {
+                $readyUntil = $Now.AddMinutes(10)
+                $expiresAt = $completedUtc.UtcDateTime.AddHours($MaxAgeHours).ToLocalTime()
+                if ($expiresAt -lt $readyUntil) { $readyUntil = $expiresAt }
+                $script:DependencyFreshCache[$cacheKey] = @{ Status = 'Ready'; Until = $readyUntil }
+                return 'Ready'
+            }
         }
     }
     return 'Waiting'
@@ -8635,6 +8665,7 @@ $script:LastPipelineRunArchiveRun = [datetime]::MinValue
 $script:LastMailHtmlRetentionRun = [datetime]::MinValue
 $script:TranscriptStarted = $false
 $script:DependencyFreshCache = @{}
+$script:FormerJobNamesByJob = $null
 $script:LastPeerMonitoringCheckTime = [datetime]::MinValue
 $script:LastSharePointConfigWarningKey = ''
 $script:LastRuntimeUpdateCheckUtc = [datetime]::MinValue
