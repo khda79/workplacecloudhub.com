@@ -1,5 +1,7 @@
 # Smart Device Registration Tool
 
+Product page: [Smart Device Registration Tool](https://workplacecloudhub.com/tools/smart-device-registration-tool/)
+
 ## User view (1.6.2)
 
 WinDC/MMP-C linked enrollments are recognized as Microsoft companion registrations when

@@ -1,5 +1,7 @@
 # SmartM365 Inventory Orchestrator
 
+Product page: [Smart Inventory Orchestrator](https://workplacecloudhub.com/tools/smart-inventory-orchestrator/)
+
 `SmartM365-Inventory-Orchestrator.ps1` (v1.5.66) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 ## Demo mode

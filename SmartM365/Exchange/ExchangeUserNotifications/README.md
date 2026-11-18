@@ -1,5 +1,7 @@
 # Exchange User Notifications
 
+Product page: [Smart Exchange User Notifications](https://workplacecloudhub.com/tools/smart-exchange-user-notifications/)
+
 User-facing Exchange communication campaigns.
 
 ## Scripts

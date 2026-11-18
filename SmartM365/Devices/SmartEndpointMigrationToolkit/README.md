@@ -1,5 +1,7 @@
 # Smart Endpoint Migration Toolkit
 
+Product page: [Smart Endpoint Migration Toolkit](https://workplacecloudhub.com/tools/smart-endpoint-migration-toolkit/)
+
 Version 1.0.0. Part of SmartM365 Devices by [WorkplaceCloudHub](https://workplacecloudhub.com).
 
 Smart Endpoint Migration Toolkit runs endpoint migration **Campaigns** from one technician

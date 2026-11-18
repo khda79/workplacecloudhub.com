@@ -1,5 +1,7 @@
 # Smart Endpoint Diagnostics Analyzer
 
+Product page: [Smart Endpoint Diagnostics Analyzer](https://workplacecloudhub.com/tools/smart-endpoint-diagnostics-analyzer/)
+
 ## Current distribution 1.0.0 — build 2
 
 The package and GUI product version are **1.0.0**. **Build 2** aligns the visible interface and report versions. The [1.0.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/endpoint-diagnostics-analyzer-v1.0.0) contains only the current build 2 assets; superseded releases and original build assets have been removed.

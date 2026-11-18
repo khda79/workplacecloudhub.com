@@ -1,5 +1,7 @@
 # Smart Device Reboot Manager
 
+Product page: [Smart Device Reboot Manager](https://workplacecloudhub.com/tools/smart-device-reboot-manager/)
+
 ## Current distribution 1.1.2
 
 Package and GUI product version: **1.1.2**. The [1.1.2 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/device-reboot-manager-v1.1.2) includes the corrected native headless launcher for 32-bit Intune installation. The previous [1.1.0 GitHub release](https://github.com/khda79/workplacecloudhub.com/releases/tag/device-reboot-manager-v1.1.0) remains available; 1.1.1 was published to PowerShell Gallery without a GitHub release.

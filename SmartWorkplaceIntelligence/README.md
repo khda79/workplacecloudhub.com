@@ -1,5 +1,7 @@
 # Smart Workplace Intelligence
 
+Product page: [Smart Workplace Intelligence](https://workplacecloudhub.com/tools/smart-workplace-intelligence/)
+
 Power BI reporting over governed SmartM365 workplace evidence and observed
 histories. Domain pages cover workforce, devices, applications, licensing,
 collaboration, messaging, and source quality. Native details retain their source

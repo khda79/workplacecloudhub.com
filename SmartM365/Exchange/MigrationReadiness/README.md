@@ -1,5 +1,7 @@
 # Smart Exchange Migration Readiness
 
+Product page: [Smart Exchange Migration Readiness](https://workplacecloudhub.com/tools/smart-exchange-migration-readiness/)
+
 Application autonome PowerShell 7 / WPF de prévalidation en lecture seule des batches de migration Exchange hybride vers Exchange Online. Préversion **1.11.17**, publication approuvée le 9 septembre 2026. [Release GitHub et package portable](https://github.com/khda79/workplacecloudhub.com/releases/tag/exchange-migration-readiness-v1.11.17). La qualification Live sur un hôte Exchange équipé reste nécessaire ; les limites de validation sont détaillées dans `VALIDATION-1.11.17.md`.
 
 Elle charge un CSV de boîtes aux lettres, interroge les sources autoritaires en Live et produit un verdict par boîte : `GO`, `GO-WARNING`, `NO-GO` ou `UNKNOWN`.

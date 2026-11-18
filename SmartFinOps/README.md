@@ -1,5 +1,7 @@
 # SmartFinOps Workplace
 
+Product page: [SmartFinOps Workplace](https://workplacecloudhub.com/tools/smartfinops-workplace/)
+
 SmartFinOps is a read-only decision-support project that applies FinOps principles to workplace technology. Its objective is not limited to reducing spend: it shows what each euro buys, what can be released at contract or renewal, what can be reused, and what remains a review or a signal.
 
 SmartFinOps Workplace V2 values the license decisions already published by SmartM365 SmartInventory. It consumes `DATA-LAST` exports and their source receipts only and writes its results into the same SmartM365 data tree of the profile. Its only API call is the optional SharePoint mirror of its own files (Microsoft Graph, `Sites.Selected`, through SmartM365.Core); it reads nothing from Graph, Azure or any other API, and it never changes a license, mailbox or account.

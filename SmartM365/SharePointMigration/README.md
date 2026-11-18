@@ -1,5 +1,7 @@
 # Smart SharePoint Migration Toolkit
 
+Product page: [Smart SharePoint Migration Toolkit](https://workplacecloudhub.com/tools/smart-sharepoint-migration-toolkit/)
+
 Smart SharePoint Migration Toolkit helps validate SharePoint migrations between
 a source and a destination. It inventories source and destination content,
 compares files and permissions, exports review workbooks, and generates guarded

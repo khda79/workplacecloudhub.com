@@ -4,6 +4,8 @@ Repository for [workplacecloudhub.com](https://workplacecloudhub.com/), a techni
 
 WorkplaceCloudHub is built around practical guidance, automation patterns, and technical notes for modern enterprise IT platforms. The site is organized around articles, scripts, tools, and field-oriented content for engineers working on secure and reliable workplace and cloud operations.
 
+**Website and documentation:** [workplacecloudhub.com](https://workplacecloudhub.com/) | [Tools catalog](https://workplacecloudhub.com/tools/) | [Articles](https://workplacecloudhub.com/articles/)
+
 ## What This Repository Contains
 
 This repository is a field toolkit rather than a single application. It contains independent PowerShell projects for Microsoft 365, Azure, Azure Virtual Desktop, Citrix, and Windows endpoint operations. The common goal is to help administrators collect reliable evidence, standardize exports, troubleshoot devices, and run repeatable operational actions without embedding tenant-specific values in the public repository.
@@ -21,6 +23,24 @@ Most tools are designed to run directly from their project folder. Local tenant 
 - `SmartWorkplaceIntelligence/`: Power BI reporting over governed SmartM365 evidence, with source qualification, domain exploration, and observed histories.
 
 Additional project directories will be added over time.
+
+## Product Pages
+
+Each packaged tool has a product page on the website that presents its purpose, scope, and documentation.
+
+| Tool | Product page | Source |
+| --- | --- | --- |
+| Smart Endpoint Diagnostics Analyzer | [Product page](https://workplacecloudhub.com/tools/smart-endpoint-diagnostics-analyzer/) | `SmartM365/Devices/EndpointDiagnosticsAnalyzer/` |
+| Smart Intune Remediation Manager | [Product page](https://workplacecloudhub.com/tools/smart-intune-remediation-manager/) | `SmartM365/Intune/Remediation/` |
+| Smart Device Reboot Manager | [Product page](https://workplacecloudhub.com/tools/smart-device-reboot-manager/) | `SmartM365/Devices/DeviceRebootManager/` |
+| Smart Device Registration Tool | [Product page](https://workplacecloudhub.com/tools/smart-device-registration-tool/) | `SmartM365/Devices/DeviceRegistrationTool/` |
+| Smart Endpoint Migration Toolkit | [Product page](https://workplacecloudhub.com/tools/smart-endpoint-migration-toolkit/) | `SmartM365/Devices/SmartEndpointMigrationToolkit/` |
+| Smart SharePoint Migration Toolkit | [Product page](https://workplacecloudhub.com/tools/smart-sharepoint-migration-toolkit/) | `SmartM365/SharePointMigration/` |
+| Smart Exchange User Notifications | [Product page](https://workplacecloudhub.com/tools/smart-exchange-user-notifications/) | `SmartM365/Exchange/ExchangeUserNotifications/` |
+| Smart Exchange Migration Readiness | [Product page](https://workplacecloudhub.com/tools/smart-exchange-migration-readiness/) | `SmartM365/Exchange/MigrationReadiness/` |
+| Smart Inventory Orchestrator | [Product page](https://workplacecloudhub.com/tools/smart-inventory-orchestrator/) | `SmartM365/SmartInventory/Orchestrator/` |
+| Smart Workplace Intelligence | [Product page](https://workplacecloudhub.com/tools/smart-workplace-intelligence/) | `SmartWorkplaceIntelligence/` |
+| SmartFinOps Workplace | [Product page](https://workplacecloudhub.com/tools/smartfinops-workplace/) | `SmartFinOps/` |
 
 ## Getting Started
 
