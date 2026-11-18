@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.40
+1.6.41
 #>
 [CmdletBinding()]
 param(
@@ -69,7 +69,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 }
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.40'
+$script:AppVersion = '1.6.41'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -591,7 +591,7 @@ $xaml = @'
                                         <DataGridTextColumn Header="Group" Binding="{Binding Group}" Width="90"/>
                                         <DataGridCheckBoxColumn Header="Enabled" Binding="{Binding Enabled}" Width="65"/>
                                         <DataGridTextColumn Header="Runtime" Binding="{Binding Runtime}" Width="130"/>
-                                        <DataGridTextColumn Header="Mode" Binding="{Binding Mode}" Width="85"/>
+                                        <DataGridTextColumn Header="Mode" Binding="{Binding Mode}" Width="120"/>
                                         <DataGridTextColumn Header="Mode source" Binding="{Binding ModeSource}" Width="180"/>
                                         <DataGridTextColumn Header="Draft mode" Binding="{Binding DraftMode}" Width="90"/>
                                         <DataGridTextColumn Header="Last success" Binding="{Binding LastSuccess}" Width="125"/>
@@ -667,7 +667,7 @@ $xaml = @'
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="Launch" Binding="{Binding Name}" Width="320"/>
                                         <DataGridTextColumn Header="Runtime" Binding="{Binding Runtime}" Width="130"/>
-                                        <DataGridTextColumn Header="Mode" Binding="{Binding Mode}" Width="85"/>
+                                        <DataGridTextColumn Header="Mode" Binding="{Binding Mode}" Width="120"/>
                                         <DataGridCheckBoxColumn Header="Interactive" Binding="{Binding Interactive}" Width="80"/>
                                         <DataGridCheckBoxColumn Header="Confirmation" Binding="{Binding RequiresConfirmation}" Width="90"/>
                                         <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="*"/>
@@ -2688,7 +2688,8 @@ function Refresh-LaunchView {
                 Enabled = [bool](Get-OrchestratorGuiPropertyValue -Object $draftJob -Name 'Enabled' -DefaultValue $false)
                 Runtime = $runtime
                 OnPremises = $null -ne $execution
-                Mode = $mode.Mode
+                # Auto is resolved from the share zone of the computer evaluating it; show both the request and the result.
+                Mode = if ($mode.Requested -eq 'Auto') { 'Auto ({0})' -f $mode.Mode } else { $mode.Mode }
                 ModeSource = if ($mode.Zone) { '{0}, zone {1}' -f $mode.Source, $mode.Zone } else { $mode.Source }
                 DraftMode = if ($null -eq $execution) { '' } elseif ($draftMode) { $draftMode } else { '(default)' }
                 CacheName = [string](Get-OrchestratorGuiPropertyValue -Object $execution -Name 'CacheName' -DefaultValue '')
@@ -2704,7 +2705,7 @@ function Refresh-LaunchView {
             [pscustomobject]@{
                 Name = $entry.Name
                 Runtime = [string](Get-OrchestratorGuiPropertyValue -Object $definition -Name 'Runtime' -DefaultValue 'PowerShell7')
-                Mode = $mode.Mode
+                Mode = if ($mode.Requested -eq 'Auto') { 'Auto ({0})' -f $mode.Mode } else { $mode.Mode }
                 Interactive = [bool](Get-OrchestratorGuiPropertyValue -Object $definition -Name 'Interactive' -DefaultValue $false)
                 RequiresConfirmation = [bool](Get-OrchestratorGuiPropertyValue -Object $definition -Name 'RequiresConfirmation' -DefaultValue $false)
                 Description = [string](Get-OrchestratorGuiPropertyValue -Object $definition -Name 'Description' -DefaultValue '')
