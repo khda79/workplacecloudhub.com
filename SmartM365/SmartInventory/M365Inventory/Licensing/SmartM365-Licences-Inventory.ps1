@@ -37,8 +37,9 @@
   The gain overlaps recovery candidates; the workbook adds a Shared conversion tab.
   A summary email already queued for the orchestrator report mail queue is reported as queued for scheduled delivery
   (1.78), no longer as pending or uncertain; the queue sends it and the gate still allows one email per period.
+  When the prepared shared mailbox evidence is unavailable or unqualified, the warning gives the reason (1.79).
 .VERSION
-1.78
+1.79
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -46,7 +47,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-     Version : 1.78
+     Version : 1.79
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -2597,7 +2598,12 @@ function Get-LicensesSharedMigrationEvidence {
   if (-not $producer -or -not $python) { return $null }
   try {
     $output=@(& $python.Source -B $producer --root $root --tenant $TenantKey 2>&1)
-    if ($LASTEXITCODE -ne 0 -or $output.Count -ne 1) { throw 'Prepared mailbox evidence failed qualification.' }
+    if ($LASTEXITCODE -ne 0 -or $output.Count -ne 1) {
+      $detail=(@($output | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ }) -join ' | ')
+      if ($detail.Length -gt 500) { $detail=$detail.Substring(0,500)+'...' }
+      if (-not $detail) { $detail='no output' }
+      throw ('Prepared mailbox evidence failed qualification (exit code {0}): {1}' -f $LASTEXITCODE,$detail)
+    }
     $jsonText=[string]$output[0]
     $evidence=($jsonText | ConvertFrom-Json -ErrorAction Stop)
     # ConvertFrom-Json can coerce ISO timestamps to local DateTime and lose the offset.
@@ -2613,7 +2619,7 @@ function Get-LicensesSharedMigrationEvidence {
     }
     if ([long]$evidence.Counts.Required -ne ([long]$evidence.Counts.AssignedCoverage + [long]$evidence.Counts.ToComplete + [long]$evidence.Counts.CoverageReview)) { throw 'Prepared mailbox coverage counts do not reconcile.' }
     return $evidence
-  } catch { WriteLog -Message 'Prepared shared mailbox migration evidence is unavailable or unqualified.' 'WARNING'; return $null }
+  } catch { WriteLog -Message ('Prepared shared mailbox migration evidence is unavailable or unqualified. Reason: {0}' -f $_.Exception.Message) 'WARNING'; return $null }
 }
 
 function Get-LicensesSharedConversionBatch {
@@ -5291,7 +5297,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.78"
+$ScriptVersion = "1.79"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
