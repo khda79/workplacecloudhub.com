@@ -145,7 +145,7 @@ Uninstallation preserves per-user configuration and logs unless `-RemoveUserData
 
 ## PowerShell Gallery channel
 
-The downloadable build 2 bundle includes module version **1.0.0**. GitHub release publication does not publish that version to the Gallery service. To install this exact build, use the standalone ZIP linked above and import its bundled module as shown below. Gallery service updates remain a separate administrator-controlled channel. Intune-owned installations must be updated through Intune.
+The downloadable build 2 bundle includes module version **1.0.0**. The source tree prepares Gallery module **1.0.5** separately as a metadata-only update. GitHub release publication does not publish that version to the Gallery service. To install this exact build, use the standalone ZIP linked above and import its bundled module as shown below. Gallery service updates remain a separate administrator-controlled channel. Intune-owned installations must be updated through Intune.
 
 Automatic updates are disabled and no scheduled update task is created.
 
