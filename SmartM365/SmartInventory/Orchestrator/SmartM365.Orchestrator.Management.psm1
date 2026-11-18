@@ -412,7 +412,11 @@ function Sync-SmartM365OrchestratorJobsManifest {
         }
         if ($null -ne $originalDocumentText) {
             # Byte copy of the manifest before a job rename, next to it (never read back by the orchestrator).
-            $backupName = '{0}.before-job-rename-{1}.json' -f [IO.Path]::GetFileNameWithoutExtension($Path), (Get-Date).ToString('yyyyMMdd-HHmmss')
+            # It keeps the manifest's JSON suffix: a bare .json next to a .json.txt manifest is refused by the
+            # SharePoint operational mirror in JsonText mode (1.5.99).
+            $manifestFileName = [IO.Path]::GetFileName($Path)
+            $jsonSuffix = if ($manifestFileName.EndsWith('.json.txt', [StringComparison]::OrdinalIgnoreCase)) { '.json.txt' } else { [IO.Path]::GetExtension($manifestFileName) }
+            $backupName = '{0}.before-job-rename-{1}{2}' -f $manifestFileName.Substring(0, $manifestFileName.Length - $jsonSuffix.Length), (Get-Date).ToString('yyyyMMdd-HHmmss'), $jsonSuffix
             $backupPath = Join-Path -Path $folder -ChildPath $backupName
             if (-not (Test-Path -LiteralPath $backupPath)) { Copy-Item -LiteralPath $Path -Destination $backupPath -ErrorAction Stop }
             if ([IO.File]::ReadAllText($backupPath) -cne $originalDocumentText) { throw "Jobs manifest backup before the job rename does not match the manifest; nothing was written: $backupPath" }

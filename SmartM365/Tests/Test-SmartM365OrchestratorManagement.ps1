@@ -185,7 +185,7 @@ try {
     }
     $renameRoot = Join-Path -Path $temporaryRoot -ChildPath 'ManifestRename'
     New-Item -ItemType Directory -Path $renameRoot -Force | Out-Null
-    $renameManifestPath = Join-Path -Path $renameRoot -ChildPath 'Orchestrator-Jobs.json'
+    $renameManifestPath = Join-Path -Path $renameRoot -ChildPath 'Orchestrator-Jobs.json.txt'
     $renameTemplatePath = Join-Path -Path $renameRoot -ChildPath 'Orchestrator-Jobs.json.template'
     $templateProxy = @($shippedTemplate.Jobs | Where-Object Name -eq 'ExchangeOnPrem-ProxyAddresses-Check')[0]
     $templateMailboxes = @($shippedTemplate.Jobs | Where-Object Name -eq 'ExchangeOnPrem-Local-Mailboxes-Inventory')[0]
@@ -210,7 +210,9 @@ try {
     Assert-True -Condition ((@($renamedMailboxes[0].DependsOn) -join ',') -ceq 'ExchangeOnPrem-ProxyAddresses-Check' -and (@($renamedDependent.DependsOn) -join ',') -ceq 'ExchangeOnPrem-Local-Mailboxes-Inventory,ExchangeOnPrem-ProxyAddresses-Check') -Message 'DependsOn did not follow the renamed jobs.'
     Assert-True -Condition ($renameResult.Updated -and @($renameResult.RenamedJobNames).Count -eq 2 -and @($renameResult.AddedJobNames).Count -eq 0) -Message 'The renames were not reported, or a renamed job was appended again.'
     Assert-True -Condition ((Test-SmartM365OrchestratorJobsDocument -Document $renamedDocument).Valid) -Message 'The renamed manifest is invalid.'
-    $renameBackups = @(Get-ChildItem -LiteralPath $renameRoot -Filter 'Orchestrator-Jobs.before-job-rename-*.json' -File)
+    # The backup keeps the .json.txt suffix of the shared manifest (a bare .json is refused by the SharePoint mirror, 1.5.99).
+    $renameBackups = @(Get-ChildItem -LiteralPath $renameRoot -File | Where-Object { $_.Name -like 'Orchestrator-Jobs.before-job-rename-*' })
+    Assert-True -Condition ($renameBackups.Count -eq 1 -and $renameBackups[0].Name -match '^Orchestrator-Jobs\.before-job-rename-\d{8}-\d{6}\.json\.txt$') -Message ('The manifest backup before the rename has an unexpected name: ' + (@($renameBackups.Name) -join ', '))
     Assert-True -Condition ($renameBackups.Count -eq 1 -and [Convert]::ToBase64String([IO.File]::ReadAllBytes($renameBackups[0].FullName)) -ceq [Convert]::ToBase64String($manifestBeforeRename)) -Message 'The manifest backup before the rename is missing or differs.'
     $secondRenameResult = Sync-SmartM365OrchestratorJobsManifest -Path $renameManifestPath -TemplatePath $renameTemplatePath
     Assert-True -Condition (-not $secondRenameResult.Updated -and @($secondRenameResult.RenamedJobNames).Count -eq 0) -Message 'A second synchronization after the rename was not idempotent.'
