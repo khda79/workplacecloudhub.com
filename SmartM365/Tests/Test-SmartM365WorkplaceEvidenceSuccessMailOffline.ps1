@@ -3,7 +3,7 @@
 .SYNOPSIS
     Synthetic completion-email regression tests; no tenant or transport is executed.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter','',Justification='Transport stubs retain production signatures without performing I/O.')]
@@ -100,6 +100,30 @@ try {
     Check (-not $mail.BodyHtml.Contains('synthetic<&>')) 'No unescaped tenant value.'
     foreach($text in 'Batch ID','Prepared CSV files','Duration','Output root','Completed at','Verified SharePoint files','Batch files and current pointer read back and verified') {
         Check ($mail.BodyHtml.Contains($text)) "Summary missing: $text"
+    }
+    Check ($mail.BodyHtml.Contains('No warning was logged before this notification.') -and -not $mail.BodyHtml.Contains('<h3>Warnings')) 'A run without a readable warning says so and lists none.'
+    # Warnings of the run log are listed (escaped, capped at 50) in the completion email (0.4.16).
+    $warningLog=Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-PreparedMailWarnings-'+[guid]::NewGuid().ToString('N')+'.log')
+    try {
+        $lines=[Collections.Generic.List[string]]::new()
+        $lines.Add('2026-11-18 09:48:05 [INFO] Starting')
+        $lines.Add('2026-11-18 09:48:20 [WARNING] Optional source used although stale: DATA-LAST/AD_HealthCheck.csv <&>')
+        $lines.Add('2026-11-18 10:34:26 [WARN] License report Not qualified; license tables are published empty.')
+        foreach($index in 1..53){ $lines.Add(('2026-11-18 10:40:00 [WARNING] Synthetic warning {0}' -f $index)) }
+        $lines.Add('2026-11-18 10:41:00 [ERROR] Not a warning')
+        [IO.File]::WriteAllLines($warningLog,[string[]]$lines)
+        Set-Variable -Name LogTextFile -Scope Global -Value $warningLog
+        Initialize-Fixture
+        . $normal
+        $body=$script:mails[0].BodyHtml
+        Check ($body.Contains('<h3>Warnings (55)</h3>') -and $body.Contains('<tr><th>Warnings</th><td>55</td></tr>')) 'The warning count of the run is shown.'
+        Check ($body.Contains('AD_HealthCheck.csv &lt;&amp;&gt;') -and -not $body.Contains('AD_HealthCheck.csv <&>')) 'Warning text is escaped.'
+        Check ($body.Contains('License report Not qualified') -and -not $body.Contains('Not a warning') -and -not $body.Contains('Starting')) 'Only WARNING and WARN lines are listed.'
+        Check (([regex]::Matches($body,'<li>')).Count -eq 50 -and $body.Contains('5 more warning(s) in the log.')) 'The list is capped at 50 with the remainder counted.'
+        Check ($body.Contains('The warnings above were logged before this notification.')) 'The note points to the listed warnings.'
+    } finally {
+        Remove-Item -LiteralPath $warningLog -Force -ErrorAction SilentlyContinue
+        Set-Variable -Name LogTextFile -Scope Global -Value 'C:\Synthetic\run<&>.log'
     }
     Initialize-Fixture; $script:batchUploadEnabled=$false
     . $normal

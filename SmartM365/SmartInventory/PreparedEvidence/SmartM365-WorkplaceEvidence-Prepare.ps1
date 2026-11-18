@@ -2,7 +2,7 @@
 .SYNOPSIS
     Prepare a validated, versioned SmartWorkplaceIntelligence batch after raw collectors.
 .VERSION
-    0.4.15
+    0.4.16
 .NOTES
     PowerShell 7. SharePoint mapping reads use the tenant configuration unless Offline.
     Deployment must include the sibling SmartWorkplaceIntelligence/scripts, config and reference folders.
@@ -122,6 +122,19 @@ function Send-PreparedSuccessMail {
     $ended=Get-Date
     $started=Get-Variable -Name SmartM365ExecutionStartTime -Scope Global -ValueOnly -ErrorAction SilentlyContinue
     $logPath=Get-Variable -Name LogTextFile -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    # Warnings this run logged so far (source quality, qualification); post-transfer retention logs after this mail.
+    $warnings=[Collections.Generic.List[string]]::new()
+    if ($logPath -and (Test-Path -LiteralPath $logPath -PathType Leaf)) {
+        try {
+            $stream=[IO.File]::Open($logPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+            try {
+                $reader=[IO.StreamReader]::new($stream)
+                while ($null -ne ($line=$reader.ReadLine())) {
+                    if ($line -match '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[WARN(?:ING)?\]\s*(.+)$') { $warnings.Add($Matches[1].Trim()) }
+                }
+            } finally { $stream.Dispose() }
+        } catch { WriteLog -Message "Run warnings could not be read for the completion email: $($_.Exception.Message)" -Level INFO }
+    }
     $details=[ordered]@{
         'Tenant'=$effective.TenantKey
         'Batch ID'=$BatchId
@@ -132,12 +145,21 @@ function Send-PreparedSuccessMail {
         'Output root'=$output
         'SharePoint transfer'=$(if($batchUploadEnabled){'Batch files and current pointer read back and verified'}else{'Disabled; local batch only'})
         'Log'=$logPath
+        'Warnings'=$warnings.Count
     }
     if ($batchUploadEnabled) { $details['Verified SharePoint files']=$VerifiedTransfer.VerifiedFiles }
     $rows=foreach($label in $details.Keys) {
         '<tr><th>{0}</th><td>{1}</td></tr>' -f [Net.WebUtility]::HtmlEncode($label),[Net.WebUtility]::HtmlEncode([string]$details[$label])
     }
-    $body='<h2>Workplace evidence completed</h2><table>'+($rows -join '')+'</table><p>Review the execution log for source-quality warnings. Batch retention runs after this notification; its result and any warning are in the same log. Power BI refresh and publication are separate operations.</p>'
+    $maxListedWarnings=50
+    $warningHtml=''
+    if ($warnings.Count) {
+        $items=@($warnings | Select-Object -First $maxListedWarnings | ForEach-Object { '<li>{0}</li>' -f [Net.WebUtility]::HtmlEncode($_) })
+        $more=if($warnings.Count -gt $maxListedWarnings){'<p>{0} more warning(s) in the log.</p>' -f ($warnings.Count-$maxListedWarnings)}else{''}
+        $warningHtml='<h3>Warnings ({0})</h3><ul>{1}</ul>{2}' -f $warnings.Count,($items -join ''),$more
+    }
+    $warningNote=if($warnings.Count){'The warnings above were logged before this notification.'}else{'No warning was logged before this notification.'}
+    $body='<h2>Workplace evidence completed</h2><table>'+($rows -join '')+'</table>'+$warningHtml+'<p>'+$warningNote+' Batch retention runs after this notification; its result and any warning are in the same log. Power BI refresh and publication are separate operations.</p>'
     # Use the shared sender/recipient and Graph/SMTP configuration; no attachments.
     SendEmailHtmlReport -Subject "$scriptName completed - batch $BatchId" -BodyHtml $body -MailPurpose Report -AllowAttachments:$false
 }
