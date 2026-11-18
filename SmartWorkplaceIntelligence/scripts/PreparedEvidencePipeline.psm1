@@ -1,5 +1,5 @@
 # Offline, single-tenant preparation and versioned local publication. No tenant APIs.
-# Version: 1.2.12
+# Version: 1.2.13
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:ProductRoot = Split-Path -Parent $PSScriptRoot
@@ -23,6 +23,16 @@ function Get-PreparedChildPath([string]$Root, [string]$Relative) {
         throw 'Path must be strictly below its declared root.'
     }
     $path
+}
+
+function Get-PreparedProcessFailureDetail($Output) {
+    # Python tracebacks end with the exception line; keep that line only so the
+    # warning shows the actual reason instead of local file paths.
+    $lines=@($Output | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+    if ($lines.Count -eq 0) { return 'no output' }
+    $detail=[string]$lines[-1]
+    if ($detail.Length -gt 500) { $detail=$detail.Substring(0,500)+'...' }
+    $detail
 }
 
 function Write-PreparedJson([string]$Path, $Value) {
@@ -764,7 +774,7 @@ function Publish-PreparedEvidenceBatch {
             $python=Get-Command $PythonCommand -CommandType Application -ErrorAction Stop | Select-Object -First 1
             Write-PreparedJson $draftManifest $manifest
             $result=@(& $python.Source -B (Join-Path $PSScriptRoot 'shared_mailbox_license_evidence.py') --batch-manifest $draftManifest --tenant $TenantKey 2>&1)
-            if ($LASTEXITCODE -ne 0 -or $result.Count -ne 1) { throw 'Shared mailbox evidence was not qualified.' }
+            if ($LASTEXITCODE -ne 0 -or $result.Count -ne 1) { throw ('Shared mailbox evidence was not qualified (exit code {0}): {1}' -f $LASTEXITCODE,(Get-PreparedProcessFailureDetail $result)) }
             $evidence=([string]$result[0] | ConvertFrom-Json -ErrorAction Stop)
             $jsonEvidence=[Text.Json.JsonDocument]::Parse([string]$result[0])
             try { $exceptionDate=$jsonEvidence.RootElement.GetProperty('ExceptionSnapshotDate').GetString() } finally { $jsonEvidence.Dispose() }
@@ -775,7 +785,7 @@ function Publish-PreparedEvidenceBatch {
             }
             if([long]$evidence.Counts.Required -ne ([long]$evidence.Counts.AssignedCoverage+[long]$evidence.Counts.ToComplete+[long]$evidence.Counts.CoverageReview)){throw 'Shared mailbox coverage does not reconcile.'}
             $manifest.SharedMailboxLicenseEvidence=@{State='Qualified';BatchId=$batchId;ExceptionSnapshotDate=$exceptionDate;Counts=$evidence.Counts}
-        } catch { Write-Warning 'Shared mailbox license evidence unavailable; existing prepared data remains usable.' }
+        } catch { Write-Warning ('Shared mailbox license evidence unavailable; existing prepared data remains usable. Reason: {0}' -f $_.Exception.Message) }
         finally { if(Test-Path -LiteralPath $draftManifest -PathType Leaf){Remove-Item -LiteralPath $draftManifest -Force} }
         # Detail is reconstructed only from the exact raw sources named by the
         # qualified report snapshot. A mismatch must never produce a partial list.
@@ -788,11 +798,12 @@ function Publish-PreparedEvidenceBatch {
                 $snapshotHash=(Get-FileHash -LiteralPath $snapshot -Algorithm SHA256).Hash
                 $python=Get-Command $PythonCommand -CommandType Application -ErrorAction Stop | Select-Object -First 1
                 $detailOutput=@(& $python.Source -B (Join-Path $PSScriptRoot 'shared_mailbox_license_detail.py') --snapshot $snapshot --licenses (Join-Path $last 'M365_Licenses_Users.csv') --mailboxes (Join-Path $last 'Exchange_EXO_Mailboxes_AllDomains.csv') --tenant $TenantKey 2>&1)
-                if ($LASTEXITCODE -ne 0 -or $detailOutput.Count -ne 1 -or (Get-FileHash -LiteralPath $snapshot -Algorithm SHA256).Hash -cne $snapshotHash) { throw 'Shared mailbox detail qualification failed.' }
+                if ($LASTEXITCODE -ne 0 -or $detailOutput.Count -ne 1) { throw ('Shared mailbox detail qualification failed (exit code {0}): {1}' -f $LASTEXITCODE,(Get-PreparedProcessFailureDetail $detailOutput)) }
+                if ((Get-FileHash -LiteralPath $snapshot -Algorithm SHA256).Hash -cne $snapshotHash) { throw 'Shared mailbox detail qualification failed: license snapshot changed while reading.' }
                 $detailRows=ConvertFrom-Json -InputObject ([string]$detailOutput[0]) -NoEnumerate -ErrorAction Stop
                 if ($detailRows -isnot [array]) { throw 'Shared mailbox detail has an invalid schema.' }
                 $manifest.SharedMailboxLicenseDetail=@{State='Qualified';SnapshotId=$licenseQualification.SnapshotId;Rows=$detailRows}
-            } catch { Write-Warning 'Shared mailbox license detail unavailable; aggregate evidence remains usable.' }
+            } catch { Write-Warning ('Shared mailbox license detail unavailable; aggregate evidence remains usable. Reason: {0}' -f $_.Exception.Message) }
         }
         Write-PreparedJson (Join-Path $batch 'batch.json.txt') $manifest
         $pointer = @{SchemaVersion=1;BatchId=$batchId;TenantKey=$TenantKey;ManifestSHA256=(Get-FileHash (Join-Path $batch 'batch.json.txt')).Hash;PreviousBatchId=if($previous){$previous.BatchId}else{$null}}
