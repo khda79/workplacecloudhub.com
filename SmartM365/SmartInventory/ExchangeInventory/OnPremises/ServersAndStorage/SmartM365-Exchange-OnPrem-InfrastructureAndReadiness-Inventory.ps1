@@ -26,7 +26,7 @@
     New-CimSession is used over DCOM only, to start the Health Checker scheduled task.
 
 .VERSION
-1.8.15
+1.8.16
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in;
@@ -38,7 +38,7 @@
     and the Health Checker scheduled task must be installed there.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.8.15
+    Version     : 1.8.16
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -49,6 +49,11 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.8.16
+      - Sets the SharePoint target globals from the effective configuration after the upload context.
+        With DATA-ALL publication enabled, the weekly history upload of the WindowsPowerShell5 Core read
+        empty globals and failed the run (Weekly history publication failed).
+
     1.8.11
       - Builds the summary mail with the shared SmartM365 template (760px frame, KPI cards, short tables):
         per-server, collection issues (certificate Failed/RemoteRetry/Unknown, Health Checker not completed),
@@ -280,7 +285,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.8.15"
+$ScriptVersion = "1.8.16"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 # Vendored Microsoft CSS-Exchange Health Checker (see ThirdParty\CSS-Exchange\HealthChecker\PROVENANCE.md).
 $HealthCheckerRelativePath = 'ThirdParty\CSS-Exchange\HealthChecker\HealthChecker.ps1'
@@ -3580,6 +3585,15 @@ try {
     $global:EnableSharePointUpload=[bool](Get-SmartM365EffectiveConfigValue -Name 'EnableSharePointUpload' -DefaultValue $false)
     . (Join-Path $smartM365LifecycleRoot 'Modules\SmartM365.Core\SmartM365-SharePointUploadPolicy.ps1')
     Initialize-SmartM365CollectorUploadContext -LocalConfig $script:SmartM365EffectiveConfig -DataAllRoot $OutputRoot -DataLastRoot ([string](Get-SmartM365EffectiveConfigValue -Name 'LatestCsvFolderPath' -DefaultValue '')) -LogAllRoot $LogFolder -ExternalActionsAllowed $true
+    # The WindowsPowerShell5 Core uploads (weekly history included) read the SharePoint target from globals.
+    # Set them from the effective configuration so DATA-ALL publication does not depend on a caller default.
+    foreach ($smartM365UploadSetting in @('SharePointSiteHostname','SharePointSitePath','SharePointLibraryDisplayName','SharePointTargetFolderPath','AppId','TenantId')) {
+        $smartM365UploadValue = [string](Get-SmartM365EffectiveConfigValue -Name $smartM365UploadSetting -DefaultValue '')
+        if (-not [string]::IsNullOrWhiteSpace($smartM365UploadValue)) { Set-Variable -Name $smartM365UploadSetting -Scope Global -Value $smartM365UploadValue }
+    }
+    $smartM365UploadThumbprint = [string](Get-SmartM365EffectiveConfigValue -Name 'Thumbprint' -DefaultValue '')
+    if ([string]::IsNullOrWhiteSpace($smartM365UploadThumbprint)) { $smartM365UploadThumbprint = [string](Get-SmartM365EffectiveConfigValue -Name 'Thumb' -DefaultValue '') }
+    if (-not [string]::IsNullOrWhiteSpace($smartM365UploadThumbprint)) { $global:Thumbprint = $smartM365UploadThumbprint }
     Start-CoreSmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath ([string](Get-SmartM365EffectiveConfigValue -Name 'LatestCsvFolderPath' -DefaultValue '')) -ScopeParameters @{IncludeServicesHealth=$IncludeServicesHealth;IncludeMailboxDatabasePaths=$IncludeMailboxDatabasePaths;IncludeHealthChecker=$IncludeHealthChecker;ExcludedServers=($configuredExcludedServers -join ';')}
     Invoke-CoreSmartM365Preflight -ScriptName $ScriptName -OutputPaths @($OutputFolder,$LogFolder) | Out-Null
 
