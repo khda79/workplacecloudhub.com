@@ -19,7 +19,7 @@
     PrivateData = @{
         PSData = @{
             Prerelease = ''
-            Tags = @('SmartM365','Windows','WPF','Intune','Diagnostics','Endpoint')
+            Tags = @('SmartM365','WorkplaceCloudHub','Windows','WPF','Intune','IntuneDiagnostics','Diagnostics','Troubleshooting','Logs','WindowsUpdate','Endpoint')
             ProjectUri = 'https://workplacecloudhub.com/tools/smart-endpoint-diagnostics-analyzer/'
             LicenseUri = 'https://github.com/khda79/workplacecloudhub.com/blob/main/LICENSE'
             ReleaseNotes = '1.0.4 fixes elevated GUI launch quoting, native worker exit codes, visible-grid CSV exports, extraction cleanup, ZIP/CAB validation and UTF-8 diagnostic errors. GUI and HTML versions follow package metadata. Includes the offline demo runtime; generated DemoAssets and diagnostic data are excluded.'
@@ -32,8 +32,8 @@
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAganfL/3ThjV1E
-# enQN/gcFzvlG8yayZFOUkbSIl35QD6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBNz0+vKiPJcT5t
+# 2Pb/lczjlnqDzo7BiDIy4LYmoi0RUKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -166,31 +166,31 @@
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKREEdoDIGiLa+vX4goo40fnTJyce8XCBkheefKAhaBmMA0GCSqG
-# SIb3DQEBAQUABIIBgBZiR0x8BNT6O4XKgx3bWnytoL6UmeHA7Whw682RJC/u5Wmg
-# 4MJfgJRRjjH1OlQa/5zRrGq/SfJL4sFe4uge3c+XYFOEdsSoapH8ztU3UAjf83FN
-# uWI5/JmUNnHsUPOJtoCSdrfgXIwP7Sx0anDzpLQm4kscNVBEHlAAcbYGlQpSiow3
-# Wup77KTpszFv1Uel52eaVmEX7IRcyo4KjONcDgWbBRJeNIs00oqPAzbd7KNEqdkd
-# kf5OJsphpYUwjgIPQGCgxBtGra1+JmhWB4DRz81Yz4q/szF+8h+ANfdKwoeIcOpv
-# dMmInPh7bt2ErZtOEtmHwuTxMnajQgQPox7W45eWOwnxILrvlMi78kI4r9dTJWMo
-# ZZsXDrhy0CCGHvKm/pf39GyeGoFYmUbwFXQaVPdwJuJtEU5mwDD/McO1dyTROoXk
-# Frm9fXRP5wTn4MOXk8NilHthFrsbBOyELKZ2R6hgNzUbzjnaoTaVDZpKVXjL6zti
-# Dj1Xv9q4ZB3TvNsbs6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHCYKG7DNNKNnYuYjmE47jsayQgJyTMUVgTN61B/0udUMA0GCSqG
+# SIb3DQEBAQUABIIBgKrMsO8tud33lt9QrIo68KwViUL2DEguteKE0QY14XvUd6nd
+# FQ611fZdcHuq/BmrVNH4QpblSGavJBi43mmqdJcod8bveaKLcgvnUClCAdfUQc7J
+# KjnN4vc2htqVBC+CtKRWLkxgstv0Dw1TK4OQwlx3nAS4Z9IanIdcoejo3dkXamj7
+# JtNp/BIezZ/8VYoLWEcX3kFlKLEmujhCZ5GWZ3k3lB70p9Zha5opjnLRoyLTmaPd
+# nxn4Ptom32NXlMm470tdLvqGypOyvFd7ki7b8ovvOBP0DTXe2Z9UV9HlyYwIy3IP
+# xX2F2g+n9vrfKXhQAFkpO2Rxw7hc3Q9UJ8/TFdp3NLh38tUUY3HEcx9ZZAqBNhiK
+# BA15N5foU6Zd0zTneU0+fQ/8V/rQ4t6Vt7qmlbSSrDbLxOFnqnFy4JLAFMtcFSzZ
+# wEDSfE5KjJeZ2R8galvlDa3FAp6oPZCLOPVwEHrwMciKHZOaAXZ0GxsBlFILBjt0
+# JC+r9pfnYhik1xtSi6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTgyMzA2
-# MTFaMC8GCSqGSIb3DQEJBDEiBCBQJXrkC3mLp6+B49XqhH6QL5Tur9PCsdUtJGJM
-# svLpBzANBgkqhkiG9w0BAQEFAASCAgCiNRqnn3biRer7VL7gZMk5B3sNEAn4aMPi
-# xWs2jhBCvNwckiRkV27mU3sYDalkLEvSpC6A2ohhLF37U/lYg36lA72XWRN4BhoT
-# bu56/H/BDH1+CdgMvMxmQHTp37tV6QhihMNbp3pBQGghBdtyRmw6WeZAudcyP+fD
-# StSliC4805d85pAb3MF8Ce4qKWvUuQXTTlJBXzgz1mV0alef5jdU9rRMGDJqRvIE
-# dDW5Ab3oDQwTHrBfKWSyk/sYA4izhtE4WxE669zvXRElrujbE0ECcVk5o8q9zfEn
-# 5Cml9Z8Ar3WBw4VGla0vN6hDmdQg8oxUKMWlT4RNaoIaQNUzbz4OhRghb/MIytih
-# w35s+awqL/wQvOdf68Y9RND68BX9BqYeoAOpFh0GxCN4ezY5nM/b7afRCFs41Zuv
-# LtmwXVEEHz7TuugGPSN0tsPZycy42ZLAKXoMWtyMqYVkDnYo4Mkqg0IInqMnQWRL
-# CbGwf4bHFwsgeJwMO313TXFr+cH3sQK44AFGpKdPD4zwmVI1uZuhHdWE6lvQgW6O
-# NUeEUovPxmU9FSgZ5C5GyyT4aHEubWl45q0kn2igC2MwXv1WvlYwBQxeNCv3wpeG
-# cXHDjzS7nDe6HsvrdjvgG9eznr9y9bSV7cPwg9agKLJ259etZceTx7K91c008tqH
-# Gvx/+/Ip0g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTgyMzEw
+# NDlaMC8GCSqGSIb3DQEJBDEiBCAa+VHttntGQkGngAw27RKjkg/vGIYlYBXxO3TD
+# IqARVjANBgkqhkiG9w0BAQEFAASCAgCYKcufUkNPnT0dKz49fZSkkHt6N4jetgDl
+# o5hYcP+trVrcMzI3stKuO9VxAN5Z6U04zzexe6+FhmR7QdWoMt9xNYJG9gmCWeoD
+# f/EiqwFoLf+aJ1hQJK6nNd8NHygwGXTEDpdcWIXkSE8QTqE5Xmpcy80o2yeOczqR
+# XQYVg5BosVDTikq4wIFKCXe8C7T33eiIKjZtYyfmWNS3cep6gF453OCllC3ZlUhi
+# FsLxOJcr/Z7ft90f4ilkEQka+5WtvV9/vC/CZowT1WWZIMj/OTm9owI4VI0qGiw1
+# YMom3jbtsp7HvWQNPIrqdi1vymToRgoeK3n4B3eOLOYroxW7Gy+307bJojrzATzw
+# Y4HfchzXJF5Uk+umSxdqiRAIZQUY8BOBJhmNzFw9eQClxUf6GSiqZzfRXkzSJWKL
+# 8AJGig/4l69Pp3pGCn23y0v3UCO9l7avUankI1WbDVmyLod5v2vTItTXL4C1Z3cO
+# yHGMqaFoa4G/LDnQ4vLWFmRjRRbE6dR8ffwrPCG+OCycbgxgJHh+ow199518mXOu
+# WzO3t7k5pggblfAAs+vVY9rpWip9sDzNCD8adHXimY2/xNqtXYchOFsxeByS3HPe
+# P7BhzXutTRBd0HsCnUT7euQTRFG/pvReUxhtz/MGP2OFXR8NsYjDRNiNF2CMvE/l
+# Rj1AnLdNxw==
 # SIG # End signature block
