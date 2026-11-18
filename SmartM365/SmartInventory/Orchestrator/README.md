@@ -825,7 +825,7 @@ The full job can declare `DependsOn` on its fast prerequisite when a quick CSV m
 | Field | Description |
 | --- | --- |
 | `Runtime` | `PowerShell7` or `WindowsPowerShell`; defaults to `PowerShellEdition`. Declaring it (or `Execution`) makes the orchestrator use the catalog engine. |
-| `Execution` | `{ "Mode": optional, "CacheName": "...", "Include": [...] }`: the entry may run from a local cache. `CacheName` is the folder under the cache roots; `Include` lists extra files or folders (relative to SmartM365) copied and checked before and after the copy. Without `Execution`, the entry always runs `Direct`. |
+| `Execution` | `{ "Mode": optional, "CacheName": "...", "Include": [...] }`: the entry may run from a local cache. `CacheName` is the folder under the cache roots; `Include` lists extra files or folders (relative to SmartM365) copied and checked before and after the copy. Without `Execution`, the entry always runs `Direct`. Since 2026-11-18 the on-premises jobs of the template declare `"Mode": "Auto"` (the manual `Launches` entries keep `OnPremExecutionMode`); `Auto` runs `Direct` when the computer sees the share in the Intranet or Trusted zone, `LocalCache` otherwise. |
 | `LaunchArguments` | Jobs only: fixed arguments that the former launcher added before the job `Arguments` (for example `-IncludeADPermission`). |
 | `WorkingDirectory` | Current directory of the script, relative to SmartInventory (replaces `pushd`). |
 | `Interactive` | The entry needs a user console (interactive sign-in or prompts); it is refused unattended. |

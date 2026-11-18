@@ -123,7 +123,9 @@ function Assert-LauncherParity {
     Assert-True ($Record.Tenant -eq $actualTenant) "$label : tenant '$($Record.Tenant)' <> '$actualTenant'"
     $expectedMode = 'Direct'
     if ($Record.CacheName) { $expectedMode = 'LocalCache' }
-    Assert-True ($Plan.Mode -eq $expectedMode) "$label : mode $expectedMode <> $($Plan.Mode)"
+    # Since 2026-11-18 the on-premises template jobs request Auto: Direct or LocalCache depending on the share zone of this computer.
+    if ($Record.CacheName -and $Plan.ModeInfo.Requested -eq 'Auto') { Assert-True ($Plan.Mode -in @('Direct', 'LocalCache') -and $Plan.ModeInfo.Source -eq 'Job') "$label : Auto resolved to $($Plan.Mode), source $($Plan.ModeInfo.Source)" }
+    else { Assert-True ($Plan.Mode -eq $expectedMode) "$label : mode $expectedMode <> $($Plan.Mode)" }
     if ($Record.CacheName) { Assert-True ($Plan.CacheName -eq $Record.CacheName) "$label : cache $($Record.CacheName) <> $($Plan.CacheName)" }
     Assert-True ((@($Record.Include) -join '|') -eq (@($Plan.Include) -join '|')) "$label : include [$(@($Record.Include) -join '|')] <> [$(@($Plan.Include) -join '|')]"
     Assert-True ([bool]$Record.RequiresConfirmation -eq [bool]$Plan.RequiresConfirmation) "$label : confirmation $($Record.RequiresConfirmation) <> $($Plan.RequiresConfirmation)"

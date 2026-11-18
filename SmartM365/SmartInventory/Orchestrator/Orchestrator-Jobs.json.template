@@ -248,6 +248,7 @@
       "Runtime": "WindowsPowerShell",
       "LaunchArguments": "-IncludeADPermission",
       "Execution": {
+        "Mode": "Auto",
         "CacheName": "ExchangeLocalMailboxes\\WithADPermissions",
         "Include": [
           "SmartInventory\\Common\\SmartM365.IdentityDateEvidence.ps1"
@@ -571,6 +572,7 @@
       "Runtime": "WindowsPowerShell",
       "LaunchArguments": "-AllOrganizationalUnit",
       "Execution": {
+        "Mode": "Auto",
         "CacheName": "ExchangeProxyAddresses",
         "Include": []
       },
@@ -611,6 +613,7 @@
       "Arguments": "-IncludeServicesHealth -IncludeMailboxDatabasePaths -IncludeHealthChecker",
       "Runtime": "WindowsPowerShell",
       "Execution": {
+        "Mode": "Auto",
         "CacheName": "ExchangeInfrastructureAndReadiness",
         "Include": []
       },
@@ -648,6 +651,7 @@
       "Arguments": "",
       "Runtime": "WindowsPowerShell",
       "Execution": {
+        "Mode": "Auto",
         "CacheName": "ExchangeHybridFreeBusy",
         "Include": []
       },
@@ -689,6 +693,7 @@
       "Arguments": "",
       "Runtime": "WindowsPowerShell",
       "Execution": {
+        "Mode": "Auto",
         "CacheName": "ExchangeCalendarPermissions",
         "Include": []
       },
@@ -1867,6 +1872,7 @@
       "Arguments": "",
       "Runtime": "WindowsPowerShell",
       "Execution": {
+        "Mode": "Auto",
         "CacheName": "SharePointInfrastructure",
         "Include": []
       },
@@ -1894,6 +1900,7 @@
       "Arguments": "",
       "Runtime": "WindowsPowerShell",
       "Execution": {
+        "Mode": "Auto",
         "CacheName": "SharePointContent",
         "Include": []
       },
