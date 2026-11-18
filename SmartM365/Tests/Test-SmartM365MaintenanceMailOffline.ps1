@@ -42,7 +42,7 @@ try {
         $source=Join-Path $core $edition
         $names=@('Send-SmartM365GraphMail','SendEmailHtmlReport','ConvertToRecipientArray','ConvertTo-SmartM365GraphRecipient','ConvertTo-SmartM365GraphFileAttachment','Get-ModuleLocalConfigValue')
         if($edition -eq 'SmartM365.Core.psm1'){$names+='Send-SmartM365Mail'}
-        $definitions=@(Get-Definitions $source $names)+@(Get-Definitions (Join-Path $core 'SmartM365-MailAdminRouting.ps1') @('Resolve-SmartM365AdminMailRoute','Get-SmartM365AdminMailControl','Set-SmartM365AdminMailControl'))+@(Get-Definitions (Join-Path $core 'SmartM365-MailMaintenance.ps1') @('Get-SmartM365MaintenanceMailRoot','Get-SmartM365MaintenanceMailState','Add-SmartM365AdminRecipients','Resolve-SmartM365MaintenanceMailRecipientRoute','Set-SmartM365SmtpMaintenanceRecipient','Resolve-SmartM365UnifiedMailRoute'))
+        $definitions=@(Get-Definitions $source $names)+@(Get-Definitions (Join-Path $core 'SmartM365-MailAdminRouting.ps1') @('Resolve-SmartM365AdminMailRoute','Get-SmartM365AdminMailControl','Set-SmartM365AdminMailControl','Test-SmartM365MailExcludeAdministrators'))+@(Get-Definitions (Join-Path $core 'SmartM365-MailMaintenance.ps1') @('Get-SmartM365MaintenanceMailRoot','Get-SmartM365MaintenanceMailState','Add-SmartM365AdminRecipients','Resolve-SmartM365MaintenanceMailRecipientRoute','Set-SmartM365SmtpMaintenanceRecipient','Resolve-SmartM365UnifiedMailRoute','Test-SmartM365MailInventoryCaller','Get-SmartM365MailDeliveryWindow','Get-SmartM365MailDeliveryWindowState','Test-SmartM365MailDeliveryWindowClosed'))
         $runtime=New-Module -ScriptBlock ([scriptblock]::Create($definitions -join "`n"));$runtimes+=$runtime
         & $runtime {
             param($Shared)

@@ -37,9 +37,11 @@
       "MailClientName": "Client name shown in the email header.",
       "MailClientLogoPath": "Client logo file for the email header.",
       "MailClientLogoMaxKB": "Maximum client logo size embedded in emails, in KB.",
-      "ReportMailSchedule.Enabled": "Queues report emails until NotBefore; operational notifications stay immediate. Disabled by default.",
+      "ReportMailSchedule.Enabled": "Queues report emails until NotBefore; operational notifications stay immediate. Disabled by default. With Days and/or NotAfter it becomes a business-hours window: outside it only Smart365Administrators receive SmartInventory mail, and the other recipients get the latest queued report when the window opens.",
       "ReportMailSchedule.NotBefore": "Earliest local time (HH:mm) at which the resident orchestrator dispatches queued report emails.",
-      "ReportMailSchedule.TimeZone": "Windows time-zone ID used to evaluate NotBefore.",
+      "ReportMailSchedule.TimeZone": "Windows time-zone ID used to evaluate NotBefore and NotAfter.",
+      "ReportMailSchedule.Days": "Optional business days (English names, for example Monday to Friday); omitted means every day.",
+      "ReportMailSchedule.NotAfter": "Optional end of the business-hours window (HH:mm, exclusive, or 24:00); later than NotBefore.",
       "ReportMailSchedule.QueuePath": "Existing protected report mail queue directory; blank or inherited uses the tenant MAIL folder.",
       "ReportMailSchedule.TrustedSids": "Approved service or administrator SIDs allowed to own or access the queue, besides local SYSTEM and Administrators."
     },

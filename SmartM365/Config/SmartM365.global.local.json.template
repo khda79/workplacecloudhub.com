@@ -24,7 +24,9 @@
   "MailPowerBiLinkText": "Click here to open the Power BI dashboard",
   "ReportMailSchedule": {
     "Enabled": false,
-    "NotBefore": "07:30",
+    "NotBefore": "08:00",
+    "NotAfter": "19:00",
+    "Days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
     "TimeZone": "Romance Standard Time",
     "QueuePath": "{{WorkspaceRootPath}}\\Tenants\\{{TenantKey}}\\MAIL",
     "TrustedSids": []

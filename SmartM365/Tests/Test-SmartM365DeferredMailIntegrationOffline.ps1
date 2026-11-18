@@ -1,6 +1,8 @@
 # Extracts the actual mail entrypoints. Authentication and transport are mocked.
 $ErrorActionPreference='Stop'
 $core=Join-Path $PSScriptRoot '../Modules/SmartM365.Core'
+. (Join-Path $core 'SmartM365-MailAdminRouting.ps1')
+. (Join-Path $core 'SmartM365-MailMaintenance.ps1')
 . (Join-Path $core 'SmartM365-DeferredMail.ps1')
 $aclVerifier=${function:Test-SmartM365DeferredMailDirectory}
 $root=Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-DeferredIntegration-'+[guid]::NewGuid().ToString('N'))

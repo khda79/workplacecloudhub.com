@@ -10,7 +10,7 @@ Import-Module (Join-Path $PSScriptRoot '../../SmartM365.JsonTransport.psd1') -Mi
 . (Join-Path $PSScriptRoot '../../SmartM365-SharePointUploadPolicy.ps1')
 . (Join-Path $PSScriptRoot '../../SmartM365-TeamsPrivateConfig.ps1')
 
-# Version: 1.0.74
+# Version: 1.0.75
 function Get-ModuleLocalConfig {
     [CmdletBinding()]
     param()

@@ -2,8 +2,15 @@
 .SYNOPSIS
     Resolve administrator mail recipients without sending mail.
 .VERSION
-    1.0.0
+    1.1.0
 #>
+function Test-SmartM365MailExcludeAdministrators {
+    # Set only while the report mail queue delivers the non-administrator copy of a
+    # report whose administrator copy was already sent outside the delivery window.
+    $flag = Get-Variable SmartM365MailExcludeAdministrators -Scope Global -ErrorAction SilentlyContinue
+    return ($null -ne $flag -and $flag.Value -is [bool] -and $flag.Value)
+}
+
 function Resolve-SmartM365AdminMailRoute {
     [CmdletBinding()]
     param(
@@ -11,7 +18,8 @@ function Resolve-SmartM365AdminMailRoute {
         [AllowEmptyString()][string]$Cc = '',
         [AllowEmptyString()][string]$Bcc = '',
         [Parameter(Mandatory)][AllowEmptyString()][string]$Smart365Administrators,
-        [Parameter(Mandatory)][bool]$AdministratorsOnly
+        [Parameter(Mandatory)][bool]$AdministratorsOnly,
+        [bool]$ExcludeAdministrators = $false
     )
     $administrators = @($Smart365Administrators -split '[;,]' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     if ($administrators.Count -eq 0) { throw 'Smart365Administrators is empty; mail was not sent.' }
@@ -25,6 +33,19 @@ function Resolve-SmartM365AdminMailRoute {
     $toList = [Collections.Generic.List[string]]::new()
     $ccList = [Collections.Generic.List[string]]::new()
     $bccList = [Collections.Generic.List[string]]::new()
+    if ($ExcludeAdministrators) {
+        # Administrators already received this message: keep only the other recipients.
+        foreach ($address in $administrators) { $null = $seen.Add($address) }
+        if (-not $AdministratorsOnly) {
+            foreach ($pair in @(@($To,$toList),@($Cc,$ccList),@($Bcc,$bccList))) {
+                foreach ($address in @([string]$pair[0] -split '[;,]' | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+                    if ($seen.Add($address)) { $pair[1].Add($address) }
+                }
+            }
+        }
+        if ($toList.Count -eq 0 -and $ccList.Count -gt 0) { $toList.AddRange($ccList); $ccList.Clear() }
+        return [pscustomobject]@{ To=($toList -join ';'); Cc=($ccList -join ';'); Bcc=($bccList -join ';'); AdministratorsOnly=$AdministratorsOnly }
+    }
     if (-not $AdministratorsOnly) {
         foreach ($pair in @(@($To,$toList),@($Cc,$ccList),@($Bcc,$bccList))) {
             foreach ($address in @([string]$pair[0] -split '[;,]' | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {

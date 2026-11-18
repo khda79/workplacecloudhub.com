@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline queue primitives for deferred report mail.
 .VERSION
-    1.0.1
+    1.1.0
 .DESCRIPTION
     Does not connect to mail services or select a production path. The caller must
     verify the queue directory and its access controls before each operation.
@@ -85,7 +85,8 @@ function Add-SmartM365ReportMailQueueItem {
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$TenantKey,
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$DeduplicationKey,
         [Parameter(Mandatory)][datetimeoffset]$NotBeforeUtc,
-        [Parameter(Mandatory)][hashtable]$Message
+        [Parameter(Mandatory)][hashtable]$Message,
+        [ValidatePattern('^(?:[0-9a-f]{64})?$')][string]$SupersedeKey = ''
     )
     $root = Assert-ReportMailQueueDirectory $QueuePath $AssertTrustedDirectory
     $id = Get-ReportMailQueueId $TenantKey $DeduplicationKey
@@ -109,6 +110,7 @@ function Add-SmartM365ReportMailQueueItem {
             CreatedAtUtc = [datetimeoffset]::UtcNow.ToString('o'); NotBeforeUnixMs = $NotBeforeUtc.ToUnixTimeMilliseconds()
             Attempts = 0; PayloadHash = $payloadHash; PayloadBase64 = [Convert]::ToBase64String($payloadBytes)
         }
+        if ($SupersedeKey) { $record.SupersedeKey = $SupersedeKey }
         Write-ReportMailQueueRecord -Path $path -Record $record -Create
         return [pscustomobject]@{ Id = $id; Status = 'Pending'; Existing = $false }
     } finally { $guard.Dispose() }
@@ -172,6 +174,37 @@ function Invoke-SmartM365ReportMailQueueItem {
     } finally { $guard.Dispose() }
 }
 
+function Set-SmartM365ReportMailQueueItemSuperseded {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$QueuePath,
+        [Parameter(Mandatory)][scriptblock]$AssertTrustedDirectory,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{64}$')][string]$Id,
+        [Parameter(Mandatory)][string]$TenantKey,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{64}$')][string]$SupersededBy
+    )
+    $root = Assert-ReportMailQueueDirectory $QueuePath $AssertTrustedDirectory
+    $guard = Open-ReportMailQueueGuard (Join-Path $root ($Id + '.lock'))
+    try {
+        $null = Assert-ReportMailQueueDirectory $root $AssertTrustedDirectory
+        $path = Join-Path $root ($Id + '.json')
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Linked queue record is not accepted.' }
+        $record = Read-ReportMailQueueRecord -Path $path
+        if ($record.SchemaVersion -ne 1 -or $record.Id -cne $Id -or $record.TenantKey -cne $TenantKey -or $record.Status -notin @('Pending','Sending','Sent')) { throw 'Invalid queue record.' }
+        if ($record.Status -eq 'Sent') { return 'Sent' }
+        if ($record.Status -eq 'Sending') { return 'Uncertain' }
+        # Recorded as Sent for readers of earlier versions; the payload is no longer needed.
+        $record.Status = 'Sent'
+        $record.PayloadBase64 = ''
+        $record | Add-Member -NotePropertyName Superseded -NotePropertyValue $true -Force
+        $record | Add-Member -NotePropertyName SupersededBy -NotePropertyValue $SupersededBy -Force
+        $record | Add-Member -NotePropertyName SentAtUtc -NotePropertyValue ([datetimeoffset]::UtcNow.ToString('o')) -Force
+        Write-ReportMailQueueRecord -Path $path -Record $record
+        return 'Superseded'
+    } finally { $guard.Dispose() }
+}
+
 function Invoke-SmartM365ReportMailQueueBatch {
     [CmdletBinding()]
     param(
@@ -183,8 +216,26 @@ function Invoke-SmartM365ReportMailQueueBatch {
         [ValidateRange(1, 1000)][int]$MaximumItems = 50
     )
     $root = Assert-ReportMailQueueDirectory $QueuePath $AssertTrustedDirectory
-    $counts = [ordered]@{ Sent=0; Pending=0; Retry=0; Busy=0; Invalid=0; Uncertain=0 }
+    $counts = [ordered]@{ Sent=0; Pending=0; Retry=0; Busy=0; Invalid=0; Uncertain=0; Superseded=0 }
     $items = @(Get-ChildItem -LiteralPath $root -Filter '*.json' -File -ErrorAction Stop | Where-Object { $_.BaseName -cmatch '^[0-9a-f]{64}$' } | Sort-Object Name)
+    # Latest pending record per supersede key; older pending copies are not delivered.
+    $latest = @{}
+    foreach ($item in $items) {
+        try {
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+            $metadata = Read-ReportMailQueueRecord -Path $item.FullName
+            $keyProperty = $metadata.PSObject.Properties['SupersedeKey']
+            if (-not $keyProperty -or -not $keyProperty.Value -or $metadata.TenantKey -cne $TenantKey -or $metadata.Status -ne 'Pending' -or $metadata.Id -cne $item.BaseName) { continue }
+            # PowerShell 7 may already convert the ISO timestamp to DateTime; keep its full precision.
+            $created = $metadata.CreatedAtUtc
+            $createdUtc = if ($created -is [datetime]) { [datetimeoffset]$created.ToUniversalTime() } elseif ($created -is [datetimeoffset]) { $created.ToUniversalTime() } else { [datetimeoffset]::Parse([string]$created, [Globalization.CultureInfo]::InvariantCulture) }
+            $candidate = [pscustomobject]@{ Id = [string]$metadata.Id; CreatedAtUtc = $createdUtc }
+            $current = $latest[[string]$keyProperty.Value]
+            if ($null -eq $current -or $candidate.CreatedAtUtc -gt $current.CreatedAtUtc -or ($candidate.CreatedAtUtc -eq $current.CreatedAtUtc -and [string]::CompareOrdinal($candidate.Id, $current.Id) -gt 0)) {
+                $latest[[string]$keyProperty.Value] = $candidate
+            }
+        } catch { continue }
+    }
     $attempted = 0
     foreach ($item in $items) {
         if ($attempted -ge $MaximumItems) { break }
@@ -193,6 +244,11 @@ function Invoke-SmartM365ReportMailQueueBatch {
             $metadata = Read-ReportMailQueueRecord -Path $item.FullName
             if ($metadata.SchemaVersion -ne 1 -or $metadata.Id -cne $item.BaseName -or $metadata.Status -notin @('Pending','Sending','Sent')) { throw 'Invalid queue record.' }
             if ($metadata.TenantKey -cne $TenantKey -or $metadata.Status -eq 'Sent') { continue }
+            $keyProperty = $metadata.PSObject.Properties['SupersedeKey']
+            if ($metadata.Status -eq 'Pending' -and $keyProperty -and $keyProperty.Value -and $latest.ContainsKey([string]$keyProperty.Value) -and $latest[[string]$keyProperty.Value].Id -cne $item.BaseName) {
+                $counts[(Set-SmartM365ReportMailQueueItemSuperseded -QueuePath $root -AssertTrustedDirectory $AssertTrustedDirectory -Id $item.BaseName -TenantKey $TenantKey -SupersededBy $latest[[string]$keyProperty.Value].Id)]++
+                continue
+            }
             if ($metadata.NotBeforeUnixMs -isnot [long] -and $metadata.NotBeforeUnixMs -isnot [int]) { throw 'Invalid queue delivery timestamp.' }
             if ($Now.ToUnixTimeMilliseconds() -lt [long]$metadata.NotBeforeUnixMs) { $counts.Pending++; continue }
             $attempted++
@@ -205,7 +261,7 @@ function Invoke-SmartM365ReportMailQueueBatch {
     return [pscustomobject]$counts
 }
 
-Export-ModuleMember -Function Add-SmartM365ReportMailQueueItem, Invoke-SmartM365ReportMailQueueItem, Invoke-SmartM365ReportMailQueueBatch
+Export-ModuleMember -Function Add-SmartM365ReportMailQueueItem, Invoke-SmartM365ReportMailQueueItem, Invoke-SmartM365ReportMailQueueBatch, Set-SmartM365ReportMailQueueItemSuperseded
 
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor

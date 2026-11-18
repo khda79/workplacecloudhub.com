@@ -121,6 +121,10 @@ recovering such a record; Sending does not prove delivery. Batch readers allow a
 file replacement, preventing their reads from blocking another worker's state commit.
 Deploy the updated queue module and restart every resident using the shared queue.
 
+## Business-hours window (Core 1.0.129)
+
+Optional `Days` (English day names) and `NotAfter` (HH:mm, exclusive, or 24:00) turn `ReportMailSchedule` into a weekly window [NotBefore, NotAfter) in `TimeZone`. Outside it, recipient routing for SmartInventory callers is restricted to `Smart365Administrators` for every purpose (Report, Error, Maintenance, operational notices); an invalid window also restricts to administrators and logs a warning. A Report-class message is sent to administrators immediately and a copy marked `ExcludeAdministrators` is queued with a `SupersedeKey` (script, recipients, subject without digits). The resident dispatches the queue only while the window is open; for each key only the newest pending copy is sent and older ones are recorded as `Sent` with `Superseded`, so earlier queue readers stay compatible. A copy left with no non-administrator recipient (or under administrators-only routing) is closed without sending. Test: `Tests/Test-SmartM365MailDeliveryWindowOffline.ps1`.
+
 No exactly-once guarantee: transport-internal retries or an exception after remote
 acceptance can still repeat a message. A crash between enqueue and updating a
 collector's submission marker can also repeat submission. Persistent receipts and

@@ -38,7 +38,63 @@ function Get-SmartM365ReportMailNotBeforeUtc {
     return $scheduledUtc
 }
 
-Export-ModuleMember -Function Get-SmartM365ReportMailNotBeforeUtc
+function ConvertTo-SmartM365MailWindowUtc {
+    param([Parameter(Mandatory)][datetime]$LocalTime, [Parameter(Mandatory)][TimeZoneInfo]$Zone)
+    # Same rules as Get-SmartM365ReportMailNotBeforeUtc: a skipped wall-clock time
+    # moves to the first valid minute; a repeated one uses its later occurrence.
+    $scheduledLocal = [datetime]::SpecifyKind($LocalTime, [DateTimeKind]::Unspecified)
+    while ($Zone.IsInvalidTime($scheduledLocal)) { $scheduledLocal = $scheduledLocal.AddMinutes(1) }
+    if ($Zone.IsAmbiguousTime($scheduledLocal)) {
+        $offset = @($Zone.GetAmbiguousTimeOffsets($scheduledLocal) | Sort-Object | Select-Object -First 1)[0]
+        return ([datetimeoffset]::new($scheduledLocal, $offset)).ToUniversalTime()
+    }
+    return [datetimeoffset]::new([TimeZoneInfo]::ConvertTimeToUtc($scheduledLocal, $Zone))
+}
+
+function Get-SmartM365ReportMailWindowState {
+    <#
+    .SYNOPSIS
+        Evaluates a weekly business-hours window [NotBefore, NotAfter) on the listed local days.
+    .OUTPUTS
+        IsOpen and NextOpenUtc (equal to Now when the window is open).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][datetimeoffset]$Now,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string[]]$Days,
+        [Parameter(Mandatory)][ValidatePattern('^(?:[01][0-9]|2[0-3]):[0-5][0-9]$')][string]$NotBefore,
+        [Parameter(Mandatory)][ValidatePattern('^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9]|24:00)$')][string]$NotAfter,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$TimeZoneId
+    )
+    $daySet = [Collections.Generic.HashSet[DayOfWeek]]::new()
+    # Name matching only (no numeric values); works the same on Windows PowerShell 5.1.
+    $names = [Enum]::GetNames([DayOfWeek])
+    foreach ($day in $Days) {
+        $name = @($names | Where-Object { $_ -eq ([string]$day).Trim() })
+        if ($name.Count -ne 1 -or -not $daySet.Add([DayOfWeek]$name[0])) {
+            throw 'Mail window days must be unique English day names.'
+        }
+    }
+    $start = [timespan]::ParseExact($NotBefore, 'hh\:mm', [Globalization.CultureInfo]::InvariantCulture)
+    $end = if ($NotAfter -eq '24:00') { [timespan]::FromHours(24) } else { [timespan]::ParseExact($NotAfter, 'hh\:mm', [Globalization.CultureInfo]::InvariantCulture) }
+    if ($end -le $start) { throw 'Mail window NotAfter must be later than NotBefore.' }
+    $zone = [TimeZoneInfo]::FindSystemTimeZoneById($TimeZoneId)
+    $nowUtc = $Now.ToUniversalTime()
+    $localNow = [TimeZoneInfo]::ConvertTime($Now, $zone)
+    $time = $localNow.TimeOfDay
+    if ($daySet.Contains($localNow.DayOfWeek) -and $time -ge $start -and $time -lt $end) {
+        return [pscustomobject]@{ IsOpen = $true; NextOpenUtc = $nowUtc }
+    }
+    for ($offset = 0; $offset -le 7; $offset++) {
+        $date = $localNow.Date.AddDays($offset)
+        if (-not $daySet.Contains($date.DayOfWeek)) { continue }
+        $openUtc = ConvertTo-SmartM365MailWindowUtc -LocalTime $date.Add($start) -Zone $zone
+        if ($openUtc -gt $nowUtc) { return [pscustomobject]@{ IsOpen = $false; NextOpenUtc = $openUtc } }
+    }
+    throw 'Mail window next opening could not be calculated.'
+}
+
+Export-ModuleMember -Function Get-SmartM365ReportMailNotBeforeUtc, Get-SmartM365ReportMailWindowState
 
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor

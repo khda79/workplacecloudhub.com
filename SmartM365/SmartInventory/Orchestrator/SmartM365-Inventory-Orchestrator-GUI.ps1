@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.41
+1.6.42
 #>
 [CmdletBinding()]
 param(
@@ -69,7 +69,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 }
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.41'
+$script:AppVersion = '1.6.42'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -1455,6 +1455,8 @@ Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.JobStop.psm
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Insights.psm1') -Force -ErrorAction Stop
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Maintenance.psm1') -ErrorAction Stop
 . (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365-MailAdminRouting.ps1')
+. (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365-MailMaintenance.ps1')
+Import-Module -Name (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.Orchestrator.ReportMailSchedule.psm1') -Global -ErrorAction Stop
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Pipeline.psm1') -ErrorAction Stop
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.GuiWorker.psm1') -ErrorAction Stop
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.ConfigView.psm1') -Force -ErrorAction Stop
@@ -1917,6 +1919,25 @@ function Set-GuiMaintenanceBannerStyle {
     $banner.FontWeight = if ($Level -eq 'Normal') { [System.Windows.FontWeights]::Normal } else { [System.Windows.FontWeights]::SemiBold }
 }
 
+function Get-GuiMailDeliveryWindowText {
+    # Read-only view of ReportMailSchedule business hours; edited in the configuration assistant.
+    param([datetimeoffset]$Now = [datetimeoffset]::UtcNow)
+    try {
+        $window = Get-SmartM365MailDeliveryWindow -Config $script:EffectiveConfig
+        if (-not $window) { return 'Business hours: off' }
+        $order = @('Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday')
+        $days = @($order | Where-Object { $_ -in $window.Days })
+        $daysText = if (($days -join ',') -eq 'Monday,Tuesday,Wednesday,Thursday,Friday') { 'Mon-Fri' } elseif ($days.Count -eq 7) { 'every day' } else { ($days | ForEach-Object { $_.Substring(0,3) }) -join ',' }
+        $state = Get-SmartM365MailDeliveryWindowState -Window $window -Now $Now
+        $label = 'Business hours {0} {1}-{2}' -f $daysText, $window.NotBefore, $window.NotAfter
+        if ($state.IsOpen) { return "${label}: OPEN" }
+        $opening = [TimeZoneInfo]::ConvertTime($state.NextOpenUtc, [TimeZoneInfo]::FindSystemTimeZoneById($window.TimeZone))
+        return ('{0}: CLOSED, administrators only until {1}' -f $label, $opening.ToString('ddd HH:mm', [Globalization.CultureInfo]::InvariantCulture))
+    } catch {
+        return 'Business hours: INVALID, administrators only'
+    }
+}
+
 function Refresh-MaintenanceView {
     param($Operations = $null)
     try {
@@ -1928,6 +1949,7 @@ function Refresh-MaintenanceView {
         $validAddresses=$true
         try {$null=Resolve-SmartM365AdminMailRoute -To 'validation@example.invalid' -Smart365Administrators $addresses -AdministratorsOnly $true}catch{$validAddresses=$false}
         if(-not $validAddresses){$script:Controls.AdminMailStatusText.Text+=' | configure Smart365Administrators: mail blocked'}
+        $script:Controls.AdminMailStatusText.Text+=' | ' + (Get-GuiMailDeliveryWindowText)
         $script:Controls.AdminMailToggleButton.IsEnabled=($validAddresses -or $script:AdminMailControl.AdministratorsOnly)
     } catch {
         $script:AdminMailControl=$null;$script:Controls.AdminMailStatusText.Text='Mail routing: CONTROL UNAVAILABLE';$script:Controls.AdminMailToggleButton.IsEnabled=$false

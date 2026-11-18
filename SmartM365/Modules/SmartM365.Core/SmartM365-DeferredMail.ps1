@@ -1,5 +1,5 @@
 <# Shared deferred report delivery. Disabled unless explicitly configured. #>
-# Version: 1.0.2
+# Version: 1.1.0
 function Get-SmartM365MailUtcNow { return [datetimeoffset]::UtcNow }
 function Get-SmartM365DeferredMailSettings {
     $config = Get-SmartM365EffectiveModuleGlobalConfig
@@ -64,8 +64,23 @@ function Add-SmartM365DeferredReport {
     if (-not $cfg) { return $false }
     Initialize-SmartM365DeferredMailRuntime
     $now = Get-SmartM365MailUtcNow
-    $due = Get-SmartM365ReportMailNotBeforeUtc -Now $now -NotBefore $cfg.Policy.NotBefore -TimeZoneId $cfg.Policy.TimeZone
-    if ($due -le $now) { return $false }
+    $supersedeKey = ''
+    $window = $null
+    try { $window = Get-SmartM365MailDeliveryWindow }
+    catch { WriteLog -Message ('Mail delivery window is invalid; report is sent to administrators only: {0}' -f $_.Exception.Message) -Level WARNING; return $false }
+    if ($window) {
+        # Business hours: administrators receive the report now (routing restricts the
+        # immediate send to them); the other recipients get a queued copy at the next opening.
+        try { $state = Get-SmartM365MailDeliveryWindowState -Window $window -Now $now }
+        catch { WriteLog -Message ('Mail delivery window is invalid; report is sent to administrators only: {0}' -f $_.Exception.Message) -Level WARNING; return $false }
+        if ($state.IsOpen) { return $false }
+        $due = $state.NextOpenUtc
+        $Message.ExcludeAdministrators = $true
+        $supersedeKey = Get-SmartM365DeferredReportSupersedeKey -Message $Message
+    } else {
+        $due = Get-SmartM365ReportMailNotBeforeUtc -Now $now -NotBefore $cfg.Policy.NotBefore -TimeZoneId $cfg.Policy.TimeZone
+        if ($due -le $now) { return $false }
+    }
     $files = @()
     foreach ($path in $Attachments) {
         $bytes = [IO.File]::ReadAllBytes($path)
@@ -75,10 +90,29 @@ function Add-SmartM365DeferredReport {
     $Message.MailPurpose = 'Report'
     $trusted = @($cfg.Policy.TrustedSids)
     $verify = { param($path) Test-SmartM365DeferredMailDirectory -Path $path -TrustedSids $trusted }
-    $item = Add-SmartM365ReportMailQueueItem -QueuePath $cfg.Path -AssertTrustedDirectory $verify -TenantKey $cfg.Profile -DeduplicationKey ([guid]::NewGuid().ToString('N')) -NotBeforeUtc $due -Message $Message
+    $queueParameters = @{ QueuePath=$cfg.Path; AssertTrustedDirectory=$verify; TenantKey=$cfg.Profile; DeduplicationKey=([guid]::NewGuid().ToString('N')); NotBeforeUtc=$due; Message=$Message }
+    if ($supersedeKey) { $queueParameters.SupersedeKey = $supersedeKey }
+    $item = Add-SmartM365ReportMailQueueItem @queueParameters
     $global:SmartM365LastMailDelivery = 'Queued'
+    if ($window) {
+        WriteLog -Message ('Outside the mail delivery window: administrators receive the report now; copy for the other recipients queued: {0}; eligible {1}' -f $item.Id,$due.ToString('o')) -Level INFO
+        return $false
+    }
     WriteLog -Message ('Report mail queued: {0}; eligible {1}' -f $item.Id,$due.ToString('o')) -Level INFO
     return $true
+}
+
+function Get-SmartM365DeferredReportSupersedeKey {
+    # Only the latest queued copy per collector script, recipients and subject (digits
+    # ignored, so dates do not matter) is delivered when the window opens.
+    param([Parameter(Mandatory)][hashtable]$Message)
+    $frames = @(Get-PSCallStack | Where-Object { $_.ScriptName -match '[\\/]SmartInventory[\\/]' })
+    $script = if ($frames.Count) { [IO.Path]::GetFileName($frames[-1].ScriptName).ToLowerInvariant() } else { '' }
+    $recipients = @(([string]$Message.To + ';' + [string]$Message.Cc) -split '[;,]' | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ } | Sort-Object -Unique) -join ';'
+    $subject = ([string]$Message.Subject -replace '\d', '').Trim().ToLowerInvariant()
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($script + '|' + $recipients + '|' + $subject)))).Replace('-', '').ToLowerInvariant() }
+    finally { $sha.Dispose() }
 }
 
 function Invoke-SmartM365DeferredMail {
@@ -86,7 +120,10 @@ function Invoke-SmartM365DeferredMail {
     if (-not $cfg) { return }
     Initialize-SmartM365DeferredMailRuntime
     $now = Get-SmartM365MailUtcNow
-    if ((Get-SmartM365ReportMailNotBeforeUtc -Now $now -NotBefore $cfg.Policy.NotBefore -TimeZoneId $cfg.Policy.TimeZone) -gt $now) { return }
+    $window = Get-SmartM365MailDeliveryWindow
+    if ($window) {
+        if (-not (Get-SmartM365MailDeliveryWindowState -Window $window -Now $now).IsOpen) { return }
+    } elseif ((Get-SmartM365ReportMailNotBeforeUtc -Now $now -NotBefore $cfg.Policy.NotBefore -TimeZoneId $cfg.Policy.TimeZone) -gt $now) { return }
     $trusted = @($cfg.Policy.TrustedSids)
     $verify = { param($path) Test-SmartM365DeferredMailDirectory -Path $path -TrustedSids $trusted }
     $send = {
@@ -108,9 +145,20 @@ function Invoke-SmartM365DeferredMail {
                 [IO.File]::WriteAllBytes($target,[Convert]::FromBase64String($file.Content)); $paths += $target
             }
             $args = @{ From=$message.From; To=$message.To; Cc=$message.Cc; Subject=$message.Subject; BodyHtml=$message.BodyHtml; Attachments=$paths; AllowAttachments=$true; MailPurpose='Report'; DeliveryClass='Operational'; SendMailMode=$message.SendMailMode; SmtpServer=$message.SmtpServer; SmtpPort=[int]$message.SmtpPort }
+            $excludeProperty = $message.PSObject.Properties['ExcludeAdministrators']
+            if ($excludeProperty -and $excludeProperty.Value -eq $true) {
+                # Administrators already received this report when it was produced.
+                $global:SmartM365MailExcludeAdministrators = $true
+                $route = Resolve-SmartM365UnifiedMailRoute -To ([string]$message.To) -Cc ([string]$message.Cc) -MailPurpose Report
+                if ([string]::IsNullOrWhiteSpace($route.To)) {
+                    WriteLog -Message ('Queued report has no recipient besides administrators; nothing more to send: {0}' -f $message.Subject) -Level INFO
+                    return $true
+                }
+            }
             SendEmailHtmlReport @args
             return $true
         } finally {
+            Remove-Variable -Name SmartM365MailExcludeAdministrators -Scope Global -ErrorAction SilentlyContinue
             $resolved = [IO.Path]::GetFullPath($temp)
             if ((Split-Path -Leaf $resolved) -notmatch '^SmartM365-DeferredMail-[a-f0-9]{32}$' -or (Split-Path -Parent $resolved).TrimEnd('\\') -ne ([IO.Path]::GetTempPath()).TrimEnd('\\')) { throw 'Unexpected mail staging path.' }
             Remove-Item -LiteralPath $resolved -Recurse -Force

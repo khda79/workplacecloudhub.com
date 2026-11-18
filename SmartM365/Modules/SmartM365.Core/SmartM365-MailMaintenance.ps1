@@ -2,7 +2,7 @@
 .SYNOPSIS
 Shared mail admission policy, dot-sourced by both Core editions. No I/O on load.
 .VERSION
-1.0.2
+1.1.0
 #>
 function Get-SmartM365MaintenanceMailRoot {
     param([Parameter(Mandatory)]$Config)
@@ -76,8 +76,57 @@ function Add-SmartM365AdminRecipients {
     param($Route,$Config,$Control)
     $property=$Config.PSObject.Properties['Smart365Administrators']
     $administrators=if($property){[string](Resolve-SmartM365ConfigValue $property.Value)}else{''}
-    $result=Resolve-SmartM365AdminMailRoute -To $Route.To -Cc $Route.Cc -Smart365Administrators $administrators -AdministratorsOnly $Control.AdministratorsOnly
+    $result=Resolve-SmartM365AdminMailRoute -To $Route.To -Cc $Route.Cc -Smart365Administrators $administrators -AdministratorsOnly $Control.AdministratorsOnly -ExcludeAdministrators (Test-SmartM365MailExcludeAdministrators)
     return [pscustomobject]@{To=$result.To;Cc=$result.Cc;MailPurpose=$Route.MailPurpose;Restricted=($Route.Restricted -or $Control.AdministratorsOnly);AdministratorsOnly=[bool]$Control.AdministratorsOnly}
+}
+
+function Test-SmartM365MailInventoryCaller {
+    # The delivery window applies to SmartInventory collectors and the orchestrator only;
+    # other SmartM365 consumers (user communication campaigns, tools) keep their behavior.
+    return [bool]@(Get-PSCallStack | Where-Object { $_.ScriptName -match '[\\/]SmartInventory[\\/]' }).Count
+}
+
+function Get-SmartM365MailDeliveryWindow {
+    # Business-hours mode: ReportMailSchedule enabled with Days and/or NotAfter.
+    # Without them the legacy daily NotBefore cutoff keeps its previous behavior.
+    param($Config = (Get-SmartM365EffectiveModuleGlobalConfig))
+    $property = $Config.PSObject.Properties['ReportMailSchedule']
+    if (-not $property -or -not $property.Value -or $property.Value -is [string]) { return $null }
+    $settings = $property.Value
+    $read = { param($name) if ($settings -is [Collections.IDictionary]) { if ($settings.Contains($name)) { ,$settings[$name] } } else { $p = $settings.PSObject.Properties[$name]; if ($p) { ,$p.Value } } }
+    $enabled = & $read 'Enabled'
+    if ($enabled -isnot [bool] -or -not $enabled) { return $null }
+    $days = & $read 'Days'
+    $notAfter = & $read 'NotAfter'
+    if ($null -eq $days -and $null -eq $notAfter) { return $null }
+    if ($null -eq $days) { $days = @('Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday') }
+    if ($null -eq $notAfter) { $notAfter = '24:00' }
+    return [pscustomobject]@{ Days = @($days | ForEach-Object { [string]$_ }); NotBefore = [string](& $read 'NotBefore'); NotAfter = [string]$notAfter; TimeZone = [string](& $read 'TimeZone') }
+}
+
+function Get-SmartM365MailDeliveryWindowState {
+    param([Parameter(Mandatory)]$Window,[datetimeoffset]$Now = [datetimeoffset]::UtcNow)
+    if (-not (Get-Command Get-SmartM365ReportMailWindowState -ErrorAction SilentlyContinue)) {
+        Import-Module (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.ReportMailSchedule.psm1') -Global -Force -ErrorAction Stop
+    }
+    return Get-SmartM365ReportMailWindowState -Now $Now -Days $Window.Days -NotBefore $Window.NotBefore -NotAfter $Window.NotAfter -TimeZoneId $Window.TimeZone
+}
+
+function Test-SmartM365MailDeliveryWindowClosed {
+    param($Config)
+    if (Test-SmartM365MailExcludeAdministrators) { return $false }
+    if (-not (Test-SmartM365MailInventoryCaller)) { return $false }
+    try {
+        $window = Get-SmartM365MailDeliveryWindow -Config $Config
+        if (-not $window) { return $false }
+        $now = if (Get-Command Get-SmartM365MailUtcNow -ErrorAction SilentlyContinue) { Get-SmartM365MailUtcNow } else { [datetimeoffset]::UtcNow }
+        return -not (Get-SmartM365MailDeliveryWindowState -Window $window -Now $now).IsOpen
+    } catch {
+        # Never block administrators because of an invalid window: fall back to them only.
+        $message = 'Mail delivery window is invalid ({0}); mail is restricted to Smart365Administrators.' -f $_.Exception.Message
+        if (Get-Command WriteLog -ErrorAction SilentlyContinue) { WriteLog -Message $message -Level WARNING } else { Write-Warning $message }
+        return $true
+    }
 }
 
 function Resolve-SmartM365MaintenanceMailRecipientRoute {
@@ -87,6 +136,11 @@ function Resolve-SmartM365MaintenanceMailRecipientRoute {
     $adminControl = Get-SmartM365AdminMailControl -SharedDataFolderPath (Get-SmartM365MaintenanceMailRoot $config)
     if ($adminControl.AdministratorsOnly) {
         return Add-SmartM365AdminRecipients -Route ([pscustomobject]@{To=$To;Cc=$Cc;MailPurpose=$MailPurpose;Restricted=$true}) -Config $config -Control $adminControl
+    }
+    if (Test-SmartM365MailDeliveryWindowClosed -Config $config) {
+        # Outside business hours only administrators receive mail; deferred reports
+        # reach the other recipients through the queue when the window opens.
+        return Add-SmartM365AdminRecipients -Route ([pscustomobject]@{To=$To;Cc=$Cc;MailPurpose=$MailPurpose;Restricted=$true}) -Config $config -Control ([pscustomobject]@{AdministratorsOnly=$true})
     }
     $state = Get-SmartM365MaintenanceMailState -SharedDataFolderPath (Get-SmartM365MaintenanceMailRoot $config)
     if ($MailPurpose -eq 'Auto') {
@@ -147,7 +201,7 @@ function Resolve-SmartM365UnifiedMailRoute {
         $originalTo=@($To -split '[;,]' | ForEach-Object {$_.Trim().ToLowerInvariant()} | Where-Object {$_})
         $visibleTo=@($base.To -split '[;,]' | Where-Object {$_.Trim().ToLowerInvariant() -notin $hiddenSet -or $_.Trim().ToLowerInvariant() -in $originalTo}) -join ';'
     }
-    $final=Resolve-SmartM365AdminMailRoute -To $visibleTo -Cc $base.Cc -Bcc $hidden -Smart365Administrators $admin -AdministratorsOnly $false
+    $final=Resolve-SmartM365AdminMailRoute -To $visibleTo -Cc $base.Cc -Bcc $hidden -Smart365Administrators $admin -AdministratorsOnly $false -ExcludeAdministrators (Test-SmartM365MailExcludeAdministrators)
     $onlyProperty=$base.PSObject.Properties['AdministratorsOnly']
     return [pscustomobject]@{To=$final.To;Cc=$final.Cc;Bcc=$final.Bcc;AdministratorsOnly=($null -ne $onlyProperty -and [bool]$onlyProperty.Value)}
 }

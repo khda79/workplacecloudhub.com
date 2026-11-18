@@ -49,6 +49,21 @@ function Assert-SiReportMailSchedule {
         try {$null=[Security.Principal.SecurityIdentifier]::new($sid)} catch {throw 'Trusted SIDs must be valid and unique.'}
     }
     if ($Schedule.Enabled -and -not $sids.Count) {throw 'An enabled report mail schedule requires trusted SIDs.'}
+    # Optional business-hours window: Days and/or NotAfter (NotBefore is the opening time).
+    $daysProperty=$Schedule.PSObject.Properties['Days']
+    if ($daysProperty) {
+        $days=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        if ($daysProperty.Value -isnot [array] -or -not @($daysProperty.Value).Count) {throw 'Report mail window days must be a nonempty list of English day names.'}
+        foreach ($day in $daysProperty.Value) {
+            if ($day -isnot [string] -or $day -notin [Enum]::GetNames([DayOfWeek]) -or -not $days.Add($day)) {throw 'Report mail window days must be unique English day names (Monday to Sunday).'}
+        }
+    }
+    $notAfterProperty=$Schedule.PSObject.Properties['NotAfter']
+    if ($notAfterProperty) {
+        if ($notAfterProperty.Value -isnot [string] -or $notAfterProperty.Value -notmatch '^(?:([01]\d|2[0-3]):[0-5]\d|24:00)$') {throw 'Report mail window NotAfter must be HH:mm or 24:00.'}
+        $end=if ($notAfterProperty.Value -eq '24:00') {[timespan]::FromHours(24)} else {[timespan]::ParseExact($notAfterProperty.Value,'hh\:mm',[Globalization.CultureInfo]::InvariantCulture)}
+        if ($end -le [timespan]::ParseExact($Schedule.NotBefore,'hh\:mm',[Globalization.CultureInfo]::InvariantCulture)) {throw 'Report mail window NotAfter must be later than NotBefore.'}
+    }
 }
 function Get-SiTenantTemplateDelta {
     param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)]$Document,[string[]]$RequiredFields=@())
