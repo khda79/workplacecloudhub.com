@@ -834,8 +834,8 @@
     },
 
     @{
-        Launcher = 'Launchers\Jobs\Start-Exchange2016-FreeBusy-Check.cmd'
-        Entry = 'Exchange2016-FreeBusy-Check'
+        Launcher = 'Launchers\Jobs\Start-ExchangeOnPrem-FreeBusy-Check.cmd'
+        Entry = 'ExchangeOnPrem-FreeBusy-Check'
         Action = 'Now'
         Runtime = 'WindowsPowerShell'
         Script = 'ExchangeInventory\Hybrid\FreeBusy\SmartM365-Exchange-Hybrid-FreeBusy-Inventory.ps1'
@@ -849,8 +849,8 @@
         RequiresConfirmation = $False
     },
     @{
-        Launcher = 'Launchers\Jobs\Start-Exchange2016-Infrastructure-Inventory.cmd'
-        Entry = 'Exchange2016-Infrastructure-Inventory'
+        Launcher = 'Launchers\Jobs\Start-ExchangeOnPrem-Infrastructure-Inventory.cmd'
+        Entry = 'ExchangeOnPrem-Infrastructure-Inventory'
         Action = 'Now'
         Runtime = 'WindowsPowerShell'
         Script = 'ExchangeInventory\OnPremises\ServersAndStorage\SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1'
@@ -864,8 +864,8 @@
         RequiresConfirmation = $False
     },
     @{
-        Launcher = 'Launchers\Jobs\Start-Exchange2016-Local-Mailboxes-Inventory.cmd'
-        Entry = 'Exchange2016-Local-Mailboxes-Inventory'
+        Launcher = 'Launchers\Jobs\Start-ExchangeOnPrem-Local-Mailboxes-Inventory.cmd'
+        Entry = 'ExchangeOnPrem-Local-Mailboxes-Inventory'
         Action = 'Now'
         Runtime = 'WindowsPowerShell'
         Script = 'ExchangeInventory\OnPremises\Mailboxes\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1'
@@ -879,8 +879,8 @@
         RequiresConfirmation = $False
     },
     @{
-        Launcher = 'Launchers\Jobs\Start-Exchange2016-Mailboxes-CalendarPermissions.cmd'
-        Entry = 'Exchange2016-Mailboxes-CalendarPermissions'
+        Launcher = 'Launchers\Jobs\Start-ExchangeOnPrem-Mailboxes-CalendarPermissions.cmd'
+        Entry = 'ExchangeOnPrem-Mailboxes-CalendarPermissions'
         Action = 'Now'
         Runtime = 'WindowsPowerShell'
         Script = 'ExchangeInventory\OnPremises\CalendarPermissions\SmartM365-Exchange-MailboxCalendarPermissions-Inventory.ps1'
@@ -894,8 +894,8 @@
         RequiresConfirmation = $False
     },
     @{
-        Launcher = 'Launchers\Jobs\Start-Exchange2016-ProxyAddresses-Check.cmd'
-        Entry = 'Exchange2016-ProxyAddresses-Check'
+        Launcher = 'Launchers\Jobs\Start-ExchangeOnPrem-ProxyAddresses-Check.cmd'
+        Entry = 'ExchangeOnPrem-ProxyAddresses-Check'
         Action = 'Now'
         Runtime = 'WindowsPowerShell'
         Script = 'ExchangeInventory\OnPremises\ProxyAddresses\SmartM365-Check-ProxyAddresses-Exchange.ps1'
@@ -1631,7 +1631,7 @@
     },
     @{
         Launcher = 'Launchers\OnPremises\Start-SmartM365-Check-ProxyAddresses-Exchange-ReadOnly.cmd'
-        Entry = 'Exchange2016-ProxyAddresses-Check'
+        Entry = 'ExchangeOnPrem-ProxyAddresses-Check'
         Action = 'Now'
         Runtime = 'WindowsPowerShell'
         Script = 'ExchangeInventory\OnPremises\ProxyAddresses\SmartM365-Check-ProxyAddresses-Exchange.ps1'
@@ -1646,7 +1646,7 @@
     },
     @{
         Launcher = 'Launchers\OnPremises\Start-SmartM365-Check-ProxyAddresses-Exchange-Write.cmd'
-        Entry = 'Exchange2016-ProxyAddresses-Write'
+        Entry = 'ExchangeOnPrem-ProxyAddresses-Write'
         Action = 'Now'
         Runtime = 'WindowsPowerShell'
         Script = 'ExchangeInventory\OnPremises\ProxyAddresses\SmartM365-Check-ProxyAddresses-Exchange.ps1'
@@ -1676,7 +1676,7 @@
     },
     @{
         Launcher = 'Launchers\OnPremises\Start-SmartM365-Exchange-Hybrid-FreeBusy-Inventory.cmd'
-        Entry = 'Exchange2016-FreeBusy-Check'
+        Entry = 'ExchangeOnPrem-FreeBusy-Check'
         Action = 'Now'
         Runtime = 'WindowsPowerShell'
         Script = 'ExchangeInventory\Hybrid\FreeBusy\SmartM365-Exchange-Hybrid-FreeBusy-Inventory.ps1'
@@ -1691,7 +1691,7 @@
     },
     @{
         Launcher = 'Launchers\OnPremises\Start-SmartM365-Exchange-Local-MailboxCalendarPermissions-Inventory.cmd'
-        Entry = 'Exchange2016-Mailboxes-CalendarPermissions'
+        Entry = 'ExchangeOnPrem-Mailboxes-CalendarPermissions'
         Action = 'Now'
         Runtime = 'WindowsPowerShell'
         Script = 'ExchangeInventory\OnPremises\CalendarPermissions\SmartM365-Exchange-MailboxCalendarPermissions-Inventory.ps1'
@@ -1706,7 +1706,7 @@
     },
     @{
         Launcher = 'Launchers\OnPremises\Start-SmartM365-Exchange-Local-Mailboxes-Inventory-OnlyADPermissions.cmd'
-        Entry = 'Exchange2016-Local-Mailboxes-OnlyADPermissions'
+        Entry = 'ExchangeOnPrem-Local-Mailboxes-OnlyADPermissions'
         Action = 'Now'
         Runtime = 'WindowsPowerShell'
         Script = 'ExchangeInventory\OnPremises\Mailboxes\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1'
@@ -1721,7 +1721,7 @@
     },
     @{
         Launcher = 'Launchers\OnPremises\Start-SmartM365-Exchange-Local-Mailboxes-Inventory.cmd'
-        Entry = 'Exchange2016-Local-Mailboxes-Inventory-MailboxesOnly'
+        Entry = 'ExchangeOnPrem-Local-Mailboxes-Inventory-MailboxesOnly'
         Action = 'Now'
         Runtime = 'WindowsPowerShell'
         Script = 'ExchangeInventory\OnPremises\Mailboxes\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1'
@@ -1736,7 +1736,7 @@
     },
     @{
         Launcher = 'Launchers\OnPremises\Start-SmartM365-Exchange-Local-Mailboxes-InventoryWithADPermissions.cmd'
-        Entry = 'Exchange2016-Local-Mailboxes-Inventory'
+        Entry = 'ExchangeOnPrem-Local-Mailboxes-Inventory'
         Action = 'Now'
         Runtime = 'WindowsPowerShell'
         Script = 'ExchangeInventory\OnPremises\Mailboxes\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1'
@@ -1751,7 +1751,7 @@
     },
     @{
         Launcher = 'Launchers\OnPremises\Start-SmartM365-Exchange-MailboxCalendarPermissions-Inventory.cmd'
-        Entry = 'Exchange2016-Mailboxes-CalendarPermissions'
+        Entry = 'ExchangeOnPrem-Mailboxes-CalendarPermissions'
         Action = 'Now'
         Runtime = 'WindowsPowerShell'
         Script = 'ExchangeInventory\OnPremises\CalendarPermissions\SmartM365-Exchange-MailboxCalendarPermissions-Inventory.ps1'
@@ -1766,7 +1766,7 @@
     },
     @{
         Launcher = 'Launchers\OnPremises\Start-SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.cmd'
-        Entry = 'Exchange2016-Infrastructure-Inventory-Basic'
+        Entry = 'ExchangeOnPrem-Infrastructure-Inventory-Basic'
         Action = 'Now'
         Runtime = 'WindowsPowerShell'
         Script = 'ExchangeInventory\OnPremises\ServersAndStorage\SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1'
@@ -1946,12 +1946,12 @@
     },
 
     @{
-        Launcher = 'LaunchersByOrchestrator\Request-Exchange2016-FreeBusy-Check.cmd'
-        Entry = 'Exchange2016-FreeBusy-Check'
+        Launcher = 'LaunchersByOrchestrator\Request-ExchangeOnPrem-FreeBusy-Check.cmd'
+        Entry = 'ExchangeOnPrem-FreeBusy-Check'
         Action = 'Request'
         Runtime = 'PowerShell7'
         Script = 'Orchestrator\SmartM365-Inventory-Pipeline.ps1'
-        Arguments = @('-Job', 'Exchange2016-FreeBusy-Check', '-Collect')
+        Arguments = @('-Job', 'ExchangeOnPrem-FreeBusy-Check', '-Collect')
         Tenant = 'prod'
         TenantFollowsOrchestrator = $False
         ForwardsExtraArguments = $True
@@ -1961,12 +1961,12 @@
         RequiresConfirmation = $False
     },
     @{
-        Launcher = 'LaunchersByOrchestrator\Request-Exchange2016-Infrastructure-Inventory.cmd'
-        Entry = 'Exchange2016-Infrastructure-Inventory'
+        Launcher = 'LaunchersByOrchestrator\Request-ExchangeOnPrem-Infrastructure-Inventory.cmd'
+        Entry = 'ExchangeOnPrem-Infrastructure-Inventory'
         Action = 'Request'
         Runtime = 'PowerShell7'
         Script = 'Orchestrator\SmartM365-Inventory-Pipeline.ps1'
-        Arguments = @('-Job', 'Exchange2016-Infrastructure-Inventory', '-Collect')
+        Arguments = @('-Job', 'ExchangeOnPrem-Infrastructure-Inventory', '-Collect')
         Tenant = 'prod'
         TenantFollowsOrchestrator = $False
         ForwardsExtraArguments = $True
@@ -1976,12 +1976,12 @@
         RequiresConfirmation = $False
     },
     @{
-        Launcher = 'LaunchersByOrchestrator\Request-Exchange2016-Local-Mailboxes-Inventory.cmd'
-        Entry = 'Exchange2016-Local-Mailboxes-Inventory'
+        Launcher = 'LaunchersByOrchestrator\Request-ExchangeOnPrem-Local-Mailboxes-Inventory.cmd'
+        Entry = 'ExchangeOnPrem-Local-Mailboxes-Inventory'
         Action = 'Request'
         Runtime = 'PowerShell7'
         Script = 'Orchestrator\SmartM365-Inventory-Pipeline.ps1'
-        Arguments = @('-Job', 'Exchange2016-Local-Mailboxes-Inventory', '-Collect')
+        Arguments = @('-Job', 'ExchangeOnPrem-Local-Mailboxes-Inventory', '-Collect')
         Tenant = 'prod'
         TenantFollowsOrchestrator = $False
         ForwardsExtraArguments = $True
@@ -1991,12 +1991,12 @@
         RequiresConfirmation = $False
     },
     @{
-        Launcher = 'LaunchersByOrchestrator\Request-Exchange2016-Mailboxes-CalendarPermissions.cmd'
-        Entry = 'Exchange2016-Mailboxes-CalendarPermissions'
+        Launcher = 'LaunchersByOrchestrator\Request-ExchangeOnPrem-Mailboxes-CalendarPermissions.cmd'
+        Entry = 'ExchangeOnPrem-Mailboxes-CalendarPermissions'
         Action = 'Request'
         Runtime = 'PowerShell7'
         Script = 'Orchestrator\SmartM365-Inventory-Pipeline.ps1'
-        Arguments = @('-Job', 'Exchange2016-Mailboxes-CalendarPermissions', '-Collect')
+        Arguments = @('-Job', 'ExchangeOnPrem-Mailboxes-CalendarPermissions', '-Collect')
         Tenant = 'prod'
         TenantFollowsOrchestrator = $False
         ForwardsExtraArguments = $True
@@ -2006,12 +2006,12 @@
         RequiresConfirmation = $False
     },
     @{
-        Launcher = 'LaunchersByOrchestrator\Request-Exchange2016-ProxyAddresses-Check.cmd'
-        Entry = 'Exchange2016-ProxyAddresses-Check'
+        Launcher = 'LaunchersByOrchestrator\Request-ExchangeOnPrem-ProxyAddresses-Check.cmd'
+        Entry = 'ExchangeOnPrem-ProxyAddresses-Check'
         Action = 'Request'
         Runtime = 'PowerShell7'
         Script = 'Orchestrator\SmartM365-Inventory-Pipeline.ps1'
-        Arguments = @('-Job', 'Exchange2016-ProxyAddresses-Check', '-Collect')
+        Arguments = @('-Job', 'ExchangeOnPrem-ProxyAddresses-Check', '-Collect')
         Tenant = 'prod'
         TenantFollowsOrchestrator = $False
         ForwardsExtraArguments = $True

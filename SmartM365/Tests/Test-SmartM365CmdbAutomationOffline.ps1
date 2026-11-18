@@ -122,7 +122,7 @@ Assert-True (Test-SmartM365OrchestratorConfigurationConsistency -JobsDocument $o
 Import-Module (Join-Path $smartRoot 'SmartInventory/Orchestrator/SmartM365.Orchestrator.Pipeline.psm1') -Force
 $selection=Get-SmartM365OrchestratorPipelineSelection -JobsDocument $valid -JobName 'CmdbEvidence-Prepare' -IncludeDependencies
 # 19 jobs: the mailbox inventory now also brings its ProxyAddresses check.
-Assert-True ($selection.SelectedJobs.Count -eq 19 -and @($selection.SelectedJobs | Where-Object Name -eq 'Exchange2016-ProxyAddresses-Check').Count -eq 1) 'Native producer omitted from dependency selection.'
+Assert-True ($selection.SelectedJobs.Count -eq 19 -and @($selection.SelectedJobs | Where-Object Name -eq 'ExchangeOnPrem-ProxyAddresses-Check').Count -eq 1) 'Native producer omitted from dependency selection.'
 $contract=Get-Content (Join-Path $preparedRoot 'cmdb-prepared-contract.json.txt') -Raw | ConvertFrom-Json
 Assert-True ($contract.maxAgeHours -eq 48 -and $contract.freshnessGroups[0].maxAgeHours -eq 240 -and $contract.freshnessGroups[0].warningAgeHours -eq 168) 'Freshness policy changed.'
 $activation=Get-Content (Join-Path $preparedRoot 'SmartM365-CmdbEvidence-Orchestrator.ps1') -Raw

@@ -41,7 +41,7 @@ emptied; right before the launch, every code file of the cache must be byte-iden
 Compatible with Windows PowerShell 5.1 and PowerShell 7.
 
 .VERSION
-1.6.2
+1.6.3
 #>
 Set-StrictMode -Version 2.0
 
@@ -140,6 +140,7 @@ function Get-SmartM365InventoryCatalog {
         TemplatePath = $roots.TemplatePath
         OverlayPath = $OverlayPath
         Entries = $entries.ToArray()
+        RenamedJobs = (Get-SmartM365InventoryProperty -Object $template -Name 'RenamedJobs' -Default $null)
     }
 }
 
@@ -147,6 +148,13 @@ function Find-SmartM365InventoryCatalogEntry {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Catalog, [Parameter(Mandatory)][string]$Name)
     $match = @($Catalog.Entries | Where-Object { $_.Name -ieq $Name })
+    # A former name (template RenamedJobs) still resolves to the renamed entry.
+    # @() around the whole if: Windows PowerShell 5.1 turns an empty branch result into $null.
+    $renamed = @(if ($match.Count -eq 0 -and $Catalog.PSObject.Properties['RenamedJobs'] -and $null -ne $Catalog.RenamedJobs) { $Catalog.RenamedJobs.PSObject.Properties | Where-Object { $_.Name -ieq $Name } })
+    if ($renamed.Count -gt 0) {
+        $match = @($Catalog.Entries | Where-Object { $_.Name -ieq [string]$renamed[0].Value })
+        if ($match.Count -gt 0) { Write-Warning ("'{0}' was renamed '{1}'; use the new name." -f $Name, $match[0].Name) }
+    }
     if ($match.Count -eq 0) { throw "Unknown job or launch '$Name'. Use -List to show the catalog." }
     return $match[0]
 }
@@ -960,7 +968,7 @@ function Initialize-SmartM365InventoryLaunch {
 
 # Menu domains of SmartInventory.cmd, in display order, from the catalog Group values.
 $script:MenuDomains = [ordered]@{
-    AD = 'Active Directory'; Exchange = 'Exchange Online'; ExchangeOnline = 'Exchange Online'; Exchange2016 = 'Exchange 2016 (on-premises)'
+    AD = 'Active Directory'; Exchange = 'Exchange Online'; ExchangeOnline = 'Exchange Online'; ExchangeOnPrem = 'Exchange (on-premises)'; Exchange2016 = 'Exchange (on-premises)'
     Intune = 'Intune'; M365 = 'Microsoft 365'; SharePointOnPrem = 'SharePoint (on-premises)'; PreparedEvidence = 'Workplace Evidence'
     FinOps = 'SmartFinOps'; Orchestrator = 'Orchestrator'
 }

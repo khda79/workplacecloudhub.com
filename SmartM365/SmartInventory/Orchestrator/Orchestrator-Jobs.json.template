@@ -241,7 +241,7 @@
       "EstimatedDurationMinutes": 90
     },
     {
-      "Name": "Exchange2016-Local-Mailboxes-Inventory",
+      "Name": "ExchangeOnPrem-Local-Mailboxes-Inventory",
       "ConcurrencyKey": "ExchangeOnPremServer",
       "ScriptPath": "ExchangeInventory\\OnPremises\\Mailboxes\\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1",
       "Arguments": "",
@@ -258,9 +258,9 @@
         "Launchers\\OnPremises\\Start-SmartM365-Exchange-Local-Mailboxes-InventoryWithADPermissions.cmd"
       ],
       "Enabled": true,
-      "Group": "Exchange2016",
+      "Group": "ExchangeOnPrem",
       "DependsOn": [
-        "Exchange2016-ProxyAddresses-Check"
+        "ExchangeOnPrem-ProxyAddresses-Check"
       ],
       "AllowedServers": [],
       "PowerShellEdition": "WindowsPowerShell",
@@ -566,7 +566,7 @@
     },
 
     {
-      "Name": "Exchange2016-ProxyAddresses-Check",
+      "Name": "ExchangeOnPrem-ProxyAddresses-Check",
       "ScriptPath": "ExchangeInventory\\OnPremises\\ProxyAddresses\\SmartM365-Check-ProxyAddresses-Exchange.ps1",
       "Arguments": "",
       "Runtime": "WindowsPowerShell",
@@ -580,7 +580,7 @@
         "Launchers\\OnPremises\\Start-SmartM365-Check-ProxyAddresses-Exchange-ReadOnly.cmd"
       ],
       "Enabled": true,
-      "Group": "Exchange2016",
+      "Group": "ExchangeOnPrem",
       "DependsOn": [],
       "AllowedServers": [],
       "PowerShellEdition": "WindowsPowerShell",
@@ -608,7 +608,7 @@
       "ConcurrencyKey": "ExchangeOnPremServer"
     },
     {
-      "Name": "Exchange2016-Infrastructure-Inventory",
+      "Name": "ExchangeOnPrem-Infrastructure-Inventory",
       "ScriptPath": "ExchangeInventory\\OnPremises\\ServersAndStorage\\SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1",
       "Arguments": "-IncludeServicesHealth -IncludeMailboxDatabasePaths -IncludeHealthChecker",
       "Runtime": "WindowsPowerShell",
@@ -618,7 +618,7 @@
         "Include": []
       },
       "Enabled": true,
-      "Group": "Exchange2016",
+      "Group": "ExchangeOnPrem",
       "DependsOn": [],
       "AllowedServers": [],
       "PowerShellEdition": "WindowsPowerShell",
@@ -646,7 +646,7 @@
       "ConcurrencyKey": "ExchangeOnPremServer"
     },
     {
-      "Name": "Exchange2016-FreeBusy-Check",
+      "Name": "ExchangeOnPrem-FreeBusy-Check",
       "ScriptPath": "ExchangeInventory\\Hybrid\\FreeBusy\\SmartM365-Exchange-Hybrid-FreeBusy-Inventory.ps1",
       "Arguments": "",
       "Runtime": "WindowsPowerShell",
@@ -659,7 +659,7 @@
         "Launchers\\OnPremises\\Start-SmartM365-Exchange-Hybrid-FreeBusy-Inventory.cmd"
       ],
       "Enabled": true,
-      "Group": "Exchange2016",
+      "Group": "ExchangeOnPrem",
       "DependsOn": [],
       "AllowedServers": [],
       "PowerShellEdition": "WindowsPowerShell",
@@ -688,7 +688,7 @@
       "EstimatedDurationMinutes": 15,
       "ConcurrencyKey": "ExchangeOnPremServer"
     },    {
-      "Name": "Exchange2016-Mailboxes-CalendarPermissions",
+      "Name": "ExchangeOnPrem-Mailboxes-CalendarPermissions",
       "ScriptPath": "ExchangeInventory\\OnPremises\\CalendarPermissions\\SmartM365-Exchange-MailboxCalendarPermissions-Inventory.ps1",
       "Arguments": "",
       "Runtime": "WindowsPowerShell",
@@ -702,7 +702,7 @@
         "Launchers\\OnPremises\\Start-SmartM365-Exchange-MailboxCalendarPermissions-Inventory.cmd"
       ],
       "Enabled": true,
-      "Group": "Exchange2016",
+      "Group": "ExchangeOnPrem",
       "DependsOn": [],
       "AllowedServers": [],
       "PowerShellEdition": "WindowsPowerShell",
@@ -1315,7 +1315,7 @@
       "Group": "Exchange",
       "DependsOn": [
         "EXO-Mailboxes-Permissions",
-        "Exchange2016-Local-Mailboxes-Inventory"
+        "ExchangeOnPrem-Local-Mailboxes-Inventory"
       ],
       "AllowedServers": [],
       "TimeoutMinutes": 1380,
@@ -1421,8 +1421,8 @@
         "Intune-Devices-Compliance-Inventory",
         "EXO-Mailboxes-Inventory-Fast",
         "EXO-Mailboxes-Permissions",
-        "Exchange2016-Local-Mailboxes-Inventory",
-        "Exchange2016-Infrastructure-Inventory",
+        "ExchangeOnPrem-Local-Mailboxes-Inventory",
+        "ExchangeOnPrem-Infrastructure-Inventory",
         "M365-SyncHealth-Inventory",
         "M365-Usage-Inventory",
         "Intune-DiscoveredApps-Inventory",
@@ -1957,10 +1957,10 @@
       ]
     },
     {
-      "Name": "Exchange2016-Local-Mailboxes-Inventory-MailboxesOnly",
+      "Name": "ExchangeOnPrem-Local-Mailboxes-Inventory-MailboxesOnly",
       "Manual": true,
-      "Group": "Exchange2016",
-      "Description": "Exchange 2016 local mailboxes inventory without AD permissions.",
+      "Group": "ExchangeOnPrem",
+      "Description": "Exchange on-premises local mailboxes inventory without AD permissions.",
       "ScriptPath": "ExchangeInventory\\OnPremises\\Mailboxes\\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1",
       "Arguments": "",
       "Runtime": "WindowsPowerShell",
@@ -1975,10 +1975,10 @@
       ]
     },
     {
-      "Name": "Exchange2016-Local-Mailboxes-OnlyADPermissions",
+      "Name": "ExchangeOnPrem-Local-Mailboxes-OnlyADPermissions",
       "Manual": true,
-      "Group": "Exchange2016",
-      "Description": "Exchange 2016 local mailboxes: AD permissions only.",
+      "Group": "ExchangeOnPrem",
+      "Description": "Exchange on-premises local mailboxes: AD permissions only.",
       "ScriptPath": "ExchangeInventory\\OnPremises\\Mailboxes\\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1",
       "Arguments": "-OnlyADPermission",
       "Runtime": "WindowsPowerShell",
@@ -1993,9 +1993,9 @@
       ]
     },
     {
-      "Name": "Exchange2016-ProxyAddresses-Write",
+      "Name": "ExchangeOnPrem-ProxyAddresses-Write",
       "Manual": true,
-      "Group": "Exchange2016",
+      "Group": "ExchangeOnPrem",
       "Description": "Adds the missing proxy addresses in Exchange on-premises (write mode).",
       "ScriptPath": "ExchangeInventory\\OnPremises\\ProxyAddresses\\SmartM365-Check-ProxyAddresses-Exchange.ps1",
       "Arguments": "-AllOrganizationalUnit -AddMissingAddress",
@@ -2011,10 +2011,10 @@
       ]
     },
     {
-      "Name": "Exchange2016-Infrastructure-Inventory-Basic",
+      "Name": "ExchangeOnPrem-Infrastructure-Inventory-Basic",
       "Manual": true,
-      "Group": "Exchange2016",
-      "Description": "Exchange 2016 servers and storage inventory without the optional health sections.",
+      "Group": "ExchangeOnPrem",
+      "Description": "Exchange on-premises servers and storage inventory without the optional health sections.",
       "ScriptPath": "ExchangeInventory\\OnPremises\\ServersAndStorage\\SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1",
       "Arguments": "",
       "Runtime": "WindowsPowerShell",
@@ -2029,7 +2029,7 @@
     {
       "Name": "Exchange-HealthChecker-ScheduledTask-Installer",
       "Manual": true,
-      "Group": "Exchange2016",
+      "Group": "ExchangeOnPrem",
       "Advanced": true,
       "HideInGui": true,
       "Description": "Installs the HealthChecker scheduled task on the Exchange servers (Windows PowerShell 5.1 for the CIM sessions).",
@@ -2315,5 +2315,19 @@
         "Launchers\\Orchestrator\\Start-SmartM365-Inventory-OrchestratorScheduledTask-Installer.cmd"
       ]
     }
-  ]
+  ],
+  "RenamedJobs": {
+    "Exchange2016-Local-Mailboxes-Inventory": "ExchangeOnPrem-Local-Mailboxes-Inventory",
+    "Exchange2016-ProxyAddresses-Check": "ExchangeOnPrem-ProxyAddresses-Check",
+    "Exchange2016-Infrastructure-Inventory": "ExchangeOnPrem-Infrastructure-Inventory",
+    "Exchange2016-FreeBusy-Check": "ExchangeOnPrem-FreeBusy-Check",
+    "Exchange2016-Mailboxes-CalendarPermissions": "ExchangeOnPrem-Mailboxes-CalendarPermissions",
+    "Exchange2016-Local-Mailboxes-Inventory-MailboxesOnly": "ExchangeOnPrem-Local-Mailboxes-Inventory-MailboxesOnly",
+    "Exchange2016-Local-Mailboxes-OnlyADPermissions": "ExchangeOnPrem-Local-Mailboxes-OnlyADPermissions",
+    "Exchange2016-ProxyAddresses-Write": "ExchangeOnPrem-ProxyAddresses-Write",
+    "Exchange2016-Infrastructure-Inventory-Basic": "ExchangeOnPrem-Infrastructure-Inventory-Basic"
+  },
+  "RenamedGroups": {
+    "Exchange2016": "ExchangeOnPrem"
+  }
 }

@@ -166,7 +166,7 @@ function Get-SmartM365OrchestratorPipelineSelection {
     param(
         [Parameter(Mandatory)]$JobsDocument,
         [Parameter(ParameterSetName = 'Pipeline')]
-        [ValidateSet('Full', 'AD', 'Exchange', 'Exchange2016', 'M365', 'Intune')]
+        [ValidateSet('Full', 'AD', 'Exchange', 'ExchangeOnPrem', 'Exchange2016', 'M365', 'Intune')]
         [string]$Pipeline = 'Full',
         [Parameter(Mandatory, ParameterSetName = 'Jobs')]
         [string[]]$JobName,
@@ -193,6 +193,8 @@ function Get-SmartM365OrchestratorPipelineSelection {
         $enabled -and $mode -ne 'Manual'
     }
 
+    # Exchange2016 is the former name of the ExchangeOnPrem group (1.5.96); it stays accepted.
+    if ($Pipeline -eq 'Exchange2016') { $Pipeline = 'ExchangeOnPrem' }
     $selectionName = if ($PSCmdlet.ParameterSetName -eq 'Jobs') { 'Jobs' } else { $Pipeline }
     $selectedNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     if ($PSCmdlet.ParameterSetName -eq 'Jobs') {
@@ -455,7 +457,7 @@ function New-SmartM365OrchestratorPipelineRequest {
     param(
         [Parameter(Mandatory)][string]$SharedDataFolderPath,
         [Parameter(Mandatory)][string]$Tenant,
-        [Parameter(Mandatory)][ValidateSet('Full', 'AD', 'Exchange', 'Exchange2016', 'M365', 'Intune', 'Jobs')][string]$Pipeline,
+        [Parameter(Mandatory)][ValidateSet('Full', 'AD', 'Exchange', 'ExchangeOnPrem', 'Exchange2016', 'M365', 'Intune', 'Jobs')][string]$Pipeline,
         [Parameter(Mandatory)]$Selection,
         [Parameter(Mandatory)][string]$ManifestHash,
         [string]$RequestedBy = '',

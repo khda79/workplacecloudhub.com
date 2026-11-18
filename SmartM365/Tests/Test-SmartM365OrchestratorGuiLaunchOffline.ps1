@@ -80,7 +80,7 @@ try {
     Assert-Case (@($script:ManualLaunchRows | Where-Object { ($_.Name -like 'Orchestrator-*' -and $_.Name -ne 'Orchestrator-ServerAcceptance') -or $_.Name -like '*-Installer' }).Count -eq 0) 'Orchestrator entries and installers must stay out of the GUI.'
     Assert-Case (@($script:ManualLaunchRows | Where-Object { $_.Name -eq 'Orchestrator-ServerAcceptance' }).Count -eq 1) 'The server acceptance test is listed in Manual launches.'
     Assert-Case ($script:Controls.OnPremModeText.Text -in @('LocalCache', 'Direct', 'Auto')) 'The global on-premises mode must be shown.'
-    $mailboxes = @($script:LaunchJobRows | Where-Object Name -eq 'Exchange2016-Local-Mailboxes-Inventory')[0]
+    $mailboxes = @($script:LaunchJobRows | Where-Object Name -eq 'ExchangeOnPrem-Local-Mailboxes-Inventory')[0]
     Assert-Case ($mailboxes.OnPremises -and $mailboxes.Runtime -eq 'WindowsPowerShell' -and $mailboxes.DraftMode -eq 'Auto' -and $mailboxes.ModeSource -like 'Job*, zone *' -and $mailboxes.Mode -like 'Auto (*)') 'An on-premises job must show its runtime, the Auto mode of the template with its resolved mode, and its source.'
     $cloud = @($script:LaunchJobRows | Where-Object Name -eq 'M365-ActiveUsers-Inventory')[0]
     Assert-Case (-not $cloud.OnPremises -and $cloud.Mode -eq 'Direct' -and $cloud.DraftMode -eq '') 'A cloud job runs Direct and has no mode to set.'
@@ -106,19 +106,19 @@ try {
     Update-SelectedLaunchPreview -Kind Job
     Assert-Case ($script:Controls.JobExecutionModeCombo.IsEnabled -and (Get-ComboText -Combo $script:Controls.JobExecutionModeCombo) -eq 'Auto') 'On-premises job: the mode can be set.'
 
-    $write = @($script:ManualLaunchRows | Where-Object Name -eq 'Exchange2016-ProxyAddresses-Write')[0]
+    $write = @($script:ManualLaunchRows | Where-Object Name -eq 'ExchangeOnPrem-ProxyAddresses-Write')[0]
     Assert-Case ($write.RequiresConfirmation -and $write.Interactive -and $write.Runtime -eq 'WindowsPowerShell') 'The write entry must be flagged for confirmation.'
     $script:Controls.ManualLaunchesGrid.SelectedItem = $write
     Update-SelectedLaunchPreview -Kind Manual
     Assert-Case ($script:Controls.RunManualLaunchButton.IsEnabled -and $script:Controls.ManualLaunchCommandBox.Text -match 'Confirmation: the user must type WRITE' -and $script:Controls.ManualLaunchCommandBox.Text -match '-AllOrganizationalUnit -AddMissingAddress') 'The manual preview must show the command and the confirmation.'
 
     # Execution mode in the draft: set, reset, apply to all, validation.
-    [void](Set-GuiJobExecutionMode -JobName 'Exchange2016-Local-Mailboxes-Inventory' -Mode Direct)
-    $draftJob = @($script:DraftJobs.Jobs | Where-Object Name -eq 'Exchange2016-Local-Mailboxes-Inventory')[0]
-    Assert-Case ($draftJob.Execution.Mode -eq 'Direct' -and @($script:LaunchJobRows | Where-Object Name -eq 'Exchange2016-Local-Mailboxes-Inventory')[0].DraftMode -eq 'Direct') 'The mode must be written to the draft and shown.'
+    [void](Set-GuiJobExecutionMode -JobName 'ExchangeOnPrem-Local-Mailboxes-Inventory' -Mode Direct)
+    $draftJob = @($script:DraftJobs.Jobs | Where-Object Name -eq 'ExchangeOnPrem-Local-Mailboxes-Inventory')[0]
+    Assert-Case ($draftJob.Execution.Mode -eq 'Direct' -and @($script:LaunchJobRows | Where-Object Name -eq 'ExchangeOnPrem-Local-Mailboxes-Inventory')[0].DraftMode -eq 'Direct') 'The mode must be written to the draft and shown.'
     Assert-Case ((Test-SmartM365OrchestratorJobsDocument -Document $script:DraftJobs).Valid) 'A draft with an execution mode must stay valid.'
     Assert-Case ($draftJob.Execution.PSObject.Properties['CacheName'] -and $draftJob.Execution.CacheName -eq 'ExchangeLocalMailboxes\WithADPermissions') 'Other Execution fields of the draft job must be kept.'
-    [void](Set-GuiJobExecutionMode -JobName 'Exchange2016-Local-Mailboxes-Inventory' -Mode '(default)')
+    [void](Set-GuiJobExecutionMode -JobName 'ExchangeOnPrem-Local-Mailboxes-Inventory' -Mode '(default)')
     Assert-Case (-not $draftJob.Execution.PSObject.Properties['Mode']) '(default) must remove the job mode.'
     $onPremNames = @($script:LaunchJobRows | Where-Object { $_.OnPremises -and $_.InManifest } | ForEach-Object Name)
     $changed = @(Set-GuiJobExecutionMode -JobName $onPremNames -Mode Auto)
@@ -127,8 +127,8 @@ try {
     $bad.Jobs[0] | Add-Member -NotePropertyName Execution -NotePropertyValue ([pscustomobject]@{ Mode = 'Remote' }) -Force
     $badValidation = Test-SmartM365OrchestratorJobsDocument -Document $bad
     Assert-Case (-not $badValidation.Valid -and (@($badValidation.Errors) -join ' ') -match 'Execution.Mode must be Direct, LocalCache or Auto') 'An invalid execution mode must be rejected before publication.'
-    [void](Set-GuiJobExecutionMode -JobName 'Exchange2016-Local-Mailboxes-Inventory' -Mode LocalCache)
-    $previewOfPublished = (Get-GuiLaunchPlanText -Name 'Exchange2016-Local-Mailboxes-Inventory').Plan
+    [void](Set-GuiJobExecutionMode -JobName 'ExchangeOnPrem-Local-Mailboxes-Inventory' -Mode LocalCache)
+    $previewOfPublished = (Get-GuiLaunchPlanText -Name 'ExchangeOnPrem-Local-Mailboxes-Inventory').Plan
     Assert-Case ($previewOfPublished.ModeInfo.Requested -eq 'Auto') 'Previews follow the published configuration, not the unpublished draft.'
 
     # Orchestrator actions: same commands as the former Launchers\Orchestrator .cmd files (frozen reference).

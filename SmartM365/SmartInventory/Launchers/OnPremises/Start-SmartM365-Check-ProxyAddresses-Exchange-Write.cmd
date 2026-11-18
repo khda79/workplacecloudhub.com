@@ -1,1 +1,1 @@
-@call "%~dp0..\..\SmartInventory.cmd" Exchange2016-ProxyAddresses-Write %*
+@call "%~dp0..\..\SmartInventory.cmd" ExchangeOnPrem-ProxyAddresses-Write %*

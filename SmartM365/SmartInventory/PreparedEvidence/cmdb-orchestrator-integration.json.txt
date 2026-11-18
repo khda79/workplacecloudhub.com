@@ -53,7 +53,7 @@
         "Intune-DiscoveredApps-Inventory",
         "M365-Licences-Inventory",
         "EXO-Mailboxes-Inventory-Fast",
-        "Exchange2016-Local-Mailboxes-Inventory",
+        "ExchangeOnPrem-Local-Mailboxes-Inventory",
         "M365-SPO-Inventory",
         "M365-Teams-Inventory",
         "M365-VerifiedDomains-Inventory",

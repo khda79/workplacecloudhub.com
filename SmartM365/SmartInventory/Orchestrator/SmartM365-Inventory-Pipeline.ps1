@@ -22,7 +22,7 @@ orchestrator applies the job's scheduled dependency rule to them (for example Fr
 Add -IncludeDependencies to run the enabled dependencies in the same request.
 
 .VERSION
-1.2.3
+1.2.4
 
 .EXAMPLE
 ./SmartM365-Inventory-Pipeline.ps1 -Tenant test -Cancel -BatchId '<active-batch-id>' -Reason 'Controlled direct collection' -ValidateOnly
@@ -31,7 +31,7 @@ Read-only cancellation preview. Omit -ValidateOnly to cancel remaining jobs; run
 [CmdletBinding()]
 param(
     [string]$Tenant = 'test',
-    [ValidateSet('Full', 'AD', 'Exchange', 'Exchange2016', 'M365', 'Intune')]
+    [ValidateSet('Full', 'AD', 'Exchange', 'ExchangeOnPrem', 'Exchange2016', 'M365', 'Intune')]
     [string]$Pipeline = 'Full',
     [string[]]$Job = @(),
     [switch]$IncludeDependencies,

@@ -54,7 +54,7 @@ can reveal host names, addresses, certificates or domains were masked at collect
 ## Hybrid free/busy (Messaging & Hybrid page)
 
 The Messaging & Hybrid page has a sixth view, Free/Busy, fed by the weekly
-Exchange2016-FreeBusy-Check job (Microsoft CSS-Exchange FreeBusyChecker):
+ExchangeOnPrem-FreeBusy-Check job (Microsoft CSS-Exchange FreeBusyChecker):
 Exchange_Hybrid_FreeBusy_Summary.csv and Exchange_Hybrid_FreeBusy_Findings.csv,
 optional prepared sources kept up to 192 hours. A dedicated reader applies the same
 batch, tenant, header, column and stable-pointer checks as the infrastructure reader

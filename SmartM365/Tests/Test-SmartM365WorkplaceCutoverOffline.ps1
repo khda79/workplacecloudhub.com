@@ -25,7 +25,7 @@ $m.ScriptPath='PreparedEvidence/SmartM365-CmdbEvidence-Prepare.ps1'
 $m.ConcurrencyKey='CmdbEvidence-Prepare'
 $m.DependsOn=@('M365-ActiveUsers-Inventory','AD-Inventory','M365-WorkplaceScope-Inventory',
     'M365-EntraDevices-Inventory','Intune-Devices-Inventory','Intune-DiscoveredApps-Inventory',
-    'M365-Licences-Inventory','EXO-Mailboxes-Inventory-Fast','Exchange2016-Local-Mailboxes-Inventory',
+    'M365-Licences-Inventory','EXO-Mailboxes-Inventory-Fast','ExchangeOnPrem-Local-Mailboxes-Inventory',
     'M365-SPO-Inventory','M365-Teams-Inventory','M365-VerifiedDomains-Inventory',
     'Intune-WindowsAutopilot-Inventory','Intune-EndpointAnalytics-Inventory',
     'Intune-Devices-UpgradeEligibility','Intune-AutopatchAlerts-Inventory','M365-Usage-Inventory')

@@ -110,7 +110,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.95
+1.5.96
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -123,7 +123,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.95
+    Version : 1.5.96
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
@@ -160,7 +160,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.95"
+$ScriptVersion = "1.5.96"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -9144,6 +9144,10 @@ try {
     elseif ($null -ne $manifestSync -and $manifestSync.Updated) {
         $addedJobNames = @($manifestSync.AddedJobNames | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
         $updatedJobNames = @($manifestSync.UpdatedJobNames | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+        $renamedJobNames = @(if ($manifestSync.PSObject.Properties['RenamedJobNames']) { $manifestSync.RenamedJobNames | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } })
+        if ($renamedJobNames.Count -gt 0) {
+            Write-OrchestratorLog -Message ("Renamed jobs from the committed template (local settings kept, dependencies updated, history restarts under the new name): {0}." -f ($renamedJobNames -join ', ')) -Level WARN
+        }
         if ($addedJobNames.Count -gt 0) {
             Write-OrchestratorLog -Message ("Added missing jobs from the committed template without changing existing local job settings: {0}." -f ($addedJobNames -join ', ')) -Level WARN
         }

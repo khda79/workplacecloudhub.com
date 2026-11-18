@@ -1,1 +1,1 @@
-@call "%~dp0..\..\SmartInventory.cmd" Exchange2016-FreeBusy-Check %*
+@call "%~dp0..\..\SmartInventory.cmd" ExchangeOnPrem-FreeBusy-Check %*

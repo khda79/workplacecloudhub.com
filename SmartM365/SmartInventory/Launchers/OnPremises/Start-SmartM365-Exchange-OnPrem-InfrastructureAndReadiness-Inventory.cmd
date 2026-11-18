@@ -1,1 +1,1 @@
-@call "%~dp0..\..\SmartInventory.cmd" Exchange2016-Infrastructure-Inventory-Basic %*
+@call "%~dp0..\..\SmartInventory.cmd" ExchangeOnPrem-Infrastructure-Inventory-Basic %*

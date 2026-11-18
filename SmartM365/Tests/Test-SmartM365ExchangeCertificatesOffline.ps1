@@ -251,7 +251,7 @@ try{
     Check ($rows.Count -eq 2 -and @($rows|Where-Object CollectionStatus -eq ERROR).Count -eq 2 -and $script:starts.Count -eq 0) 'Missing cached worker blocked infrastructure or became known zero'
     $script:InfrastructureCertificateWorkerPath=$worker
     # The local cache copies the whole script folder (/MIR), so the worker next to the collector is cached.
-    $catalogJob=@((Get-Content (Join-Path $smartRoot 'SmartInventory/Orchestrator/Orchestrator-Jobs.json.template') -Raw | ConvertFrom-Json).Jobs | Where-Object Name -eq 'Exchange2016-Infrastructure-Inventory')
+    $catalogJob=@((Get-Content (Join-Path $smartRoot 'SmartInventory/Orchestrator/Orchestrator-Jobs.json.template') -Raw | ConvertFrom-Json).Jobs | Where-Object Name -eq 'ExchangeOnPrem-Infrastructure-Inventory')
     $launchModuleText=Get-Content (Join-Path $smartRoot 'SmartInventory/Orchestrator/SmartM365.Inventory.Launch.psm1') -Raw
     Check ($catalogJob.Count -eq 1 -and $catalogJob[0].Execution.CacheName -and $launchModuleText -match "Label = 'script'; Source = \`$scriptFolder" -and $launchModuleText -match "-Options @\('/MIR'\) -LogOption \`$copy\.Log") 'Worker not covered by launcher cache copy'
 

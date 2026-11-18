@@ -93,7 +93,7 @@ try {
     $launchModule=Import-Module (Join-Path $smartRoot 'SmartInventory/Orchestrator/SmartM365.Inventory.Launch.psm1') -Force -PassThru
     $launchModuleText=[IO.File]::ReadAllText($launchModule.Path)
     $catalog=Get-Content (Join-Path $smartRoot 'SmartInventory/Orchestrator/Orchestrator-Jobs.json.template') -Raw | ConvertFrom-Json
-    foreach ($name in @('Exchange2016-Local-Mailboxes-Inventory','Exchange2016-Local-Mailboxes-Inventory-MailboxesOnly','Exchange2016-Local-Mailboxes-OnlyADPermissions')) {
+    foreach ($name in @('ExchangeOnPrem-Local-Mailboxes-Inventory','ExchangeOnPrem-Local-Mailboxes-Inventory-MailboxesOnly','ExchangeOnPrem-Local-Mailboxes-OnlyADPermissions')) {
         $entry=@(@($catalog.Jobs) + @($catalog.Launches) | Where-Object Name -eq $name)
         Check ($entry.Count -eq 1 -and $entry[0].Runtime -eq 'WindowsPowerShell' -and $entry[0].Execution.CacheName -and $launchModuleText -match "Label = 'SmartM365.Core'; Source = \(Join-Path \`$smartM365Root 'Modules\\SmartM365.Core'\)") ($name + ': shared helper not covered by cache')
         Check (Test-Path -LiteralPath $helperPath -PathType Leaf) ($name + ': missing dot-sourced helper')

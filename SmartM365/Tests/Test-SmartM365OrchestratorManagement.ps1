@@ -2,7 +2,7 @@
 .SYNOPSIS
 Runs offline management and central-manifest migration tests for the SmartM365 orchestrator.
 .VERSION
-1.1.4
+1.1.5
 #>
 #Requires -Version 7.0
 [CmdletBinding()]
@@ -174,6 +174,54 @@ try {
     Assert-True -Condition (@($upgradeResult.UpdatedJobNames) -contains $existingJob.Name) -Message 'The external-action argument migration was not reported.'
     $secondUpgradeResult = Sync-SmartM365OrchestratorJobsManifest -Path $upgradeManifestPath -TemplatePath $upgradeTemplatePath
     Assert-True -Condition (-not $secondUpgradeResult.Updated -and @($secondUpgradeResult.AddedJobNames).Count -eq 0 -and @($secondUpgradeResult.UpdatedJobNames).Count -eq 0) -Message 'A second manifest synchronization was not idempotent.'
+
+    # Job renames declared by the template (1.5.96): Exchange2016-* -> ExchangeOnPrem-*.
+    $shippedTemplate = Read-SmartM365OrchestratorJson -Path $jobsTemplatePath
+    Assert-True -Condition ($shippedTemplate.RenamedJobs.'Exchange2016-Local-Mailboxes-Inventory' -eq 'ExchangeOnPrem-Local-Mailboxes-Inventory' -and $shippedTemplate.RenamedGroups.Exchange2016 -eq 'ExchangeOnPrem') -Message 'The shipped template does not declare the Exchange2016 renames.'
+    foreach ($property in @($shippedTemplate.RenamedJobs.PSObject.Properties)) {
+        $targetCount = @(@($shippedTemplate.Jobs) + @($shippedTemplate.Launches) | Where-Object Name -eq ([string]$property.Value)).Count
+        Assert-True -Condition ($targetCount -eq 1) -Message "Renamed job target '$($property.Value)' is not in the shipped template."
+        Assert-True -Condition (@(@($shippedTemplate.Jobs) + @($shippedTemplate.Launches) | Where-Object Name -eq ([string]$property.Name)).Count -eq 0) -Message "Former job name '$($property.Name)' is still in the shipped template."
+    }
+    $renameRoot = Join-Path -Path $temporaryRoot -ChildPath 'ManifestRename'
+    New-Item -ItemType Directory -Path $renameRoot -Force | Out-Null
+    $renameManifestPath = Join-Path -Path $renameRoot -ChildPath 'Orchestrator-Jobs.json'
+    $renameTemplatePath = Join-Path -Path $renameRoot -ChildPath 'Orchestrator-Jobs.json.template'
+    $templateProxy = @($shippedTemplate.Jobs | Where-Object Name -eq 'ExchangeOnPrem-ProxyAddresses-Check')[0]
+    $templateMailboxes = @($shippedTemplate.Jobs | Where-Object Name -eq 'ExchangeOnPrem-Local-Mailboxes-Inventory')[0]
+    $oldProxy = $templateProxy | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100
+    $oldProxy.Name = 'Exchange2016-ProxyAddresses-Check'; $oldProxy.Group = 'Exchange2016'; $oldProxy.Enabled = $false
+    $oldMailboxes = $templateMailboxes | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100
+    $oldMailboxes.Name = 'Exchange2016-Local-Mailboxes-Inventory'; $oldMailboxes.Group = 'Exchange2016'; $oldMailboxes.DependsOn = @('Exchange2016-ProxyAddresses-Check'); $oldMailboxes.Schedule.Times = @('01:23')
+    $localDependent = $templateMailboxes | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100
+    $localDependent.Name = 'Local-Only-Dependent'; $localDependent.Group = 'PreparedEvidence'; $localDependent.DependsOn = @('Exchange2016-Local-Mailboxes-Inventory', 'Exchange2016-ProxyAddresses-Check')
+    Write-SmartM365OrchestratorJsonAtomically -Path $renameManifestPath -Document ([pscustomobject][ordered]@{ SchemaVersion = 1; Jobs = @($oldProxy, $oldMailboxes, $localDependent) })
+    Write-SmartM365OrchestratorJsonAtomically -Path $renameTemplatePath -Document ([pscustomobject][ordered]@{ SchemaVersion = 1; Jobs = @($templateProxy, $templateMailboxes); RenamedJobs = $shippedTemplate.RenamedJobs; RenamedGroups = $shippedTemplate.RenamedGroups })
+    $manifestBeforeRename = [IO.File]::ReadAllBytes($renameManifestPath)
+    $renameResult = Sync-SmartM365OrchestratorJobsManifest -Path $renameManifestPath -TemplatePath $renameTemplatePath
+    $renamedDocument = Read-SmartM365OrchestratorJson -Path $renameManifestPath
+    $renamedProxy = @($renamedDocument.Jobs | Where-Object Name -eq 'ExchangeOnPrem-ProxyAddresses-Check')
+    $renamedMailboxes = @($renamedDocument.Jobs | Where-Object Name -eq 'ExchangeOnPrem-Local-Mailboxes-Inventory')
+    $renamedDependent = @($renamedDocument.Jobs | Where-Object Name -eq 'Local-Only-Dependent')[0]
+    Assert-True -Condition (@($renamedDocument.Jobs).Count -eq 3 -and $renamedProxy.Count -eq 1 -and $renamedMailboxes.Count -eq 1) -Message 'The renamed jobs were duplicated or not renamed.'
+    Assert-True -Condition (@($renamedDocument.Jobs | Where-Object { ([string]$_.Name).StartsWith('Exchange2016-') }).Count -eq 0) -Message 'A former job name is still in the manifest.'
+    Assert-True -Condition (-not [bool]$renamedProxy[0].Enabled -and $renamedMailboxes[0].Schedule.Times[0] -eq '01:23') -Message 'A renamed job lost its local settings.'
+    Assert-True -Condition ($renamedProxy[0].Group -ceq 'ExchangeOnPrem' -and $renamedMailboxes[0].Group -ceq 'ExchangeOnPrem' -and $renamedDependent.Group -ceq 'PreparedEvidence') -Message 'The Exchange2016 group was not renamed.'
+    Assert-True -Condition ((@($renamedMailboxes[0].DependsOn) -join ',') -ceq 'ExchangeOnPrem-ProxyAddresses-Check' -and (@($renamedDependent.DependsOn) -join ',') -ceq 'ExchangeOnPrem-Local-Mailboxes-Inventory,ExchangeOnPrem-ProxyAddresses-Check') -Message 'DependsOn did not follow the renamed jobs.'
+    Assert-True -Condition ($renameResult.Updated -and @($renameResult.RenamedJobNames).Count -eq 2 -and @($renameResult.AddedJobNames).Count -eq 0) -Message 'The renames were not reported, or a renamed job was appended again.'
+    Assert-True -Condition ((Test-SmartM365OrchestratorJobsDocument -Document $renamedDocument).Valid) -Message 'The renamed manifest is invalid.'
+    $renameBackups = @(Get-ChildItem -LiteralPath $renameRoot -Filter 'Orchestrator-Jobs.before-job-rename-*.json' -File)
+    Assert-True -Condition ($renameBackups.Count -eq 1 -and [Convert]::ToBase64String([IO.File]::ReadAllBytes($renameBackups[0].FullName)) -ceq [Convert]::ToBase64String($manifestBeforeRename)) -Message 'The manifest backup before the rename is missing or differs.'
+    $secondRenameResult = Sync-SmartM365OrchestratorJobsManifest -Path $renameManifestPath -TemplatePath $renameTemplatePath
+    Assert-True -Condition (-not $secondRenameResult.Updated -and @($secondRenameResult.RenamedJobNames).Count -eq 0) -Message 'A second synchronization after the rename was not idempotent.'
+    # Both names present (manual partial migration): nothing is renamed or removed.
+    $bothNames = Read-SmartM365OrchestratorJson -Path $renameManifestPath
+    $leftover = $oldProxy | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100
+    $leftover.Group = 'Custom'
+    $bothNames.Jobs = @($bothNames.Jobs) + @($leftover)
+    Write-SmartM365OrchestratorJsonAtomically -Path $renameManifestPath -Document $bothNames
+    $bothResult = Sync-SmartM365OrchestratorJobsManifest -Path $renameManifestPath -TemplatePath $renameTemplatePath
+    Assert-True -Condition (-not $bothResult.Updated -and @((Read-SmartM365OrchestratorJson -Path $renameManifestPath).Jobs).Count -eq 4) -Message 'A former name next to its new name was renamed or removed.'
     $convertedPolicies = ConvertTo-SmartM365OrchestratorHashtable -InputObject $snapshot.Cluster.ServerJobPolicies
     Assert-True -Condition ($convertedPolicies['SERVER-B']['OnlyJobsRequiring'] -eq 'ExchangeOnPrem') -Message 'String values were corrupted while converting the server policy to a hashtable.'
     $invalidPinnedJobs = $snapshot.Jobs | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100

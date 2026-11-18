@@ -1,1 +1,1 @@
-@call "%~dp0..\..\SmartInventory.cmd" Exchange2016-Local-Mailboxes-Inventory-MailboxesOnly %*
+@call "%~dp0..\..\SmartInventory.cmd" ExchangeOnPrem-Local-Mailboxes-Inventory-MailboxesOnly %*

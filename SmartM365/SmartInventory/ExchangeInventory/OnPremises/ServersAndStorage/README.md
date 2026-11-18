@@ -70,8 +70,8 @@ Health Checker requires the existing elevated account and installed remote tasks
 Run from PowerShell (the job with its arguments, or the manual entry without the optional sections):
 
 ```powershell
-& '<source-root>\SmartInventory\SmartInventory.cmd' Exchange2016-Infrastructure-Inventory
-& '<source-root>\SmartInventory\SmartInventory.cmd' Exchange2016-Infrastructure-Inventory-Basic
+& '<source-root>\SmartInventory\SmartInventory.cmd' ExchangeOnPrem-Infrastructure-Inventory
+& '<source-root>\SmartInventory\SmartInventory.cmd' ExchangeOnPrem-Infrastructure-Inventory-Basic
 # Explicit opt-out when invoking the cached script from Windows PowerShell 5.1:
 & '<cached-script-folder>\SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1' -Tenant prod -IncludeHealthChecker:$false
 ```

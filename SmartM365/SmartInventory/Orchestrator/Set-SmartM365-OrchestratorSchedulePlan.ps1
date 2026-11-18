@@ -23,7 +23,7 @@ Jobs template to apply. Defaults to Orchestrator-Jobs.json.template next to this
 
 .PARAMETER RemoveJob
 Shared jobs to remove. Defaults to Exchange2016-Local-Mailboxes-Fast (same script and arguments
-as Exchange2016-Local-Mailboxes-Inventory).
+as ExchangeOnPrem-Local-Mailboxes-Inventory, formerly Exchange2016-Local-Mailboxes-Inventory).
 
 .PARAMETER SyncEnabled
 Also takes the Enabled flag from the template for the jobs it contains. The changed flags are
@@ -33,7 +33,7 @@ shown in the preview like the other fields.
 Publishes the displayed changes. Omit this switch for preview only.
 
 .VERSION
-1.1
+1.1.1
 #>
 #requires -Version 7.2
 

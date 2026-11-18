@@ -23,9 +23,9 @@ editing the template.
 | EXO-Mailboxes-Inventory-Fast | Daily 00:15, chained after AD and active users |
 | EXO-AcceptedDomains-Inventory | Daily 00:10 |
 | Mailboxes-PermissionsByUser-Report | Daily 08:30 |
-| Exchange2016-Local-Mailboxes-Inventory | Daily 00:35, after a fresh ProxyAddresses check |
-| Exchange2016-ProxyAddresses-Check | Daily 00:00 |
-| Exchange2016-Infrastructure-Inventory | Daily 03:15, after the on-premises mailbox chain (same concurrency key), with service health, mailbox database paths and CSS-Exchange Health Checker |
+| ExchangeOnPrem-Local-Mailboxes-Inventory | Daily 00:35, after a fresh ProxyAddresses check |
+| ExchangeOnPrem-ProxyAddresses-Check | Daily 00:00 |
+| ExchangeOnPrem-Infrastructure-Inventory | Daily 03:15, after the on-premises mailbox chain (same concurrency key), with service health, mailbox database paths and CSS-Exchange Health Checker |
 | M365-Usage-Inventory | Daily 04:45 |
 | Intune-DeviceSystem-Inventory | Daily 01:15 |
 | Intune-Devices-BIOS-Inventory | Daily 00:55 |
@@ -86,8 +86,8 @@ do not trigger full identity/device/license recollection.
 | --- | --- |
 | EXO-Mailboxes-Inventory | Saturday 06:00, after the same Saturday's Fast |
 | EXO-Mailboxes-CalendarPermissions | Tuesday, Thursday 20:00 |
-| Exchange2016-Mailboxes-CalendarPermissions | Monday, Wednesday, Friday 04:00 |
-| Exchange2016-FreeBusy-Check | Sunday 05:00, Exchange hybrid free/busy check with CSS-Exchange Free/Busy Checker (same concurrency key as the other Exchange on-premises jobs) |
+| ExchangeOnPrem-Mailboxes-CalendarPermissions | Monday, Wednesday, Friday 04:00 |
+| ExchangeOnPrem-FreeBusy-Check | Sunday 05:00, Exchange hybrid free/busy check with CSS-Exchange Free/Busy Checker (same concurrency key as the other Exchange on-premises jobs) |
 
 Daily EXO Fast refreshes unrestricted mailbox details without live statistics.
 The unified Workplace job depends on that daily acquisition rather than the weekly live-stats
@@ -175,9 +175,9 @@ Their qualification policy is separate and is not weakened by a schedule change.
 ## Launch engine and execution mode
 
 The schedule does not depend on how a job starts. The on-premises jobs
-(`Exchange2016-Local-Mailboxes-Inventory`, `Exchange2016-ProxyAddresses-Check`,
-`Exchange2016-Infrastructure-Inventory`, `Exchange2016-FreeBusy-Check`,
-`Exchange2016-Mailboxes-CalendarPermissions` and the manual SharePoint on-premises
+(`ExchangeOnPrem-Local-Mailboxes-Inventory`, `ExchangeOnPrem-ProxyAddresses-Check`,
+`ExchangeOnPrem-Infrastructure-Inventory`, `ExchangeOnPrem-FreeBusy-Check`,
+`ExchangeOnPrem-Mailboxes-CalendarPermissions` and the manual SharePoint on-premises
 jobs) run through the catalog engine in Windows PowerShell 5.1, from a local
 cache by default (`OnPremExecutionMode = LocalCache`). Switching to `Direct` or
 `Auto` (see the SmartInventory README, "On-premises execution mode") removes the
@@ -196,10 +196,10 @@ In particular, AD's observed duration does not imply error-free domain coverage.
 | --- | --- |
 | M365-Licences-Inventory | 90 |
 | AD-Inventory | 120 |
-| Exchange2016-Local-Mailboxes-Inventory | 150 |
-| Exchange2016-ProxyAddresses-Check | 30 |
-| Exchange2016-Infrastructure-Inventory | 90 |
-| Exchange2016-FreeBusy-Check | 15 |
+| ExchangeOnPrem-Local-Mailboxes-Inventory | 150 |
+| ExchangeOnPrem-ProxyAddresses-Check | 30 |
+| ExchangeOnPrem-Infrastructure-Inventory | 90 |
+| ExchangeOnPrem-FreeBusy-Check | 15 |
 | M365-WorkplaceScope-Inventory | 360 |
 | Intune-Configurations-Inventory | 30 |
 | Intune-ManagedApps-Inventory | 60 |

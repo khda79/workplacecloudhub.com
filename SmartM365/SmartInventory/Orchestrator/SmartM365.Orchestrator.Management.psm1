@@ -242,6 +242,59 @@ function Write-SmartM365OrchestratorManagementLog {
     }
 }
 
+function Invoke-SmartM365OrchestratorJobRename {
+    # Applies the template RenamedJobs and RenamedGroups maps to a jobs document in place (1.5.96).
+    # A job is renamed only when the template defines the new name and the document has the old name
+    # but not the new one; its local settings are kept and every DependsOn follows. Job state, claims,
+    # receipts and logs keyed by the old name are not migrated (a renamed job starts a new history).
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Document, [Parameter(Mandatory)]$Template)
+    $jobMap = @{}; $groupMap = @{}
+    $renamedJobNames = [Collections.Generic.List[string]]::new()
+    $updatedJobNames = [Collections.Generic.List[string]]::new()
+    if ($Template.PSObject.Properties['RenamedJobs'] -and $null -ne $Template.RenamedJobs) {
+        $templateNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($job in @($Template.Jobs)) { [void]$templateNames.Add([string]$job.Name) }
+        $documentNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($job in @($Document.Jobs)) { [void]$documentNames.Add([string]$job.Name) }
+        foreach ($property in @($Template.RenamedJobs.PSObject.Properties)) {
+            $oldName = ([string]$property.Name).Trim(); $newName = ([string]$property.Value).Trim()
+            if (-not $oldName -or -not $newName -or $oldName -ieq $newName) { continue }
+            if ($templateNames.Contains($newName) -and $documentNames.Contains($oldName) -and -not $documentNames.Contains($newName)) { $jobMap[$oldName] = $newName }
+        }
+    }
+    if ($Template.PSObject.Properties['RenamedGroups'] -and $null -ne $Template.RenamedGroups) {
+        foreach ($property in @($Template.RenamedGroups.PSObject.Properties)) {
+            $oldGroup = ([string]$property.Name).Trim(); $newGroup = ([string]$property.Value).Trim()
+            if ($oldGroup -and $newGroup -and $oldGroup -cne $newGroup) { $groupMap[$oldGroup] = $newGroup }
+        }
+    }
+    foreach ($job in @($Document.Jobs)) {
+        $changed = $false
+        $name = [string]$job.Name
+        if ($jobMap.ContainsKey($name)) {
+            $job.Name = $jobMap[$name]
+            $renamedJobNames.Add(('{0} -> {1}' -f $name, $jobMap[$name])) | Out-Null
+            $changed = $true
+        }
+        if ($job.PSObject.Properties['DependsOn'] -and $null -ne $job.DependsOn) {
+            $dependencies = @($job.DependsOn | ForEach-Object { [string]$_ })
+            $renamedDependencies = @($dependencies | ForEach-Object { if ($jobMap.ContainsKey($_)) { $jobMap[$_] } else { $_ } })
+            if (($dependencies -join "`n") -cne ($renamedDependencies -join "`n")) { $job.DependsOn = @($renamedDependencies); $changed = $true }
+        }
+        if ($job.PSObject.Properties['Group'] -and $groupMap.ContainsKey([string]$job.Group)) {
+            $job.Group = $groupMap[[string]$job.Group]
+            $changed = $true
+        }
+        if ($changed) { $updatedJobNames.Add([string]$job.Name) | Out-Null }
+    }
+    [pscustomobject]@{
+        Changed = ($updatedJobNames.Count -gt 0)
+        RenamedJobNames = @($renamedJobNames)
+        UpdatedJobNames = @($updatedJobNames)
+    }
+}
+
 function Sync-SmartM365OrchestratorJobsManifest {
     [CmdletBinding()]
     param(
@@ -270,6 +323,7 @@ function Sync-SmartM365OrchestratorJobsManifest {
                 Updated = $true
                 AddedJobNames = @($template.Jobs | ForEach-Object { [string]$_.Name })
                 UpdatedJobNames = @()
+                RenamedJobNames = @()
             }
         }
 
@@ -278,6 +332,9 @@ function Sync-SmartM365OrchestratorJobsManifest {
         if (-not $documentValidation.Valid) {
             throw "Existing jobs manifest is invalid and was not changed: $($documentValidation.Errors -join '; ')"
         }
+        $originalDocumentText = $null
+        $rename = Invoke-SmartM365OrchestratorJobRename -Document $document -Template $template
+        if ($rename.Changed) { $originalDocumentText = [IO.File]::ReadAllText($Path) }
 
         $knownNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         foreach ($job in @($document.Jobs)) { [void]$knownNames.Add([string]$job.Name) }
@@ -315,8 +372,10 @@ function Sync-SmartM365OrchestratorJobsManifest {
             }
         }
 
+        foreach ($jobName in @($rename.UpdatedJobNames)) { if (-not $updatedJobNames.Contains($jobName)) { $updatedJobNames.Add($jobName) | Out-Null } }
+
         if ($missingJobs.Count -eq 0 -and $updatedJobNames.Count -eq 0) {
-            return [pscustomobject]@{ Created = $false; Updated = $false; AddedJobNames = @(); UpdatedJobNames = @() }
+            return [pscustomobject]@{ Created = $false; Updated = $false; AddedJobNames = @(); UpdatedJobNames = @(); RenamedJobNames = @() }
         }
 
         $clonedMissingJobs = @($missingJobs | ForEach-Object {
@@ -327,12 +386,20 @@ function Sync-SmartM365OrchestratorJobsManifest {
         if (-not $mergedValidation.Valid) {
             throw "Merged jobs manifest is invalid and was not written: $($mergedValidation.Errors -join '; ')"
         }
+        if ($null -ne $originalDocumentText) {
+            # Byte copy of the manifest before a job rename, next to it (never read back by the orchestrator).
+            $backupName = '{0}.before-job-rename-{1}.json' -f [IO.Path]::GetFileNameWithoutExtension($Path), (Get-Date).ToString('yyyyMMdd-HHmmss')
+            $backupPath = Join-Path -Path $folder -ChildPath $backupName
+            if (-not (Test-Path -LiteralPath $backupPath)) { Copy-Item -LiteralPath $Path -Destination $backupPath -ErrorAction Stop }
+            if ([IO.File]::ReadAllText($backupPath) -cne $originalDocumentText) { throw "Jobs manifest backup before the job rename does not match the manifest; nothing was written: $backupPath" }
+        }
         Write-SmartM365OrchestratorJsonAtomically -Path $Path -Document $document
         [pscustomobject]@{
             Created = $false
             Updated = $true
             AddedJobNames = @($clonedMissingJobs | ForEach-Object { [string]$_.Name })
             UpdatedJobNames = @($updatedJobNames)
+            RenamedJobNames = @($rename.RenamedJobNames)
         }
     }
     finally {
@@ -523,6 +590,7 @@ function Initialize-SmartM365OrchestratorCentralConfiguration {
             Updated = ([bool]$manifestSync.Updated -or [bool]$templateSync.Updated)
             AddedJobNames = @($manifestSync.AddedJobNames) + @($templateSync.AddedJobNames)
             UpdatedJobNames = @($manifestSync.UpdatedJobNames) + @($templateSync.UpdatedJobNames)
+            RenamedJobNames = @($manifestSync.RenamedJobNames) + @($templateSync.RenamedJobNames)
         }
     }
     if (-not (Test-Path -LiteralPath $paths.ClusterPath)) {
@@ -684,7 +752,7 @@ function Get-SmartM365OrchestratorTimeoutPolicyExceptions {
         'AD-Inventory'                  = 'Shares the AD-WorkplaceScope key; 360 minutes bounds how long AD holds WorkplaceScope back.'
         'M365-WorkplaceScope-Inventory' = 'Shares the AD-WorkplaceScope key; 480 minutes bounds how long WorkplaceScope holds AD back.'
         'EXO-Mailboxes-Inventory'       = 'Shares the EXOMailboxes key; 2160 minutes bounds how long a full run holds the daily Fast chain back.'
-        'Exchange2016-FreeBusy-Check'   = 'Short weekly check; keeps its own timeout.'
+        'ExchangeOnPrem-FreeBusy-Check'   = 'Short weekly check; keeps its own timeout.'
     }
 }
 

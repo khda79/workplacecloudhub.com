@@ -21,9 +21,9 @@ Exchange 2016 local mailbox inventory script with integrated reporting.
 
 ## Launchers
 
-- `SmartM365\SmartInventory\SmartInventory.cmd Exchange2016-Local-Mailboxes-Inventory-MailboxesOnly`: standard mailbox inventory without AD permissions.
-- `SmartM365\SmartInventory\SmartInventory.cmd Exchange2016-Local-Mailboxes-OnlyADPermissions`: AD permission export only (`-OnlyADPermission`).
-- `SmartM365\SmartInventory\SmartInventory.cmd Exchange2016-Local-Mailboxes-Inventory`: standard inventory with AD permissions (`-IncludeADPermission`), the orchestrator job.
+- `SmartM365\SmartInventory\SmartInventory.cmd ExchangeOnPrem-Local-Mailboxes-Inventory-MailboxesOnly`: standard mailbox inventory without AD permissions.
+- `SmartM365\SmartInventory\SmartInventory.cmd ExchangeOnPrem-Local-Mailboxes-OnlyADPermissions`: AD permission export only (`-OnlyADPermission`).
+- `SmartM365\SmartInventory\SmartInventory.cmd ExchangeOnPrem-Local-Mailboxes-Inventory`: standard inventory with AD permissions (`-IncludeADPermission`), the orchestrator job.
 ## Configuration
 
 For a tenant that has no on-premises remote mailbox recipients (for example before hybrid deployment), the tenant profile can explicitly set `"ExpectedNoOnPremRemoteMailboxes": true`. The default is false. A zero-row remote export is allowed only for a full, unrestricted run when the remote-mailbox query has no warnings, a separate forest recipient query succeeds with at least one recipient and no remote-mailbox types, and neither existing current export contains rows or invalid evidence. An unexpected empty result, a warning, a conflicting recipient or an existing nonempty export still stops publication. The resulting CSV has its normal headers and no fabricated row. Review this setting when hybrid deployment begins; it is an expectation about on-premises remote recipients, not about cloud-only mailboxes.

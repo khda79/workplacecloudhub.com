@@ -213,7 +213,7 @@ try {
     Assert-True ($menu.Count -eq @($catalog.Entries).Count -and @($menu | Where-Object { $_.Domain -eq 'Other' }).Count -eq 0) 'Every catalog entry must belong to a menu domain.'
     Assert-True ($advanced.Count -eq 10 -and $advanced -contains 'WorkplaceEvidence-ConvertMetadata' -and $advanced -contains 'Orchestrator-ScheduledTask-Installer' -and $advanced -contains 'Orchestrator-ServerAcceptance' -and $advanced -notcontains 'M365-Usage-Inventory-D180') 'Ten advanced entries: migration, repair, diagnostics, acceptance and setup tools.'
     Assert-True ((($domains | Measure-Object -Property Count -Sum).Sum) -eq ($menu.Count - 10) -and (($allDomains | Measure-Object -Property Count -Sum).Sum) -eq $menu.Count) 'Advanced entries are listed only on request.'
-    Assert-True (@($domains.Domain) -join '|' -eq 'Active Directory|Exchange Online|Exchange 2016 (on-premises)|Intune|Microsoft 365|SharePoint (on-premises)|Workplace Evidence|SmartFinOps|Orchestrator|Maintenance') ('Unexpected menu domains: ' + (@($domains.Domain) -join '|'))
+    Assert-True (@($domains.Domain) -join '|' -eq 'Active Directory|Exchange Online|Exchange (on-premises)|Intune|Microsoft 365|SharePoint (on-premises)|Workplace Evidence|SmartFinOps|Orchestrator|Maintenance') ('Unexpected menu domains: ' + (@($domains.Domain) -join '|'))
     $adItems = @($domains[0].Items)
     Assert-True ($adItems[0].Kind -eq 'Job' -and $adItems[-1].Kind -eq 'Manual') 'Jobs come before manual entries in a domain.'
     Assert-True ((Resolve-SmartM365InventoryMenuChoice -Choices $domains -Items $menu -Choice ' 2 ').Domain -eq 'Exchange Online' -and (Resolve-SmartM365InventoryMenuChoice -Choices $domains -Items $menu -Choice 'workplaceevidence-convertmetadata').Name -eq 'WorkplaceEvidence-ConvertMetadata' -and $null -eq (Resolve-SmartM365InventoryMenuChoice -Choices $domains -Items $menu -Choice '99')) 'A choice resolves by number, or by name even for an advanced entry.'
@@ -224,14 +224,20 @@ try {
     $requestPlan = Resolve-SmartM365InventoryLaunch -Catalog $catalog -Name 'AD-Inventory' -Action Request -ExtraArguments @('-IncludeDependencies', '-NoWait')
     $requestCommand = Get-SmartM365InventoryCommand -Plan $requestPlan -EnginePath 'pwsh.exe' -ScriptPath $requestPlan.ScriptPath -SmartInventoryRoot $inventoryRoot
     Assert-True (((@($requestCommand.Arguments) | Select-Object -Skip 5) -join ' ') -eq '-Tenant prod -Job AD-Inventory -Collect -IncludeDependencies -NoWait') ('Request extra arguments must be passed once: ' + (@($requestCommand.Arguments) -join ' '))
-    Assert-Throws { Resolve-SmartM365InventoryLaunch -Catalog $catalog -Name 'Exchange2016-ProxyAddresses-Write' -Action Request } 'manual launch' 'A manual entry must not be requested through the orchestrators.'
+    Assert-Throws { Resolve-SmartM365InventoryLaunch -Catalog $catalog -Name 'ExchangeOnPrem-ProxyAddresses-Write' -Action Request } 'manual launch' 'A manual entry must not be requested through the orchestrators.'
 
     # Legacy launchers that ignored SMARTM365_ORCHESTRATOR_TENANT (hard-coded prod) now follow it.
     $env:SMARTM365_ORCHESTRATOR_TENANT = 'demo'
-    $write = Resolve-SmartM365InventoryLaunch -Catalog $catalog -Name 'Exchange2016-ProxyAddresses-Write'
+    $write = Resolve-SmartM365InventoryLaunch -Catalog $catalog -Name 'ExchangeOnPrem-ProxyAddresses-Write'
     Assert-True ($write.Tenant -eq 'demo' -and $write.Interactive -and $write.RequiresConfirmation -and $write.Mode -eq 'LocalCache') 'ProxyAddresses Write: tenant, confirmation or cache.'
-    $onlyAd = Resolve-SmartM365InventoryLaunch -Catalog $catalog -Name 'Exchange2016-Local-Mailboxes-OnlyADPermissions'
+    $onlyAd = Resolve-SmartM365InventoryLaunch -Catalog $catalog -Name 'ExchangeOnPrem-Local-Mailboxes-OnlyADPermissions'
     Assert-True ($onlyAd.Tenant -eq 'demo') 'OnlyADPermissions must follow the orchestrator tenant.'
+    # Former Exchange2016-* names (template RenamedJobs, 1.5.96) still resolve to the renamed entries.
+    $formerName = Resolve-SmartM365InventoryLaunch -Catalog $catalog -Name 'Exchange2016-Local-Mailboxes-OnlyADPermissions' -WarningAction SilentlyContinue
+    Assert-True ($formerName.Name -eq 'ExchangeOnPrem-Local-Mailboxes-OnlyADPermissions' -and $formerName.Tenant -eq 'demo') 'A former Exchange2016 name must resolve to the renamed entry.'
+    Assert-Throws { Resolve-SmartM365InventoryLaunch -Catalog $catalog -Name 'Exchange2016-Unknown-Job' } 'Unknown job' 'An unknown former-looking name must still be refused.'
+    $exchangeGroups = @(@($catalog.Entries) | ForEach-Object { [string]$_.Definition.Group } | Where-Object { $_ -like 'Exchange2016*' })
+    Assert-True ($exchangeGroups.Count -eq 0) 'No catalog entry may keep the former Exchange2016 group.'
     foreach ($installer in @('Exchange-HealthChecker-ScheduledTask-Installer', 'Orchestrator-ScheduledTask-Installer')) {
         $installerPlan = Resolve-SmartM365InventoryLaunch -Catalog $catalog -Name $installer
         Assert-True ($installerPlan.Kind -eq 'Manual' -and $installerPlan.Runtime -eq 'WindowsPowerShell' -and $installerPlan.Mode -eq 'Direct' -and $installerPlan.Interactive) "$installer must be a manual Windows PowerShell entry in Direct mode."

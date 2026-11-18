@@ -12,7 +12,7 @@ PowerShell 5.1) and execution mode (Direct or LocalCache), outside the orchestra
 -Name <Job>[,<Job>...] -Request submits the jobs through SmartM365-Inventory-Pipeline.ps1: the
 resident orchestrators run them on the elected server with their dependencies and locks.
 Without argument in a user console, a menu lists the domains (Active Directory, Exchange Online,
-Exchange 2016, Intune, Microsoft 365, ...), then the entries of the chosen domain; type a number or an
+Exchange (on-premises), Intune, Microsoft 365, ...), then the entries of the chosen domain; type a number or an
 entry name, then run now, request through the orchestrators (jobs), or show the resolved command.
 Advanced entries (migration, repair, diagnostic, setup tools) are listed only after A. -List (or no argument when the input is redirected) prints the
 catalog. -WhatIf shows the resolved command without running anything.
@@ -29,13 +29,13 @@ The exit code of the launched script is returned. Preparation errors return 1.
 .\Invoke-SmartM365InventoryJob.ps1 -List
 
 .EXAMPLE
-.\Invoke-SmartM365InventoryJob.ps1 Exchange2016-Local-Mailboxes-Inventory -WhatIf
+.\Invoke-SmartM365InventoryJob.ps1 ExchangeOnPrem-Local-Mailboxes-Inventory -WhatIf
 
 .EXAMPLE
 .\Invoke-SmartM365InventoryJob.ps1 AD-Inventory -Request -IncludeDependencies
 
 .VERSION
-1.3.2
+1.3.3
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(

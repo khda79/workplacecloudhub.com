@@ -38,9 +38,9 @@ $daily = @{
         'EXO-Mailboxes-Inventory-Fast' = '00:15'
         'EXO-AcceptedDomains-Inventory' = '00:10'
         'Mailboxes-PermissionsByUser-Report' = '08:30'
-        'Exchange2016-Local-Mailboxes-Inventory' = '00:35'
-        'Exchange2016-ProxyAddresses-Check' = '00:00'
-        'Exchange2016-Infrastructure-Inventory' = '03:15'
+        'ExchangeOnPrem-Local-Mailboxes-Inventory' = '00:35'
+        'ExchangeOnPrem-ProxyAddresses-Check' = '00:00'
+        'ExchangeOnPrem-Infrastructure-Inventory' = '03:15'
         'M365-Usage-Inventory' = '04:45'
         'Intune-DeviceSystem-Inventory' = '01:15'
         'Intune-Devices-BIOS-Inventory' = '00:55'
@@ -73,17 +73,17 @@ $daily = @{
 $weekly = @{
         'EXO-Mailboxes-Inventory' = 'Saturday|06:00'
         'EXO-Mailboxes-CalendarPermissions' = 'Tuesday,Thursday|20:00'
-        'Exchange2016-Mailboxes-CalendarPermissions' = 'Monday,Wednesday,Friday|04:00'
-        'Exchange2016-FreeBusy-Check' = 'Sunday|05:00'
+        'ExchangeOnPrem-Mailboxes-CalendarPermissions' = 'Monday,Wednesday,Friday|04:00'
+        'ExchangeOnPrem-FreeBusy-Check' = 'Sunday|05:00'
         'Maintenance-ServerDataCleanup' = 'Sunday|06:00'
 }
 $estimates = @{
         'M365-Licences-Inventory' = 90
         'AD-Inventory' = 120
-        'Exchange2016-Local-Mailboxes-Inventory' = 150
-        'Exchange2016-ProxyAddresses-Check' = 30
-        'Exchange2016-Infrastructure-Inventory' = 90
-        'Exchange2016-FreeBusy-Check' = 15
+        'ExchangeOnPrem-Local-Mailboxes-Inventory' = 150
+        'ExchangeOnPrem-ProxyAddresses-Check' = 30
+        'ExchangeOnPrem-Infrastructure-Inventory' = 90
+        'ExchangeOnPrem-FreeBusy-Check' = 15
         'M365-WorkplaceScope-Inventory' = 360
         'Intune-Devices-Compliance-Inventory' = 15
         'Intune-Configurations-Inventory' = 30
@@ -200,7 +200,7 @@ foreach ($path in $paths) {
     Assert-True ($full.ConcurrencyKey -eq 'EXOMailboxes' -and $fast.ConcurrencyKey -eq $full.ConcurrencyKey) 'Concurrent full and fast EXO acquisition can launch.'
     Assert-True ([string]::IsNullOrWhiteSpace([string]$fast.Arguments)) 'Daily EXO Fast is restricted or collects live stats.'
     # The prepared artifact contract expects the service health, mailbox database path and Health Checker CSVs.
-    $exchangeInfrastructure = @($document.Jobs | Where-Object Name -eq 'Exchange2016-Infrastructure-Inventory')[0]
+    $exchangeInfrastructure = @($document.Jobs | Where-Object Name -eq 'ExchangeOnPrem-Infrastructure-Inventory')[0]
     $infrastructureSwitches = @(([string]$exchangeInfrastructure.Arguments) -split '\s+' | Where-Object { $_ })
     foreach ($switch in @('-IncludeServicesHealth', '-IncludeMailboxDatabasePaths', '-IncludeHealthChecker')) {
         Assert-True ($infrastructureSwitches -contains $switch) "Exchange infrastructure no longer collects the prepared artifact enabled by $switch."
@@ -212,7 +212,7 @@ foreach ($path in $paths) {
     Assert-True ([TimeSpan]::Parse([string]@($exchangeInfrastructure.Schedule.Times)[0]) -ge $chainEnd) 'Exchange infrastructure (Health Checker) starts before the on-premises mailbox chain is expected to end.'
     # Free/busy runs on an Exchange server under Windows PowerShell 5.1; Exchange Online is opened by the
     # collector with the app certificate, so the pwsh Exchange Online probe is not a prerequisite.
-    $freeBusy = @($document.Jobs | Where-Object Name -eq 'Exchange2016-FreeBusy-Check')[0]
+    $freeBusy = @($document.Jobs | Where-Object Name -eq 'ExchangeOnPrem-FreeBusy-Check')[0]
     Assert-True ($freeBusy.PowerShellEdition -eq 'WindowsPowerShell' -and $freeBusy.ConcurrencyKey -eq 'ExchangeOnPremServer' -and
         (@($freeBusy.RequiredCapabilities) -join ',') -ceq 'AD,ExchangeOnPrem,SharedRuntime') 'Free/busy check requirements changed.'
     Assert-True ([string]::IsNullOrWhiteSpace([string]$freeBusy.Arguments) -and $freeBusy.LauncherPath -eq 'Launchers\OnPremises\Start-SmartM365-Exchange-Hybrid-FreeBusy-Inventory.cmd') 'Free/busy check launcher changed.'
@@ -225,10 +225,10 @@ foreach ($path in $paths) {
     Assert-True ($exportTimeoutIndex -ge 0 -and $endpointSecurityArguments[$exportTimeoutIndex + 1] -eq '1200') 'Endpoint security exports are back to the shorter 600-second script default.'
     Assert-True ((3 * 1200 / 60) -lt [int]$endpointSecurity.TimeoutMinutes) 'Endpoint security export waits no longer fit inside the job timeout.'
     # The mailbox summary uses the same night's ProxyAddresses audit, which now runs first.
-    $localMailboxes = @($document.Jobs | Where-Object Name -eq 'Exchange2016-Local-Mailboxes-Inventory')[0]
-    Assert-True ((@($localMailboxes.DependsOn) -join ',') -ceq 'Exchange2016-ProxyAddresses-Check' -and $localMailboxes.DependencyMode -eq 'FreshSuccess') 'Local mailboxes no longer wait for a fresh ProxyAddresses check.'
+    $localMailboxes = @($document.Jobs | Where-Object Name -eq 'ExchangeOnPrem-Local-Mailboxes-Inventory')[0]
+    Assert-True ((@($localMailboxes.DependsOn) -join ',') -ceq 'ExchangeOnPrem-ProxyAddresses-Check' -and $localMailboxes.DependencyMode -eq 'FreshSuccess') 'Local mailboxes no longer wait for a fresh ProxyAddresses check.'
     # One daily time: the 1380-minute timeout policy.
-    foreach ($name in @('M365-Teams-Inventory', 'M365-SPO-Inventory', 'Intune-WindowsAutopilot-Inventory', 'Exchange2016-ProxyAddresses-Check', 'Exchange2016-Local-Mailboxes-Inventory')) {
+    foreach ($name in @('M365-Teams-Inventory', 'M365-SPO-Inventory', 'Intune-WindowsAutopilot-Inventory', 'ExchangeOnPrem-ProxyAddresses-Check', 'ExchangeOnPrem-Local-Mailboxes-Inventory')) {
         Assert-True (@($document.Jobs | Where-Object Name -eq $name)[0].TimeoutMinutes -eq 1380) "Daily job timeout is not 1380 minutes: $name"
     }
     # The template keeps the normal 48-hour freshness window; a server may widen it temporarily.
@@ -237,7 +237,7 @@ foreach ($path in $paths) {
     }
     # Every one-time daily or weekly job follows the timeout policy unless it is a declared exception.
     $timeoutExceptions = Get-SmartM365OrchestratorTimeoutPolicyExceptions
-    Assert-True ((@($timeoutExceptions.Keys) -join ',') -ceq 'AD-Inventory,M365-WorkplaceScope-Inventory,EXO-Mailboxes-Inventory,Exchange2016-FreeBusy-Check') 'Timeout policy exceptions changed.'
+    Assert-True ((@($timeoutExceptions.Keys) -join ',') -ceq 'AD-Inventory,M365-WorkplaceScope-Inventory,EXO-Mailboxes-Inventory,ExchangeOnPrem-FreeBusy-Check') 'Timeout policy exceptions changed.'
     foreach ($exceptionName in @($timeoutExceptions.Keys)) {
         Assert-True (@($document.Jobs | Where-Object Name -eq $exceptionName).Count -eq 1) "Timeout policy exception is not a manifest job: $exceptionName"
     }
