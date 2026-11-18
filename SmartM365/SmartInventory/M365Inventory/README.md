@@ -419,7 +419,7 @@ Supported report selections:
 
 | Report | Latest CSV | Notes |
 | --- | --- | --- |
-| `Office365ActiveUserDetail` | `M365_Users_Activity.csv` | Normalized workload activity by user. |
+| `Office365ActiveUserDetail` | `M365_Users_Activity.csv` | Normalized workload activity by user. One row per User Principal Name: a UPN that Graph lists more than once, for example a deleted account and a new account that reuses it, is left out with a warning (1.40). More than 1 % of such rows fails the run. |
 | `MailboxUsageDetail` | `M365_Mailbox_Usage.csv` | Graph usage view: storage, quotas, deleted items, archive flag, last activity. Complements the EXO mailbox inventory. |
 | `OneDriveUsageAccountDetail` | `M365_OneDrive_Usage.csv` | OneDrive storage, file counts, active files, owner, last activity. |
 | `SharePointSiteUsageDetail` | `M365_SharePoint_SiteUsage.csv` | SharePoint site storage, file/page activity, owner/site metadata from Graph reports. |

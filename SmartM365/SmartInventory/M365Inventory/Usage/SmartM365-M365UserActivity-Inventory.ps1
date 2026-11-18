@@ -15,9 +15,13 @@ older than CarriedOverReportAlertAgeHours (default 72), an alert is sent to the
 Teams Alerts channel.
 Since 1.34, -Reports All also collects email client usage, OneDrive user activity
 and Microsoft 365 groups activity.
+Since 1.40, a User Principal Name that the active user detail report lists more
+than once (for example a deleted account and a new account that reuses its UPN)
+is ambiguous: none of its rows is published and a warning names it. The run
+fails if ambiguous rows exceed 1 % of the report.
 
 .VERSION
-1.39
+1.40
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Reports.
@@ -67,7 +71,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = "1.39"
+$ScriptVersion = "1.40"
 $TaskName = "SmartM365-M365UserActivity-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 
@@ -202,6 +206,34 @@ function ConvertFrom-M365UserActivityReport {
             AssignedProducts = [string](Get-SourcePropertyValue -Row $row -Names @('Assigned Products'))
         }
     }
+}
+
+function Remove-M365UserActivityAmbiguousRows {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows,
+        [ValidateRange(0,100)][double]$MaxAmbiguousPercent = 1
+    )
+
+    # Graph can list one UPN twice, for example a deleted account and the new account that
+    # reuses its UPN. The report has no object ID, so neither row can be attributed: none is published.
+    $counts = @{}
+    foreach ($row in $Rows) {
+        $key = ([string]$row.UserPrincipalName).Trim().ToLowerInvariant()
+        if (-not $key) { continue }
+        $counts[$key] = 1 + [int]$counts[$key]
+    }
+    $ambiguous = @($counts.Keys | Where-Object { $counts[$_] -gt 1 } | Sort-Object)
+    if ($ambiguous.Count -eq 0) {
+        return [pscustomobject]@{ Rows = $Rows; AmbiguousUserPrincipalNames = @(); RemovedRows = 0 }
+    }
+    $ambiguousSet = [Collections.Generic.HashSet[string]]::new([string[]]$ambiguous, [StringComparer]::Ordinal)
+    $kept = @($Rows | Where-Object { -not $ambiguousSet.Contains(([string]$_.UserPrincipalName).Trim().ToLowerInvariant()) })
+    $removed = $Rows.Count - $kept.Count
+    if ($removed * 100 -gt $Rows.Count * $MaxAmbiguousPercent) {
+        throw ("Active user detail report lists {0} User Principal Name(s) more than once ({1} of {2} rows), above the {3} % limit. Nothing was published; check the report in the Microsoft 365 admin center." -f $ambiguous.Count,$removed,$Rows.Count,$MaxAmbiguousPercent)
+    }
+    return [pscustomobject]@{ Rows = $kept; AmbiguousUserPrincipalNames = $ambiguous; RemovedRows = $removed }
 }
 
 function Get-M365UsageReportDefinition {
@@ -604,8 +636,17 @@ function Export-M365UsageReport {
 
     $requestedPeriod = if ($ReportDefinition.PSObject.Properties['PeriodOverride']) { [string]$ReportDefinition.PeriodOverride } else { $Period }
     $rawRows = @(Import-Csv -LiteralPath $RawPath)
+    $ambiguousUserPrincipalNames = @()
     if ($ReportDefinition.Normalize -eq 'ActiveUserDetail') {
         $normalizedRows = @(ConvertFrom-M365UserActivityReport -Rows $rawRows)
+        $ambiguity = Remove-M365UserActivityAmbiguousRows -Rows $normalizedRows
+        if ($ambiguity.RemovedRows -gt 0) {
+            $normalizedRows = @($ambiguity.Rows)
+            $ambiguousUserPrincipalNames = @($ambiguity.AmbiguousUserPrincipalNames)
+            $shown = @($ambiguousUserPrincipalNames | Select-Object -First 20) -join ', '
+            if ($ambiguousUserPrincipalNames.Count -gt 20) { $shown += ', ...' }
+            WriteLog ("{0} lists {1} User Principal Name(s) more than once; their {2} row(s) are left out of {3}.csv because Graph gives no object ID to tell the accounts apart. Raw report kept: {4}. UPN: {5}" -f $ReportDefinition.Name,$ambiguousUserPrincipalNames.Count,$ambiguity.RemovedRows,$ReportDefinition.BaseFileName,$RawPath,$shown) 'WARNING'
+        }
         $columns = @(
             'RunId', 'ReportPeriod', 'ReportRefreshDate', 'UserPrincipalName', 'DisplayName', 'IsDeleted', 'DeletedDate',
             'HasExchangeLicense', 'HasOneDriveLicense', 'HasSharePointLicense', 'HasSkypeForBusinessLicense', 'HasYammerLicense', 'HasTeamsLicense',
@@ -635,6 +676,7 @@ function Export-M365UsageReport {
         ReportName = $ReportDefinition.Name
         FileName = "$($ReportDefinition.BaseFileName).csv"
         Rows = $normalizedRows.Count
+        AmbiguousUserPrincipalNames = $ambiguousUserPrincipalNames
         LatestPath = $exportResult.LatestPath
         PublishedPath = $exportResult.PublishedPath
         TimestampedPath = $exportResult.TimestampedPath
@@ -850,8 +892,9 @@ try {
         }
         catch { WriteLog ("Teams alert notification failed: {0}" -f $_.Exception.Message) 'WARNING' }
     }
-    $summary = "Tenant=$Tenant; Period=$Period; Published=$($summaryParts -join '; '); EmptyKeptPrevious=$($carriedOverEntries -join '; '); HistorySkippedUnchanged=$($unchangedHistoryReports -join '; '); LatestFolder=$LatestCsvFolderPath"
-    $completionLevel = if ($unchangedHistoryReports.Count -gt 0 -or $carriedOverReports.Count -gt 0) { 'WARNING' } else { 'SUCCESS' }
+    $ambiguousEntries = @($reportResults | Where-Object { @($_.AmbiguousUserPrincipalNames).Count -gt 0 } | ForEach-Object { "{0}={1}" -f $_.ReportName, @($_.AmbiguousUserPrincipalNames).Count })
+    $summary = "Tenant=$Tenant; Period=$Period; Published=$($summaryParts -join '; '); AmbiguousUpnsLeftOut=$($ambiguousEntries -join '; '); EmptyKeptPrevious=$($carriedOverEntries -join '; '); HistorySkippedUnchanged=$($unchangedHistoryReports -join '; '); LatestFolder=$LatestCsvFolderPath"
+    $completionLevel = if ($unchangedHistoryReports.Count -gt 0 -or $carriedOverReports.Count -gt 0 -or $ambiguousEntries.Count -gt 0) { 'WARNING' } else { 'SUCCESS' }
     WriteLog ("Microsoft 365 usage reports inventory completed. {0}" -f $summary) $completionLevel
     Send-SmartM365TeamsNotification -Level $completionLevel -Channel Infos -Title 'SmartM365 M365 usage reports inventory completed' -Message $summary -ResultSummary $summary -Facts @{
         Tenant = $Tenant
@@ -863,6 +906,7 @@ try {
     Stop-SmartM365UsageTranscript
     Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0 -and @($selectedReports | Where-Object Name -eq 'Office365ActiveUserDetail').Count -eq 1) -Scope 'CMDB:activity' -Qualifications @(
         "M365 usage report period=$Period; acquisition time is not the workload report refresh date."
+        if ($ambiguousEntries.Count -gt 0) { "User Principal Names listed more than once by Graph are left out as ambiguous: $($ambiguousEntries -join '; ')." }
         if ($carriedOverReports.Count -gt 0) { "Empty Graph report(s) after $emptyReportAttempts attempt(s); previous DATA-LAST CSV kept unchanged and not receipted: $($carriedOverDetails -join '; ')." }
     )
     Complete-SmartM365ExecutionContext -Status Auto
