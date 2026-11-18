@@ -1,8 +1,12 @@
 # Smart Device Reboot Manager
 
-## Current distribution 1.1.0
+## Next release 1.1.1 (source, not yet published)
 
-The package and GUI product version are **1.1.0**. The [1.1.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/device-reboot-manager-v1.1.0) supersedes 1.0.0 build 2, which stays available on its own release page.
+Package and GUI version: **1.1.1**. Planned local artifacts: `SmartM365-DeviceRebootManager-1.1.1.zip`, `SmartM365-DeviceRebootManager-1.1.1.intunewin`, `SmartM365-DeviceRebootManager-1.1.1.sha256`; planned tag path `releases/tag/device-reboot-manager-v1.1.1` (not published). Adds a signed, standalone action-only task launcher repair with a protected XML backup and rollback on read-back mismatch. The repair preserves existing arguments, working directory, triggers, principal and settings. Task creation reads the actual Windows build before selecting `conhost.exe --headless`. The helper is included in new standalone and Gallery package builds under `Deploy/`; previously published 1.1.0 packages remain unchanged. Restart rules and the GUI layout are unchanged.
+
+## Current published distribution 1.1.0
+
+The published package and GUI product version are **1.1.0**. The [1.1.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/device-reboot-manager-v1.1.0) supersedes 1.0.0 build 2, which stays available on its own release page.
 
 | Download | File |
 | --- | --- |
@@ -247,7 +251,29 @@ To recreate only the scheduled task on an already installed device:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Deploy\SmartM365-DeviceRebootManager-CreateScheduledTask.ps1 -RepeatIntervalMinutes 240
 ```
 
-On Windows 10 2004 (build 19041) and later, the task runs `conhost.exe --headless "...\powershell.exe" -STA -NoProfile -WindowStyle Hidden ...`. The headless console host prevents the black console window that `powershell.exe -WindowStyle Hidden` alone briefly shows at every run, including runs where the GUI exits silently below the threshold. Older builds keep the direct `powershell.exe` action. The task result is the console host result, not the GUI exit code. Existing installations keep their previous action until the task is recreated (reinstall, or the command above). The `Pending-Reboot-Age-DeviceRebootManager` Intune remediation accepts both actions.
+On Windows 10 2004 (build 19041) and later, the task runs `conhost.exe --headless "...\powershell.exe" -STA -NoProfile -WindowStyle Hidden ...`. The headless console host prevents the black console window that `powershell.exe -WindowStyle Hidden` alone briefly shows at every run, including runs where the GUI exits silently below the threshold. Older builds keep the direct `powershell.exe` action. The task result is the console host result, not the GUI exit code. Existing installations keep their previous action until it is updated; use the action-only repair below to preserve existing triggers and settings. The `Pending-Reboot-Age-DeviceRebootManager` Intune remediation accepts both actions.
+
+For an existing task that still starts PowerShell directly, the standalone admin
+helper `Deploy/SmartM365-DeviceRebootManager-RepairTaskLauncher.ps1` can repair only
+its action. Use it from this source checkout, or copy that helper to the affected
+computer; it is not included in the published 1.1.0 packages. Run it in elevated
+Windows PowerShell on that computer:
+
+```powershell
+# Read-only preview: shows the current and proposed command.
+.\Deploy\SmartM365-DeviceRebootManager-RepairTaskLauncher.ps1
+
+# Apply the reviewed action-only repair; does not start the task.
+.\Deploy\SmartM365-DeviceRebootManager-RepairTaskLauncher.ps1 -Apply -Confirm:$false
+```
+
+The helper requires Windows build 19041 or later, backs up the original task XML,
+preserves the exact existing arguments and working directory, and verifies that
+triggers, principal, settings and registration information are unchanged. It
+restores the original definition if read-back verification fails. An already
+headless task is left unchanged. Password-based tasks, registration triggers and
+unrecognized or multiple actions are refused for separate review. It does not
+change reboot thresholds or preferences, reinstall SDRM, or create another task.
 
 ## PowerShell Gallery packaging
 

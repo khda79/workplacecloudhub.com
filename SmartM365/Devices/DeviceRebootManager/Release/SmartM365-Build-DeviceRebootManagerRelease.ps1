@@ -5,7 +5,7 @@
 Validates and optionally builds the standalone Device Reboot Manager release artifacts.
 
 .DESCRIPTION
-Uses an explicit 29-file allow-list, validates version consistency, PowerShell
+Uses an explicit file allow-list, validates version consistency, PowerShell
 syntax, the pinned WorkplaceCloudHub Authenticode signer, and README release
 references. Preview is the default and writes nothing. Use -Build to create the
 ZIP and SHA-256 file locally. An optional existing IntuneWin can be copied and
@@ -27,7 +27,7 @@ This script never publishes to GitHub, PowerShell Gallery, or Microsoft Intune.
     -IntuneWinPath C:\Temp\SmartM365-DeviceRebootManager-0.1.1.intunewin `
     -OutputRoot C:\Temp\DeviceRebootManager-Release
 .VERSION
-1.1.2
+1.1.3
 #>
 
 [CmdletBinding()]
@@ -547,6 +547,7 @@ $releaseFiles = @(
     [pscustomobject]@{ Base = 'Product'; Source = 'Start-SmartM365-DeviceRebootManager-GUI-Test.cmd'; Destination = 'Start-SmartM365-DeviceRebootManager-GUI-Test.cmd' }
     [pscustomobject]@{ Base = 'Product'; Source = 'WorkplaceCloudHub.ico'; Destination = 'WorkplaceCloudHub.ico' }
     [pscustomobject]@{ Base = 'Product'; Source = 'WorkplaceCloudHub-lockup-WPF.png'; Destination = 'WorkplaceCloudHub-lockup-WPF.png' }
+    [pscustomobject]@{ Base = 'Product'; Source = 'Deploy\SmartM365-DeviceRebootManager-RepairTaskLauncher.ps1'; Destination = 'Deploy\SmartM365-DeviceRebootManager-RepairTaskLauncher.ps1' }
     [pscustomobject]@{ Base = 'Product'; Source = 'Deploy\SmartM365-DeviceRebootManager-CreateScheduledTask.ps1'; Destination = 'Deploy\SmartM365-DeviceRebootManager-CreateScheduledTask.ps1' }
     [pscustomobject]@{ Base = 'Product'; Source = 'Deploy\SmartM365-DeviceRebootManager-Detection.ps1'; Destination = 'Deploy\SmartM365-DeviceRebootManager-Detection.ps1' }
     [pscustomobject]@{ Base = 'Product'; Source = 'Deploy\SmartM365-DeviceRebootManager-Install.ps1'; Destination = 'Deploy\SmartM365-DeviceRebootManager-Install.ps1' }
@@ -564,8 +565,8 @@ $releaseFiles = @(
     [pscustomobject]@{ Base = 'Product'; Source = 'Tests\SmartM365-Test-DeviceRebootManagerPowerShellGallery.ps1'; Destination = 'Tests\SmartM365-Test-DeviceRebootManagerPowerShellGallery.ps1' }
 )
 
-if ($releaseFiles.Count -ne 29) {
-    throw "Release allow-list must contain exactly 29 files; found $($releaseFiles.Count)."
+if ($releaseFiles.Count -ne 30) {
+    throw "Release allow-list must contain exactly 30 files; found $($releaseFiles.Count)."
 }
 $duplicateDestinations = @(
     $releaseFiles |
@@ -593,8 +594,8 @@ $powerShellFiles = @(
     $resolvedFiles |
         Where-Object { [IO.Path]::GetExtension($_.DestinationPath) -in @('.ps1', '.psm1', '.psd1') }
 )
-if ($powerShellFiles.Count -ne 19) {
-    throw "Release allow-list must contain exactly 19 PowerShell files; found $($powerShellFiles.Count)."
+if ($powerShellFiles.Count -ne 20) {
+    throw "Release allow-list must contain exactly 20 PowerShell files; found $($powerShellFiles.Count)."
 }
 foreach ($file in $powerShellFiles) {
     Assert-PowerShellSyntax -Path $file.SourcePath
@@ -629,6 +630,7 @@ if (-not [string]::IsNullOrWhiteSpace($IntuneWinPath)) {
         'WorkplaceCloudHub-lockup-WPF.png'
         'Start-SmartM365-DeviceRebootManager-GUI.cmd'
         'Start-SmartM365-DeviceRebootManager-GUI-Test.cmd'
+        'Deploy\SmartM365-DeviceRebootManager-RepairTaskLauncher.ps1'
         'Deploy\SmartM365-DeviceRebootManager-CreateScheduledTask.ps1'
         'Deploy\SmartM365-DeviceRebootManager-Detection.ps1'
         'Deploy\SmartM365-DeviceRebootManager-Install.ps1'
@@ -762,8 +764,8 @@ try {
         Get-ChildItem -LiteralPath $verifiedPackageRoot -Recurse -File |
             Where-Object { $_.Extension -in @('.ps1', '.psm1', '.psd1') }
     )
-    if ($verifiedPowerShellFiles.Count -ne 19) {
-        throw "ZIP must contain exactly 19 PowerShell files; found $($verifiedPowerShellFiles.Count)."
+    if ($verifiedPowerShellFiles.Count -ne 20) {
+        throw "ZIP must contain exactly 20 PowerShell files; found $($verifiedPowerShellFiles.Count)."
     }
     foreach ($file in $verifiedPowerShellFiles) {
         Assert-PowerShellSyntax -Path $file.FullName
@@ -848,8 +850,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAM+NAxSAPQHlGh
-# Z0KWkFQetofeUsJ2gQFV0tSKa8o/gqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBoeZpdhCo0oNOu
+# 0R4eMfvbkvuycKYfsxBM4QubhQ9+KqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -982,31 +984,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPFSRKo7uokTv23ccRp88Hgh50LiINVAoDsjX+GC690lMA0GCSqG
-# SIb3DQEBAQUABIIBgBVgng/uE8bEHkV72/59ztXFsDqYw3YZEN9FY0DExb5OuV/+
-# qNzbMr8xBb7HVRI60dJ6N2dY7yeyHZaCXWhi6d7hoQhjnObJjLkT8XSdZmvnKq0m
-# 4DB7GfLBcARuaC2aIvTHynEIrZy4NPFXHWDVjJkypecna7jmRlK4i/eMtIedpAJW
-# fZGug3WGN/5dO1D3meEozfQ16rfCGNg8rKzgQ8BR1EAINlPWfGsBfynf1GowH4ec
-# 2POW95Yjv1ZnrwKfCCDTQ5HWYKTZlMLfdwZHYQPOSTVmP2iqRx6i4C5HQBNnaRcT
-# zN1E6N47FsyUP5myApKuZt3zBUEdk1IJH6sNFO4eKcsqPpHw5VKASWRyvlYHsB67
-# 0RpkGcjspk1+K7RYu8W7rxY4DGmdqa3y1ddwt4bUgHLHJSFYueQdWjszQSiWzi0v
-# Epm4boSVJ5aVN5RZqfgwVHtz/+/EKv5gkga4n4eaq5uTdKMderjfi/rDeFT1VKrl
-# lRC3yDtuy7yu9bYvAqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAFJ05jbrEV2kmJHKvxpIKow/EKDgHL4nEMKEwLzPkMZMA0GCSqG
+# SIb3DQEBAQUABIIBgH7anjY5Wj9dJTBgS0HrOwmDKSYEgZp7ENWNq6ZTVrLhwSH7
+# rugF2N4wcgJJ7cXrXeHLhUaysuHYMxY07qmmOl2A0fi9ZM25oKTo4Hbyk3w76d/4
+# r2AjgRjsDPsu10l5jkd6vbu8QAw55jEaaHseQbzD3wcjU6PrB0ljD9fAzILx/n47
+# 9a35w5l7AkhiiLEkiD1xx4nWHFfrg15mqfftdZUl46Y7YwBTbYn4b4h2HBPUWXeH
+# nWzgUFbLnmUt17EIKez+bqlaDIH1fZCILmLxslKt8gRd7ptSjzchDSmuhyJIaLCT
+# zfZwzg5/20cu/YtTt5gb9Gwr8mR2I56Nx1ZmNl3VTRRNc0TemUajABXV4POaS3H4
+# cBn6mlAsATfgEvJPhzCaIwoZxWp4ztM2lW60Hu6AfCWRkVTjXZmxPIfJkKRijPuW
+# K0Tr+Q8UkPKlq05W/hyllNfLxUoMjYCtbcakZOy9sViC0kWxlttBUCxTtnAP127e
+# YYwUhBx6IW/xvjf22qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTMxMDE1
-# NTFaMC8GCSqGSIb3DQEJBDEiBCDffrSjoFs3V9UKyd/yK1YNgdLfC7y98D0QRyFY
-# Sy/KWTANBgkqhkiG9w0BAQEFAASCAgCxqeg13z829GuqwHf8b4p5ws+KW610AX/w
-# JoDXeZXF5YEQLL2RqLmYs5Gy9v8nYzlIrhC7oQNI9L3pOoxl5yf5d+b83Bo5h+Ne
-# 6iSIQc7ju/I2d/hYAhkcY+Y66WrwH1a1Pm8aopHFZ0L84fjRWx5U3Jxi2k4Cxd8r
-# fLakPnd+HxgiTLA0Su6r3dEqapfKdhXk6/NlyySi1ZL4j54qAasB6Y3/+5Z/rXXJ
-# kaMeKqye/rUmLLohlyzXiaVr6fSKYYDvHoAGwOCQShWmeNy/qy/icL90uSOwvDa8
-# Meblz8Wf2ZTrzYZVPWqk5+X+iRHPg+iol9Ks2ZdrPiptC3LZ6ztNyoBnRKHsg66M
-# Ll+OG06AHCsmiL6SnkLCDXliVu30KQRhdFeYwFZPDX9vftVQLhiO2xCqk0l4o/jH
-# eTQseRxZIZfP4HpXvQBioFwGRx48nvIudS9sm0aFWXnz9g9nZfJreiT5EciafDpj
-# waFYNa35PyjRZ6/RDstAqM1JlwHF4laainf+rRQjTiZNWHoH3q+F8oxF2UX/pWsY
-# Lo5QTup45sZ/l5piAPXqNzIzPNg2oCH2Lt6YuwVDwHaKhr4IQ5bqMwc3Qr86dlq1
-# 7LqyivuOidKOWlkzbVXJ8xpt2T+2LB3Qa35X0ENUc97/OpSGBdsgTBAU1o/XOkGf
-# 3QKkOV5Asw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTgxNjM1
+# MjJaMC8GCSqGSIb3DQEJBDEiBCD2VfakecrvRIc3/80XJyXZ5iFl38mROLMDH/J7
+# OgR67TANBgkqhkiG9w0BAQEFAASCAgCeh5Oyh1PVRtwz0lndOctO2yaA5Dg2Gthq
+# eUxB05lfAMUwewCvTNGW9o4C/yfYC5bOZz3Q9CoJwIjdwrZ/RM2xlaa5jzlsuy7n
+# BGzW7WHBQofkI8C/7Im236SdL/VOycW1+4FhsrbyRQcL/SH+bjMk0VZV3qee0uW3
+# CwT2QaFWnVOV5eGnocBjAhw4b6Q12J9+AotoQOo599XNVfNXlmw1bbX67ktBjszA
+# FSg9S22p9mK6slDGqco6dFoCiRPIkPyRcDI7azVSCWskKo6XDvh4O3lzhVOtJSa1
+# eSkcbItPgv3kec/eEV2WM0r97iX4GDZLaUO7KuY8DXUi57bkpkqBXbFoCjJd4BOh
+# domXwNhwAZjrHiypfw7IrSpNnxc1d2hGyVKeH9tKl8ecMZSNTPlpkLHDqGrSetN1
+# bcDiRJ2GBOkWTXO14IFNLs6FPvFVhmrtGfEQ2BjdZitZhLz11JA2nuXLEbB4Qmdy
+# HlHFZWtCrFecuS5PpBwbaO1GZ5cfKO9p2c41ejr5krxE2S52INE05whhA/BRB7kq
+# 90Gz7ORNSkBDgzGTNgQJRR2RcYtlmv/MyAUOxxZnS5GlbAI/+QDxW3Vtofi2P7je
+# vdbp+kU2E9SMcC6SDIkXnkfe7op91Xqahuy/K6lubkI+oi0t+fRPtghbxt4wmfZ7
+# 5vGeTbwGjA==
 # SIG # End signature block

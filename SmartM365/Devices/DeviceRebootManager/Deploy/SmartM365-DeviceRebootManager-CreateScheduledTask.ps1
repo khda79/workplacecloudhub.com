@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 
 <#
 .SYNOPSIS
@@ -10,7 +10,7 @@
     intended for Intune Win32 deployments running as SYSTEM.
 
 .VERSION
-    1.1.0
+    1.1.1
 #>
 
 [CmdletBinding()]
@@ -70,7 +70,7 @@ if (-not [string]::IsNullOrWhiteSpace($ConfigPath)) {
 # when the GUI exits silently below the threshold. A headless console host prevents it
 # (Windows 10 2004 and later); older builds keep the direct PowerShell host.
 $conhostPath = Join-Path -Path $env:SystemRoot -ChildPath 'System32\conhost.exe'
-if ([Environment]::OSVersion.Version.Build -ge 19041 -and (Test-Path -LiteralPath $conhostPath)) {
+if ([int](Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop).BuildNumber -ge 19041 -and (Test-Path -LiteralPath $conhostPath)) {
     $taskArguments = @('--headless', (ConvertTo-QuotedArgument -Value $PowerShellPath)) + $taskArguments
     $action = New-ScheduledTaskAction -Execute $conhostPath -Argument ($taskArguments -join ' ')
 }
@@ -111,8 +111,8 @@ Write-Output ("Scheduled task registered: {0}{1}" -f $TaskPath, $TaskName)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDXgxVDguUylCYc
-# m5/iodpbOzJJ/rbHld2uSIrMVGGnsaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCc5QyIQZ/3pgv4
+# iAdoznaCD+su9YreWnUWYDC+Kb/VfaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -245,31 +245,31 @@ Write-Output ("Scheduled task registered: {0}{1}" -f $TaskPath, $TaskName)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIL7FKyPcESs4iWJeFd3HIEb1XvQQuQVv1HtyZ6jOQgEaMA0GCSqG
-# SIb3DQEBAQUABIIBgFW19nvYUj9kZexFGNAOHXUhWUQDiRgZPie5MwYICpxZ2Qho
-# HKJPEJh7LMlLLgzXm8kB2HSG0xZaD3hyLNDSaP1FD8j5Scct8wm8kL16bGMpXxXF
-# 8EODzaaIUdTe0ZRvAxcJXnBNnb46fYOrymZAGy3m0UDpieAmUtB5XtVZJptp/BKu
-# Wn5fRxOxswD931r3JicnqzoBujbHqA7NneajMJJoJJHoGacaZdUl5KX5ieEOp8fq
-# qLugQOL2P6SxxHz6aclr2/HgcgL4+Naab53pes7z//sKZxmt8LdIJWfjEk/npT0O
-# 8sP4dBkEz0Jx7m4kB4VlrQ1eNXjR/fAbY1Sq/lz9s6CLQkBMGoB/TZ85ZczzUZeK
-# wGvlr/WKFf0A31IRHaM8qeB7OFcG7dw4NQmt7SKS/JpJInQo1nESlk6ACvl6z/Y6
-# JB1p6po3upoQBd8JMko29bo1Xav2n0AbzCrED6+zGvhq7zvKcqlA+YT4BkW3ayi9
-# mbKz0a4PzgB80ekxM6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICc7eCwLTsjXc5/G6uv6thEkPTxUcxBEcJ6CJaJ7iLaYMA0GCSqG
+# SIb3DQEBAQUABIIBgJ1WtgHFnc342cpexrm5Gb5m6ts4u0on956wY1z2ma3okHcL
+# 9mC4qBPxJHdeRMKAZ5CGxf+Kqe54D+lkf1GoU5WZLlTVwzzyr2uCgO40wNF84eLw
+# 9krSodWP/X3CafIy1snM1bX2XCpjG1ObrAwBPvG+rkBrE5TU0x5H4bAXCme9eXmx
+# bxvhBCQnC3nLy4XOI/piqSD18M3lkoVF5XNWx6zNfnB9UPWsdA67PKjBfftFwy9c
+# 4K8w2+iPc3RqSKPFqJ0Tr3gVjdsWtDYsL4rBmfJ6lX/68KfZt3vDjh9QrlladCph
+# U39QVBn4A0pvbcAoxPVMjJwkpfXT7GNj7ujYkrRaRUoKx6f03CLj+LTztZ/Snb/s
+# DK01oZSfisqzwi4XIeszjckKv6C+CB0UBt3Rj+Wqmtg6Ssq+8QzUIDSPmJPQt8pj
+# 5hjw1xc81D5GSDNf8rd4OeMl9LauXQtUB70WopMYMbFjCMmldqfQsWoSTpJ2edhc
+# WZ1H4smiEAisMtkE16GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxNjU5
-# NDJaMC8GCSqGSIb3DQEJBDEiBCA/OWSfqODUCzz6Dm5h3G3yLN54tJq4oGRn67M/
-# XQoAojANBgkqhkiG9w0BAQEFAASCAgBqJZKQChQ4+22GgsUHaSI40lBwNxju1UGB
-# ctsdb7w+Ox+auFcH0Bs662p3BcXMl45SaOZMs4wSh2KJ63+MBJzZykzfSatee41g
-# fUkdjElydEcVTIIHCyCThVaA16ulJPtnaxQruVG2TBpFmqOv3zAtmNyqJxc0mUcN
-# uyo1NTRRrHqXqVea/aqRelckfDKrgXuBVhxRH2wP7gSdNQP5uZrEbUqzsQJLzfv5
-# 0zpBZhpLTWrRNaTx8qJRN5BKPCXaKg2iVLPDSWiEhGzK+WyM5wYxVIQHiptVoqAk
-# H9iPls4FOQ7rRQJGnlWQGyyikvOxbJavv7hRns7HxT9Sxxr09XVQwx+57PH8Hk31
-# SuiY5az9oO6TJCDgw+N2mVq06BIqn9mp54IfR4NPXI2uWzwK8rA2o2l2Jlhq+PLa
-# 1fWJklr3GV2aTNqxSrXfjqfm12Xoh9oXl6YtPwF5tLkJ0ReYXIEPX+/juvkKjvTL
-# KZRD5G5TdpEdxQQQl3CcRoLOjbXFl7+FOfS9A3idqNkidtBtHj5e1VGsTN60NlLL
-# 6cj7hL+wnCnHXMQz5hOT5HGAHcudKdgyzHUywS9CjsxgmwX4KQBMZBfnhEdkQjr5
-# cFPyIE6OnXhXEDjQcoOTQIkHHQwOJg3kM+LkpCEZ5THnMs/ohidPpNaqwbPIfx3/
-# bg8JMI+n7w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTgxNjMz
+# NDVaMC8GCSqGSIb3DQEJBDEiBCAKgcx009TWjgghATJQaryTDteIwXo2cL4IvAqp
+# KJ5eGDANBgkqhkiG9w0BAQEFAASCAgBbXKv8vI/7wY+eGp8jaxdWhsgAzQXfANW7
+# nyo4gMLlf1cueHfwZwZ9m5JpDVFY8kr9Fnfqc1azhsimdCzfJufkAu8OooynSLtk
+# kSYSSfHy3h6KJGE1xquzBlRLaOWx5y4E91Yb4OUvzouXvm2s5i2lvZV5WeTsNl8s
+# hHGX5ujyZUMhUU+kFC2AKLGEQ028BkCUMbL6AWxfyAWh7qkhloiUy5XEBBi10n1J
+# ZYkoTqVBaexrm4WEY4DQN9jLDu/1a+HBd4AIRSu/tS4hNCXdJhG72MR63WPYZTbl
+# 26a/eDwZ9xxTlTg/qTYwq2Hfs9bXlnOkrAaJNscJAtBKYEZm3PybVVpSiWWGenJg
+# D/7QJZGk2GxbNH7/i1Zrktm5ClETAdfXUVB1CjR4Zli1EMvpwByZVAYwnmvFAf7w
+# agF7sCLFcWZRqMMxbAQ4jSjOVBB/0H9Um/3zxgdH0+TLTkSGzD2lTKod9GFuaWd/
+# JXlBp81gDOl/eEkfBqJjSipy+D/vv3Asmlb0fbpGrxlFKF/X0cRvi6B/TRuvsUpH
+# EPKAdPYN+zyuO9arccYs4MOJm1qlDZtT4vg6sUUoK94AIpG7OQ8wObrWNHo97GPC
+# 1uRda5TO8Azi525M0aOPBIUk4MrVg2Ix8bLLp6FEIzfY31bkDLip9yArbUWJCJZr
+# jYeSz7iFRw==
 # SIG # End signature block

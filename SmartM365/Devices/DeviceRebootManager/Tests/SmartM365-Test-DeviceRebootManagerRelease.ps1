@@ -10,7 +10,7 @@ IntuneWin packages (real AES-256-CBC + HMAC-SHA256 layout) verify that a package
 matching the current runtime is accepted and that stale or corrupted packages
 are refused. The expected version is read from the version manifest.
 .VERSION
-1.1.0
+1.1.1
 #>
 
 [CmdletBinding()]
@@ -151,6 +151,7 @@ $testRoot = Join-Path -Path ([IO.Path]::GetTempPath()) -ChildPath (
 )
 
 $expectedPackagePaths = @(
+    'Deploy\SmartM365-DeviceRebootManager-RepairTaskLauncher.ps1'
     'Deploy\SmartM365-DeviceRebootManager-CreateScheduledTask.ps1'
     'Deploy\SmartM365-DeviceRebootManager-Detection.ps1'
     'Deploy\SmartM365-DeviceRebootManager-Install.ps1'
@@ -194,6 +195,7 @@ $intuneRuntimePaths = @(
     'WorkplaceCloudHub-lockup-WPF.png'
     'Start-SmartM365-DeviceRebootManager-GUI.cmd'
     'Start-SmartM365-DeviceRebootManager-GUI-Test.cmd'
+    'Deploy\SmartM365-DeviceRebootManager-RepairTaskLauncher.ps1'
     'Deploy\SmartM365-DeviceRebootManager-CreateScheduledTask.ps1'
     'Deploy\SmartM365-DeviceRebootManager-Detection.ps1'
     'Deploy\SmartM365-DeviceRebootManager-Install.ps1'
@@ -214,8 +216,8 @@ try {
     Assert-True ($preview.Mode -eq 'Preview') 'Default mode must be Preview.'
     Assert-True (-not $preview.BuildAttempted) 'Preview unexpectedly attempted a build.'
     Assert-True (-not $preview.PublicationAttempted) 'Preview unexpectedly attempted publication.'
-    Assert-True ($preview.FileCount -eq 29) 'Preview allow-list file count is incorrect.'
-    Assert-True ($preview.PowerShellFileCount -eq 19) 'Preview PowerShell file count is incorrect.'
+    Assert-True ($preview.FileCount -eq 30) 'Preview allow-list file count is incorrect.'
+    Assert-True ($preview.PowerShellFileCount -eq 20) 'Preview PowerShell file count is incorrect.'
     Assert-True $preview.ReadmeValidated 'Preview did not validate README references.'
     Assert-True $preview.DetectionVersionValidated 'Preview did not validate detection version consistency.'
     Assert-True (-not (Test-Path -LiteralPath $previewRoot)) 'Preview created an output directory.'
@@ -231,8 +233,8 @@ try {
     Assert-True (-not $build.PublicationAttempted) 'Local build unexpectedly attempted publication.'
     Assert-True ($build.PackageVersion -eq $expectedPackageVersion) 'Unexpected package version.'
     Assert-True ($build.ExpectedReleaseTag -eq "device-reboot-manager-v$expectedPackageVersion") 'Unexpected release tag.'
-    Assert-True ($build.FileCount -eq 29) 'Built package file count is incorrect.'
-    Assert-True ($build.PowerShellFileCount -eq 19) 'Built package PowerShell file count is incorrect.'
+    Assert-True ($build.FileCount -eq 30) 'Built package file count is incorrect.'
+    Assert-True ($build.PowerShellFileCount -eq 20) 'Built package PowerShell file count is incorrect.'
     Assert-True (-not $build.IntuneWinIncluded) 'Build unexpectedly included an IntuneWin.'
     Assert-True (Test-Path -LiteralPath $build.ZipPath -PathType Leaf) 'ZIP was not created.'
     Assert-True (Test-Path -LiteralPath $build.ChecksumPath -PathType Leaf) 'Checksum file was not created.'
@@ -267,7 +269,7 @@ try {
     Assert-PackagedDemo -RuntimeRoot $packageRoot
 
     $actualPackagePaths = Get-RelativeFilePaths -Root $packageRoot
-    Assert-True ($actualPackagePaths.Count -eq 29) 'ZIP does not contain exactly 29 files.'
+    Assert-True ($actualPackagePaths.Count -eq 30) 'ZIP does not contain exactly 30 files.'
     Assert-True (@(Compare-Object -ReferenceObject $expectedPackagePaths -DifferenceObject $actualPackagePaths).Count -eq 0) `
         'ZIP paths differ from the independently defined expected package topology.'
 
@@ -383,8 +385,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBEg0CCOf/9zUl+
-# qexeo1vUiZm13dF7HWy255V0tDsRBKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB2/bovaOJcwkVA
+# jF4esdRUrXMkJeo+bQzG0ncC1kdspaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -517,31 +519,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMjGRSbRNs86/bO0jgXG/Tobsv0vddQbv6GSavjbgvkEMA0GCSqG
-# SIb3DQEBAQUABIIBgEfiHfUZ98yP/PtSWVG22G+PiNU9l2LFXTOEC5exMG7ouNLS
-# 4skArFsSoj4l2S2vGSEjMmEMDKRmmQaBVL3FeZv7t9D55BLWcXGAUpbwNEfvKVyG
-# GmvysxkyNSkvGjMkAF3liGqxzRuqzJ51Wyi/TqDmjnrmGm1F0aZ26B+lepRz6b/+
-# FCSoS3Q0pYb1mD+nbsFxK9Py7t+AM3xoPbs526uKz+R1JATQYtb+PYlml8+kbJIK
-# LPBFUSUGp4Tj4ZzLcKnfxLC7zi3DgjNt8OXIF4XEVtDXqRzEKwwnoLQeMYYZ0zqz
-# aPGQmtguLKS8mQ3/yEv2h54o+Fo4JsNEz0rYIqxCNT+gD2qL8yH7ybKVJaTcSNRk
-# yswRxF0AxVdn9NwdD6i9Jy+iep3nEoIJcX9Zdm1nBC9t+ni9MGkR2Jy7Hk11yQd+
-# gvlYBVEek0JXHsoPC0Kb2dgN1kMKAowwEJpbzO0ylRgoACiS5nmTtNbN8WFgQ6Sb
-# sPyO9c9IAlqR69/Xz6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIM2bTDTUPfmgPNezNDonZidM0WUZA7/ZNK+/5eT3lLO2MA0GCSqG
+# SIb3DQEBAQUABIIBgJBDeDmVovinXlgozsZn2NDmw8SNN+nRLj2izDg/51Etq/cB
+# b0V69hPGc/9PccPJPAKjjdsO+qjBbHz6zoLv0ZyNq6PSFJy4LFZoZALNa/Fa9pKu
+# 7RsXu/mu4sWRMdNArzPv8fjRXV3ZXVRdqF0f4kJdjM4bNbzWWt+YgpWf6lCnmHct
+# fm1altjIvVUpAk7PiyiK4Z0G/SeeVYyeCVnZ1SCC2KudxDeTKntv6K/EXBJN8Zls
+# U3lJxuzdPs3/Fz6n5sgfAdfPVlR2IWa661NXLvWyUgnyAaJFDqa9VWobNO1vTfQz
+# j8kbp9Z7YqIc3jbdGDiOKihZpGKa5KhJFjDSqSjzm8LbreLGaG0VUlmzwrbt6xdN
+# 2dW2DXYMg4zUaDefymS5XkZ9G/cyqOpsiB/JoSBpfWps8nr0yNL4daTS9pBkaO0J
+# mNqL+WAgL6z5MlNw3vOiyEgGlkc6JhrtkchSwSwjd/d0PKtOYsm1I5J2HBa9vXfE
+# GEsoCUtXwLRUHHMXdaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMjQy
-# MjRaMC8GCSqGSIb3DQEJBDEiBCCgo91oPEjnQRZY3oEOGuy+MXLEg5j9nts2IQcp
-# +r+ZXTANBgkqhkiG9w0BAQEFAASCAgCpQ295RPoJh4ndtikCT05kErxiq3t3d85E
-# Ltoqv9/GcJeN5yOINN8LbJTlOJMcnBcD01VBv3LgU2HA1ik+Qv6NJrJuJ6oKIrtl
-# msE9FI+ElnTuzqvT4jHDN0QNUd9F/QAoho26+Zd9igqjLJrEyXZfeqB8fmg7+ir5
-# XnlllhNRpCi9dSPEHe9PgJzmWKsdvy0knUlxSxk3TJ9gQsJdqB/QygzflxVrwpVH
-# HGyc+nR5F/tkoI94vvGFFzfjdF7kjPTpVK1EButrcicrlNpvPF+9jLkhVqOGW0Fb
-# nmyXG9shJXNlENsu5ZavaxOLczy/ig0H0KkU0eNzDQe/X9Y2tP9E9cEXXExDm2ds
-# m3NVKSnc+JKklrp3zEOMSEDkhAYJU+rezxFZb9o+zlFvPVnKQd4sq1M/zmJQkP/k
-# y9/Z65s0NzThVMfLK3ZgH+h1MV9ERCH721H7NvUA68LlDHC8CtpbQOOumkvNTFOo
-# LuhsgzaVmT9+K1pa9laKsOjeuO113Qk65IohoITCqDvovHINGAjxYsb0xjEtT/kS
-# 96tcwgRG3C/WqJyA0GkCnQu+hCkAUHJAkz175WnX593/KcNLIxAeC2+3Oh5WKRAn
-# EBDGwZ6ksL1kphjkJKFuSa+E6kGz/NIA4r+EYm5wGnW0ey38Wo6NSbVaA1krqzFv
-# diwI1/1oyA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTgxNjM1
+# MjJaMC8GCSqGSIb3DQEJBDEiBCD+/VgLXHgxgfsj8UGWevKbcDJG3nbrduri1W9F
+# 49DnoTANBgkqhkiG9w0BAQEFAASCAgA/48X2M5GjutbNqJPafioZy5P76KheBlKV
+# 6F71iN0EhGT2JXMQ7P4A/TF4h7RPUXJykvStOBzYPsK2t7vqWP8WCUqFcIJktaXo
+# notoWAgvU7dQT0yMhBU0QoBGDxPE8q7pSNhF+gZIqk/Uit1gQkJO1tACs7pRaBvD
+# V8y8hs3wbBLZIS71PggVI6VJaYGMrRQgC+b90tIAKyviOb06jR4Sw2hgTiot23GX
+# c39ifLESDPcstC7vUeHfV0NjWuHEEvVGN4THdQop5qayTFqOzSnPqIoarSQfx5Ea
+# GuNxdlYJnsldSH2u21MMEBRZ+u2pqmN5r64Em2ggJfhC5SdJSJvAJ31IW7rEDMiB
+# VrFgh+Li1jOTTrzoVx50WgzaWhX9NtJ/xuJwcdZrtzoAxJSlarBYIFLtLbtdatem
+# XdaEebp8TN+HzG5Myb9zZ7b2vHI067truJQZwkqSx+rjYIDK7C5K5feDZmkLPYTC
+# 7Kv7rSp/vlkM4GLqFawUXFRuvlWsXp1TjvjM9ZOkLAmPB33qgdYps/9uVW/fL41M
+# Qb3vYI1jcDlT76vhvFCfiVxvsLneBQDpduu9C1Iig/LLs2sjWusMpzNHA3lmbYnf
+# XOhIu0O2vEBdAUvNhbvfI6FWntQCMqSXC4eYTUAAjC7Sints0XT0AgxTmIAB8bV7
+# kXR2tAjvww==
 # SIG # End signature block
