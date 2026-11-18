@@ -22,8 +22,8 @@ $tokens = $null; $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile((Resolve-Path $orchestratorPath), [ref]$tokens, [ref]$errors)
 Check (@($errors).Count -eq 0) 'Orchestrator does not parse.'
 $text = Get-Content -LiteralPath $orchestratorPath -Raw
-Check ($text -match '\.VERSION\r?\n1\.5\.96\r?\n') 'Orchestrator .VERSION is not 1.5.96.'
-Check ($text -match '\$ScriptVersion = "1\.5\.96"') 'Orchestrator ScriptVersion is not 1.5.96.'
+Check ($text -match '\.VERSION\r?\n1\.5\.97\r?\n') 'Orchestrator .VERSION is not 1.5.97.'
+Check ($text -match '\$ScriptVersion = "1\.5\.97"') 'Orchestrator ScriptVersion is not 1.5.97.'
 Check ($text -match '\$script:SharePointTokenPauseMinutes = 15') 'Token pause default is not 15 minutes.'
 
 # The real Core keeps the token helper internal: a direct call from the orchestrator fails (1.5.94 bug).

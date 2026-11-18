@@ -110,7 +110,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.96
+1.5.97
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -123,7 +123,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.96
+    Version : 1.5.97
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
@@ -160,7 +160,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.96"
+$ScriptVersion = "1.5.97"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -6696,6 +6696,17 @@ function Initialize-NewJobStates {
         if ($null -ne $latest) { $state.LastScheduledOccurrence = ConvertTo-StateTime -Value $latest }
         Write-OrchestratorLog -Message ("Job {0}: initialized state (fast-forwarded to {1})." -f $job.Name, $(if ($null -ne $latest) { $latest.ToString('yyyy-MM-dd HH:mm') } else { 'no past occurrence' }))
     }
+    # A renamed job without a run of its own keeps the last run of its former name (1.5.97).
+    try {
+        $renameTemplatePath = Join-Path -Path $PSScriptRoot -ChildPath 'Orchestrator-Jobs.json.template'
+        if (Test-Path -LiteralPath $renameTemplatePath -PathType Leaf) {
+            $renameTemplate = Read-SmartM365OrchestratorJson -Path $renameTemplatePath
+            foreach ($line in @(Copy-SmartM365OrchestratorRenamedJobHistory -StateJobs $script:State.Jobs -Template $renameTemplate)) {
+                Write-OrchestratorLog -Message ("Renamed job history carried over: {0}." -f $line)
+            }
+        }
+    }
+    catch { Write-OrchestratorLog -Message ("Renamed job history could not be carried over: {0}" -f $_.Exception.Message) -Level WARN }
     Save-OrchestratorState
 
 }

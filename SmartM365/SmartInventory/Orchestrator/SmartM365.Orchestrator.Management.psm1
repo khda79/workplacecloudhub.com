@@ -245,8 +245,9 @@ function Write-SmartM365OrchestratorManagementLog {
 function Invoke-SmartM365OrchestratorJobRename {
     # Applies the template RenamedJobs and RenamedGroups maps to a jobs document in place (1.5.96).
     # A job is renamed only when the template defines the new name and the document has the old name
-    # but not the new one; its local settings are kept and every DependsOn follows. Job state, claims,
-    # receipts and logs keyed by the old name are not migrated (a renamed job starts a new history).
+    # but not the new one; its local settings are kept and every DependsOn follows. Claims, receipts and
+    # logs keyed by the old name are not migrated; since 1.5.97 the orchestrator copies the last completed
+    # run of the old name in its own state (Copy-SmartM365OrchestratorRenamedJobHistory).
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Document, [Parameter(Mandatory)]$Template)
     $jobMap = @{}; $groupMap = @{}
@@ -293,6 +294,29 @@ function Invoke-SmartM365OrchestratorJobRename {
         RenamedJobNames = @($renamedJobNames)
         UpdatedJobNames = @($updatedJobNames)
     }
+}
+
+function Copy-SmartM365OrchestratorRenamedJobHistory {
+    # 1.5.97: a renamed job that has no run of its own yet takes the last completed run of its former
+    # name (template RenamedJobs) from the same server state, so FreshSuccess dependencies on the new
+    # name do not wait for its first run. Only LastRunStart, LastRunEnd, LastStatus and LastExitCode are
+    # copied; the scheduling cursor, retries and the former entry stay unchanged. Returns one line per copy.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable]$StateJobs, [Parameter(Mandatory)]$Template)
+    $copied = [Collections.Generic.List[string]]::new()
+    if (-not $Template.PSObject.Properties['RenamedJobs'] -or $null -eq $Template.RenamedJobs) { return @() }
+    foreach ($property in @($Template.RenamedJobs.PSObject.Properties)) {
+        $oldName = ([string]$property.Name).Trim(); $newName = ([string]$property.Value).Trim()
+        if (-not $oldName -or -not $newName -or $oldName -ieq $newName) { continue }
+        if (-not $StateJobs.ContainsKey($oldName) -or -not $StateJobs.ContainsKey($newName)) { continue }
+        $source = $StateJobs[$oldName]; $target = $StateJobs[$newName]
+        if ($source -isnot [hashtable] -or $target -isnot [hashtable]) { continue }
+        if ($target['LastRunStart'] -or $target['LastRunEnd'] -or [string]$target['LastStatus'] -or $null -ne $target['Running'] -or $null -ne $target['PendingRetry']) { continue }
+        if (-not [string]$source['LastStatus'] -or -not $source['LastRunEnd']) { continue }
+        foreach ($field in @('LastRunStart', 'LastRunEnd', 'LastStatus', 'LastExitCode')) { $target[$field] = $source[$field] }
+        $copied.Add(('{0} -> {1} ({2}, ended {3})' -f $oldName, $newName, $source['LastStatus'], $source['LastRunEnd'])) | Out-Null
+    }
+    return @($copied)
 }
 
 function Sync-SmartM365OrchestratorJobsManifest {
@@ -948,7 +972,7 @@ Export-ModuleMember -Function @(
     'Publish-SmartM365OrchestratorConfiguration', 'Get-SmartM365OrchestratorConfigurationVersions', 'Restore-SmartM365OrchestratorConfigurationVersion',
     'Request-SmartM365OrchestratorRebalance', 'Get-SmartM365OrchestratorHistory', 'Get-SmartM365OrchestratorServerStatus',
     'Get-SmartM365OrchestratorTimeoutPolicyExceptions', 'Get-SmartM365OrchestratorServerStateTable', 'Get-SmartM365OrchestratorInactiveServers',
-    'Initialize-SmartM365OrchestratorServerStates', 'Invoke-SmartM365OrchestratorServerStatesMigration'
+    'Initialize-SmartM365OrchestratorServerStates', 'Invoke-SmartM365OrchestratorServerStatesMigration', 'Copy-SmartM365OrchestratorRenamedJobHistory'
 )
 
 # SIG # Begin signature block

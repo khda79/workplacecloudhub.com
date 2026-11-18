@@ -214,6 +214,28 @@ try {
     Assert-True -Condition ($renameBackups.Count -eq 1 -and [Convert]::ToBase64String([IO.File]::ReadAllBytes($renameBackups[0].FullName)) -ceq [Convert]::ToBase64String($manifestBeforeRename)) -Message 'The manifest backup before the rename is missing or differs.'
     $secondRenameResult = Sync-SmartM365OrchestratorJobsManifest -Path $renameManifestPath -TemplatePath $renameTemplatePath
     Assert-True -Condition (-not $secondRenameResult.Updated -and @($secondRenameResult.RenamedJobNames).Count -eq 0) -Message 'A second synchronization after the rename was not idempotent.'
+
+    # Renamed job history (1.5.97): the new name takes the last completed run of the old name once.
+    $emptyEntry = { @{ LastScheduledOccurrence = '2026-11-18T00:35:00'; LastRunStart = $null; LastRunEnd = $null; LastStatus = ''; LastExitCode = $null; RetryCount = 0; Running = $null; PendingRetry = $null } }
+    $historyJobs = @{
+        'Exchange2016-Local-Mailboxes-Inventory' = @{ LastScheduledOccurrence = '2026-11-17T00:35:00'; LastRunStart = '2026-11-17T00:35:08+01:00'; LastRunEnd = '2026-11-17T01:37:24+01:00'; LastStatus = 'Success'; LastExitCode = 0; RetryCount = 0; Running = $null; PendingRetry = $null }
+        'ExchangeOnPrem-Local-Mailboxes-Inventory' = (& $emptyEntry)
+        'Exchange2016-ProxyAddresses-Check' = @{ LastScheduledOccurrence = $null; LastRunStart = $null; LastRunEnd = $null; LastStatus = ''; LastExitCode = $null; RetryCount = 0; Running = $null; PendingRetry = $null }
+        'ExchangeOnPrem-ProxyAddresses-Check' = (& $emptyEntry)
+        'Exchange2016-Infrastructure-Inventory' = @{ LastScheduledOccurrence = $null; LastRunStart = '2026-11-18T09:13:35+01:00'; LastRunEnd = '2026-11-18T09:31:30+01:00'; LastStatus = 'CompletedWithWarnings'; LastExitCode = 0; RetryCount = 0; Running = $null; PendingRetry = $null }
+        'ExchangeOnPrem-Infrastructure-Inventory' = @{ LastScheduledOccurrence = $null; LastRunStart = '2026-11-18T10:00:00+01:00'; LastRunEnd = '2026-11-18T10:20:00+01:00'; LastStatus = 'Failed'; LastExitCode = 1; RetryCount = 0; Running = $null; PendingRetry = $null }
+        'Exchange2016-FreeBusy-Check' = @{ LastScheduledOccurrence = $null; LastRunStart = '2026-11-18T09:31:53+01:00'; LastRunEnd = '2026-11-18T09:36:25+01:00'; LastStatus = 'Success'; LastExitCode = 0; RetryCount = 0; Running = $null; PendingRetry = $null }
+    }
+    $historyLines = @(Copy-SmartM365OrchestratorRenamedJobHistory -StateJobs $historyJobs -Template $shippedTemplate)
+    $copiedMailboxes = $historyJobs['ExchangeOnPrem-Local-Mailboxes-Inventory']
+    Assert-True -Condition ($historyLines.Count -eq 1 -and $historyLines[0] -like 'Exchange2016-Local-Mailboxes-Inventory -> ExchangeOnPrem-Local-Mailboxes-Inventory (Success, *') -Message "Unexpected renamed history copies: $($historyLines -join '; ')"
+    Assert-True -Condition ($copiedMailboxes.LastStatus -eq 'Success' -and $copiedMailboxes.LastRunEnd -eq '2026-11-17T01:37:24+01:00' -and $copiedMailboxes.LastRunStart -eq '2026-11-17T00:35:08+01:00' -and $copiedMailboxes.LastExitCode -eq 0) -Message 'The last run of the former name was not copied.'
+    Assert-True -Condition ($copiedMailboxes.LastScheduledOccurrence -eq '2026-11-18T00:35:00' -and $historyJobs['Exchange2016-Local-Mailboxes-Inventory'].LastStatus -eq 'Success') -Message 'The scheduling cursor or the former entry changed.'
+    Assert-True -Condition (-not $historyJobs['ExchangeOnPrem-ProxyAddresses-Check'].LastStatus) -Message 'A former name without a completed run was copied.'
+    Assert-True -Condition ($historyJobs['ExchangeOnPrem-Infrastructure-Inventory'].LastStatus -eq 'Failed' -and $historyJobs['ExchangeOnPrem-Infrastructure-Inventory'].LastRunEnd -eq '2026-11-18T10:20:00+01:00') -Message 'A run of the new name was overwritten.'
+    Assert-True -Condition (-not $historyJobs.ContainsKey('ExchangeOnPrem-FreeBusy-Check')) -Message 'A state entry was created for a new name.'
+    Assert-True -Condition (@(Copy-SmartM365OrchestratorRenamedJobHistory -StateJobs $historyJobs -Template $shippedTemplate).Count -eq 0) -Message 'The renamed history copy is not idempotent.'
+    Assert-True -Condition (@(Copy-SmartM365OrchestratorRenamedJobHistory -StateJobs $historyJobs -Template ([pscustomobject]@{ Jobs = @() })).Count -eq 0) -Message 'A template without RenamedJobs copied history.'
     # Both names present (manual partial migration): nothing is renamed or removed.
     $bothNames = Read-SmartM365OrchestratorJson -Path $renameManifestPath
     $leftover = $oldProxy | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100
