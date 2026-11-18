@@ -20,7 +20,7 @@
     folder (last run only) and are read as text only; they are never published.
 
 .VERSION
-1.0.10
+1.0.11
 .REQUIREMENTS
     Windows PowerShell 5.1, elevated, on an Exchange server with the Exchange Management Tools.
     Modules: SmartM365 WindowsPowerShell5 compatibility module; ActiveDirectory (Windows feature RSAT-AD-PowerShell);
@@ -29,7 +29,7 @@
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Script Name : SmartM365-Exchange-Hybrid-FreeBusy-Inventory.ps1
-    Version     : 1.0.10
+    Version     : 1.0.11
     Author      : https://github.com/khda79/workplacecloudhub.com
 #>
 
@@ -77,7 +77,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-Hybrid-FreeBusy-Inventory"
-$ScriptVersion = "1.0.10"
+$ScriptVersion = "1.0.11"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 # Vendored Microsoft CSS-Exchange Free/Busy Checker (see ThirdParty\CSS-Exchange\FreeBusyChecker\PROVENANCE.md).
 $FreeBusyCheckerRelativePath = 'ThirdParty\CSS-Exchange\FreeBusyChecker\FreeBusyChecker.ps1'
@@ -261,7 +261,8 @@ function Invoke-FreeBusySharePointUpload {
             [void]$script:FreeBusySharePointUploads.Add($record)
         }
         Write-Log "SharePoint upload requested: $LocalFilePath"
-        return $record
+        # Callers do not read the record (it is kept in the uploads list); returning it wrote it to the job log.
+        return
     }
     catch {
         Write-Log "SharePoint upload failed (non-blocking): $($_.Exception.Message)" "WARN"

@@ -26,7 +26,7 @@
     New-CimSession is used over DCOM only, to start the Health Checker scheduled task.
 
 .VERSION
-1.8.16
+1.8.17
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in;
@@ -38,7 +38,7 @@
     and the Health Checker scheduled task must be installed there.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.8.16
+    Version     : 1.8.17
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -49,6 +49,10 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.8.17
+      - The SharePoint upload helper no longer returns its record, which leaked into the job log
+        as a LocalFilePath object.
+
     1.8.16
       - Sets the SharePoint target globals from the effective configuration after the upload context.
         With DATA-ALL publication enabled, the weekly history upload of the WindowsPowerShell5 Core read
@@ -285,7 +289,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.8.16"
+$ScriptVersion = "1.8.17"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 # Vendored Microsoft CSS-Exchange Health Checker (see ThirdParty\CSS-Exchange\HealthChecker\PROVENANCE.md).
 $HealthCheckerRelativePath = 'ThirdParty\CSS-Exchange\HealthChecker\HealthChecker.ps1'
@@ -516,7 +520,8 @@ function Invoke-ServersAndStorageSharePointUpload {
             [void]$script:ServersAndStorageSharePointUploads.Add($record)
         }
         Write-Log "SharePoint upload requested: $LocalFilePath"
-        return $record
+        # Callers do not read the record (it is kept in the uploads list); returning it wrote it to the job log.
+        return
     }
     catch {
         Write-Log "SharePoint upload failed (non-blocking): $($_.Exception.Message)" "WARN"
