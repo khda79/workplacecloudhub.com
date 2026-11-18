@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic, offline data-quality tests for the Exchange Online calendar-permission collector.
 .VERSION
-1.0.0
+1.1.0
 #>
 [CmdletBinding()]
 param(
@@ -49,6 +49,7 @@ $functionNames = @(
     'New-CalendarPermissionRow',
     'New-CalendarStatusRow',
     'Get-MailboxCoverageKey',
+    'Resolve-CalendarMailboxAddressConflicts',
     'Resolve-CalendarPermissionExportRows',
     'Assert-CalendarPermissionCoverage',
     'Get-WorkerPermissionPropertyValue',
@@ -142,6 +143,39 @@ try {
         }
         Assert-Offline ($observed.Accepted.ExpectedCount -eq 2 -and $observed.Accepted.RepresentedCount -eq 2) 'Main/error union did not satisfy coverage.'
         Assert-Offline $observed.Refused 'Coverage barrier accepted a silently missing mailbox.'
+    }
+
+    Test-OfflineCase 'Distinct mailboxes sharing one address are left out before collection and stay represented' {
+        $observed = & $module {
+            $mailboxes = @(1..300 | ForEach-Object { [pscustomobject]@{PrimarySmtpAddress="user$_@example.test";UserPrincipalName="user$_@example.test";ExchangeGuid=[guid]::NewGuid().ToString()} })
+            $mailboxes += [pscustomobject]@{PrimarySmtpAddress='shared@example.test';UserPrincipalName='shared@example.test';ExchangeGuid='11111111-1111-1111-1111-111111111111'}
+            $mailboxes += [pscustomobject]@{PrimarySmtpAddress='Shared@Example.test';UserPrincipalName='shared@example.test';ExchangeGuid='22222222-2222-2222-2222-222222222222'}
+            $mailboxes += [pscustomobject]@{PrimarySmtpAddress='repeat@example.test';UserPrincipalName='repeat@example.test';ExchangeGuid='33333333-3333-3333-3333-333333333333'}
+            $mailboxes += [pscustomobject]@{PrimarySmtpAddress='repeat@example.test';UserPrincipalName='repeat@example.test';ExchangeGuid='33333333-3333-3333-3333-333333333333'}
+            $resolution = Resolve-CalendarMailboxAddressConflicts -Mailboxes $mailboxes
+            $kept = @($resolution.Mailboxes)
+            $mainRows = @($kept | ForEach-Object { New-CalendarStatusRow -Mailbox $_.PrimarySmtpAddress -UPN $_.UserPrincipalName -Status 'NoCalendarFolder' -Message 'Synthetic.' })
+            $conflictKeys = @($resolution.Conflicts | ForEach-Object { $_.CoverageKey })
+            $errorRow = [pscustomobject]@{Mailbox='shared@example.test';UPN='shared@example.test'}
+            $accepted = Assert-CalendarPermissionCoverage -Mailboxes $kept -ExportRows $mainRows -ErrorRows @($errorRow) -ProcessedCount $kept.Count -ConflictMailboxKeys $conflictKeys
+            $refusedWithoutErrorRow = $false
+            try { Assert-CalendarPermissionCoverage -Mailboxes $kept -ExportRows $mainRows -ErrorRows @() -ProcessedCount $kept.Count -ConflictMailboxKeys $conflictKeys | Out-Null } catch { $refusedWithoutErrorRow = $true }
+            $refusedOldBehaviour = $false
+            try { Assert-CalendarPermissionCoverage -Mailboxes $mailboxes -ExportRows $mainRows -ErrorRows @() -ProcessedCount $mailboxes.Count | Out-Null } catch { $refusedOldBehaviour = $_.Exception.Message -match 'duplicate coverage key' }
+            $massRefused = $false
+            $mass = @(1..10 | ForEach-Object { [pscustomobject]@{PrimarySmtpAddress="m$_@example.test";UserPrincipalName="m$_@example.test";ExchangeGuid=[guid]::NewGuid().ToString()} })
+            $mass += [pscustomobject]@{PrimarySmtpAddress='m1@example.test';UserPrincipalName='m1@example.test';ExchangeGuid=[guid]::NewGuid().ToString()}
+            try { Resolve-CalendarMailboxAddressConflicts -Mailboxes $mass | Out-Null } catch { $massRefused = $_.Exception.Message -match 'above the 1 % limit\. Collection not started' }
+            [pscustomobject]@{Resolution=$resolution;Kept=$kept;Accepted=$accepted;RefusedWithoutErrorRow=$refusedWithoutErrorRow;RefusedOldBehaviour=$refusedOldBehaviour;MassRefused=$massRefused}
+        }
+        Assert-Offline ($observed.Kept.Count -eq 301) "Unexpected processed mailbox count: $($observed.Kept.Count)."
+        Assert-Offline (@($observed.Kept | Where-Object { $_.PrimarySmtpAddress -match '^shared@' }).Count -eq 0) 'A mailbox with a shared address was still queued for collection.'
+        Assert-Offline ($observed.Resolution.RepeatedEntries -eq 1 -and @($observed.Kept | Where-Object PrimarySmtpAddress -eq 'repeat@example.test').Count -eq 1) 'A repeated entry of the same mailbox was not kept exactly once.'
+        Assert-Offline (@($observed.Resolution.Conflicts).Count -eq 1 -and $observed.Resolution.Conflicts[0].CoverageKey -ceq 'shared@example.test' -and $observed.Resolution.Conflicts[0].MailboxCount -eq 2 -and $observed.Resolution.Conflicts[0].ExchangeGuids -match '11111111.*22222222') 'Address conflict was not described with both ExchangeGuids.'
+        Assert-Offline ($observed.Accepted.ExpectedCount -eq 302 -and $observed.Accepted.RepresentedCount -eq 302) 'Coverage did not count the conflict address as represented by its error row.'
+        Assert-Offline $observed.RefusedWithoutErrorRow 'Coverage accepted a conflict address without its error row.'
+        Assert-Offline $observed.RefusedOldBehaviour 'Coverage no longer refuses an unresolved duplicate address.'
+        Assert-Offline $observed.MassRefused 'Mass address conflicts did not stop the run before collection.'
     }
 }
 finally {

@@ -6,6 +6,9 @@
     Retrieves calendar folder permissions for Exchange Online user, shared, room, and equipment mailboxes.
     Primary-calendar mode uses persistent parallel Exchange Online worker sessions; full-folder mode remains sequential.
     Parallel mode logs a progress line every 1,000 mailboxes or 5 minutes with rate, ETA and per-worker counts.
+    Since 2.12, the mailbox list is checked before collection: a mailbox listed twice (same ExchangeGuid) is
+    processed once; distinct mailboxes that share one address are left out, logged as a warning and reported
+    as one collection error row. More than 1 % of such mailboxes stops the run before collection.
     The script tries the canonical Calendar name, folder statistics, then common localized names.
     It exports mailbox coverage, collection status, stable permission-principal identifiers when Exchange exposes them,
     and an explicit diagnostic when a display-name-only principal collision cannot be resolved safely.
@@ -24,7 +27,7 @@
     Limits mailbox processing to the first N mailboxes for smoke tests. Default 0 processes all mailboxes.
 
 .VERSION
-2.11
+2.12
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ExchangeOnlineManagement.
@@ -144,7 +147,7 @@ function Join-ModulePath {
     throw "SmartM365.Core module file not found: $FileName"
 }
 
-$ScriptVersion = '2.11'
+$ScriptVersion = '2.12'
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 
@@ -446,6 +449,54 @@ function Get-MailboxCoverageKey {
     return $value.Trim().ToLowerInvariant()
 }
 
+function Resolve-CalendarMailboxAddressConflicts {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Mailboxes,
+        [ValidateRange(0,100)][double]$MaxConflictPercent = 1
+    )
+
+    # Checked before the hours-long collection, not only at publication. The same mailbox listed twice
+    # (same ExchangeGuid) is kept once. Distinct mailboxes sharing one address cannot be queried by that
+    # address: they are left out and reported once as a collection error under that address.
+    $kept = [System.Collections.Generic.List[object]]::new()
+    $conflicts = [System.Collections.Generic.List[object]]::new()
+    $repeatCount = 0
+    $groups = [ordered]@{}
+    foreach ($mailbox in $Mailboxes) {
+        $key = Get-MailboxCoverageKey -Mailbox ([string]$mailbox.PrimarySmtpAddress) -UPN ([string]$mailbox.UserPrincipalName)
+        if ([string]::IsNullOrWhiteSpace($key)) { $kept.Add($mailbox); continue }
+        if (-not $groups.Contains($key)) { $groups[$key] = [System.Collections.Generic.List[object]]::new() }
+        $groups[$key].Add($mailbox)
+    }
+    foreach ($key in $groups.Keys) {
+        $group = $groups[$key]
+        if ($group.Count -eq 1) { $kept.Add($group[0]); continue }
+        $guids = @($group | ForEach-Object { ([string]$_.ExchangeGuid).Trim().ToLowerInvariant() })
+        $distinctGuids = @($guids | Sort-Object -Unique)
+        if ($distinctGuids.Count -eq 1 -and $distinctGuids[0] -and $distinctGuids[0] -ne [guid]::Empty.ToString()) {
+            $kept.Add($group[0])
+            $repeatCount += $group.Count - 1
+            continue
+        }
+        $conflicts.Add([pscustomobject]@{
+            CoverageKey       = $key
+            UserPrincipalName = [string]$group[0].UserPrincipalName
+            MailboxCount      = $group.Count
+            ExchangeGuids     = ($guids -join ', ')
+        })
+    }
+    $excluded = @($conflicts | ForEach-Object { $_.MailboxCount } | Measure-Object -Sum).Sum
+    if ($excluded * 100 -gt $Mailboxes.Count * $MaxConflictPercent) {
+        throw ("Mailbox enumeration has {0} address(es) shared by distinct mailboxes ({1} of {2} mailboxes), above the {3} % limit. Collection not started." -f $conflicts.Count, $excluded, $Mailboxes.Count, $MaxConflictPercent)
+    }
+    return [pscustomobject]@{
+        Mailboxes       = $kept.ToArray()
+        Conflicts       = $conflicts.ToArray()
+        RepeatedEntries = $repeatCount
+    }
+}
+
 function Try-GetFolderPermission {
     param(
         [Parameter(Mandatory)][string[]]$MailboxIds,   # e.g. @($upn, $primarySMTP, $mbx.Identity)
@@ -590,13 +641,20 @@ function Assert-CalendarPermissionCoverage {
         [Parameter(Mandatory)][object[]]$Mailboxes,
         [AllowNull()][object[]]$ExportRows,
         [AllowNull()][object[]]$ErrorRows,
-        [Parameter(Mandatory)][int]$ProcessedCount
+        [Parameter(Mandatory)][int]$ProcessedCount,
+        # Addresses shared by distinct mailboxes: not processed, but each must be represented by an error row.
+        [AllowNull()][string[]]$ConflictMailboxKeys
     )
 
     if ($ProcessedCount -ne $Mailboxes.Count) {
         throw ("Calendar permissions coverage check failed before publication: processed={0}, enumerated={1}." -f $ProcessedCount, $Mailboxes.Count)
     }
     $expectedMailboxKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($conflictKey in @($ConflictMailboxKeys | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+        if (-not $expectedMailboxKeys.Add($conflictKey.Trim().ToLowerInvariant())) {
+            throw ("Calendar permissions conflict list contains a duplicate address: {0}" -f $conflictKey)
+        }
+    }
     foreach ($mailbox in $Mailboxes) {
         $coverageKey = Get-MailboxCoverageKey -Mailbox ([string]$mailbox.PrimarySmtpAddress) -UPN ([string]$mailbox.UserPrincipalName)
         if ([string]::IsNullOrWhiteSpace($coverageKey)) {
@@ -733,6 +791,17 @@ function Get-CalendarProgressLine {
         $line += '; workers ' + ($workerParts -join ' ')
     }
     return $line + '.'
+}
+
+$mailboxResolution = Resolve-CalendarMailboxAddressConflicts -Mailboxes @($mailboxes)
+$mailboxes = @($mailboxResolution.Mailboxes)
+$mailboxAddressConflicts = @($mailboxResolution.Conflicts)
+$total = $mailboxes.Count
+if ($mailboxResolution.RepeatedEntries -gt 0) {
+    WriteLog -Message ("Mailbox enumeration returned {0} repeated entr(ies) of the same mailbox (same ExchangeGuid); each mailbox is processed once." -f $mailboxResolution.RepeatedEntries) 'WARNING'
+}
+foreach ($conflict in $mailboxAddressConflicts) {
+    WriteLog -Message ("{0} distinct mailboxes share the address {1} (ExchangeGuid: {2}). Their calendar permissions cannot be attributed by address; they are left out and reported as a collection error. Fix the duplicate mailbox in Exchange Online." -f $conflict.MailboxCount, $conflict.CoverageKey, $conflict.ExchangeGuids) 'WARNING'
 }
 
 # ------------------------- Processing Loop -------------------------
@@ -1215,8 +1284,13 @@ if ($remainingStableDuplicates.Count -gt 0) {
     throw ("Calendar permissions stable-key deduplication failed for {0} permission key(s)." -f $remainingStableDuplicates.Count)
 }
 
+foreach ($conflict in $mailboxAddressConflicts) {
+    Add-CalendarErrorDetail -Mailbox $conflict.CoverageKey -UPN $conflict.UserPrincipalName `
+        -Message ("Ambiguous mailbox address: {0} distinct mailboxes share {1} (ExchangeGuid: {2}); calendar permissions not collected." -f $conflict.MailboxCount, $conflict.CoverageKey, $conflict.ExchangeGuids)
+}
 $coverage = Assert-CalendarPermissionCoverage -Mailboxes @($mailboxes) -ExportRows $exportRows `
-    -ErrorRows $errorDetails.ToArray() -ProcessedCount $processed
+    -ErrorRows $errorDetails.ToArray() -ProcessedCount $processed `
+    -ConflictMailboxKeys @($mailboxAddressConflicts | ForEach-Object { $_.CoverageKey })
 WriteLog -Message ("Calendar permissions publication coverage validated: {0}/{1} mailbox(es) represented in main or error data." -f `
     $coverage.RepresentedCount, $coverage.ExpectedCount) 'INFO'
 if ($duplicateResolution.DeduplicatedStableRowCount -gt 0) {
