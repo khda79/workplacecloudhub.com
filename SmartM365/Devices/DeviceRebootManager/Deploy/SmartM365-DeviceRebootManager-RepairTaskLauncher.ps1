@@ -6,6 +6,8 @@ Previews or repairs only the console host of an existing Device Reboot Manager t
 The default is read-only. With -Apply, backs up the task XML and replaces a direct
 PowerShell action with conhost --headless. Keeps the existing arguments, working
 directory, triggers, principal and settings. Never creates or starts a task.
+.VERSION
+1.1.2
 #>
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
@@ -37,7 +39,11 @@ if ($leaf -notin @('powershell.exe', 'pwsh.exe')) {
 # Read the actual Windows build, independent of the caller executable's manifest.
 $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
 $conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
-if ([int]$os.BuildNumber -lt 19041 -or -not (Test-Path -LiteralPath $conhost -PathType Leaf)) {
+$conhostProbe = $conhost
+if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
+    $conhostProbe = Join-Path $env:SystemRoot 'Sysnative\conhost.exe'
+}
+if ([int]$os.BuildNumber -lt 19041 -or -not (Test-Path -LiteralPath $conhostProbe -PathType Leaf)) {
     throw 'This repair requires Windows build 19041 or later and conhost.exe; nothing changed.'
 }
 $newArguments = '--headless "{0}" {1}' -f $executable, $arguments
@@ -120,8 +126,8 @@ $result.TaskStarted = $false
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCArovhN8Buv+iM3
-# iz/q8WnpJ36ScUFyPGmC6E/7EMIzYKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC7A4ZBIHXC/9si
+# tO01lbz7hByiPWXH7Fj4YaiUI+6iLKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -254,31 +260,31 @@ $result.TaskStarted = $false
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGq+0VaDdcilLUQp484f+m0Por/4inpvf04a4t2DeztuMA0GCSqG
-# SIb3DQEBAQUABIIBgEDyjc5adv9yu9Yg2Clh9IVCORi5mgpI1wj8tMI0AwgH2tSs
-# +ha2BWNuKHsN/bF3lVQtJUDqdb61PM4jKicf155z1tiuDnfEVVS0Nl7Zu4cRxLuI
-# Cg9i/amSGZg+zRoXWDNnM6LNCD6jAF0/xpYIwVGwtXMo8B7P2aQkg5dozy1Fluv/
-# KQ9w9wHT2m4nN6Ish+cwMsjbSwqo6ooV7gDGbF2voT2FFMkc6Pjg52fuliQAVbIo
-# TwIR8IK0XT/C84XuPxmMilu9ELVQmojf/sqRoSUCX+8IiiYD+IJnZ89YaQ3YaX4u
-# hStMv5us9SgiTxfvZRNK8M64K6hncZv0qDmlRhX2AZ3SRi+kFs82/iZ8Yqxitt6L
-# QJsnmTJFCL1VeF4ciuDDHQKSOdOHQozy/SOeXG+GtrnIoqls1GcwqXeV9B6Q79qg
-# qUOA0j5MzfUm/61p+ejyVpt0ZB4pfGh2JlNkPAUTdRm1uDp8ILkYz3Fuxs8KsZVI
-# Ew/riTVTqUQ7ccthCKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIW93+wUwG2bnLaETv2qnps4LXJrzIwSd1XgJ7NGXcHYMA0GCSqG
+# SIb3DQEBAQUABIIBgEinlHcxJ7SWRSmNloP3rzxXS3h+ebiHos2hEuG8CZSe7EfU
+# qzrEN2tQU0RjtTnIrO1bEIwFyyd4W2JODyCbTRLms8Lqg6vPyvVGeDbp2D8h7rSl
+# y4BA9pNVy/mBLi4ZAYMtll2XQ/ftUtIAXhiUNC5DT+SeQD9mH07zUCY68//YMl+C
+# fmUXZI3oqQufIZatMhx5PE2oeIWoCNx56WsrLemWL6Bx6SUMk4h1St0wKea08Te/
+# Lci6jQ6MhmUr9tCQWs6iSfc5g64XKGRcbld8mNdgOMiaYa5YhR9nj+iCe0HPMCKV
+# ZhQwLD4DWk5csQCv/hZPp1Lw4me54tFLTc8e2UVJzLBm2qV0M5pi9piqhfmZ2HYG
+# clvg32g33z7WGubcsAdDzGZ4365z8niztTXqoL6uG60+cGYnpbiC0CfGfhlw6A9b
+# 0ojLm07AgJ/9tG7RPMHmLzBlZQzjWQh0usjFXRwMeLiQhlOkf2DWavtMupidJR3U
+# jZwv8dhkal6/9ZYtt6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTgxNjIy
-# NThaMC8GCSqGSIb3DQEJBDEiBCBSoZa/iroZ8UZtT3xm7IE2WWYf3OaaFdf73YLU
-# qCKAKjANBgkqhkiG9w0BAQEFAASCAgAad8wQzs5ra0ehtsBz/XeSuUO8xA3F6KKS
-# Wff1eNQkRX8f9VHLfZ4ZB3bm7gkB1qGiW6qYvwPWKHBdCvly5vMJXxVntk33hVBe
-# nf1FQmFZIQExITGM924Hv0jugO7pNBdwFTsNoc5RZzNxLVTYO2HY9dW7dcAbD+Kf
-# I01kbVZ6MKvAS/c2gY9QUVvlM6cKoGyTKg45qnTBXQAraYQSrrV1GZYUKwPcLv7G
-# uGRqADiwdNAaNfuB1C3NagtEmxXJgn2w7R7AUsbJ+CD0sIBpatvSDFZgwlDQI05o
-# kBNfut6P0QQ0lNc0WfpP6o5x4VjZec6hUXUECLJ503kmQPmQAffa1uc/2G7EalxP
-# 0YmjvJRv4WR/UNF55qD5wt2DJXfgFp8XfNWpppg6iMkEsEO2NLrolheO8v73cG/r
-# nyUhDqN2M7L+8w/ewEj13fBkt3bo4H0h6rGaja5siZtPLDDYJNEeNLntmzVX10+0
-# OIFcOIHi1Hkn6BfGYKsROfCbOaGXXuGRbNApKM4iXGYPW3LR6vB4GdAjIBsj0OTR
-# CU9V1R5e/0q88mQmLsy2ml0NpvIkVVIUAQOhkkcRht8Cr5adusYte6dAyysgfQlF
-# lDk3kHLSrEcwFKlBf9GPQS3Mg2IBtf9XD7yQsZrHbmXpBf0b4GT6MJR+YefCUrU7
-# SNyG2/1JZg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTgxNzMy
+# MDJaMC8GCSqGSIb3DQEJBDEiBCD/XzqJV9mg3vPdHxQguzmyMHPeQIZ1pNX8amt7
+# VGnuWTANBgkqhkiG9w0BAQEFAASCAgCZQRUeTmf+HOJgtayb84OicAJxjmZs5Yto
+# OgfS03bX+slDOz8jjPPOaSJQAXmAlsOVIlzPpe7S/Bn7k29YaLoTgs8sHq/hTO4b
+# KiBtm0cXm46QWVZL6ypBs4UV2JoypRb6dAamNVxZoclQ9SseGPhvOlONxybKwcWq
+# d5eFeRiwga7jiLomONIBmnkV/MCSdx622et0Q5Iq+viLgUTwk4m4d99b6Kva/Hhe
+# V3Lxt5FW/GEsmjmYV3AyWCfC67ainVo/4xwb8eHqBoXfAgbAoWJ9pUwk5yeFQebE
+# WbxN2Q2g7Z7jXkw5szFK0HBAY74gmt0gdcW5mSjF3VEUdWoMrjOknFZ44DtBiAYo
+# xYHwvPwmurs2vhh5ptMRnSqRl7qAxMbF0d+2l/7bSXkuKzkGV6GMxRKLjJh9lj9x
+# +pzyuxhCQG4uiONVXkmPneHew4n0IQ1RgbJmkxwk57fiC+DTxUl8fPEuAm9fdifu
+# vOzEgNIEjdogOSzkkgfTsEdzFhuxICPTf655+A1WayC7XC/DViPSxLSKFyzeavuV
+# 90RTgGJNduNREKSAPKLzkX0UM+gS8wmY259iYP6G8nQbyPEVYL6l3eQLT8YqDdXc
+# lYUtgpxbjCnUXTULz6h03XA653c80h4NDQAhkbwcLl+R1yUyvaExv02lPxpJk4Mf
+# QwANMLk8Cw==
 # SIG # End signature block

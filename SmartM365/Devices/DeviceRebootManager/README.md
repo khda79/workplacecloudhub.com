@@ -1,6 +1,12 @@
 # Smart Device Reboot Manager
 
-## Next release 1.1.1 (source, not yet published)
+## Next release 1.1.2 (source, not yet published)
+
+Package and GUI version **1.1.2** fixes the 32-bit Intune installation path: WOW64 redirects the install-time `System32` file probe, so the native console host is checked through `Sysnative` when required. The scheduled action always uses canonical `System32\conhost.exe --headless`; `Sysnative` is never stored in the task. A supported Windows build with a missing native host now fails installation instead of silently choosing direct PowerShell. Task registration is read back before installation metadata is written. Detection checks both version 1.1.2 and the headless action, so an unrepaired task cannot be reported as installed successfully. Existing reboot policy and local configuration are unchanged.
+
+Planned artifacts: `SmartM365-DeviceRebootManager-1.1.2.zip`, `SmartM365-DeviceRebootManager-1.1.2.intunewin`, `SmartM365-DeviceRebootManager-1.1.2.sha256`; planned tag path `releases/tag/device-reboot-manager-v1.1.2` (not published).
+
+## Previous source 1.1.1 (published to PowerShell Gallery)
 
 Package and GUI version: **1.1.1**. Planned local artifacts: `SmartM365-DeviceRebootManager-1.1.1.zip`, `SmartM365-DeviceRebootManager-1.1.1.intunewin`, `SmartM365-DeviceRebootManager-1.1.1.sha256`; planned tag path `releases/tag/device-reboot-manager-v1.1.1` (not published). Adds a signed, standalone action-only task launcher repair with a protected XML backup and rollback on read-back mismatch. The repair preserves existing arguments, working directory, triggers, principal and settings. Task creation reads the actual Windows build before selecting `conhost.exe --headless`. The helper is included in new standalone and Gallery package builds under `Deploy/`; previously published 1.1.0 packages remain unchanged. Restart rules and the GUI layout are unchanged.
 

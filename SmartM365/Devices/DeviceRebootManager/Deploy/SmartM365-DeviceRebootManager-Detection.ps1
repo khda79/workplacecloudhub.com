@@ -4,7 +4,7 @@
 .SYNOPSIS
     Intune Win32 detection script for SmartM365 Device Reboot Manager.
 .VERSION
-1.1.1
+1.1.2
 #>
 
 [CmdletBinding()]
@@ -12,7 +12,7 @@ param(
     [string]$InstallPath = (Join-Path -Path $(if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }) -ChildPath 'WCH\SmartDeviceRebootManager'),
     [string]$TaskPath = '\SmartM365\',
     [string]$TaskName = 'Device Reboot Manager',
-    [string]$ExpectedVersion = '1.1.1',
+    [string]$ExpectedVersion = '1.1.2',
     [string]$UpdateTaskPath = '\SmartM365\',
     [string]$UpdateTaskName = 'Device Reboot Manager Update',
     [bool]$RequireGalleryAutomaticUpdateDisabled = $true
@@ -52,6 +52,15 @@ else {
     $taskArguments = @($task.Actions | ForEach-Object { [string]$_.Arguments }) -join ' '
     if ($taskArguments.IndexOf($expectedGuiArgument, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
         $issues.Add(("Scheduled task does not start {0}" -f $expectedGuiArgument))
+    }
+    # Version metadata alone must not hide a failed launcher migration.
+    if ([int](Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop).BuildNumber -ge 19041) {
+        $actions = @($task.Actions)
+        $nativeConhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
+        if ($actions.Count -ne 1 -or $actions[0].Execute -ine $nativeConhost -or
+            [string]$actions[0].Arguments -notmatch '(?i)^\s*--headless\s+') {
+            $issues.Add('Scheduled task must use native conhost.exe --headless on this Windows build.')
+        }
     }
 }
 
@@ -112,8 +121,8 @@ exit 0
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCv1uQ3wwQ8jpVp
-# 94DlkeQXDn/6pYtDpaDJAw+ZtxOCtaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB4N25iLS8LH/3j
+# Q+4bKqHtKIgw18lpWzUXBpUZJjbDvqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -246,31 +255,31 @@ exit 0
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOwpN+juuDj06+0e737zituJ8Q9y85dcGU5ze3zRgyRXMA0GCSqG
-# SIb3DQEBAQUABIIBgB7NLJPx5xrY7pTkT5o+fFv1uyQrO8UoFWx9R0JbrLnYTJvT
-# k7CVwFyBo+s05S7fuqwlNiBjdoTlHW1NfWCVVIx6otyMwipvQ5powYyoi5tubIzP
-# kGLQqBg5QL/76f62uLUH22rqKH+Hq0Rz41nqbZ69HawW5aSpd1BlRut13BrgPEE2
-# kbt3kxYjLx8HuIXJuSn/45W3qzJI/x52BVppDvnfizNTyDG7i4O33e81IhZUsgrm
-# XGUlHgGvIDkLHbUMKyq3KVWl3SZDjoL1pQoIg9pqoYlHCawWfyFWZerqhfVOSK5/
-# uK+EdzcxgfYi42fE8AiiM2tJblAll6qhOT5hEAuQSqAcVCIMoIClPXl2y/RaX8B8
-# hFLwY8OADiNz8WB0chGx/Jrg913aUE9EnA50qdkz3XXpmgZTId63nlNKfDbapV+3
-# jTkRDm5v/lgFiCUl5llG86H4HUp18EB8JcpE5ymPIQr0Stqf3ZrP7vuA0bY9kM01
-# 74JfX/nmHZZn6QPrKqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDuwX53txhu4gBm3zr1eKzYTe8gaGLsYXfUts/Ns2mB1MA0GCSqG
+# SIb3DQEBAQUABIIBgHftCS2qghsvf6z8fOUNepqdDMWbAztMYxDflrqQo2WEhyBL
+# 4Fkf0f+/V45hJAUngoV75A+Gc8UiWujGcBunGR01oP5ykB4bMQ8g0LnkH3xrMWF/
+# EePhOGOCiTe0theLnfYo5Oc5TLRsGpoi4PJpXzQquUxmw9Wdl6NrLb5AJjFwQKsP
+# +ErhjovUJ1qlUUMHvB68DTsY4vuY0yM9tJ/8NgeeLXeH9E1PXHt/SXRJg+GpRRt1
+# cIEW5LZoO7NUi6WDA332ZUWOjHrQIxIQ0uXfW4jf4wNyteFvSZ8ftUbAMoO/4ANj
+# xZkEcXJFpocXo7cdSmhug1HuC8Qt4+PbKqr8TbJ/IM2i8L7hqp2L3OUYULmg7akY
+# lTdAdRv5/SERwvKstFmwY3XI8GF2TijHpMJTIug9HvZqLWdHvYjI0j5y7wS1Jarb
+# xOGXMSeOQkKgRxbUServJLoHH8fvDJ8iagGpXBF4jvuCpYJ4+5dBR5aw+M57R0iw
+# opQ/thSPe0LjP+Ugl6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTgxNjMz
-# NDZaMC8GCSqGSIb3DQEJBDEiBCBKdnWl6LjkLg9cXqU7jaP6UXvXPfXunIUgumpU
-# Ww5WBzANBgkqhkiG9w0BAQEFAASCAgAbXbRQUCWuocUfXlEkZrOmIfvyQbEnwdhz
-# aDUbnqKU4BW/MylQX80uJb6bM234C6mhqygFS/eqoIO3ExhwgHrmENnK9mL0uOYZ
-# guT5lHrab2bcE4C5FNGGW6dxPqVgL5q+7FALIWXFSF35Rgl6/CK1WBGepQTTHGXZ
-# enbK8PTubfZtS7SPckfN+VRGBnzy4+LHlZHg5w6CKSMPr5TC6ykTwoLGX8lSI+S6
-# MvndN5YgIYTAXDBsvFrYw/JspYGw7KG/3CxPFXCncXM5Y3rdJD0S376POuS4yEWE
-# jQ4HNkUElqmeHyWXrx7O0YoPjZvYEUvOOXGBAnegWv39g2R+tBTJ3MNdRxmkAK6r
-# sLyAVVCtHMIMnqSL0fH/HqmW2BBb0GoJT/xrdOjKncFGFbaO4teTp/5jMBtDBDLj
-# vHSOOVUQCfaMDKrXHEBiQpZHGZHWSaM4oSdloi0LLTv2+d5kx0vaaJcaFOrb53jl
-# G/IxbNlHigOAdEBhRF100DwgEhJZdHJDPXer8UDjDUrAU5xHFfYEb5ZSRo7osk8C
-# 71BPjx4/8HyBoEk21E+YzkkjvnQdj+v5uOLEeQUiQLbAcPvO1YPBlgqq+xpfA4az
-# 97+sEKmLdduDYDyhBYaFZEeVpC9ydLlwByCNmpISUfVBckaBxAFgHT4cXQl0MUqH
-# OjpMrHyPmw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTgxNzMy
+# MDFaMC8GCSqGSIb3DQEJBDEiBCAF4/0JGDSKyp6GM36juq34syWq5knT2QGOZcYY
+# LqsBNDANBgkqhkiG9w0BAQEFAASCAgBTrlGjvm452K/BcC7Don4/glN1ILIIBi7q
+# L7Hi9+RC6B7pezFPPCWmPsHz/9rR2GxLN5TXeu7XyTI7QcAvheAtOYMObLuStC/k
+# oSlgO/yBXyOGM06QuE9/MEWavBYSK4bigv5v6rdRWyatKpn3t94JI92DnWOGxgFG
+# RErrEJsrON2AvY/n73+hvxSoTAJqQYgkm0VJs8N9Vo3Cq/jH5EyC52aGKqFL1v2E
+# g/HxnmgmgtYFdAkJLq/0dd/+NogvXnIziW+bTJj315B4ddiBJp6QqISen7NN3PdW
+# oRl2k7nYMnqXxA3a/8B4EqwAnPC9IP5kVAtB4blXLm4Ehk44poQC61Q7UTNnGud4
+# Rpt7BvQNI6+Dh+kvUpzUrFge/XC52gG/rxSQ3Kcb/D9a1fjPI74XNWdlqhvgPKLB
+# LN0ECw1EhbSalI7TsPzDTERTyhACDestbq2GWRhCBWemFYelrd5yyf0XCmfM3Ebs
+# hgAZvVxj+3hJU/+yhoEjitK2bELqboOnr73WjTqgbt9ZfT736TPd2VC+2NExjtNW
+# P28IqSbmFRzYH4v0ku2o6SOiD8MRzs1L4ZDhoBmpoRjuz59Ay6SXDwN0XyQ2rVyn
+# ZxPPc3Xhnm+O0N692DPSiRImk95CJxJWiWhAG2Zmo8lICcmjwz+DHS96/I2lh6b9
+# K8yPGpwMHA==
 # SIG # End signature block

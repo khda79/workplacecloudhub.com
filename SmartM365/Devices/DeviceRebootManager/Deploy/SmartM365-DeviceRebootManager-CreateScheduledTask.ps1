@@ -10,7 +10,7 @@
     intended for Intune Win32 deployments running as SYSTEM.
 
 .VERSION
-    1.1.1
+    1.1.2
 #>
 
 [CmdletBinding()]
@@ -70,7 +70,16 @@ if (-not [string]::IsNullOrWhiteSpace($ConfigPath)) {
 # when the GUI exits silently below the threshold. A headless console host prevents it
 # (Windows 10 2004 and later); older builds keep the direct PowerShell host.
 $conhostPath = Join-Path -Path $env:SystemRoot -ChildPath 'System32\conhost.exe'
-if ([int](Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop).BuildNumber -ge 19041 -and (Test-Path -LiteralPath $conhostPath)) {
+$conhostProbe = $conhostPath
+if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
+    # Sysnative bypasses WOW64 only for this install-time existence check.
+    # Task Scheduler must retain the canonical System32 path for its native process.
+    $conhostProbe = Join-Path -Path $env:SystemRoot -ChildPath 'Sysnative\conhost.exe'
+}
+if ([int](Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop).BuildNumber -ge 19041) {
+    if (-not (Test-Path -LiteralPath $conhostProbe -PathType Leaf)) {
+        throw 'Native conhost.exe is missing on a supported Windows build; refusing a console-flashing task.'
+    }
     $taskArguments = @('--headless', (ConvertTo-QuotedArgument -Value $PowerShellPath)) + $taskArguments
     $action = New-ScheduledTaskAction -Execute $conhostPath -Argument ($taskArguments -join ' ')
 }
@@ -102,6 +111,15 @@ Register-ScheduledTask `
     -Description 'Starts the SmartM365 Device Reboot Manager GUI in the interactive user session.' `
     -Force | Out-Null
 
+if ([IO.Path]::GetFileName($action.Execute) -ieq 'conhost.exe') {
+    $registered = Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction Stop
+    $registeredActions = @($registered.Actions)
+    if ($registeredActions.Count -ne 1 -or $registeredActions[0].Execute -ine $conhostPath -or
+        [string]$registeredActions[0].Arguments -cne [string]$action.Arguments) {
+        throw 'Scheduled task launcher read-back failed; installation is not complete.'
+    }
+}
+
 if ($RunOnceNow) {
     Start-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName
 }
@@ -111,8 +129,8 @@ Write-Output ("Scheduled task registered: {0}{1}" -f $TaskPath, $TaskName)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCc5QyIQZ/3pgv4
-# iAdoznaCD+su9YreWnUWYDC+Kb/VfaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCA12Xw7JX8uFM5
+# oQOxxa+G7ytN98CyjlHqAe/xM43p76CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -245,31 +263,31 @@ Write-Output ("Scheduled task registered: {0}{1}" -f $TaskPath, $TaskName)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICc7eCwLTsjXc5/G6uv6thEkPTxUcxBEcJ6CJaJ7iLaYMA0GCSqG
-# SIb3DQEBAQUABIIBgJ1WtgHFnc342cpexrm5Gb5m6ts4u0on956wY1z2ma3okHcL
-# 9mC4qBPxJHdeRMKAZ5CGxf+Kqe54D+lkf1GoU5WZLlTVwzzyr2uCgO40wNF84eLw
-# 9krSodWP/X3CafIy1snM1bX2XCpjG1ObrAwBPvG+rkBrE5TU0x5H4bAXCme9eXmx
-# bxvhBCQnC3nLy4XOI/piqSD18M3lkoVF5XNWx6zNfnB9UPWsdA67PKjBfftFwy9c
-# 4K8w2+iPc3RqSKPFqJ0Tr3gVjdsWtDYsL4rBmfJ6lX/68KfZt3vDjh9QrlladCph
-# U39QVBn4A0pvbcAoxPVMjJwkpfXT7GNj7ujYkrRaRUoKx6f03CLj+LTztZ/Snb/s
-# DK01oZSfisqzwi4XIeszjckKv6C+CB0UBt3Rj+Wqmtg6Ssq+8QzUIDSPmJPQt8pj
-# 5hjw1xc81D5GSDNf8rd4OeMl9LauXQtUB70WopMYMbFjCMmldqfQsWoSTpJ2edhc
-# WZ1H4smiEAisMtkE16GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIG8FdLcBISJunVGcYKf1/AYex1x1TvMg0+XPjscm1eFeMA0GCSqG
+# SIb3DQEBAQUABIIBgCm3GOVv3LxnAvlg78L/gNkwF2HYCpgtaKSAmkSk/ZJqY9eK
+# EkWibSaoaOAFcoDd0WHvyhQ0oM5O4fB48PX+AkUnwhqy/7ipUNKJ56mWq1u+9ZRp
+# ccaHXJeHJ8+uGGyDxkJlG60OYGQ8xiuAwlGL/vZkny7ciWSq1opUXAaEe6/8O0Dd
+# FGjxo4aTZtuhVh+o7yJKNEN0goh0L6lw0H+b1OjM7DNZ4LmjpSOAu82gsRdRw3MW
+# oSe7PEvLLfwhS5zco7mmf7pPOntqx9PF6WU0uyJQbaOvrkz/lrLNIGbm+OwB/cnE
+# uS+FCEOKwyREUZbEaWXQSswyBY88xon57NyvJDcsOFQuClHgyi8Cn6hlIDS4VR34
+# MLOfFfS9mfH/P2DTN3TJ9rKazdZdx5/31od/lnT2HXP3TQWiMdgDZWUWTVKVvppX
+# uEnEE6JsuvXf9qavkpPzzJDbjZQQNO9l8PzDkGsJ8tD/rplaAo8FyPcegerMz6xI
+# gH7EnYS3MBRRLkAvKaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTgxNjMz
-# NDVaMC8GCSqGSIb3DQEJBDEiBCAKgcx009TWjgghATJQaryTDteIwXo2cL4IvAqp
-# KJ5eGDANBgkqhkiG9w0BAQEFAASCAgBbXKv8vI/7wY+eGp8jaxdWhsgAzQXfANW7
-# nyo4gMLlf1cueHfwZwZ9m5JpDVFY8kr9Fnfqc1azhsimdCzfJufkAu8OooynSLtk
-# kSYSSfHy3h6KJGE1xquzBlRLaOWx5y4E91Yb4OUvzouXvm2s5i2lvZV5WeTsNl8s
-# hHGX5ujyZUMhUU+kFC2AKLGEQ028BkCUMbL6AWxfyAWh7qkhloiUy5XEBBi10n1J
-# ZYkoTqVBaexrm4WEY4DQN9jLDu/1a+HBd4AIRSu/tS4hNCXdJhG72MR63WPYZTbl
-# 26a/eDwZ9xxTlTg/qTYwq2Hfs9bXlnOkrAaJNscJAtBKYEZm3PybVVpSiWWGenJg
-# D/7QJZGk2GxbNH7/i1Zrktm5ClETAdfXUVB1CjR4Zli1EMvpwByZVAYwnmvFAf7w
-# agF7sCLFcWZRqMMxbAQ4jSjOVBB/0H9Um/3zxgdH0+TLTkSGzD2lTKod9GFuaWd/
-# JXlBp81gDOl/eEkfBqJjSipy+D/vv3Asmlb0fbpGrxlFKF/X0cRvi6B/TRuvsUpH
-# EPKAdPYN+zyuO9arccYs4MOJm1qlDZtT4vg6sUUoK94AIpG7OQ8wObrWNHo97GPC
-# 1uRda5TO8Azi525M0aOPBIUk4MrVg2Ix8bLLp6FEIzfY31bkDLip9yArbUWJCJZr
-# jYeSz7iFRw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTgxNzMy
+# MDFaMC8GCSqGSIb3DQEJBDEiBCDURlJxHk8KDDBx/+OA7fCADF9jTE1h/1DdmEDb
+# siwMADANBgkqhkiG9w0BAQEFAASCAgCcifad9xzJt8j68YA0zxwl7wtJb8GG9W5W
+# cK7I+IjSK2agL0Jc80HNlfD2mXjOWkvTd8bS2xXSZsTAPamRZVDdKgD3AOwGpPgn
+# ySjL8+aZ9hm1q1DXB0gLSqfjxUL5DbDRKIEoYD3JR/yuHF3iLDN4FSeaWGcK+r8E
+# HEGv9cWE3ZdDtfZresgMjiZ8wWo4BhFM0wKAKsFvYJSZY7pF8QUMHkyW/YrsyPRP
+# 0aUucdB65wKVh7KHmTBLvsWYVpUmrlTSEp+w2dkw2ckxI73D6Xv6Q3dbZxDmZK/0
+# mxElfN20qFtqZRpW2AGWza/ajQOWatVE2ItXoNIBEHREPBj6rBDWB7pL87HcQskc
+# r/L+YrEANh98+rPcfvjOH/j+e3Kr6guefwInEPt+cVGmQkZhMQbzCTGSNry9ntzj
+# ddgCBV7inWXRmDlsYFh6+FTo51LzkNrT+vg+DKCOu/9jAkG+qwyz+KGmJ4/sXRIO
+# j2aImW/R+hbg2yTTlqxrjyDyPBqYckbQb9ADZ3CpvAXaLBvQ1F8+IO50yi9YOgqI
+# 8bIwXZlSGOSm4/V600mUxxFjBNH/1apRTlQLpUA3cfsixDUxMP5GIEglpRlTHifx
+# 1NSgDS5D1GoclySvrMTUe1s+cYjfMAKUxewmBpW0JgITkkW11uXKXXgmvz34T9m9
+# vgttmMzIfg==
 # SIG # End signature block
