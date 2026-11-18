@@ -29,7 +29,7 @@
     .\SmartM365-EndpointMigration-Build-Release.ps1 -Build -AllowUnsigned
 
 .VERSION
-    1.0.3
+    1.0.4
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -295,7 +295,11 @@ $notes = @(
     '- ProgramData: only the SEMT components of the data folder chain get owner Administrators and a protected DACL; shared parents (WCH, WCH\SmartM365) are verified, never changed; a read-only pass refuses reparse points, hard links and existing content without verified provenance before any change; failure is blocking (SEMT_DATA_FOLDER_UNTRUSTED, DATA_FOLDER_UNTRUSTED). The Intune runner verifies both folders before it runs anything. Setup media without its manifest, or without a required package reference, is refused. Intune WithCacheOnly for devices with reusable media, WithMedia otherwise.',
     '- PowerShell: GUI and endpoint scripts on Windows PowerShell 5.1; engine, worker and tools on Windows PowerShell 5.1 or PowerShell 7.2+. Unsupported engines are refused before any state is written.',
     '',
-    'See README.md, Docs/TEST-REPORT.md and Docs/ACCEPTANCE-PROCEDURE.md.'
+    'See README.md, Docs/TEST-REPORT.md and Docs/ACCEPTANCE-PROCEDURE.md.',
+    '',
+    '---',
+    '',
+    'Product page: [Smart Endpoint Migration Toolkit](https://workplacecloudhub.com/tools/smart-endpoint-migration-toolkit/) | More tools: [workplacecloudhub.com/tools](https://workplacecloudhub.com/tools/)'
 )
 [IO.File]::WriteAllLines($notesPath, $notes, [Text.UTF8Encoding]::new($false))
 Remove-Item -LiteralPath $workRoot -Recurse -Force

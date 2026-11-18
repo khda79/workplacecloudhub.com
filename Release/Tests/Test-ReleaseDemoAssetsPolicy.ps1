@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 <# .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 param()
@@ -70,10 +70,12 @@ try{
  $notes=Join-Path $temp notes.md;[IO.File]::WriteAllText($notes,'# release')
  $publisher=Join-Path $repo 'Release\Publish-WorkplaceCloudHubRelease.ps1';$sha='a'*40
  $script:ghCalls=0;function gh {$script:ghCalls++;throw 'No GitHub call permitted in this offline test'}
+ Must-Reject {& $publisher -Repository example/tool -Tag v1.0.0 -TargetCommit $sha -AssetPath $out -NotesPath $notes} 'Publisher accepted notes without the website footer'
+ [IO.File]::WriteAllText($notes,"# release`n`n---`n`nProduct page: [Example](https://workplacecloudhub.com/tools/example-tool/)")
  $preview=& $publisher -Repository example/tool -Tag v1.0.0 -TargetCommit $sha -AssetPath $out -NotesPath $notes
  Assert-Policy ($preview.Validated -and -not $preview.PublicationAttempted -and $script:ghCalls -eq 0) 'Preview contacted GitHub'
  Must-Reject {& $publisher -Repository example/tool -Tag v1.0.0 -TargetCommit $sha -AssetPath $nested -NotesPath $notes -Publish} 'Publisher allowed nested media before upload'
- [IO.File]::WriteAllText($notes,'Download Product-DemoAssets.zip')
+ [IO.File]::WriteAllText($notes,'Download Product-DemoAssets.zip from https://workplacecloudhub.com/')
  Must-Reject {& $publisher -Repository example/tool -Tag v1.0.0 -TargetCommit $sha -AssetPath $out -NotesPath $notes -Publish} 'Publisher accepted stale media attachment notes'
  Assert-Policy ($script:ghCalls -eq 0) 'Rejected publication contacted GitHub'
  if($PSVersionTable.PSVersion.Major -ge 7){

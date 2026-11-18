@@ -99,6 +99,7 @@ try {
     Test-Step 'checksum file lists the ZIP with its real SHA256' { ($sha[0] -split ' ')[0] -eq (Get-FileHash $zip1 -Algorithm SHA256).Hash }
     $notes = [IO.File]::ReadAllText((Join-Path $out1 'RELEASE-NOTES-1.0.0.md'))
     Test-Step 'release notes mark the build UNSIGNED and name the tag without creating it' { $notes -match 'UNSIGNED QUALIFICATION BUILD' -and $notes -match 'endpoint-migration-toolkit-v1\.0\.0' -and $notes -match 'not created by this script' }
+    Test-Step 'release notes end with the website product page footer' { $notes -match 'https://workplacecloudhub\.com/tools/smart-endpoint-migration-toolkit/' }
     Test-Step 'no build work folder is left behind' { @(Get-ChildItem -LiteralPath $out1 -Directory).Count -eq 0 }
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem

@@ -1,5 +1,5 @@
 ﻿#Requires -Version 5.1
-<# .VERSION 1.0.0 #>
+<# .VERSION 1.1.0 #>
 [CmdletBinding()]
 param([Parameter(Mandatory=$true)][string]$Repository,[Parameter(Mandatory=$true)][string]$Tag,[Parameter(Mandatory=$true)][string]$TargetCommit,[Parameter(Mandatory=$true)][string[]]$AssetPath,[Parameter(Mandatory=$true)][string]$NotesPath,[string]$Title,[switch]$Publish,[switch]$Draft)
 $ErrorActionPreference='Stop'
@@ -10,6 +10,8 @@ foreach($path in @($AssetPath)+@($NotesPath)){
     Assert-WchNoDemoAssets -Path $path
     if($path -match '(?i)\.(md|txt|json|sha256)$' -and [IO.File]::ReadAllText($path) -match '(?i)demo[-_ ]?assets[^\r\n"<>]*\.(zip|7z|nupkg)'){throw "Stale DemoAssets archive reference: $path"}
 }
+# Standard footer: every release body links the website, the tool product page when one exists (see Release/README.md).
+if([IO.File]::ReadAllText($NotesPath) -notmatch 'https://workplacecloudhub\.com/'){throw "Release notes must end with the standard website footer (https://workplacecloudhub.com/...): $NotesPath"}
 $hashes=@(foreach($path in @($AssetPath)+@($NotesPath)){[pscustomobject]@{Path=$path;SHA256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash}})
 if($Publish){
     foreach($file in $hashes){if((Get-FileHash -LiteralPath $file.Path -Algorithm SHA256).Hash -ne $file.SHA256){throw 'Release input changed after validation.'}}
