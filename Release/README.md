@@ -35,3 +35,5 @@ Product page: [<Tool name>](https://workplacecloudhub.com/tools/<tool-slug>/) | 
 | `smart-thinclient-v` | `smart-thinclient` |
 
 Retired projects do not get a product page link.
+
+The table is mirrored in `website-footer-map.json` (a test keeps both in sync). As a safety net, the `Release website footer` GitHub Actions workflow runs when a release is published: if the body contains no `https://workplacecloudhub.com/` link, `release_website_footer.py` appends the footer for the tag prefix (tools catalog only for an unknown prefix, nothing for `noProductLink` prefixes). Drafts are not touched. Still write the footer in the notes file: the workflow is a fallback, not the normal path.

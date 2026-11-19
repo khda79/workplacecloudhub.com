@@ -1,0 +1,21 @@
+{
+  "description": "Release tag prefix -> product page used by the standard release-note footer (see Release/README.md). Prefixes in noProductLink get no footer.",
+  "products": [
+    { "prefix": "endpoint-diagnostics-analyzer-v", "name": "Smart Endpoint Diagnostics Analyzer", "slug": "smart-endpoint-diagnostics-analyzer" },
+    { "prefix": "smart-intune-remediation-manager-v", "name": "Smart Intune Remediation Manager", "slug": "smart-intune-remediation-manager" },
+    { "prefix": "device-reboot-manager-v", "name": "Smart Device Reboot Manager", "slug": "smart-device-reboot-manager" },
+    { "prefix": "device-registration-tool-v", "name": "Smart Device Registration Tool", "slug": "smart-device-registration-tool" },
+    { "prefix": "endpoint-migration-toolkit-v", "name": "Smart Endpoint Migration Toolkit", "slug": "smart-endpoint-migration-toolkit" },
+    { "prefix": "sharepoint-migration-toolkit-v", "name": "Smart SharePoint Migration Toolkit", "slug": "smart-sharepoint-migration-toolkit" },
+    { "prefix": "exchange-user-notifications-v", "name": "Smart Exchange User Notifications", "slug": "smart-exchange-user-notifications" },
+    { "prefix": "exchange-migration-readiness-v", "name": "Smart Exchange Migration Readiness", "slug": "smart-exchange-migration-readiness" },
+    { "prefix": "smartworkplaceintelligence-v", "name": "Smart Workplace Intelligence", "slug": "smart-workplace-intelligence" },
+    { "prefix": "smartfinops-workplace-v", "name": "SmartFinOps Workplace", "slug": "smartfinops-workplace" },
+    { "prefix": "smart-thinclient-v", "name": "Smart ThinClient Shell", "slug": "smart-thinclient" }
+  ],
+  "noProductLink": [
+    "intune-hybrid-join-toolkit-v",
+    "windows11-upgrade-toolkit-v",
+    "smartworkplacecmdb-v"
+  ]
+}

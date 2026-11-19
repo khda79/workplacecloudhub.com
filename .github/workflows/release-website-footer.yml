@@ -1,0 +1,32 @@
+# Safety net: every published release body ends with the standard website footer
+# (Release/README.md). Appends it when missing, including releases published with a
+# direct `gh release create`. Drafts are left untouched so pre-publication checks that
+# compare the draft body with the local notes file keep working. Edits made with
+# GITHUB_TOKEN do not trigger another workflow run.
+name: Release website footer
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  footer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: Release
+      - name: Append the footer when missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release view "$TAG" --json body --jq .body > "$RUNNER_TEMP/body.md"
+          python3 -I Release/release_website_footer.py --tag "$TAG" --body-file "$RUNNER_TEMP/body.md" --output "$RUNNER_TEMP/notes.md"
+          if [ -f "$RUNNER_TEMP/notes.md" ]; then
+            gh release edit "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          fi
