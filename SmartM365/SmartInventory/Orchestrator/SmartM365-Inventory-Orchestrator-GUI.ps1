@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.46
+1.6.47
 #>
 [CmdletBinding()]
 param(
@@ -69,7 +69,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 }
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.46'
+$script:AppVersion = '1.6.47'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -2975,10 +2975,10 @@ function Invoke-GuiPreparedReportReplay {
     param([string]$Producer, [ValidateSet('Administrators','Configured')][string]$Audience)
     if ($script:SendSummaryRun) { throw 'Another mail is already being sent.' }
     $label = if ($Audience -eq 'Administrators') { 'Smart365Administrators only' } else { 'the configured recipients' }
-    $message = "Rebuild the $Producer report from the current published exports and send it to $label? No inventory will run."
+    $message = 'Rebuild the {0} report from the current published exports and send it to {1}? No inventory will run.' -f $Producer,$label
     if ($script:OrchestratorDialog.Show($message, 'Send mail only', 'YesNo', 'Question') -ne 'Yes') { return }
     Start-GuiSendSummary -Command ([pscustomobject]@{
-        ScriptPath=(Join-Path $PSScriptRoot 'SmartM365-SendPreparedReportMail.ps1')
+        ScriptPath=(Join-Path $script:SmartInventoryRoot 'Orchestrator/SmartM365-SendPreparedReportMail.ps1')
         Arguments=@('-Tenant',$Tenant,'-Producer',$Producer,'-Audience',$Audience)
     }) -PreparedReport
 }
@@ -4590,8 +4590,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBdwWslf6pYQYv7
-# lOaKlN+whbFZ4Xfw960OTkfrFLapjaCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBFZfYtkr7/6DNK
+# uEEYbx5sJ+cdiy64BxLdvxu3H96GVqCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4728,31 +4728,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
 # EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
 # DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
-# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg6qwctAjIDDBg
-# 9JsryDEShN80SA3y98bnlKmpQUdPZxcwDQYJKoZIhvcNAQEBBQAEggGAJxHwY8HQ
-# 2EiMEIfBwX2uXMcC3Vnjv32zYfdBt3lN7nuTgCSwXPVUJp8ksJ/0wAMfJJ61DTDa
-# PptD6llU9a4PwufNTvzJfEsoXNg31NolKOKyeQ+ySveS7qREmOYVRs8ZX/RVcoSP
-# iS2hNDYTQASnBLStnB2t3K1jOeUDwTHSvPSzzrlsXCvaUaf2rflpQcvYsuXSF9hW
-# Rdq0VaRGkhJHSTiqknqw8DAPRrLrWrocT92p9L1oG87xENUdYIRvUrTY0jR+ucFr
-# yaJl7co0U8z8LTEJe5URDJntUL0Ko1smi0naPZPcMOG5OcqIB1FbpdVfVPIjusjx
-# 4X1sWqSKVfkmfA9r0ABW/Drdc7cOTDXUrUgnE0qSqPm2nGwj9/XI7zJJKg5p3Rz0
-# qZpL1VzUuC6KRbPvtArzAeKPsKer1nyFuSD1YMei4Wl1/AmS2aE9ELX/Qu7jt7Sh
-# orNlEirO0/NtAETMxyddVEf1jpRbvB/d9KB+A0lA9eYupPEVWxa9dd90oYIDIzCC
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgmZAQAmNRcdmP
+# NLeOBWHqDM1coYK81OEwQmy1iQXmvqwwDQYJKoZIhvcNAQEBBQAEggGAJnnmBiuW
+# ZoWIXA8CSRaSIzCysgC5j/keiDOIq6uEAAWTtu7gxRSaSrIcchKVegPS0mZGJLpV
+# 9/rGHA+I8y8GvGwKoe/uO0DJ15LdMlxUzVteIYzXb/z0jvbV5xms8bLSBnn4Tnx5
+# e4dOHmbJ4TULBSI4xRq75xy7sJ/p8BM+F2jdxD1MbGsmq9K03kMWbENgv1o0bPFt
+# zhzKrB0v3x2zd6pRLImidCygzleyBuPOk7vdk+O0g/97DJ+G68G/6IEVEzvST92L
+# /gJjqLFVOpNeo7j1rsLZpOmwNhippmI6RvdOvfCDvB1T7UYaq1MQyee+hcmWSh+i
+# zRHpAA9kS+hliZHyy3jz5/5PEN9PqVxakUc37YhbCIkRyfPpQU3GuQ76RhsImIX4
+# rQO2f8PHv2ViVqH6TmlGzRTsVUHg8EqU/zkNcUfXsN9HFHnUsOqUXRstclTkFtaW
+# byMl8Fo68W/9Tg97Nefan/o3j8p3HFdguz7ovtHcBhOnCm/xJc1zVYQEoYIDIzCC
 # Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
 # BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
 # ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
 # AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
-# MjYxMTE5MDk0MjU1WjA/BgkqhkiG9w0BCQQxMgQwu3UtyNAL8HnQdw+OQ37JINpf
-# vvOUmnAS0VYAzfkxAxq4oVeu04Cz1c7A6KpTpfnSMA0GCSqGSIb3DQEBAQUABIIC
-# AGMhG0C3b8FZmKRVAsEcZ5gTc8QAfWgUJTPVO5oAV02Gawg1XEkskvoe1dFRx3yx
-# iuSkbJNduJ4t5dEAzWd0R4PslIorQpK6fxnZKjOyCYmT14Sj3QmAZ9Sd5YiQ4Fcs
-# 3rNp+EY6LK8W6P9YsZ8Gni7rh2C3fpTKF5BLAWT5RcXudiLzlNK3NOvkMRJ0ff7y
-# XwKsDCQmUM33qPIrzFklCCCRkjfqOEoPkEkOynawkaiRNKwIHCvzAhZ7YUu3AA9d
-# dPkY3jQsGAd4tS3f1YTK/gQxIiT+KaLO5WQj9dWzuzVpA5Fidouevukz67CxqsJF
-# bYv4BdYs37CD2Bfqp5JNQwqeCKpOh6WCaEnhPinXgyr31teFD9BAi9aaFLX6vdtf
-# jSHs6qs95KBWm0tR/yqh4qzisu/tRMRCAvJoKhm6FH4xpAEtWm5s0e93ewm9i5tV
-# BmOBr33ay/XMpjMuFKXpjmhNM17IFumkmyjNUJVjU7dgiIEZ8/hKJSHY8aqCyoL5
-# 6VTnR9J18Hv38OMSsJwL3oVfmtZ9zmyialGi8A0VkyShfqVwrPmHRUqMLqsAB+l/
-# AM/uSxLYA91/oGbo2iF/+SBRr51EvJ6GENC58KbKlxatdIY6oLDSz4iecF+5EzzO
-# t2KVl+TBS3FkGVUZ6W2+M4LqcgDGWNkT8RafNyB9gWgx
+# MjYxMTE5MTAwNjExWjA/BgkqhkiG9w0BCQQxMgQweHD61qQwkhuRWSnMGuWiUDdo
+# XdLGgNx9NAKya4x7/y2s6GyxyjkgklmuNXCD+IVuMA0GCSqGSIb3DQEBAQUABIIC
+# AKx3ynXaS7plg5dbbYzFGwFyH+9eHYKIv9pnsIlk3kni6L/0Eh1fUUI+rGiVgOYU
+# xxB607X9CTMZJe7euqQzAJTUBF8UbUzZFU+Inh7+X6uXU5fsznoTuEAEQZDFHQv2
+# Sg7jacHqS0MUsY8AHIzgQleooqItlcRmw7ULga1c10AcxZ72sI9JfY02qyr1O3Yl
+# rco2eRJNnixTXxUj5krPctRGSauwSydSXVZ42T8Jkxy3MF3NCtUStr5mIT5+kMPt
+# 5/JbajHkiCs9Iqs1LxQHjvvdCq8uOEfM0kr9SYcz3TmY68CM8c8PRfBBV+mmGkUl
+# fh3eiO0r9HUqgwi6UvAMw+CXT5jpH1WNmAcaj/m3CmV0qtc4yXjQgZ3QdM4jyX87
+# LNws73GfEA7lKN66BjDS6IsH/vI2TZGUB6d1k33UimHiatDRpjzOoIAZxrOjpgEk
+# elbIU+L0JZfYmbVCvKp1+JuZRvbVOXXyBQ1tHnaGteUnPm+tId5tEkNOrY27fU7o
+# GVRtQt3AQRFgE/EMGx4rYcIfr9F0eUjBETRCR14HnGC1dmR89aBaUKTYFZiKUWfO
+# rG2SmSPUQNpR3vwfwblidnLoHxWwJObXP2EG97M5T7ncnjc/41qWOFqkNrtE88YY
+# EkwQCXJZgLxDHepx1IIETySI/Ov7LeVSfKPML4VBS/To
 # SIG # End signature block

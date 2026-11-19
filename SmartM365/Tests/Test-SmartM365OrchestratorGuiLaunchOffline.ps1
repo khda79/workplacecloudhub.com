@@ -33,7 +33,7 @@ $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $folder 'Sm
 if ($errors.Count) { throw 'GUI parsing failed.' }
 foreach ($name in @('ConvertFrom-OrchestratorGuiXaml', 'Get-OrchestratorGuiPropertyValue', 'Set-JsonProperty', 'Copy-JsonDocument', 'Get-ComboText', 'Select-ComboText', 'Get-GuiLaunchCatalog', 'Get-GuiJobScriptVersion', 'Get-GuiJobReportMailProducer', 'Get-GuiSwiRow', 'Refresh-LaunchView',
         'Get-GuiLaunchPlanText', 'Update-SelectedLaunchPreview', 'Update-GuiPrepareRequestButton', 'Start-GuiConsoleProcess', 'Get-GuiOrchestratorActionCommand', 'Set-GuiJobExecutionMode', 'Request-SelectedJobRun',
-        'New-GuiWaitDialog', 'Close-GuiWaitDialog', 'Start-GuiSendSummary', 'Receive-GuiSendSummary', 'Get-GuiOrchestratorServiceAccount', 'Get-GuiRunAsArgumentList')) {
+        'Connect-OrchestratorJobReportReplay', 'Invoke-GuiPreparedReportReplay', 'New-GuiWaitDialog', 'Close-GuiWaitDialog', 'Start-GuiSendSummary', 'Receive-GuiSendSummary', 'Get-GuiOrchestratorServiceAccount', 'Get-GuiRunAsArgumentList')) {
     $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
     if ($null -eq $definition) { throw "Missing GUI function: $name" }
     . ([scriptblock]::Create($definition.Extent.Text))
@@ -43,7 +43,7 @@ $window = ConvertFrom-OrchestratorGuiXaml -Text $assignment.Right.Expression.Val
 $script:Controls = @{}
 foreach ($name in @('OperationsTabs', 'OnPremModeText', 'JobExecutionModeCombo', 'ApplyJobExecutionModeButton', 'ApplyModeToAllOnPremButton', 'LaunchJobsGrid', 'RunJobNowButton', 'RunJobAsServiceAccountButton', 'RequestJobButton', 'RequestPrepareButton',
         'LaunchIncludeDependenciesCheck', 'LaunchJobCommandBox', 'ManualLaunchesGrid', 'RunManualLaunchButton', 'ManualLaunchCommandBox', 'OrchestratorStartButton', 'OrchestratorStopButton',
-        'OrchestratorRestartButton', 'FullCollectButton', 'SendSummaryButton', 'StatusText', 'PlanningGrid', 'IncludeDependenciesCheck', 'OperationsRunningGrid')) {
+        'OrchestratorRestartButton', 'FullCollectButton', 'SendSummaryButton', 'StatusText', 'PlanningGrid', 'PlanningReportReplayButton', 'OperationsReportReplayButton', 'IncludeDependenciesCheck', 'OperationsRunningGrid')) {
     $script:Controls[$name] = $window.FindName($name)
     if (-not $script:Controls[$name]) { throw "Missing XAML control: $name" }
 }
@@ -208,6 +208,57 @@ try {
         $script:Results.Clear()
     }
 
+    # Exercise the real confirmation path from both job menus, with a recorded dialog and no worker process.
+    $script:OrchestratorDialog = [pscustomobject]@{ Answer = 'Yes'; Message = ''; Title = ''; Buttons = ''; Icon = '' }
+    $script:OrchestratorDialog | Add-Member -MemberType ScriptMethod -Name Show -Value {
+        param($Message,$Title,$Buttons,$Icon)
+        $this.Message = $Message
+        $this.Title = $Title
+        $this.Buttons = $Buttons
+        $this.Icon = $Icon
+        return $this.Answer
+    }
+    $script:ReportWorkerCalls = [Collections.Generic.List[object]]::new()
+    $originalStart = (Get-Command Start-GuiSendSummary).ScriptBlock
+    Set-Item -Path Function:script:Start-GuiSendSummary -Value {
+        param($Command,[switch]$PreparedReport)
+        $script:ReportWorkerCalls.Add([pscustomobject]@{ Command = $Command; PreparedReport = [bool]$PreparedReport })
+    }
+    try {
+        $invokeReportMail = Get-Command Invoke-GuiPreparedReportReplay -ErrorAction Stop
+        Connect-OrchestratorJobReportReplay -Controls $script:Controls -Replay {
+            param($producer,$audience)
+            & $invokeReportMail -Producer $producer -Audience $audience
+        }.GetNewClosure()
+        $ad = $script:LaunchJobRows | Where-Object Name -EQ 'AD-Inventory'
+        $script:Controls.PlanningGrid.ItemsSource = @($ad)
+        foreach ($pair in @(
+            @($script:Controls.PlanningGrid,$script:Controls.PlanningReportReplayButton),
+            @($script:Controls.LaunchJobsGrid,$script:Controls.OperationsReportReplayButton)
+        )) {
+            $grid,$button = $pair
+            $grid.SelectedItem = $ad
+            foreach ($item in $button.ContextMenu.Items) {
+                $before = $script:ReportWorkerCalls.Count
+                $item.RaiseEvent([System.Windows.RoutedEventArgs]::new([System.Windows.Controls.MenuItem]::ClickEvent))
+                $audience = [string]$item.Tag
+                $recipient = if ($audience -eq 'Administrators') { 'Smart365Administrators only' } else { 'the configured recipients' }
+                $dialog = $script:OrchestratorDialog
+                Assert-Case ($dialog.Message -ceq ('Rebuild the SmartM365-ActiveDirectory-Inventory report from the current published exports and send it to {0}? No inventory will run.' -f $recipient) -and
+                    $dialog.Title -eq 'Send mail only' -and $dialog.Buttons -eq 'YesNo' -and $dialog.Icon -eq 'Question') 'Report confirmation did not identify the selected producer and audience.'
+                Assert-Case ($script:ReportWorkerCalls.Count -eq ($before + 1)) 'Confirming report delivery must start one mail-only worker.'
+                $call = $script:ReportWorkerCalls[$before]
+                Assert-Case ($call.PreparedReport -and $call.Command.ScriptPath -eq (Join-Path $inventoryRoot 'Orchestrator/SmartM365-SendPreparedReportMail.ps1') -and
+                    ($call.Command.Arguments -join ' ') -ceq "-Tenant demo -Producer SmartM365-ActiveDirectory-Inventory -Audience $audience") 'Confirmed delivery must call the report worker with the expected tenant, producer and audience.'
+            }
+        }
+        $script:OrchestratorDialog.Answer = 'No'
+        $script:Controls.OperationsReportReplayButton.ContextMenu.Items[0].RaiseEvent([System.Windows.RoutedEventArgs]::new([System.Windows.Controls.MenuItem]::ClickEvent))
+        Assert-Case ($script:ReportWorkerCalls.Count -eq 4) 'Declining report delivery must not start a worker.'
+    } finally {
+        Set-Item -Path Function:script:Start-GuiSendSummary -Value $originalStart
+    }
+
     # GUI shortcut of the scheduled task installer: hidden PowerShell 7, minimized, no console window.
     $installerAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $folder 'Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1'), [ref]$null, [ref]$null)
     foreach ($name in @('ConvertTo-QuotedArgument', 'Set-OrchestratorGuiShortcut')) {
@@ -235,8 +286,8 @@ finally {
 # SIG # Begin signature block
 # MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDjNUBCR3A/Ee8x
-# pXU9E7BtyMRwyV7UK8Sb00Rw5/4m06CCGNgwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3wPYN1yN4C64f
+# nF6gu1q/z6nCRqxU3KYeJNNt2ShqZaCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -373,31 +424,31 @@ finally {
 # bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
 # EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
 # DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
-# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg1Rwafk98Mzwb
-# blxvkbDCqzauCAoKGzoSLGvn//nS7kowDQYJKoZIhvcNAQEBBQAEggGAc+nfrCy9
-# 2+FwX+eF+8lB1ExaG2BRU5Y+jFZZWfDzb8MOWqyuXVU7c0yZjk9Z7k5S53LN6DGI
-# 3gNSHqnJQCooVqb5AglmQl1h4dQA7cnyaJQOBjXYDmZ1lC5vx2FiRnrXC+r1j8ac
-# SwohL8Z5etb7nKCcdv22Asl5KtAYoOAmJ/bhMcAlpC0vDqN3WwZnOK9GiAlhtfY7
-# ZSjpk9hwMr96MoI/DCTQ+aFOJlOzTDJLF1U3yfQIHk9G9V988p7v/2kS+WXqLwfg
-# BRjJNEP4eqD/yE8vOlblhcTDNRICChdoCZms8/FaEALOKbw/uppHbwvUBW3u9gKR
-# rrRdoXsz3wncIR/e5GRapZhavnrWLo7/mHRjli5LYqlIHtfWqXuU4zmt2RQ2YA9m
-# +Qw3HmgEDOsJxcI3N6fyDtBxJc2z0nyHcnwzpoc6e3llhgRcvXp5BvY5MVW9EAsL
-# lJLOKgPIs57tfZZeJgOrjlAm1vyyJei/4dQ85+PrZRIsb1P42GgiDOdjoYIDIzCC
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgppxgVgmPPXie
+# 0p6L6dMbEo8joCz60XGZM7KwSxqhIHEwDQYJKoZIhvcNAQEBBQAEggGAUL+hueDM
+# KugmgBVjhdklpuSkCXWBQSENT3045G2AB8O64Wir5CkegS8kX8wnSyOsn3rLPXK6
+# 4uqkp/MZm6PUfhzrKuuuqcdEfmCmQW5Pq9juTrsEyHNP+pSi7qkgSZoTPE2bzhPJ
+# mB9U76IaRKmitM3Tc1HQgGrK8qL3oRPilpEWfW2HzOlETq0ObKCB20mv/pdhTp6V
+# dq34wPMMtCx7QJyzMMNoZ85oPNnISFuRMHIhCi0ZgfKYKeepTDT4FiZlgHmYCCWc
+# nndBQklb94+p16AmNE58k5u+vTsT5tVpPLbFsOykxAzJDQMWR9fjm+lITbbVVreU
+# YDDnhg0VsFYmJ+cxjQ5+GTXSQE2evoY8IeXftgojcV4Z2lieJG+3HpliiFh2HtGh
+# mNfvxoxcuIHP2Ux8PxD61sysNKOwXLZdy/z9MqMbBhDH9K9MhGIQWPwQOwN1kZqZ
+# 4X4DzxXJU4y/6cgR0w32qgIbE6Mn6Yo4kfUevgl1LMTLxVrsMQ6AWCspoYIDIzCC
 # Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
 # BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
 # ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
 # AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
-# MjYxMTE5MDk0MzA3WjA/BgkqhkiG9w0BCQQxMgQwQ3128JagOFC992XrGF2pB8X7
-# yZetEJM0Dlr6y2qKORFX7H40LH5abzyLKK2nGNpUMA0GCSqGSIb3DQEBAQUABIIC
-# AA89hova0zm0uPRF4vJQeMUXOdfp47sgu4B133LH+P6vaN2xmIytEPAtL6GNc7G8
-# QdfWARms+SMB300tiTrdX+rGEmYzJ8TvZVL+K+dpwjIHltthneJ7Ea+lPiOM7rki
-# 3xIyq7syvmn72UxjzFMLo9trL+bZbL0GsHKAcIklNqsKvTl+LN/FA8IEidQXBp4o
-# HBdu0TyzLfSKbOyceccRyI2wYMl0Jvr/681PeqGBrqlR9g+qkFFvYSppcvKKxab7
-# jl5NYQQpz4Z2ZwaIvfh0GohVELRSavgiXuneuQ3YgLfAMqu1t6751d8CDpI5YMFk
-# k/oYG7UMBQrT/1YuVNnw7+DTWZC1RCM2nFGm4qK37Gs/dxwdPSxqUMA1pT/ASeWk
-# fiB1BrV1hF7rRCDYkhehbecjD6PfmEB19r8yKROKhSSkWMPKxhl4BqGY9YKZYJ5u
-# XmAO6/j1wNqIgY9Qs5P9J+pHMIPi+KHgv+X0Zg5Qo1Aj3e2YyF7mP2EotqU5Duwj
-# dHUxKauGYSf/e6X2SlG+O/HnRl18048E4FaMe8qgeBzhWkLs2UwdWJZV2FXtZC4m
-# 4li5voTrd4+L8yUZmcFsz4R8ySqkqamunOKrZpC7hlUO2uwMf1bHM4WvPU9OnIwQ
-# yYFRG5hGM7k6Adgkoybt4F4VqtR5f047609KQ6O2RGqe
+# MjYxMTE5MTAwNjE0WjA/BgkqhkiG9w0BCQQxMgQw0mIj/4AoXalslsX43ju/DLyP
+# 6oLM+DLyW7HbdRi8dyg2J+gvsHrB4ogPB0yI2SifMA0GCSqGSIb3DQEBAQUABIIC
+# AAFNQGSqhKflLkPjO4SAPoVYmwax/DGC7lHNdY8eAW3jtVNPW4FC9I+bxs2+Vmyp
+# BeqoIxfGIcq7fwIdX3mi77EDzK87PB7ljuOxCY4tZt1H6AwhcXzLDn/UHqFoo8l0
+# JdDQ8/S+CeIVF837bSDcf90xpCHa02IIny/0Xx82N0UFnWBv9Rg2i75YR/HxzjHZ
+# nggJhLKMXx6ooiiaD/kWDXoyRz2cDaDfGoUM81MifT6piK8xlJnArYwFMTcv/OVz
+# 78AXrsT0Vgdq9WmR5MW8IWfdhJqlgiLJAWUMrB+T5dQxOzQ+WtX2iDuoiWdIwoj9
+# lQu/zBMMHBkHuRaTkmvtn+ZlqFbimkoBR6TaIi0q0XKsXZGUdYrr4SBzu/HOaFRg
+# j2eJpOh50ngzQ32wLYYIdnzY5e7DEEvneiDnzabHseWHBBBrOsO54Zd/5+jarMym
+# MlAMfPt3PeF2BQRiqTj4sQrNSSeImc20LRqsZv6ksBEWJHgZXDeSGmbklSFgd63M
+# xshR6VVp3j1/Yi8T/cbB27krdBYDceWD/lYUz2yOccDBrZA9UzfyyHdUd4AjpN8V
+# R66RE8HzxGm4VWQYmP0vyn39+xLuFhkBIJFBdTbODuHOZsbMdM9aDeCvO0CoKZyo
+# A+Vlucp4OQ6c33X6cfVKPa0aCLso/uMTHFmCOJQ/Y3L6
 # SIG # End signature block
