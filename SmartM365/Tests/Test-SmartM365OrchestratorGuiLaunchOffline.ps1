@@ -259,6 +259,23 @@ try {
         Set-Item -Path Function:script:Start-GuiSendSummary -Value $originalStart
     }
 
+    foreach ($failure in @(
+        @{ Code=21; Message='*next scheduled collection with the updated collector*' },
+        @{ Code=22; Message='*belong to a different export*' },
+        @{ Code=24; Message='*worker could not start*' },
+        @{ Code=25; Message='*configuration is missing or could not be read*' }
+    )) {
+        $script:SendSummaryRun = [pscustomobject]@{
+            Process=[pscustomobject]@{ Id=100; HasExited=$true; ExitCode=$failure.Code }
+            Clock=[Diagnostics.Stopwatch]::StartNew(); Dialog=$null; PreparedReport=$true
+        }
+        Receive-GuiSendSummary
+        $result=$script:Results[-1]
+        Assert-Case ($result.Title -eq 'Send mail only' -and $result.Icon -eq 'Warning' -and
+            $result.Message -like $failure.Message -and $result.Message -like "*Exit code: $($failure.Code)*") "Missing report failure details for exit $($failure.Code)."
+        $script:Results.Clear()
+    }
+
     # GUI shortcut of the scheduled task installer: hidden PowerShell 7, minimized, no console window.
     $installerAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $folder 'Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1'), [ref]$null, [ref]$null)
     foreach ($name in @('ConvertTo-QuotedArgument', 'Set-OrchestratorGuiShortcut')) {
@@ -286,8 +303,8 @@ finally {
 # SIG # Begin signature block
 # MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3wPYN1yN4C64f
-# nF6gu1q/z6nCRqxU3KYeJNNt2ShqZaCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBQHMoqSvUohvVd
+# 22dmTeX5rw+nS3ng5nZFFpUhspI7LKCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -424,31 +441,31 @@ finally {
 # bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
 # EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
 # DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
-# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgppxgVgmPPXie
-# 0p6L6dMbEo8joCz60XGZM7KwSxqhIHEwDQYJKoZIhvcNAQEBBQAEggGAUL+hueDM
-# KugmgBVjhdklpuSkCXWBQSENT3045G2AB8O64Wir5CkegS8kX8wnSyOsn3rLPXK6
-# 4uqkp/MZm6PUfhzrKuuuqcdEfmCmQW5Pq9juTrsEyHNP+pSi7qkgSZoTPE2bzhPJ
-# mB9U76IaRKmitM3Tc1HQgGrK8qL3oRPilpEWfW2HzOlETq0ObKCB20mv/pdhTp6V
-# dq34wPMMtCx7QJyzMMNoZ85oPNnISFuRMHIhCi0ZgfKYKeepTDT4FiZlgHmYCCWc
-# nndBQklb94+p16AmNE58k5u+vTsT5tVpPLbFsOykxAzJDQMWR9fjm+lITbbVVreU
-# YDDnhg0VsFYmJ+cxjQ5+GTXSQE2evoY8IeXftgojcV4Z2lieJG+3HpliiFh2HtGh
-# mNfvxoxcuIHP2Ux8PxD61sysNKOwXLZdy/z9MqMbBhDH9K9MhGIQWPwQOwN1kZqZ
-# 4X4DzxXJU4y/6cgR0w32qgIbE6Mn6Yo4kfUevgl1LMTLxVrsMQ6AWCspoYIDIzCC
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgz87mfHyuztKk
+# Xn6BIirjypsTVGHLAWQ+eRWDUzRBGnYwDQYJKoZIhvcNAQEBBQAEggGAbKzpS2Rl
+# qHo9EV+JAF4aKiwLL3Fncy08kqbhn5/M3z+JmwSmeSkYDshdUJ26eNQ8RI7a2A56
+# yD5LMmHz/EPZtIlpcVI7wNs+hWTkXO+AJBs/AqfVM99Fgvbd3nnJfBSTPQxgZFsN
+# D/GDwEFqSoNUJ0Di8tZrQuIioQTNYIMn7eHYuYnalFqOc0BwPUyowDQfyfSdQi+C
+# mr+xCOz06Kzxd/5Q/YnxQJ69gsyFWJEwLRcdHuqn4KiTsyylH8yMWTw2Chb+whgn
+# DJg7bAU32vDwHYinp9pqPyUyKbku2n8WOVGuAGNnMCA6Snr8WTV8O6fR+Ikakc8r
+# xD0YK3rfiE82mixnKBSOjtJkXSxe+Z/OE1jf9dJi9aow7NvlqqTrp/KvJc9/+gVT
+# ZOFFSkkHw6r188xw8FHXWYjw6qbAEyv5CDOkgBruLXwjgOw7OdNFPYlpbw/sGwWL
+# S0EvYCd4+PwbnN1CD58Tt/6YEMvYDflShHOTs1rOq3jQ70tzSM5tgoVioYIDIzCC
 # Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
 # BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
 # ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
 # AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
-# MjYxMTE5MTAwNjE0WjA/BgkqhkiG9w0BCQQxMgQw0mIj/4AoXalslsX43ju/DLyP
-# 6oLM+DLyW7HbdRi8dyg2J+gvsHrB4ogPB0yI2SifMA0GCSqGSIb3DQEBAQUABIIC
-# AAFNQGSqhKflLkPjO4SAPoVYmwax/DGC7lHNdY8eAW3jtVNPW4FC9I+bxs2+Vmyp
-# BeqoIxfGIcq7fwIdX3mi77EDzK87PB7ljuOxCY4tZt1H6AwhcXzLDn/UHqFoo8l0
-# JdDQ8/S+CeIVF837bSDcf90xpCHa02IIny/0Xx82N0UFnWBv9Rg2i75YR/HxzjHZ
-# nggJhLKMXx6ooiiaD/kWDXoyRz2cDaDfGoUM81MifT6piK8xlJnArYwFMTcv/OVz
-# 78AXrsT0Vgdq9WmR5MW8IWfdhJqlgiLJAWUMrB+T5dQxOzQ+WtX2iDuoiWdIwoj9
-# lQu/zBMMHBkHuRaTkmvtn+ZlqFbimkoBR6TaIi0q0XKsXZGUdYrr4SBzu/HOaFRg
-# j2eJpOh50ngzQ32wLYYIdnzY5e7DEEvneiDnzabHseWHBBBrOsO54Zd/5+jarMym
-# MlAMfPt3PeF2BQRiqTj4sQrNSSeImc20LRqsZv6ksBEWJHgZXDeSGmbklSFgd63M
-# xshR6VVp3j1/Yi8T/cbB27krdBYDceWD/lYUz2yOccDBrZA9UzfyyHdUd4AjpN8V
-# R66RE8HzxGm4VWQYmP0vyn39+xLuFhkBIJFBdTbODuHOZsbMdM9aDeCvO0CoKZyo
-# A+Vlucp4OQ6c33X6cfVKPa0aCLso/uMTHFmCOJQ/Y3L6
+# MjYxMTE5MTAxNTIwWjA/BgkqhkiG9w0BCQQxMgQw5YAAl/THd3pM+DYP0FJb0K9r
+# ZwjVkxmbs4r0gpRFT0fPeExNjcO3m5qzqW2DjCDXMA0GCSqGSIb3DQEBAQUABIIC
+# AI/u6kMopn7O7gzJzcq0s7kqX0tMuHv2hW+TiC070D00owLUWIzBrySkqKKvBb09
+# jTrrwgaBs5Krf5b0svkFQiZ3lvJz8eZeOBF3zZDeEO5/7Sf7D2lb34bH1m1fhq2p
+# OARvXPBwwkaICMtmG+1XZrQV8TpDqRo4yHF4+U7LR/sObVUfoEyjU0IdcUCxhkeC
+# 3/tcceCXRsRcAVsraR3uH2NeYnlcwDIDv6BJk2/4g9jIjOxBAXIoyd2/dlmCtQrH
+# VOAjJ/tRyonsuwbsdeeE9KduvsV3aYXuKSChlbXytfv3ITQMoAKB7nmfLio9dYvE
+# fc3Lpp2ZXXH1ZTVeiwFz+hM6eZn+EJAvnrASu4X9ovhpqX9Y0XP+rK/z+F79QGPz
+# 5GiMV0SJ2mukuqCOLnB9jvfimX+rajBS7LoiKFoUy6aqkXBvhHt4j3cvfC9//3ap
+# Gb/sm/s0eQXNxny/iCzwUHBtI4ChQNTZ5Zav52vUL9IhxOwHNcAKFhY0pQn9DDZo
+# yH0xwwpbjKGf43g/IAqk5B5VY0aYsfEKHibMcGAhBVEEcNCiUTY1t9nJI5FiIrLb
+# jCN/GJ9gXUCUlUwtKxDxqOEluraVnpD0Y2mZNccTN9DkP2khjrCgwte+lOz8nh0/
+# phei67koLtjpXbC55Jny6ETOq3e/OpesyL0vqrwNH/gt
 # SIG # End signature block

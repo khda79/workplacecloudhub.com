@@ -3,7 +3,7 @@
 .SYNOPSIS
 Rebuilds report mail from published SmartInventory exports.
 .VERSION
-1.2.0
+1.2.1
 #>
 [CmdletBinding()]
 param(
@@ -13,6 +13,8 @@ param(
 )
 $ErrorActionPreference='Stop'
 $code = 0
+$stage = 24
+$logInitialized = $false
 $base = [IO.Path]::GetTempPath()
 $work = [IO.Path]::GetFullPath((Join-Path $base ('SmartM365-ReportRebuild-' + [guid]::NewGuid().ToString('N'))))
 try {
@@ -21,9 +23,6 @@ try {
     Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.132' -ErrorAction Stop
     Import-Module (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.ReportCadence.psm1') -ErrorAction Stop
     Import-Module (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.RebuiltReport.psm1') -ErrorAction Stop
-    $mode = Get-SmartM365RebuiltReportMode -Producer $Producer
-    $source = Get-SmartM365OrchestratorMailOnlySource -InventoryRoot (Split-Path -Parent $PSScriptRoot) -Producer $Producer
-    $null = InitializeScriptEnvironment -LogFileName 'SmartM365-SendPreparedReportMail' -CallerScriptPath $PSCommandPath
     $global:EnableSharePointUpload = $false
     $global:SmartM365CollectorUploadPolicies = $null
     $null = [IO.Directory]::CreateDirectory($work)
@@ -33,6 +32,12 @@ try {
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),'FullControl','ContainerInherit,ObjectInherit','None','Allow'))
     }
     [IO.FileSystemAclExtensions]::SetAccessControl([IO.DirectoryInfo]::new($work), $acl)
+    $null = InitializeScriptEnvironment -OutputPath $work -LogFileName 'SmartM365-SendPreparedReportMail' -CallerScriptPath $PSCommandPath
+    $logInitialized = $true
+    $stage = 25
+    $mode = Get-SmartM365RebuiltReportMode -Producer $Producer
+    $source = Get-SmartM365OrchestratorMailOnlySource -InventoryRoot (Split-Path -Parent $PSScriptRoot) -Producer $Producer
+    $stage = 1
     if ($mode -ne 'Exports') {
         # The allowlist contains only entry points whose mail-only mode precedes collection.
         $signature = Get-AuthenticodeSignature -LiteralPath $source.ScriptPath
@@ -76,11 +81,20 @@ try {
 }
 catch {
     $message = $_.Exception.Message
-    Write-Host $message
-    if (Get-Command WriteLog -ErrorAction SilentlyContinue) {
-        WriteLog -Message ("Report reconstruction failed: {0}" -f $message) -Level ERROR
+    $code = switch (($_.FullyQualifiedErrorId -split ',', 2)[0]) {
+        'SmartM365.ReportInputsMissing' {21}
+        'SmartM365.ReportInputsStale' {22}
+        default {
+            if ($message -like 'Missing current export:*') {20}
+            elseif ($message -like '*restricted by the mail policy*') {23}
+            else {$stage}
+        }
     }
-    $code = if ($message -like 'Missing current export:*') {20} elseif ($message -like '*restricted by the mail policy*') {23} else {1}
+    Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Report mail failed (exit {1}): {2}' -f (Get-Date),$code,$message)
+    if ($logInitialized) {
+        try { WriteLog -Message ("Report reconstruction failed (exit {0}): {1}" -f $code,$message) -Level ERROR }
+        catch { Write-Warning "Report mail failure could not be written to the log: $($_.Exception.Message)" }
+    }
 }
 finally {
     if ([IO.Directory]::Exists($work) -and [IO.Path]::GetFileName($work) -match '^SmartM365-ReportRebuild-[a-f0-9]{32}$' -and
@@ -93,8 +107,8 @@ exit $code
 # SIG # Begin signature block
 # MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDGjo4qBid4ivp2
-# Y8G13gb/3OpnUGcSE5bYSz7J7G6JW6CCGNgwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCrYEQ0iQf9Ng4u
+# oLwuRifYbSFY7nOvitDcOjc/nkxdzaCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -231,31 +245,31 @@ exit $code
 # bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
 # EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
 # DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
-# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgOvuHktJhQnEw
-# NWCkq3I+qA337z5Pry1/QsZUwL4oP3UwDQYJKoZIhvcNAQEBBQAEggGABwH1YeoG
-# 2Ml6tJxGWBlXbUe/80+F0aOxR08yREvZpaRm/sj/TWc8fAW1wo9pk1HdjB3kXHSY
-# 3cXM86LGznDNviZ5zUtM0FF3fkzZzQhClbPWvfymrEgUS/yQg2TFDLQ+i3ChFsp/
-# E8LDn8CUPOvBKysgTIR07tNTcg9/KHBzhBsulCJDJ4Pb6velePFibMDmw8YbYymb
-# stD6jWQZCZwQlNOlv9eTRwvdmPUsXLJX4PSJ9jmvwiceDAmqCXuTVhLOTGEQMONx
-# 7tNbBZbyfpn4gIzifFbfkNasSCBrWGLPaHxDalc/b5yR7gDECLMm4ydfw++PFrlQ
-# xVAhyHWJC2634OdnWJINEBH1/SaVmCM3tNyrNL5Lh/bJt9ZLstZ1l+de+FYyNJfB
-# 2iockiUl+s8j0Bhe8ae0AyH7KFqnyfa7Rk7OpmNXMJoZU+Vcyaohi/FpkVzBTOPl
-# 7OrmW9NvRObX3KQyS5kFGk/kEcspSW0RqNd93pXrabwt94SZLuHGx82XoYIDIzCC
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg+uIO5hC0pQaN
+# SFIkCbg1El0YWoAHaMIsOh/yFm/wnagwDQYJKoZIhvcNAQEBBQAEggGAIAkjF3rG
+# jdcQ7lfUFPneM8aUKoM2UR+htZe5/rvSmsiqGJT9DZQnN82ZTR2a/MHFfztTS1gO
+# WS3Ec4mziYVRWb8C9GoduvVFgDfjBoyhpOnJh3PtZYuG4YqaTQ0HNx7Rhej6y8+g
+# 9hL0Qp1wjPLNEodXt+suDRfaoR2+LFtCdgwPMBkwlJLfVJq0c9SsdaHnJzBU7tu0
+# 2pHfVap4QOcJ1c2eAxgVPfw6GWiOBEa8XVBSVDNybYELHIaE6W3xwgZEyn3JVZJM
+# hgq/Z/RoCy9OVqhr8cVdaTkTkVo8dnu1YY31NoLyXMAF9sSsJlXWIm/svGnk93Rl
+# BZXX5jnhCNXCXTTPFvvqWkUO8ZPqJqgykNZW4lpElb9b5PwpgshzAPWm6eXrs4rH
+# Lf8S6Xe9NfgWf2S4Hm9ip1L9ikUooSJX/2nX0EPBCMUOBuQTiRLUEufsHiSZtWAb
+# MuANKsgPGazXG8NuEvWmXjbuq7Kij5N8uohjioMALrYWLH0IHoOESiKxoYIDIzCC
 # Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
 # BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
 # ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
 # AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
-# MjYxMTE5MDkxNTM5WjA/BgkqhkiG9w0BCQQxMgQwGdOc+hS4D78oW8udSAyYW3SZ
-# n/sy7sUvmbr1wZD8RZQWVvXzkgsezcO2LGCIgHqXMA0GCSqGSIb3DQEBAQUABIIC
-# ADEUL3M2gNNZN3lLxDE4612OxZkC9cyxZu6VvVDzMIIzcb/gHhvbkGxacnVY/s+q
-# xApaHL/aS5e5lJq9iWWzeEdI7moHV7JRTRQlpyl87tLVrZa9NJ34m9K0xfSiUlQl
-# vL3KXe/wcycIrJE7Q+Tor1ogKlLZT14uREVKKorXKBfTBoif/C74OsEQ/jI2AJIz
-# xBQw1VlXZOdT1sCf+IB2MwFUnMkq99UpFGKWxgAAS56v8w+6JwofG8M8nHWRhi8J
-# xPTsYxobTKr3ZOYPZFgpy4W4jBQejoVE7TbTEA3uRMN4wX4TyHLU5NiqMuesDLAo
-# WEe9dnJrq1JmdLUqKXmibIAkfvNNmuDyx7SH5gYZNoIHoW0QBy+NAwyeRQS7fwga
-# L1c/XvB7dWUZu5nwhTpYX3qsjkxTW6HW239qzuuj11J1ktRbFAi+a+12pJgyRipT
-# 2xIa5cH2dszWS1briDjqLP3R0Q9i2TR5dU1yFKRU+H0b8vhgge4So0lxSb7vgCFv
-# 4bQE+KFj5KqC5oZE/NPdQPVLnUDPtj7I7knqou6q4jMbRDkLP+6qxOXm1/ybJyPH
-# Rspdd4+dLxsTkypLbzWhZAhuNfd017Sgh8ZJghoi+iU9AfbTN/AumcQb3iPb4Xp4
-# KFT1BHC4MufS7TpacQnoa63u9Xlp/kbbYsgUZZkKFK9k
+# MjYxMTE5MTAxNTExWjA/BgkqhkiG9w0BCQQxMgQwoULxBeD5Joz5/lXYi6IIHAN7
+# 4fOXoxMHSAHE7DOAQsiA03zxi5lRtsMJAQKXXJLKMA0GCSqGSIb3DQEBAQUABIIC
+# AAsA2lY6yeBARmptU4L1n/WShXUwtiiOzC4tVmjIfxohCThpvGjBSlIP93ARj9fj
+# GaoiVFUBEn+v9uqkr1I4q0ApB+N4y8s0R1pUghbl1zUKykX9/Yx7Yuh7HWfd9kEP
+# G+2OYeVzOD39yo7MESW7EBme1kYz6QoAwbpB3+MGtvWMo4m2WuO8ws7sylMNjEOT
+# PSUHgTiaoWSq71l0G0Vkpf0vyPJYGCtLvn3VMJae0UFih5+6S/NAFzuSDas9Eluk
+# 1CfJYzLAJQMS8nGAJe+TBj/f326/HSNWkvpEiiHNi9IRQMfwQEvTZAH+djG4tL1v
+# 8Lw5m7Y2sYJz/v0mf1VxZ4wcuq8ltRfZ2jeyDOEdYAn/Th4ExAfmnXV/U95+0XAD
+# ucPPC5gZ6Oi+9Vg6FQiilBiUhoXSqBC4rXBn8LWVD9B+0SAo/EEXbknn7zQTnTnI
+# LeotD4ajVTrOb7EdclQFRyNMGRFLSfylruCa2yZvC1wM6kq39Cmepq/7IX2hWaay
+# nejZuFbexJUycHVoPcs0MFKyKF4s8b4534KuKV8GijIW1EGXW+feG2tWr1zCyu+Q
+# /fgbC1dLGGET+DJg8uFCoOEiHj38w1oJWLFGHppNFeDQWMLayYB5iboulWGMuOIZ
+# eV3Rvv5fIz3d6SdaNeUtAMVVcUHfzX/uc+ijSuIltzi1
 # SIG # End signature block

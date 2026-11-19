@@ -94,7 +94,8 @@ function Read-RebuiltReportInputs {
         if ([string]$entry.Key -notmatch '^[a-zA-Z0-9_-]+\.csv$') { throw 'Invalid export name in report inputs.' }
         $source = Join-Path $LatestFolder $entry.Key
         if (-not (Test-Path -LiteralPath $source -PathType Leaf) -or (Get-RebuiltReportFileHash $source) -cne $entry.Value) {
-            throw "Saved report inputs do not match the latest export: $($entry.Key)"
+            $reason = [InvalidOperationException]::new("Saved report inputs do not match the latest export: $($entry.Key)")
+            throw [Management.Automation.ErrorRecord]::new($reason, 'SmartM365.ReportInputsStale', [Management.Automation.ErrorCategory]::InvalidData, $entry.Key)
         }
     }
     [pscustomobject]@{Path=$path; Hash=$hash; Manifest=$manifest}
@@ -162,7 +163,8 @@ function New-SmartM365RebuiltReport {
         $inputs.Remove('PathSharePointUploads')
     }
     if (-not $inputs -and $Producer -notin @('SmartM365-EXO-QuarantineMessages-Report','SmartM365-Exchange-Hybrid-FreeBusy-Inventory')) {
-        throw "The current export is missing the original report inputs for $Producer. Wait for its next normal collection with this version."
+        $reason = [InvalidOperationException]::new("The current export is missing the original report inputs for $Producer. Wait for its next normal collection with this version.")
+        throw [Management.Automation.ErrorRecord]::new($reason, 'SmartM365.ReportInputsMissing', [Management.Automation.ErrorCategory]::ObjectNotFound, $Producer)
     }
 
     $report = switch ($Producer) {
@@ -324,8 +326,8 @@ Export-ModuleMember -Function Get-SmartM365RebuiltReportMode, New-SmartM365Rebui
 # SIG # Begin signature block
 # MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBOwlxH4D3uKhum
-# fCzgEiV79u6p3Lpmb6CqXlWaJLpwoqCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDzLs615ElCImcM
+# kdkda93WiGHGsff21OPNDuWG+fidgKCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -462,31 +464,31 @@ Export-ModuleMember -Function Get-SmartM365RebuiltReportMode, New-SmartM365Rebui
 # bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
 # EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
 # DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
-# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgrA6NP3PKUO7P
-# KOfyi4Unf2pW4BbNVcST/9smlqz99E8wDQYJKoZIhvcNAQEBBQAEggGActEgRZhD
-# PqU4jAQmPv826y9Fs1VZEIbDQNJRsZNM9G7Y6J/L0cozD1pxgd33QVW08sd3ecVN
-# a7gmSzIYTcSrPW2VWwGS1mr58zybmt0FOrRFAPz2UpTDdQg4hEJ+OY4L5IjA9yIi
-# ZRGSeC872bdBZWWIHlZhMs/1i0RpQ3S+bDpPLGVdXegpH9OwULH/Ys4FQAWDyIr3
-# tPkpvwKFlBxGy6o00lAmWPo48D5MSdw9HqJ7nikayLm1wmV/FQmyGYWWoAfIQgTQ
-# zlCBNp31Og7Ao3ZvUGLGPzWVJzbK4U5/ufOPfw0ZjIhc52nkupsjJjSsoDL9cdpp
-# g5AuF/clay2RWiQEpng5U/SFC6tM8Xhcce7IsxwXaWLXqoeSwLQlluGI4v6JnAcF
-# HJRc2avSHSVQdMqCsMq6jbMxzfULqjAqO4t2Hez2Sj18GPaRmEPjsKW2e2MxLW9P
-# rP0AXmuWBSpZjdZ+OqzRofx92s2zIXB4qAVxFPlG+lR+jf4jEkLi3xC+oYIDIzCC
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgVXggASvJRmqk
+# rFInWUBbSF9oE0MFRTmHCWoQRxeAHVkwDQYJKoZIhvcNAQEBBQAEggGASd5UJ5tK
+# 8MKhy7zuxY2L2dFnNmNQOHzVkoY5bABspF2GxxrU/cBhNMaho0AShRXhV+ENwUL0
+# fx5SlKadhmfw1mXiI7RO3Vgt6g269Q2JVKHPo/kvybeJSDA0WLhAwrF4ggoCAsiV
+# EwFeU7sOK+/qr8N8Bik8G8/rbRZW6oqkNKTmB7yrk14fd+MHXuSKS3X5CyBs13q2
+# Q/QX1hbx+gCnlklYxUZ9bfDQ0q/Oj1qsvZxmyQ81LA+6nH7xNN3XqInVaYrJA3V1
+# JLutjQcqoBQjKxOxpCYPo/aSyUKWXEXLvsQ8zcNTlAr9lAluCzMotmTk//WaYkqc
+# 1YwnEK57Dik67epZkiLU2AL5XUslSv0kAuQe25y2LLOOBkaVgJKYDKXWuZ/izOkP
+# CZy4hMsY2fuqY7oRZGKJBoRz3BF1pawIuwuZBN70L3DXiyBKgBLWUbsQKmMvk3Os
+# BLHkw3a03lk06L+TRhINBlPFmwCudZwrrGNBf0LkHkA2VnZepCs9sF1NoYIDIzCC
 # Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
 # BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
 # ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
 # AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
-# MjYxMTE5MDkxODI5WjA/BgkqhkiG9w0BCQQxMgQwzqNMAF3OYYM40TFDEeX2q9s0
-# dN4jAcuiEt2AEneUokT9+xO8omyiPdJbxOpyJ0EGMA0GCSqGSIb3DQEBAQUABIIC
-# AKK7RAz3A/zpHxBCnyrAsk8ArwHdoUYML50D/A7Wsnafd+Gy2Po0/WYvXKafhdjn
-# FXTWUcW4FuSgr4KVY/VDnlQ/lZB+8mmgw1XfF+r9jf1vhDWvJ/sXD4w7HT4ebVAj
-# /ZFG5lrowmPkXsmNh+DUMLWZihkli+PNJJ8kkmFp6aa27FaAmW4GNwiZtx7TctuX
-# 7QlX+n+S1l8dx4MlLLLq94JGRAwivLw9948MYGIDDxiQl60V0l5GtuHOCRVAdewZ
-# OvYEqtWGtvBAKBuRZS+Qh55dMUCE0/ewGXl1kQGg/qq6gExVzST+CUVUWYfze0cU
-# X/o00xcur3Y5ZJLW5Y0zjzH3VYsrFyeOylZiiH6n1vv4o4BZCBd3dOll4xOlK3My
-# ZfNDcimxfIcjJCPi9x9JUGEUuZytCZXDUliXK8XH9Aok0/5MCks59gJUrkwTCeCh
-# IO8cfwazFG8s+5aHezcSjhJzDrvdvSC1dE/SkIveulBzolVQfGkculxX2xcLYJLc
-# L+a+2LjddIwKMcd78urS16EdrBAol6SmTR7W/vxw94+Voxj09EtoqCUzNuydHBP2
-# bYCxc5i0UTGOMpGSeeUL/GKq6g2NeBPmfurlaZ2jf18JSwQFINf1PTQjTb29pd84
-# xIc4eVX9J7y63LSOU/8T8yml+74a73qTr7+2I+bxJ3Nt
+# MjYxMTE5MTAxNTE0WjA/BgkqhkiG9w0BCQQxMgQwMBev/9v9NRX/xh7GjwxfYh7H
+# y7zpyYMfPd1GL38AGGeCQDUd8k/R+vnAdP7LIidiMA0GCSqGSIb3DQEBAQUABIIC
+# AA5qDKHeFTJWbAgrK93SV5CH/yhOPB8PTuIOLHGANyoxa/4WrtfxG3eohztdHc9A
+# cvvJPHmGqb2peNyOS2Ec450qBL3y6b1xYThVtk000fcojO335Cs5uop7O2zpw8KP
+# 7YqwEIVo6SS0U1XJSN9SuggtHY5kwNTU+N9h3Dxngb1e2wGgwh9vaI78HslfXNWP
+# OduVl7uxClvAZMUeR7L4ADpyTE9yC2vCDs5a7BDy1wCammWRl2jAzMLKXq2Zbiuc
+# BpiKku9CsboaSZzbe4yw9ymUb4i4ut8Xet7EGEA6Dnp/V8uPHD+PVBVTmYzXo55K
+# XbeuB2TmHrlNLk1IyGwyXvuPBOU+vUnEDwmd0kg6zgxOpULibmGwFnY5Kn70XSxK
+# SzNAb8BSsNa1ohpHGuKXHGYcuRh6ajHsHJ09aBQfQ45RQEAwGG8Wx2S1VSk+RmSG
+# T+dxsSfgzGq6H7TuNW37+pxhTAaLTnxMFU0aZDuphX89e/pnej0iRAugA5qSqHYz
+# D5c70uuZpJ19JSPnMKNnZssSSYIUmFBUhcz9WjpILRGPB1+Mct4THaEdlm+FFYiK
+# kqtVaHy0uWwtFA523zbdpImqbGJktxMOaYa9BzBk5WP+yfje+wKW8fEhpBrV8d9u
+# NRxGzranHyeXOO2Keq3kqOHbqyV50YXA7ut5YDmpPcO7
 # SIG # End signature block

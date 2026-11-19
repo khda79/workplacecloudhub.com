@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.47
+1.6.48
 #>
 [CmdletBinding()]
 param(
@@ -69,7 +69,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 }
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.47'
+$script:AppVersion = '1.6.48'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -3019,8 +3019,16 @@ function Receive-GuiSendSummary {
         $message = switch ($process.ExitCode) {
             0 { 'The rebuilt report mail was accepted for delivery.' }
             20 { 'A required current export is missing. Check the published inventory data.' }
+            21 { 'The current export does not include the data needed to reproduce this report. Wait for the next scheduled collection with the updated collector, then try again.' }
+            22 { 'The report inputs belong to a different export. Wait until the current collection and publication are complete, then try again.' }
             23 { 'Delivery to configured recipients is currently restricted by mail policy.' }
-            default { 'The report could not be rebuilt or sent. Check the mail-only log before trying again.' }
+            24 { 'The mail-only worker could not start. Check the tenant configuration and access to the temporary and log folders.' }
+            25 { 'The selected report configuration is missing or could not be read. Check the worker log.' }
+            default { 'The report could not be rebuilt or sent. Check the worker log before trying again.' }
+        }
+        if ($process.ExitCode -ne 0) {
+            Write-GuiActivity -Message ("Send mail only finished with exit code {0} (PID {1}). Worker logs: LogAllRootPath/SmartM365-SendPreparedReportMail." -f $process.ExitCode,$process.Id) -Level WARN
+            $message += "`n`nExit code: $($process.ExitCode). Worker logs: LogAllRootPath/SmartM365-SendPreparedReportMail."
         }
         Show-GuiJobRunRequestResult -Message $message -Title $label -Icon $(if ($process.ExitCode -eq 0) { 'Information' } else { 'Warning' })
         return
@@ -4590,8 +4598,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBFZfYtkr7/6DNK
-# uEEYbx5sJ+cdiy64BxLdvxu3H96GVqCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCLswe6tIKZMzwg
+# RxWRzSMt/qTqsPb2XdiFZ+hQyrtkSKCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4728,31 +4736,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
 # EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
 # DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
-# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgmZAQAmNRcdmP
-# NLeOBWHqDM1coYK81OEwQmy1iQXmvqwwDQYJKoZIhvcNAQEBBQAEggGAJnnmBiuW
-# ZoWIXA8CSRaSIzCysgC5j/keiDOIq6uEAAWTtu7gxRSaSrIcchKVegPS0mZGJLpV
-# 9/rGHA+I8y8GvGwKoe/uO0DJ15LdMlxUzVteIYzXb/z0jvbV5xms8bLSBnn4Tnx5
-# e4dOHmbJ4TULBSI4xRq75xy7sJ/p8BM+F2jdxD1MbGsmq9K03kMWbENgv1o0bPFt
-# zhzKrB0v3x2zd6pRLImidCygzleyBuPOk7vdk+O0g/97DJ+G68G/6IEVEzvST92L
-# /gJjqLFVOpNeo7j1rsLZpOmwNhippmI6RvdOvfCDvB1T7UYaq1MQyee+hcmWSh+i
-# zRHpAA9kS+hliZHyy3jz5/5PEN9PqVxakUc37YhbCIkRyfPpQU3GuQ76RhsImIX4
-# rQO2f8PHv2ViVqH6TmlGzRTsVUHg8EqU/zkNcUfXsN9HFHnUsOqUXRstclTkFtaW
-# byMl8Fo68W/9Tg97Nefan/o3j8p3HFdguz7ovtHcBhOnCm/xJc1zVYQEoYIDIzCC
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgifxP7RtYPYut
+# 49XGE0AizU4pRA1Bsb/65YnKJuruLW8wDQYJKoZIhvcNAQEBBQAEggGAjcOpkwuI
+# v+cfKDsWODeV4XfVBNCSb/RNeFSLpUNOfp2rVWnSUrMb3dRPSbbgh2jeEUf1AbkD
+# G0nZhkAEdJkdlvHJWmmdqHyiDCPjjm4u+dVy0EfZq/ef5ncuiG+eQUmOyqvfqRrj
+# dYh5+HelRX1xiffucDifOBPgBZjNC4hfxEZRtZFGTqlHrm2SQST2sH9FNRomEZZA
+# uMKSnx58Kyl6KDAKabM8qAHr+0YepENwZRZ77OaJjL42o6xHusmeSEnoqYuywfYm
+# M6356cfctjjb9EXeqsO3dkXyv93zrHBq55x31MTRvZ+9LI2YXjsXzlvedalhpmwM
+# QCKg4Wbr8YQW0A5ESTRkKu6rZ9ExVVGN2/PB8U+DNEvR030tJ3YTc9SOmieHT17z
+# LukD3Z59Qdz4+PYwirBzYLQ2IWVMYv9dGMojPHey1/YYFSmMttPMlbJUEucsgggO
+# PTVqbumNtsPA4ZAwfaCDFjkO5870MYZsoAI5+pWVgSOq/iTJ4s7Metz/oYIDIzCC
 # Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
 # BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
 # ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
 # AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
-# MjYxMTE5MTAwNjExWjA/BgkqhkiG9w0BCQQxMgQweHD61qQwkhuRWSnMGuWiUDdo
-# XdLGgNx9NAKya4x7/y2s6GyxyjkgklmuNXCD+IVuMA0GCSqGSIb3DQEBAQUABIIC
-# AKx3ynXaS7plg5dbbYzFGwFyH+9eHYKIv9pnsIlk3kni6L/0Eh1fUUI+rGiVgOYU
-# xxB607X9CTMZJe7euqQzAJTUBF8UbUzZFU+Inh7+X6uXU5fsznoTuEAEQZDFHQv2
-# Sg7jacHqS0MUsY8AHIzgQleooqItlcRmw7ULga1c10AcxZ72sI9JfY02qyr1O3Yl
-# rco2eRJNnixTXxUj5krPctRGSauwSydSXVZ42T8Jkxy3MF3NCtUStr5mIT5+kMPt
-# 5/JbajHkiCs9Iqs1LxQHjvvdCq8uOEfM0kr9SYcz3TmY68CM8c8PRfBBV+mmGkUl
-# fh3eiO0r9HUqgwi6UvAMw+CXT5jpH1WNmAcaj/m3CmV0qtc4yXjQgZ3QdM4jyX87
-# LNws73GfEA7lKN66BjDS6IsH/vI2TZGUB6d1k33UimHiatDRpjzOoIAZxrOjpgEk
-# elbIU+L0JZfYmbVCvKp1+JuZRvbVOXXyBQ1tHnaGteUnPm+tId5tEkNOrY27fU7o
-# GVRtQt3AQRFgE/EMGx4rYcIfr9F0eUjBETRCR14HnGC1dmR89aBaUKTYFZiKUWfO
-# rG2SmSPUQNpR3vwfwblidnLoHxWwJObXP2EG97M5T7ncnjc/41qWOFqkNrtE88YY
-# EkwQCXJZgLxDHepx1IIETySI/Ov7LeVSfKPML4VBS/To
+# MjYxMTE5MTAxNTA4WjA/BgkqhkiG9w0BCQQxMgQw09egddfRy6Rl5cUiFIqRf9gP
+# sFpKqHmT50lTaQ+SG4WbtfJ+WdgbQc8FLYdT3/TWMA0GCSqGSIb3DQEBAQUABIIC
+# AB8JVwU4pa5I1AEA2CzBYKCFmUV83x+iC3zhLau5rdnZ0RYr1zxMAOIR8hl7oh6v
+# smLKE+bxtv1oWh/jNWG3fNkULuJYAwWTrB+0LA/6I+mfByaHV5RQ6rPFRPLjQvI+
+# J0gzts6gIIKdQp/WvIwD9EeJpCftQ7LNmU9QjJSqjwTtIDJNBTYLfzoka/d5XPn1
+# JQyxzWS2u2/SmPWUqxkwpiy1aDrcMBC0k/CYUs0QQHV918OnEVzKZHKSPK563dk0
+# 0NiHw5EuDOg6K42hkVCqP+0YJA84Hku+sOCb9IzwOvIz0qro6wSvQF8f1JiWla1w
+# UHYuaQqiyiXtrCfQ3v8ozSnbgyGNNm73V1qRIzakU+KajbSLb0pavdmOCVTOhkkw
+# YbrG4Iswg2hlog6N736BPsSUxzsJougkOmONkkszDulaqUfxYPhs0Dvob+wX165r
+# 7IhLaiOKUqDgR96BdUrOOfSbRNfgUhQ/ts4JRP5CQENio8Y4oBHXqhiIXl1auUKL
+# J6Ct25L/6lgjfWeVusmnARy/PkzcU4kmkXugQYJVExqNCiIEo8wNcKQhyVOu7OBQ
+# +ut9HXViX7yKtONLwu1PO/zA1tUeelI4im/K3UkME8glBOmP+StlOKzRWsu6vzL/
+# PFom44b9dM3Ne/xO+DJmoc/m/uviSB4vT95jtoh9nGED
 # SIG # End signature block

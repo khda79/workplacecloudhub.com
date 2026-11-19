@@ -111,6 +111,72 @@ try {
     $producer='SmartM365-ActiveDirectory-Inventory'
     $adNames=@('AD_Users_AllDomains.csv','AD_Computers_AllDomains.csv')
     foreach ($name in $adNames) { Export-FixtureCsv -Name $name -Rows $healthRow }
+    # Test the worker entry point with the real renderer and a simulated transport.
+    $runtime = Join-Path $root 'worker-runtime'
+    $workerDir = Join-Path $runtime 'SmartInventory/Orchestrator'
+    $fixtureConfig = Join-Path $runtime 'Config'
+    $fixtureCore = Join-Path $runtime 'Modules/SmartM365.Core'
+    $fixtureCommon = Join-Path $runtime 'SmartInventory/Common'
+    foreach ($directory in @($workerDir,$fixtureConfig,$fixtureCore,$fixtureCommon)) { $null = [IO.Directory]::CreateDirectory($directory) }
+    foreach ($name in @('SmartM365-SendPreparedReportMail.ps1','SmartM365.Orchestrator.RebuiltReport.psm1')) {
+        Copy-Item -LiteralPath (Join-Path $gui $name) -Destination $workerDir
+    }
+    foreach ($name in @('SmartM365.ReportRenderers.ps1','SmartM365.ReportInputs.ps1')) {
+        Copy-Item -LiteralPath (Join-Path $inventoryRoot "Common/$name") -Destination $fixtureCommon
+    }
+    @'
+function Initialize-SmartM365TenantContext {
+    param($Tenant,$StartPath,$ScriptName)
+    if ($Tenant -ne 'demo') { throw 'Unexpected fixture tenant.' }
+    [pscustomobject]@{TenantKey='demo';LatestCsvFolderPath=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../DATA-LAST'))}
+}
+function Get-SmartM365ConfigurationValue {
+    param($Name,$LocalConfig,$EffectiveConfig,$DefaultValue,$EffectiveFallback)
+    $p = $EffectiveConfig.PSObject.Properties[$Name]
+    if ($p) { $p.Value } else { $DefaultValue }
+}
+'@ | Set-Content -LiteralPath (Join-Path $fixtureConfig 'SmartM365-TenantContext.ps1')
+    @'
+@{RootModule='SmartM365.Core.psm1';ModuleVersion='1.0.132';FunctionsToExport='*'}
+'@ | Set-Content -LiteralPath (Join-Path $fixtureCore 'SmartM365.Core.psd1')
+    @'
+function InitializeScriptEnvironment {
+    param($OutputPath,$LogFileName,$CallerScriptPath)
+    if (-not $OutputPath -or -not [IO.Directory]::Exists($OutputPath)) { throw 'The mail-only worker must provide an existing output folder.' }
+    if (-not ([IO.FileSystemAclExtensions]::GetAccessControl([IO.DirectoryInfo]::new($OutputPath))).AreAccessRulesProtected) { throw 'The work folder is not private.' }
+    Write-Host 'FIXTURE: environment initialized'
+}
+function WriteLog {
+    param($Message,$Level)
+    Write-Host "FIXTURE LOG: $Message"
+}
+function Complete-SmartM365ExecutionContext { param($Status) }
+function ConvertTo-SmartM365EmailHtmlText { param($Value) [Net.WebUtility]::HtmlEncode([string]$Value) }
+function New-SmartM365EmailBody { '<p>Fictional report body</p>' }
+function Set-SmartM365ManualReportAudience { param($Audience) $script:Audience=$Audience }
+function SendEmailHtmlReport {
+    param($Subject,$BodyHtml,$To,$Cc,$From,$MailPurpose,$DeliveryClass,$Attachments,$AllowAttachments,$SuppressAttachmentLinks,$SmtpServer,$SmtpPort)
+    if ($script:Audience -ne 'Administrators' -or $MailPurpose -ne 'Report' -or $DeliveryClass -ne 'Operational' -or $BodyHtml -notmatch 'Fictional report body') { throw 'Unexpected simulated delivery.' }
+    Write-Host 'FIXTURE: delivery simulated'
+}
+'@ | Set-Content -LiteralPath (Join-Path $fixtureCore 'SmartM365.Core.psm1')
+    @'
+function Get-SmartM365OrchestratorMailOnlySource {
+    param($InventoryRoot,$Producer)
+    if ($Producer -ne 'SmartM365-ActiveDirectory-Inventory') { throw 'Unexpected fixture report producer.' }
+    [pscustomobject]@{Config=[pscustomobject]@{}}
+}
+'@ | Set-Content -LiteralPath (Join-Path $workerDir 'SmartM365.Orchestrator.ReportCadence.psm1')
+    $workerPath = Join-Path $workerDir 'SmartM365-SendPreparedReportMail.ps1'
+    function Assert-FixtureWorker {
+        param([int]$ExpectedCode,[string]$ExpectedOutput,[switch]$ExpectedDelivery)
+        $output = & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $workerPath -Tenant demo -Producer 'SmartM365-ActiveDirectory-Inventory' -Audience Administrators 2>&1 | Out-String
+        $actualCode = $LASTEXITCODE
+        Assert-Rebuild ($actualCode -eq $ExpectedCode -and $output -match 'FIXTURE: environment initialized' -and $output -like "*$ExpectedOutput*") "Unexpected mail worker outcome ($actualCode instead of $ExpectedCode): $output"
+        Assert-Rebuild (($output -match 'FIXTURE: delivery simulated') -eq [bool]$ExpectedDelivery) 'The worker unexpectedly reached or skipped the simulated transport.'
+    }
+    Assert-FixtureWorker -ExpectedCode 21 -ExpectedOutput 'missing the original report inputs'
+
     $snapshot=[pscustomobject]@{
         SnapshotDate='2026-11-18';GeneratedAt=$generated;DomainCount=1;TotalUsers=12;TotalComputers=4;TotalGroups=3;TotalOUs=2;TotalContacts=1
         DistinctDuplicateUPNs=0;AffectedDuplicateUPNAccounts=0;DistinctDuplicateSMTPAddresses=0;AffectedDuplicateSMTPEntries=0
@@ -124,6 +190,16 @@ try {
     $normalAd=New-SmartM365AdInventoryMailReport @adInputs
     $rebuiltAd=Build-FixtureReport $producer
     Assert-Rebuild ($rebuiltAd.Subject -ceq $normalAd.Subject -and $rebuiltAd.BodyHtml -ceq $normalAd.BodyHtml) 'AD inventory differs from the normal report.'
+    Assert-FixtureWorker -ExpectedCode 0 -ExpectedOutput 'Rebuilt report mail accepted' -ExpectedDelivery
+    $adSourcePath = Join-Path $latest $adNames[0]
+    $adCsv = [IO.File]::ReadAllBytes($adSourcePath)
+    try {
+        [IO.File]::AppendAllText($adSourcePath,[Environment]::NewLine)
+        Assert-FixtureWorker -ExpectedCode 22 -ExpectedOutput 'do not match the latest export'
+    } finally {
+        [IO.File]::WriteAllBytes($adSourcePath,$adCsv)
+    }
+
 
     $producer='SmartM365-Exchange-Local-Mailboxes-Inventory'
     $mailboxName='Exchange_OnPrem_Mailboxes_AllDomains.csv'
@@ -234,8 +310,8 @@ finally {
 # SIG # Begin signature block
 # MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBCdzAIVlDM8VK
-# Sb644Nq5hpZN38JsvNrPWLjgiXFanKCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCdtM927Uf1/d5m
+# zP+MK3oGZYlpAq/EetIxHvbjeD0UN6CCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -372,31 +448,31 @@ finally {
 # bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
 # EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
 # DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
-# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgYlcCS0HlBJfe
-# rYmRGSdufJeD5MUcuPHzvIsnCaHhNkgwDQYJKoZIhvcNAQEBBQAEggGAAqXjNGz/
-# qNyVOuF6fO6fim0nvINxsy9AFrl6YEitt7M1TCdbADKa21tKVD1ptA3lXT1ztfHD
-# wWWlK33WJdNnuqdBEj7bGPn2uy71HimuKkBgjvHawrBKpLet9CLNGZFigzznu7cS
-# 0xLcYYWN63sHpcUqjMk/xeTwKLDwG67XJ+xdjVZlLcGmBQ9CRl1D5euYz2yvHZs8
-# Of1ehH3GHOxKwVAiTxyj+xeRCyovEAnsnt9KRNdFsu21ZdDm7blno6eZzGe/y7ny
-# cWLROG4QWOyCsyT/e5ZMW07uxwtNrwqKa/3GO7qvfZUMO00ukBLAF5hQ4s2obg/q
-# ZVqW1fQPDUyPYWC3c3zyw8oyfwZyQ6dR3udsLxgZWa0HglQmnlYhc54cmX4UbC47
-# PS/EslCV3y/AjDZDujX7SAcQeVq7mw0rta35HLkY5bl5SLT/QgeFIgNtPkubj0rY
-# P2ozQgEXGzYJADpgpHM198EX0Io1TnJ2d3CkQC9HxH8cJv2pag/DVHe3oYIDIzCC
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgL2WoEZADg0OI
+# zPgQvch1VanSgU1rgIJubXjzXtq8/I4wDQYJKoZIhvcNAQEBBQAEggGAm2nh1feB
+# flL7VYx/ugX1mrjauXL1DD7Q0igZhEgZhW+1nZ/mrZBwNhJa2p3ztqse7zoDqZAl
+# JG4lCdJdj2cei7FU6loMuNVB0XsypI/3ewxcIvEITbopV4G2vgztEWhVM13/tk0z
+# f7S7Bx8vFwMYY0TWx5jmYQ2v5Udkl4wTIlIyJvoiSpudMCNW5WODmm+nGSAKsb55
+# Mm5JYHK6C72n+SskLuVMBdZqIpCvwiTgEhTbb2I2zM4dJly06s7vQOTxkDbeKTKB
+# kZNUW+qw2FiwVMx948ibm4MLKSFldM5+VFFB3r17MEc4L2oIMGIqRIEz/eO9fEJP
+# 76TWvSB+mW71iy0C02mvtI5C08iHUxfZRJnz14k7hKm0QWxV777jnP66ZRklt3Qv
+# QGD67L12Mst5nicUwGPGPgq4eCbyu6pvA7ac4wI00+mdKo6X42hldUQKonSXlaY1
+# aAWT3hbpiI7UzJdfshvxUd6gbbikaHfHap8Oh9msjdz3gScOTEDUK2nxoYIDIzCC
 # Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
 # BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
 # ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
 # AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
-# MjYxMTE5MDkxODMyWjA/BgkqhkiG9w0BCQQxMgQw6LewXn8Ew5UgGdl1ESs11B44
-# SIixywqKXx2DRCiXERuQfKaaessUVQTvzKroizl3MA0GCSqGSIb3DQEBAQUABIIC
-# AIS2bjds2ernH3U02oIytf2buzp7D38ntUB26/IFGl6qC/wrYuhDA4DDh6xjJbso
-# wohtaQ31QrIkGxpMayDB5laROaZABysSI19NtVszergkAXNn8dPgB7w1PM4cchPf
-# 70y/FJdObr5NygfHQKK4H/Cefu+CQMRET2T2iI5kpqQUEqY+vyLGejJwUXGnilQH
-# uwvxqMK5LS/Mxso7ILwSFDDH5LsfoLCnrBUuN4uxQtNK+45i7dE2p8HEIjj55x07
-# 262MrUktP4s6HSD497mxpRb3eMgr/ySnB3vN9GSxkMjwant3XQqjxWh4Sg0vwJ27
-# L1E89lhhuz44Ut3+eupTpjHFQDGXKhEHxiJ2V+Is2Os+JJ2xFVS2kWGgBMxr3vlP
-# kShdWOgDV3CkCvANSG9QX4y0DPSTm/VkU+/sk+uZ4SsxA2/BPEvFRTO5nNbhWWP7
-# MwIM6TWdMPx4c6oW0D8hnQiegqo5nhNK0xS1fJnhgE8/Mz98A+MHGaMs0w1h78Ph
-# d+vjMI/pJXlaB/7I+ZNL4/5LaiLZKzP5cOeKy3tV9cAe+I6u/xifsSrs7wyPmqL9
-# ieozwE5hrXt8UiwU/OwjA86LzWVOJXmi6xW3txRzrlOIHV1QEpgNYI3n4uq7YD1z
-# jTWv5GsvegffKgvBJJ5Cn49+ExCX2I7FfKBmRkJf4cvW
+# MjYxMTE5MTAxNTE3WjA/BgkqhkiG9w0BCQQxMgQw2xKwOEO9Xc3mVuI2zCpmqcVc
+# KuKnwlb/Qk2mZp3InRtNqvAPzyrO2Uh3Zvz1hF9XMA0GCSqGSIb3DQEBAQUABIIC
+# AHOJAjDoPuO3d5e0GkAgcdwkenBA16nwksORzDmgdpqNadCxNAJyEkfFfFlg/rPA
+# vxmH5gcyhF7Yl6FbtonzGMrb2XLKlcOBYTvic/sGqk7Rjfmi8qDnhtNV99C4Pz2z
+# k4hRrh/4qhF8QttDJOiK+uGo7boX88646iQWELa29DO3VuXkX4LFyWAtTgxnp8Z3
+# DxTRi9e3uT5viZtsHqY2XF3khM6Agog3XzBLB111Z08TYWVotF0bM7X8VthhFnXb
+# 8O6cxZ2kbamOEzvATXkaMgyaCiumzFZw0W6U1KIyUwE9n7PlIRU6hh7/7ljKx2h0
+# kqgMMaAGt/G6z7XMszkS46mL/j3957Un9j1ya35ElUwVw021FBdRCOmv81EOgNy+
+# N7ZuL0VVr7drDFy+Rq+aD70y0kbca+Iy6S1zMYfJE+3NDp/0WoyJY0wQdv1Dtl1L
+# 7AxBCcFG65vnbrmJVMtowKQLwFKSa8Y+rxI6+pyzQm+Fmr9U/uU5X49RjzlTqLL4
+# 3mSt/zEbmF0bp5W2coIGvy4xiKjIuADEIr0QTkve3GfqaAGdKf20AZ2hJQ38hfiu
+# Zjf2pKc3/MfHfU21irmY8yB3NX6z4ixLR+GUPPARDxHC9SvIbx3HGUwUYVBmjtbJ
+# hvWROUUbIBxKHjK4WUqz/6A4tj+dxmvHZu6qbdjbhjvx
 # SIG # End signature block
