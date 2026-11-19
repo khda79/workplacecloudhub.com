@@ -23,7 +23,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.77
+1.78
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
@@ -78,6 +78,8 @@ while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $sma
 }
 if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
 . (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+. (Join-Path $smartM365LifecycleRoot 'SmartInventory/Common/SmartM365.ReportRenderers.ps1')
+. (Join-Path $smartM365LifecycleRoot 'SmartInventory/Common/SmartM365.ReportInputs.ps1')
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
 try {
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
@@ -216,29 +218,6 @@ function Get-SmartM365AdInventorySendMailMode {
     }
 }
 
-function New-SmartM365SharePointLinksSection {
-    [CmdletBinding()]
-    param([array]$UploadRecords)
-
-    $records = @($UploadRecords | Where-Object { $_ -and -not [string]::IsNullOrWhiteSpace([string]$_.WebUrl) })
-    if ($records.Count -eq 0) { return $null }
-
-    $rows = foreach ($record in $records) {
-        $label = ConvertTo-SmartM365EmailHtmlText $record.Label
-        if ([string]::IsNullOrWhiteSpace($label)) { $label = ConvertTo-SmartM365EmailHtmlText $record.FileName }
-        $url = ConvertTo-SmartM365EmailHtmlText $record.WebUrl
-        $sharePointPath = ConvertTo-SmartM365EmailHtmlText $record.SharePointPath
-        "<tr><td style=`"width:180px;background:#f8fafc;border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;font-weight:700;color:#334155;`">$label</td><td style=`"border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;word-break:break-all;`"><a href=`"$url`" style=`"color:#2563eb;text-decoration:underline;`">$sharePointPath</a></td></tr>"
-    }
-
-    $tableHtml = @"
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
-  $($rows -join "`n")
-</table>
-"@
-
-    return [pscustomobject]@{ Title = 'SharePoint links'; Html = $tableHtml }
-}
 
 function Add-SmartM365SharePointUploadLabel {
     [CmdletBinding()]
@@ -252,198 +231,8 @@ function Add-SmartM365SharePointUploadLabel {
     return $UploadRecord
 }
 
-function New-SmartM365AdDuplicatePreviewSection {
-    [CmdletBinding()]
-    param(
-        [array]$Rows,
-        [Parameter(Mandatory = $true)]
-        [ValidateSet('UPN','SMTP','REMOTE')]
-        [string]$DuplicateType,
-        [int]$Limit = 10
-    )
 
-    $items = @($Rows | Where-Object { $_ })
-    if ($items.Count -eq 0) { return $null }
 
-    $valueProperty = switch ($DuplicateType) {
-        'UPN' { 'UserPrincipalName' }
-        'SMTP' { 'SmtpAddress' }
-        'REMOTE' { 'NormalizedRemoteRoutingAddress' }
-    }
-    $label = switch ($DuplicateType) {
-        'UPN' { 'duplicate UPN' }
-        'SMTP' { 'duplicate SMTP address' }
-        'REMOTE' { 'duplicate remote routing address' }
-    }
-    $title = switch ($DuplicateType) {
-        'UPN' { "Top $Limit duplicate UPN accounts" }
-        'SMTP' { "Top $Limit duplicate SMTP entries" }
-        'REMOTE' { "Top $Limit duplicate remote routing addresses" }
-    }
-
-    $groups = @(
-        $items |
-            Where-Object {
-                $property = $_.PSObject.Properties[$valueProperty]
-                $null -ne $property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)
-            } |
-            Group-Object -Property $valueProperty |
-            Where-Object { $_.Count -gt 1 } |
-            Sort-Object -Property @{ Expression = 'Count'; Descending = $true }, Name
-    )
-    if ($groups.Count -eq 0) { return $null }
-
-    $topGroups = @($groups | Select-Object -First $Limit)
-    $tableRows = foreach ($group in $topGroups) {
-        $sortedRows = @($group.Group | Sort-Object DomainName, SamAccountName, UserPrincipalName)
-        $firstInGroup = $true
-        foreach ($row in $sortedRows) {
-            $valueCell = if ($firstInGroup) { ConvertTo-SmartM365EmailHtmlText $group.Name } else { '' }
-            $countCell = if ($firstInGroup) { ConvertTo-SmartM365EmailHtmlText $group.Count } else { '' }
-            $firstInGroup = $false
-
-            $domainNameShort = [string]$row.DomainNameShort
-            $domainName = [string]$row.DomainName
-            $samAccountName = [string]$row.SamAccountName
-            $userPrincipalName = [string]$row.UserPrincipalName
-            $accountText = ''
-            if (-not [string]::IsNullOrWhiteSpace($domainNameShort) -and -not [string]::IsNullOrWhiteSpace($samAccountName)) { $accountText = '{0}\{1}' -f $domainNameShort, $samAccountName }
-            elseif (-not [string]::IsNullOrWhiteSpace($samAccountName)) { $accountText = $samAccountName }
-            elseif (-not [string]::IsNullOrWhiteSpace($userPrincipalName)) { $accountText = $userPrincipalName }
-
-            $enabledText = [string]$row.Enabled
-            if ([string]::IsNullOrWhiteSpace($enabledText)) { $enabledText = 'Unknown' }
-            $lastLogonText = [string]$row.LastLogonDate
-            if ([string]::IsNullOrWhiteSpace($lastLogonText)) { $lastLogonText = 'Never / unavailable' }
-
-            $accountHtml = ConvertTo-SmartM365EmailHtmlText $accountText
-            $enabledHtml = ConvertTo-SmartM365EmailHtmlText $enabledText
-            $lastLogonHtml = ConvertTo-SmartM365EmailHtmlText $lastLogonText
-            $domainHtml = ConvertTo-SmartM365EmailHtmlText $domainName
-
-            "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-family:Consolas,'Courier New',monospace;font-size:12px;color:#334155;word-break:break-all;`">$valueCell</td><td align=`"right`" style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:13px;font-weight:700;color:#111827;`">$countCell</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-family:Consolas,'Courier New',monospace;font-size:12px;color:#334155;word-break:break-all;`">$accountHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$enabledHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;white-space:nowrap;`">$lastLogonHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$domainHtml</td></tr>"
-        }
-    }
-
-    $caption = ConvertTo-SmartM365EmailHtmlText ('Showing accounts for top {0} of {1} {2} value(s). Full details are available in the attached Excel workbook.' -f $topGroups.Count, $groups.Count, $label)
-    $html = @"
-<div style="font-size:13px;color:#64748b;margin-bottom:8px;">$caption</div>
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
-  <tr>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Value</th>
-    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Count</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Account</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Enabled</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Last logon</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Domain</th>
-  </tr>
-  $($tableRows -join "`n")
-</table>
-"@
-
-    return [pscustomobject]@{ Title = $title; Html = $html }
-}
-function New-SmartM365AdRemoteRoutingIssuePreviewSection {
-    [CmdletBinding()]
-    param(
-        [array]$Rows,
-        [int]$Limit = 10
-    )
-
-    $items = @($Rows | Where-Object { $_ } | Sort-Object Severity, IssueType, DomainName, SamAccountName | Select-Object -First $Limit)
-    if ($items.Count -eq 0) { return $null }
-
-    $tableRows = foreach ($row in $items) {
-        $accountText = if (-not [string]::IsNullOrWhiteSpace([string]$row.DomainNameShort) -and -not [string]::IsNullOrWhiteSpace([string]$row.SamAccountName)) {
-            '{0}\{1}' -f $row.DomainNameShort, $row.SamAccountName
-        }
-        elseif (-not [string]::IsNullOrWhiteSpace([string]$row.UserPrincipalName)) { [string]$row.UserPrincipalName }
-        else { [string]$row.DistinguishedName }
-
-        $issueHtml = ConvertTo-SmartM365EmailHtmlText $row.IssueType
-        $severityHtml = ConvertTo-SmartM365EmailHtmlText $row.Severity
-        $accountHtml = ConvertTo-SmartM365EmailHtmlText $accountText
-        $targetAddressHtml = ConvertTo-SmartM365EmailHtmlText $row.TargetAddress
-        $expectedDomainHtml = ConvertTo-SmartM365EmailHtmlText $row.ExpectedRemoteRoutingDomain
-        "<tr><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;`">$issueHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;font-weight:700;color:#334155;`">$severityHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-family:Consolas,'Courier New',monospace;font-size:12px;color:#334155;word-break:break-all;`">$accountHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-family:Consolas,'Courier New',monospace;font-size:12px;color:#334155;word-break:break-all;`">$targetAddressHtml</td><td style=`"border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;word-break:break-all;`">$expectedDomainHtml</td></tr>"
-    }
-
-    $caption = ConvertTo-SmartM365EmailHtmlText ('Showing {0} of {1} remote routing issue row(s). Full details are available in the attached Excel workbook.' -f $items.Count, @($Rows).Count)
-    $html = @"
-<div style="font-size:13px;color:#64748b;margin-bottom:8px;">$caption</div>
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
-  <tr>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Issue</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Severity</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Account</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">targetAddress</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;font-size:12px;color:#475569;text-transform:uppercase;">Expected domain</th>
-  </tr>
-  $($tableRows -join "`n")
-</table>
-"@
-
-    return [pscustomobject]@{ Title = "Top $Limit remote routing issues"; Html = $html }
-}
-
-function Get-SmartM365AdCaseInsensitiveDistinctCount {
-    param([array]$Rows, [Parameter(Mandatory = $true)][string]$PropertyName)
-    $values = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($row in $Rows) {
-        $property = $row.PSObject.Properties[$PropertyName]
-        if ($null -eq $property) { continue }
-        $value = ([string]$property.Value).Trim()
-        if (-not [string]::IsNullOrWhiteSpace($value)) { [void]$values.Add($value) }
-    }
-    return $values.Count
-}
-
-function New-SmartM365AdIdentitySummaryHtml {
-    [CmdletBinding()]
-    param([array]$AllUsers, [array]$DuplicateUpnRows, [array]$DuplicateSmtpRows,
-          [array]$DuplicateRemoteRows, [array]$RoutingIssueRows)
-
-    $domains = @($AllUsers | ForEach-Object { if ([string]::IsNullOrWhiteSpace([string]$_.DomainName)) { 'Unknown domain' } else { [string]$_.DomainName } } | Sort-Object -Unique)
-    $sets = @(
-        [pscustomobject]@{ Title = 'Duplicate identities'; Metrics = @(
-            [pscustomobject]@{ Label = 'UPN values'; Rows = $DuplicateUpnRows; Distinct = 'UserPrincipalName'; IssueType = '' }
-            [pscustomobject]@{ Label = 'UPN accounts'; Rows = $DuplicateUpnRows; Distinct = ''; IssueType = '' }
-            [pscustomobject]@{ Label = 'SMTP values'; Rows = $DuplicateSmtpRows; Distinct = 'SmtpAddress'; IssueType = '' }
-            [pscustomobject]@{ Label = 'SMTP entries'; Rows = $DuplicateSmtpRows; Distinct = ''; IssueType = '' }
-            [pscustomobject]@{ Label = 'Routing values'; Rows = $DuplicateRemoteRows; Distinct = 'NormalizedRemoteRoutingAddress'; IssueType = '' }
-            [pscustomobject]@{ Label = 'Routing accounts'; Rows = $DuplicateRemoteRows; Distinct = ''; IssueType = '' }
-        ) }
-        [pscustomobject]@{ Title = 'Remote routing issues'; Metrics = @(
-            [pscustomobject]@{ Label = 'Accounts'; Rows = $RoutingIssueRows; Distinct = 'DistinguishedName'; IssueType = '' }
-            [pscustomobject]@{ Label = 'Missing target'; Rows = $RoutingIssueRows; Distinct = ''; IssueType = 'MissingRemoteRoutingAddress' }
-            [pscustomobject]@{ Label = 'Invalid target'; Rows = $RoutingIssueRows; Distinct = ''; IssueType = 'InvalidRemoteRoutingAddress' }
-            [pscustomobject]@{ Label = 'Wrong domain'; Rows = $RoutingIssueRows; Distinct = ''; IssueType = 'UnexpectedRemoteRoutingDomain' }
-            [pscustomobject]@{ Label = 'Target absent in proxy'; Rows = $RoutingIssueRows; Distinct = ''; IssueType = 'RemoteRoutingAddressMissingFromProxyAddresses' }
-            [pscustomobject]@{ Label = 'Tenant proxy missing'; Rows = $RoutingIssueRows; Distinct = ''; IssueType = 'MissingMailOnMicrosoftProxyAddress' }
-        ) }
-    )
-    $tables = foreach ($set in $sets) {
-        $headers = @($set.Metrics | ForEach-Object { '<th align="right" style="padding:6px 4px;">{0}</th>' -f (ConvertTo-SmartM365EmailHtmlText $_.Label) }) -join ''
-        $rows = foreach ($domain in $domains) {
-            $cells = foreach ($metric in $set.Metrics) {
-                $items = @($metric.Rows | Where-Object {
-                    $rowDomain = if ([string]::IsNullOrWhiteSpace([string]$_.DomainName)) { 'Unknown domain' } else { [string]$_.DomainName }
-                    $rowDomain -eq $domain -and ([string]::IsNullOrWhiteSpace($metric.IssueType) -or [string]$_.IssueType -eq $metric.IssueType)
-                })
-                $value = if ($metric.Distinct) { Get-SmartM365AdCaseInsensitiveDistinctCount -Rows $items -PropertyName $metric.Distinct } else { $items.Count }
-                '<td align="right" style="border-bottom:1px solid #eef2f7;padding:6px 4px;">{0}</td>' -f $value
-            }
-            '<tr><td style="border-bottom:1px solid #eef2f7;padding:6px 4px;">{0}</td>{1}</tr>' -f (ConvertTo-SmartM365EmailHtmlText $domain), ($cells -join '')
-        }
-        $totalCells = foreach ($metric in $set.Metrics) {
-            $items = @($metric.Rows | Where-Object { [string]::IsNullOrWhiteSpace($metric.IssueType) -or [string]$_.IssueType -eq $metric.IssueType })
-            $value = if ($metric.Distinct) { Get-SmartM365AdCaseInsensitiveDistinctCount -Rows $items -PropertyName $metric.Distinct } else { $items.Count }
-            '<td align="right" style="background:#dbeafe;padding:7px 4px;font-weight:700;">{0}</td>' -f $value
-        }
-        '<div style="font-size:12px;font-weight:700;margin:12px 0 6px;">{0}</div><table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;font-size:10px;"><tr style="background:#f1f5f9;"><th align="left">Domain</th>{1}</tr>{2}<tr><td style="background:#dbeafe;padding:7px 4px;font-weight:700;">TOTAL</td>{3}</tr></table>' -f $set.Title, $headers, ($rows -join ''), ($totalCells -join '')
-    }
-    return (($tables -join "`n") + '<div style="font-size:11px;color:#64748b;margin-top:6px;">Distinct values may span domains; TOTAL counts distinct values across the forest.</div>')
-}
 
 function Send-SmartM365AdInventoryEmailHtmlReport {
     [CmdletBinding()]
@@ -454,7 +243,8 @@ function Send-SmartM365AdInventoryEmailHtmlReport {
         [string[]]$Attachments,
         [bool]$ShowLinks = $true,
         [ValidateSet('Report','Error')][string]$MailPurpose = 'Report',
-        [ValidateSet('Report','Operational')][string]$DeliveryClass = 'Report'
+        [ValidateSet('Report','Operational')][string]$DeliveryClass = 'Report',
+        [string]$ReportCadenceKey = ''
     )
 
     $effectiveSendMailMode = Get-SmartM365AdInventorySendMailMode -Config $ScriptLocalConfig
@@ -474,6 +264,8 @@ function Send-SmartM365AdInventoryEmailHtmlReport {
         $mailParams['AllowAttachments'] = $true
     }
 
+    if ($ReportCadenceKey) { $mailParams.ReportCadenceKey = $ReportCadenceKey }
+
     if ($ShowLinks) {
         SendEmailHtmlReport @mailParams
     }
@@ -487,98 +279,6 @@ function Send-SmartM365AdInventoryEmailHtmlReport {
             $global:SmartM365SharePointUploadedFiles = $uploadedFiles
         }
     }
-}
-
-function Export-SmartM365AdDiagnosticsWorkbook {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)][array]$Sources,
-        [Parameter(Mandatory = $true)][string]$Path
-    )
-
-    Initialize-SmartM365ImportExcel | Out-Null
-
-    $parentPath = Split-Path -Path $Path -Parent
-    if (-not [string]::IsNullOrWhiteSpace($parentPath) -and -not (Test-Path -LiteralPath $parentPath)) {
-        New-Item -Path $parentPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
-    }
-    if (Test-Path -LiteralPath $Path) {
-        Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
-    }
-
-    $excelPackage = $null
-    try {
-        $excelPackage = Open-ExcelPackage -Path $Path -Create
-        foreach ($source in @($Sources)) {
-            $csvPath = [string]$source.CsvPath
-            $worksheetName = [string]$source.WorksheetName
-            $tableName = [string]$source.TableName
-            if (-not (Test-Path -LiteralPath $csvPath -PathType Leaf)) {
-                throw ("Diagnostic CSV not found: {0}" -f $csvPath)
-            }
-
-            $rows = @(Import-Csv -LiteralPath $csvPath)
-            if ($rows.Count -gt 0) {
-                $columns = @($rows[0].PSObject.Properties.Name)
-            }
-            else {
-                $header = [string](Get-Content -LiteralPath $csvPath -TotalCount 1 -ErrorAction Stop)
-                if ([string]::IsNullOrWhiteSpace($header)) {
-                    throw ("Diagnostic CSV has no header: {0}" -f $csvPath)
-                }
-                $separatorCount = ([regex]::Matches($header, ',')).Count
-                $fakeRow = (@('x') * ($separatorCount + 1)) -join ','
-                $probe = @(@($header, $fakeRow) | ConvertFrom-Csv)
-                $columns = if ($probe.Count -gt 0) { @($probe[0].PSObject.Properties.Name) } else { @() }
-            }
-            if ($columns.Count -eq 0) {
-                throw ("Diagnostic CSV columns could not be resolved: {0}" -f $csvPath)
-            }
-
-            $worksheet = $excelPackage.Workbook.Worksheets.Add($worksheetName)
-            $matrix = [System.Collections.Generic.List[object[]]]::new()
-            $matrix.Add([object[]]$columns)
-            foreach ($row in $rows) {
-                $values = foreach ($column in $columns) {
-                    $property = $row.PSObject.Properties[$column]
-                    if ($null -eq $property -or $null -eq $property.Value) { '' } else { [string]$property.Value }
-                }
-                $matrix.Add([object[]]$values)
-            }
-            $null = $worksheet.Cells['A1'].LoadFromArrays($matrix)
-            $worksheet.View.FreezePanes(2, 1)
-            $worksheet.Cells.AutoFitColumns(10, 60)
-
-            $headerAddress = [OfficeOpenXml.ExcelCellBase]::GetAddress(1, 1, 1, $columns.Count)
-            $headerRange = $worksheet.Cells[$headerAddress]
-            $headerRange.Style.Font.Bold = $true
-            $headerRange.Style.Font.Color.SetColor([System.Drawing.Color]::White)
-            $headerRange.Style.Fill.PatternType = [OfficeOpenXml.Style.ExcelFillStyle]::Solid
-            $headerRange.Style.Fill.BackgroundColor.SetColor([System.Drawing.Color]::FromArgb(31, 78, 121))
-
-            if ($rows.Count -gt 0) {
-                $tableAddress = [OfficeOpenXml.ExcelCellBase]::GetAddress(1, 1, $rows.Count + 1, $columns.Count)
-                $tableRange = $worksheet.Cells[$tableAddress]
-                $table = $worksheet.Tables.Add($tableRange, $tableName)
-                $table.TableStyle = [OfficeOpenXml.Table.TableStyles]::Medium2
-            }
-            else {
-                $headerRange.AutoFilter = $true
-            }
-        }
-
-        Close-ExcelPackage -ExcelPackage $excelPackage
-        $excelPackage = $null
-    }
-    finally {
-        if ($null -ne $excelPackage) {
-            Close-ExcelPackage -ExcelPackage $excelPackage -NoSave
-        }
-    }
-
-    $workbookFile = Get-Item -LiteralPath $Path -ErrorAction Stop
-    WriteLog -Message ("AD identity and mail routing workbook created: {0} ({1:N0} bytes)" -f $workbookFile.FullName, $workbookFile.Length)
-    return $workbookFile.FullName
 }
 
 
@@ -660,7 +360,7 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.122' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.130' -ErrorAction Stop
 } catch {
     Write-Host ("Failed to import SmartM365.Core module from '{0}' : {1}" -f $modulePath, $_) -ForegroundColor Red
     $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
@@ -669,7 +369,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.77"
+$ScriptVersion = "1.78"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $script:ExitCode = 0
 $globalError = $null
@@ -1865,177 +1565,6 @@ try {
         return $total
     }
 
-    function ConvertTo-SmartM365AdDomainSetText {
-        [CmdletBinding()]
-        param([AllowNull()][object[]]$DomainNames)
-
-        return (@($DomainNames | ForEach-Object { ([string]$_).Trim().TrimEnd('.').ToLowerInvariant() } |
-            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique) -join ';')
-    }
-
-    function Get-SmartM365AdSummaryCoverageComparison {
-        [CmdletBinding()]
-        param([Parameter(Mandatory = $true)]$Current, [AllowNull()]$Previous)
-
-        if ($null -eq $Previous) {
-            return [pscustomobject]@{ IsComparable = $false; Reason = 'No previous scan' }
-        }
-        if ((ConvertTo-SmartM365AdSummaryInt64 $Current.DomainCount) -ne (ConvertTo-SmartM365AdSummaryInt64 $Previous.DomainCount)) {
-            return [pscustomobject]@{ IsComparable = $false; Reason = 'Domain count changed' }
-        }
-        $currentProperty = $Current.PSObject.Properties['CollectedDomains']
-        $previousProperty = $Previous.PSObject.Properties['CollectedDomains']
-        $currentSet = if ($currentProperty) { ConvertTo-SmartM365AdDomainSetText -DomainNames @(([string]$currentProperty.Value) -split ';') } else { '' }
-        $previousSet = if ($previousProperty) { ConvertTo-SmartM365AdDomainSetText -DomainNames @(([string]$previousProperty.Value) -split ';') } else { '' }
-        if ([string]::IsNullOrWhiteSpace($currentSet) -or [string]::IsNullOrWhiteSpace($previousSet)) {
-            return [pscustomobject]@{ IsComparable = $false; Reason = 'Domain list unavailable' }
-        }
-        if (@($currentSet -split ';').Count -ne (ConvertTo-SmartM365AdSummaryInt64 $Current.DomainCount) -or
-            @($previousSet -split ';').Count -ne (ConvertTo-SmartM365AdSummaryInt64 $Previous.DomainCount)) {
-            return [pscustomobject]@{ IsComparable = $false; Reason = 'Domain list and count disagree' }
-        }
-        if ($currentSet -cne $previousSet) {
-            return [pscustomobject]@{ IsComparable = $false; Reason = 'Domain set changed' }
-        }
-        return [pscustomobject]@{ IsComparable = $true; Reason = 'Same domains' }
-    }
-
-    function Get-SmartM365AdSummaryMetricComparison {
-        [CmdletBinding()]
-        param(
-            [Parameter(Mandatory = $true)]$Current,
-            [AllowNull()]$Previous,
-            [Parameter(Mandatory = $true)][string]$Property,
-            [string]$LogicalCountBaselineAt = ''
-        )
-
-        if ($null -eq $Previous) { return [pscustomobject]@{ IsComparable = $false; Delta = 'n/a'; DeltaValue = 0; Reason = 'No previous scan' } }
-        $currentProperty = $Current.PSObject.Properties[$Property]
-        $previousProperty = $Previous.PSObject.Properties[$Property]
-        if (-not $currentProperty -or -not $previousProperty -or
-            [string]::IsNullOrWhiteSpace([string]$currentProperty.Value) -or
-            [string]::IsNullOrWhiteSpace([string]$previousProperty.Value)) {
-            return [pscustomobject]@{ IsComparable = $false; Delta = 'n/a'; DeltaValue = 0; Reason = 'Metric unavailable' }
-        }
-        if ($Property -ne 'DomainCount') {
-            $coverage = Get-SmartM365AdSummaryCoverageComparison -Current $Current -Previous $Previous
-            if (-not $coverage.IsComparable) {
-                return [pscustomobject]@{ IsComparable = $false; Delta = 'n/a'; DeltaValue = 0; Reason = $coverage.Reason }
-            }
-        }
-        if ($Property -in @('TotalComputers','TotalGroups','TotalContacts')) {
-            $snapshotTime = [datetimeoffset]::MinValue
-            $baselineTime = [datetimeoffset]::MinValue
-            if ([string]::IsNullOrWhiteSpace($LogicalCountBaselineAt) -or
-                -not [datetimeoffset]::TryParse([string]$Previous.GeneratedAt, [ref]$snapshotTime) -or
-                -not [datetimeoffset]::TryParse($LogicalCountBaselineAt, [ref]$baselineTime) -or
-                $snapshotTime -lt $baselineTime) {
-                return [pscustomobject]@{ IsComparable = $false; Delta = 'n/a'; DeltaValue = 0; Reason = 'Historical count incompatible' }
-            }
-        }
-        $deltaValue = (ConvertTo-SmartM365AdSummaryInt64 $currentProperty.Value) - (ConvertTo-SmartM365AdSummaryInt64 $previousProperty.Value)
-        return [pscustomobject]@{
-            IsComparable = $true
-            Delta = Format-SmartM365AdSummaryDelta -Current $currentProperty.Value -Previous $previousProperty.Value -HasPrevious $true
-            DeltaValue = $deltaValue
-            Reason = ''
-        }
-    }
-
-    function Get-SmartM365AdSummaryDeltaColor {
-        [CmdletBinding()]
-        param([Parameter(Mandatory = $true)][string]$Property, [Parameter(Mandatory = $true)][int64]$DeltaValue)
-
-        if ($DeltaValue -eq 0) { return '#475569' }
-        if ($Property -in @('DistinctDuplicateUPNs','AffectedDuplicateUPNAccounts','DistinctDuplicateSMTPAddresses','AffectedDuplicateSMTPEntries')) {
-            if ($DeltaValue -gt 0) { return '#b91c1c' }
-            return '#166534'
-        }
-        if ($Property -eq 'DomainCount' -and $DeltaValue -lt 0) { return '#b91c1c' }
-        return '#475569'
-    }
-
-    function New-SmartM365AdDailySummaryKpiHtml {
-        [CmdletBinding()]
-        param(
-            [Parameter(Mandatory = $true)]$Snapshot,
-            [AllowNull()]$Previous,
-            [string]$LogicalCountBaselineAt = ''
-        )
-
-        $upnHasIssues = (ConvertTo-SmartM365AdSummaryInt64 $Snapshot.AffectedDuplicateUPNAccounts) -gt 0
-        $smtpHasIssues = (ConvertTo-SmartM365AdSummaryInt64 $Snapshot.AffectedDuplicateSMTPEntries) -gt 0
-        $cards = @(
-            [pscustomobject]@{ Label = 'USERS'; Property = 'TotalUsers'; Detail = 'accounts in snapshot'; Background = '#eff6ff'; Border = '#bfdbfe'; Accent = '#1d4ed8' }
-            [pscustomobject]@{ Label = 'COMPUTERS'; Property = 'TotalComputers'; Detail = 'computer objects'; Background = '#f0fdfa'; Border = '#99f6e4'; Accent = '#0f766e' }
-            [pscustomobject]@{ Label = 'GROUPS'; Property = 'TotalGroups'; Detail = 'groups in snapshot'; Background = '#f5f3ff'; Border = '#ddd6fe'; Accent = '#7c3aed' }
-            [pscustomobject]@{ Label = 'UPN DUPLICATES'; Property = 'AffectedDuplicateUPNAccounts'; Detail = 'affected accounts'; Background = $(if ($upnHasIssues) { '#fff7ed' } else { '#ecfdf5' }); Border = $(if ($upnHasIssues) { '#fed7aa' } else { '#bbf7d0' }); Accent = $(if ($upnHasIssues) { '#c2410c' } else { '#166534' }) }
-            [pscustomobject]@{ Label = 'SMTP DUPLICATES'; Property = 'AffectedDuplicateSMTPEntries'; Detail = 'affected entries'; Background = $(if ($smtpHasIssues) { '#fef2f2' } else { '#ecfdf5' }); Border = $(if ($smtpHasIssues) { '#fecaca' } else { '#bbf7d0' }); Accent = $(if ($smtpHasIssues) { '#b91c1c' } else { '#166534' }) }
-        )
-        $coverage = Get-SmartM365AdSummaryCoverageComparison -Current $Snapshot -Previous $Previous
-        $currentDomainCount = Format-SmartM365AdSummaryNumber $Snapshot.DomainCount
-        $previousDomainText = if ($Previous) {
-            'Previous ({0}): {1} ({2})' -f $Previous.SnapshotDate,
-                (Format-SmartM365AdSummaryNumber $Previous.DomainCount),
-                (Format-SmartM365AdSummaryDelta -Current $Snapshot.DomainCount -Previous $Previous.DomainCount -HasPrevious $true)
-        } else { 'Previous: n/a' }
-        $coverageText = 'Domains analyzed: {0} | {1} | {2}' -f $currentDomainCount, $previousDomainText, $coverage.Reason
-        $coverageBackground = if ($coverage.IsComparable) { '#ecfdf5' } else { '#fff7ed' }
-        $coverageBorder = if ($coverage.IsComparable) { '#bbf7d0' } else { '#fed7aa' }
-        $coverageHtml = '<div style="background:{0};border:1px solid {1};border-radius:6px;padding:9px 12px;margin:0 0 12px 0;font-size:12px;color:#334155;">{2}</div>' -f $coverageBackground, $coverageBorder, (ConvertTo-SmartM365EmailHtmlText $coverageText)
-        $cells = foreach ($card in $cards) {
-            $comparison = Get-SmartM365AdSummaryMetricComparison -Current $Snapshot -Previous $Previous -Property $card.Property -LogicalCountBaselineAt $LogicalCountBaselineAt
-            $label = ConvertTo-SmartM365EmailHtmlText $card.Label
-            $value = ConvertTo-SmartM365EmailHtmlText (Format-SmartM365AdSummaryNumber $Snapshot.($card.Property))
-            $detail = ConvertTo-SmartM365EmailHtmlText $card.Detail
-            $deltaColor = if ($comparison.IsComparable) { Get-SmartM365AdSummaryDeltaColor -Property $card.Property -DeltaValue $comparison.DeltaValue } else { '#64748b' }
-            $previousLabel = if ($Previous) { 'vs ' + [string]$Previous.SnapshotDate } else { 'vs previous' }
-            $deltaText = ConvertTo-SmartM365EmailHtmlText ('{0}: {1}' -f $previousLabel, $comparison.Delta)
-            @"
-<td width="20%" valign="top" style="padding:0 4px;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;">
-    <tr><td style="height:108px;background:$($card.Background);border:1px solid $($card.Border);border-radius:6px;padding:10px;">
-      <div style="min-height:25px;font-size:10px;line-height:12px;font-weight:700;color:#64748b;">$label</div>
-      <div style="font-size:25px;line-height:30px;font-weight:700;color:$($card.Accent);">$value</div>
-      <div style="font-size:10px;line-height:14px;color:#475569;">$detail</div>
-      <div style="margin-top:6px;font-size:10px;line-height:13px;font-weight:700;color:$deltaColor;">$deltaText</div>
-    </td></tr>
-  </table>
-</td>
-"@
-        }
-        return @"
-$coverageHtml
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed;margin:0 0 16px 0;">
-  <tr>$($cells -join [Environment]::NewLine)</tr>
-</table>
-"@
-    }
-
-    function New-SmartM365AdDomainSummaryHtml {
-        [CmdletBinding()]
-        param([Parameter(Mandatory = $true)]$Snapshot)
-
-        $maps = $script:SmartM365AdDailyDomainCounts
-        $domains = @(@($maps.Values | ForEach-Object { $_.Keys }) + @($script:SmartM365AdDailyDomainNames) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)
-        $rows = foreach ($domain in $domains) {
-            $cells = foreach ($key in @('Users','Computers','Groups','OUs','Contacts','DuplicateUPN','DuplicateSMTP')) {
-                $value = if ($maps[$key].ContainsKey($domain)) { $maps[$key][$domain] } else { 0 }
-                '<td align="right" style="border-bottom:1px solid #eef2f7;padding:7px 5px;font-size:11px;">{0}</td>' -f (Format-SmartM365AdSummaryNumber $value)
-            }
-            '<tr><td style="border-bottom:1px solid #eef2f7;padding:7px 5px;font-size:11px;">{0}</td>{1}</tr>' -f (ConvertTo-SmartM365EmailHtmlText $domain), ($cells -join '')
-        }
-        $totals = foreach ($value in @($Snapshot.TotalUsers,$Snapshot.TotalComputers,$Snapshot.TotalGroups,$Snapshot.TotalOUs,$Snapshot.TotalContacts,$Snapshot.AffectedDuplicateUPNAccounts,$Snapshot.AffectedDuplicateSMTPEntries)) {
-            '<td align="right" style="padding:8px 5px;font-size:11px;font-weight:700;background:#dbeafe;">{0}</td>' -f (Format-SmartM365AdSummaryNumber $value)
-        }
-        return @"
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
-<tr style="background:#f1f5f9;font-size:10px;"><th align="left">Domain</th><th>Users</th><th>Computers</th><th>Groups</th><th>OUs</th><th>Contacts</th><th>UPN dup.</th><th>SMTP dup.</th></tr>
-$($rows -join "`n")
-<tr><td style="padding:8px 5px;font-size:11px;font-weight:700;background:#dbeafe;">TOTAL ($($Snapshot.DomainCount) domains)</td>$($totals -join '')</tr>
-</table>
-"@
-    }
 
     function Get-SmartM365AdCsvDistinctValueCount {
         [CmdletBinding()]
@@ -2061,39 +1590,7 @@ $($rows -join "`n")
             return $values.Count
         }
     }
-    function ConvertTo-SmartM365AdSummaryInt64 {
-        [CmdletBinding()]
-        param([AllowNull()]$Value)
 
-        if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return 0 }
-        [int64]$parsed = 0
-        if ([int64]::TryParse(([string]$Value).Trim(), [ref]$parsed)) { return $parsed }
-        return 0
-    }
-
-    function Format-SmartM365AdSummaryNumber {
-        [CmdletBinding()]
-        param([AllowNull()]$Value)
-
-        $number = ConvertTo-SmartM365AdSummaryInt64 -Value $Value
-        return $number.ToString('N0', [System.Globalization.CultureInfo]::InvariantCulture)
-    }
-
-    function Format-SmartM365AdSummaryDelta {
-        [CmdletBinding()]
-        param(
-            [AllowNull()]$Current,
-            [AllowNull()]$Previous,
-            [bool]$HasPrevious
-        )
-
-        if (-not $HasPrevious) { return 'n/a' }
-
-        $delta = (ConvertTo-SmartM365AdSummaryInt64 -Value $Current) - (ConvertTo-SmartM365AdSummaryInt64 -Value $Previous)
-        if ($delta -gt 0) { return ('+{0}' -f (Format-SmartM365AdSummaryNumber -Value $delta)) }
-        if ($delta -lt 0) { return ('-{0}' -f (Format-SmartM365AdSummaryNumber -Value ([Math]::Abs($delta)))) }
-        return '0'
-    }
 
     function Get-SmartM365AdDailySummarySnapshot {
         [CmdletBinding()]
@@ -2198,75 +1695,6 @@ $($rows -join "`n")
         return @($previousRows | Sort-Object SortDate -Descending | Select-Object -First 1)[0].Row
     }
 
-    function New-SmartM365AdDailySummaryDiffSection {
-        [CmdletBinding()]
-        param(
-            [Parameter(Mandatory = $true)]$Current,
-            [AllowNull()]$Previous,
-            [AllowNull()]$Week,
-            [AllowNull()]$Month,
-            [string]$LogicalCountBaselineAt = ''
-        )
-
-        $metrics = @(
-            [pscustomobject]@{ Label = 'Domains'; Property = 'DomainCount' }
-            [pscustomobject]@{ Label = 'Users'; Property = 'TotalUsers' }
-            [pscustomobject]@{ Label = 'Computers'; Property = 'TotalComputers' }
-            [pscustomobject]@{ Label = 'Groups'; Property = 'TotalGroups' }
-            [pscustomobject]@{ Label = 'OUs'; Property = 'TotalOUs' }
-            [pscustomobject]@{ Label = 'Contacts'; Property = 'TotalContacts' }
-            [pscustomobject]@{ Label = 'Distinct duplicate UPNs'; Property = 'DistinctDuplicateUPNs' }
-            [pscustomobject]@{ Label = 'Affected duplicate UPN accounts'; Property = 'AffectedDuplicateUPNAccounts' }
-            [pscustomobject]@{ Label = 'Distinct duplicate SMTP addresses'; Property = 'DistinctDuplicateSMTPAddresses' }
-            [pscustomobject]@{ Label = 'Affected duplicate SMTP entries'; Property = 'AffectedDuplicateSMTPEntries' }
-        )
-
-        $comparisons = @(
-            [pscustomobject]@{ Label = 'Previous'; Snapshot = $Previous }
-            [pscustomobject]@{ Label = 'J-7'; Snapshot = $Week }
-            [pscustomobject]@{ Label = 'J-30'; Snapshot = $Month }
-        )
-        $headers = foreach ($comparison in $comparisons) {
-            $dateText = if ($comparison.Snapshot) { [string]$comparison.Snapshot.SnapshotDate } else { 'n/a' }
-            '<th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:8px 6px;font-size:11px;color:#475569;">{0} ({1})</th>' -f $comparison.Label, (ConvertTo-SmartM365EmailHtmlText $dateText)
-        }
-        $rows = foreach ($metric in $metrics) {
-            $currentProperty = $Current.PSObject.Properties[$metric.Property]
-            $currentValue = if ($null -ne $currentProperty) { $currentProperty.Value } else { 0 }
-            $labelHtml = ConvertTo-SmartM365EmailHtmlText $metric.Label
-            $currentHtml = ConvertTo-SmartM365EmailHtmlText (Format-SmartM365AdSummaryNumber -Value $currentValue)
-            $comparisonCells = foreach ($comparison in $comparisons) {
-                $snapshot = $comparison.Snapshot
-                $metricComparison = Get-SmartM365AdSummaryMetricComparison -Current $Current -Previous $snapshot -Property $metric.Property -LogicalCountBaselineAt $LogicalCountBaselineAt
-                $cell = 'n/a'
-                if ($snapshot) {
-                    $property = $snapshot.PSObject.Properties[$metric.Property]
-                    if ($property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) {
-                        $color = if ($metricComparison.IsComparable) { Get-SmartM365AdSummaryDeltaColor -Property $metric.Property -DeltaValue $metricComparison.DeltaValue } else { '#64748b' }
-                        $cell = '{0}<br /><strong style="color:{1};">{2}</strong>' -f
-                            (ConvertTo-SmartM365EmailHtmlText (Format-SmartM365AdSummaryNumber $property.Value)),
-                            $color,
-                            (ConvertTo-SmartM365EmailHtmlText $metricComparison.Delta)
-                    }
-                }
-                '<td align="right" style="border-bottom:1px solid #eef2f7;padding:8px 6px;font-size:11px;color:#334155;">{0}</td>' -f $cell
-            }
-            '<tr><td style="border-bottom:1px solid #eef2f7;padding:8px 6px;font-size:11px;color:#334155;">{0}</td><td align="right" style="border-bottom:1px solid #eef2f7;padding:8px 6px;font-size:11px;font-weight:700;">{1}</td>{2}</tr>' -f $labelHtml, $currentHtml, ($comparisonCells -join '')
-        }
-        $html = @"
-<div style="font-size:12px;color:#64748b;margin-bottom:8px;">Each delta compares Current with the dated scan. Inventory and duplicate deltas require the same recorded domain set; n/a means no scan, unknown or changed coverage, or an incompatible historical count. The historical value remains visible where available.</div>
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
-  <tr>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:8px 6px;font-size:11px;color:#475569;">Metric</th>
-    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:8px 6px;font-size:11px;color:#475569;">Current ($($Current.SnapshotDate))</th>
-    $($headers -join "`n")
-  </tr>
-  $($rows -join "`n")
-</table>
-"@
-
-        return [pscustomobject]@{ Title = 'Diff against previous scans'; Html = $html }
-    }
 
     function Invoke-SmartM365AdDailySummaryEmail {
         [CmdletBinding()]
@@ -2294,9 +1722,9 @@ $($rows -join "`n")
             $lastSentStamp = (Get-Content -LiteralPath $LastSentFilePath -Raw -ErrorAction SilentlyContinue).Trim()
         }
 
-        if ($lastSentStamp -eq $todayStamp -and -not $ForceSend) {
+        $alreadySent = $lastSentStamp -eq $todayStamp -and -not $ForceSend
+        if ($alreadySent) {
             WriteLog -Message ("Active Directory daily summary email already accepted for delivery today ({0}). Use -ForceSendDailySummary to resend." -f $todayStamp)
-            return $false
         }
 
         $summarySnapshot = Get-SmartM365AdDailySummarySnapshot -SourceFolder $SourceFolder
@@ -2317,107 +1745,87 @@ $($rows -join "`n")
         }
         $logicalCountBaselineAt = (Get-Content -LiteralPath $logicalCountMarker -Raw).Trim()
 
-        $existingDailySummary = Test-Path -LiteralPath $summaryCsvPath
-        if (Test-Path -LiteralPath $summaryCsvPath) {
-            Repair-SmartM365CsvTenantKeySchema -Path $summaryCsvPath -Delimiter ',' -Encoding UTF8 | Out-Null
-            Update-SmartM365AdDailySummaryCoverageSchema -SummaryCsvPath $summaryCsvPath
-        }
-        Add-SmartM365CsvRowsAtomically -Data @($summarySnapshot) -Path $summaryCsvPath -Encoding UTF8
-        if ($existingDailySummary) {
-            WriteLog -Message ("AD daily summary snapshot appended: {0}" -f $summaryCsvPath)
-        }
-        else {
-            WriteLog -Message ("AD daily summary snapshot created: {0}" -f $summaryCsvPath)
-        }
+        $summarySharePointUploads = @()
+        $latestSummaryPath = if ($LatestFolderPath) { Join-Path $LatestFolderPath 'AD_Inventory_DailySummary.csv' }
+        if (-not $alreadySent) {
+            $existingDailySummary = Test-Path -LiteralPath $summaryCsvPath
+            if (Test-Path -LiteralPath $summaryCsvPath) {
+                Repair-SmartM365CsvTenantKeySchema -Path $summaryCsvPath -Delimiter ',' -Encoding UTF8 | Out-Null
+                Update-SmartM365AdDailySummaryCoverageSchema -SummaryCsvPath $summaryCsvPath
+            }
+            Add-SmartM365CsvRowsAtomically -Data @($summarySnapshot) -Path $summaryCsvPath -Encoding UTF8
+            if ($existingDailySummary) {
+                WriteLog -Message ("AD daily summary snapshot appended: {0}" -f $summaryCsvPath)
+            }
+            else {
+                WriteLog -Message ("AD daily summary snapshot created: {0}" -f $summaryCsvPath)
+            }
 
-        if (-not $global:csvGeneratedPaths -or -not ($global:csvGeneratedPaths -is [System.Collections.Generic.HashSet[string]])) {
-            $existingCsvGeneratedPaths = @($global:csvGeneratedPaths)
-            $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-            foreach ($existingCsvGeneratedPath in $existingCsvGeneratedPaths) {
-                if (-not [string]::IsNullOrWhiteSpace([string]$existingCsvGeneratedPath)) {
-                    [void]$global:csvGeneratedPaths.Add([string]$existingCsvGeneratedPath)
+            if (-not $global:csvGeneratedPaths -or -not ($global:csvGeneratedPaths -is [System.Collections.Generic.HashSet[string]])) {
+                $existingCsvGeneratedPaths = @($global:csvGeneratedPaths)
+                $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+                foreach ($existingCsvGeneratedPath in $existingCsvGeneratedPaths) {
+                    if (-not [string]::IsNullOrWhiteSpace([string]$existingCsvGeneratedPath)) {
+                        [void]$global:csvGeneratedPaths.Add([string]$existingCsvGeneratedPath)
+                    }
                 }
             }
-        }
-        [void]$global:csvGeneratedPaths.Add($summaryCsvPath)
+            [void]$global:csvGeneratedPaths.Add($summaryCsvPath)
 
-        $summarySharePointUploads = @()
-        $sourceUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $summaryCsvPath
-        $sourceUpload = Add-SmartM365SharePointUploadLabel -UploadRecord $sourceUpload -Label 'AD daily summary (DATA-ALL)'
-        if ($sourceUpload) { $summarySharePointUploads += $sourceUpload }
+            $summarySharePointUploads = @()
+            $sourceUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $summaryCsvPath
+            $sourceUpload = Add-SmartM365SharePointUploadLabel -UploadRecord $sourceUpload -Label 'AD daily summary (DATA-ALL)'
+            if ($sourceUpload) { $summarySharePointUploads += $sourceUpload }
 
-        $latestSummaryPath = $null
-        if (-not [string]::IsNullOrWhiteSpace($LatestFolderPath)) {
-            if (-not (Test-Path -LiteralPath $LatestFolderPath)) {
-                New-Item -Path $LatestFolderPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
-                WriteLog -Message ("Created missing LatestCsvFolderPath directory: {0}" -f $LatestFolderPath)
+            $latestSummaryPath = $null
+            if (-not [string]::IsNullOrWhiteSpace($LatestFolderPath)) {
+                if (-not (Test-Path -LiteralPath $LatestFolderPath)) {
+                    New-Item -Path $LatestFolderPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
+                    WriteLog -Message ("Created missing LatestCsvFolderPath directory: {0}" -f $LatestFolderPath)
+                }
+
+                $latestSummaryPath = Join-Path -Path $LatestFolderPath -ChildPath ([System.IO.Path]::GetFileName($summaryCsvPath))
+                $latestUpload = Publish-SmartM365AdLatestCopy -SourcePath $summaryCsvPath -DestinationPath $latestSummaryPath
+                WriteLog -Message ("AD daily summary copied to LatestCsvFolderPath: {0}" -f $latestSummaryPath)
+
+                $latestUpload = Add-SmartM365SharePointUploadLabel -UploadRecord $latestUpload -Label 'AD daily summary (DATA-LAST)'
+                if ($latestUpload) { $summarySharePointUploads += $latestUpload }
             }
-
-            $latestSummaryPath = Join-Path -Path $LatestFolderPath -ChildPath ([System.IO.Path]::GetFileName($summaryCsvPath))
-            $latestUpload = Publish-SmartM365AdLatestCopy -SourcePath $summaryCsvPath -DestinationPath $latestSummaryPath
-            WriteLog -Message ("AD daily summary copied to LatestCsvFolderPath: {0}" -f $latestSummaryPath)
-
-            $latestUpload = Add-SmartM365SharePointUploadLabel -UploadRecord $latestUpload -Label 'AD daily summary (DATA-LAST)'
-            if ($latestUpload) { $summarySharePointUploads += $latestUpload }
         }
 
         $dailySummaryTo = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue '')
         if ([string]::IsNullOrWhiteSpace($dailySummaryTo)) {
             WriteLog -Message 'Active Directory daily summary email skipped because To is not configured in local or global configuration.' -Level 'WARNING'
-            return $false
         }
 
-        $diffSection = New-SmartM365AdDailySummaryDiffSection -Current $summarySnapshot -Previous $previousSnapshot -Week $weekSnapshot -Month $monthSnapshot -LogicalCountBaselineAt $logicalCountBaselineAt
-        $allUploads = @($summarySharePointUploads)
-        if ($IdentityContext) { $allUploads += @($IdentityContext.SharePointUploads) }
-        $sharePointSection = if ($ShowMailLinks) { New-SmartM365SharePointLinksSection -UploadRecords $allUploads } else { $null }
-        $sections = @($diffSection)
-        if ($IdentityContext) { $sections += @($IdentityContext.Sections) }
-        if ($sharePointSection) { $sections += $sharePointSection }
-
-        $hasDuplicateIdentities = ((ConvertTo-SmartM365AdSummaryInt64 -Value $summarySnapshot.AffectedDuplicateUPNAccounts) -gt 0) -or ((ConvertTo-SmartM365AdSummaryInt64 -Value $summarySnapshot.AffectedDuplicateSMTPEntries) -gt 0)
-        $severity = if ($hasDuplicateIdentities) { 'Warning' } else { 'Success' }
-        $actionTitle = if ($hasDuplicateIdentities) { 'Review required' } else { 'No duplicate identity conflict detected' }
-        $actionHtml = if ($hasDuplicateIdentities) { 'Review duplicate UPN and SMTP counters before identity cleanup, migration, or synchronization decisions.' } else { 'Keep the generated CSV files as the daily Active Directory inventory baseline.' }
-
-        $summaryHtml = (New-SmartM365AdDailySummaryKpiHtml -Snapshot $summarySnapshot -Previous $previousSnapshot -LogicalCountBaselineAt $logicalCountBaselineAt) + (New-SmartM365AdDomainSummaryHtml -Snapshot $summarySnapshot)
-        if ($IdentityContext) {
-            $summaryHtml += '<div style="font-size:13px;font-weight:700;margin:16px 0 8px;">Identity and mail routing issues by domain</div>' + [string]$IdentityContext.SummaryHtml
-            $severity = 'Warning'
-            $actionTitle = 'Action required'
-            $actionHtml = 'Review the attached Excel workbook and the identity diagnostics before cleanup, migration, or synchronization decisions.'
+        $mailInputs = @{
+            SummarySnapshot=$summarySnapshot; PreviousSnapshot=$previousSnapshot; WeekSnapshot=$weekSnapshot; MonthSnapshot=$monthSnapshot
+            LogicalCountBaselineAt=$logicalCountBaselineAt; SourceFolder=$SourceFolder; SummaryCsvPath=$summaryCsvPath
+            LatestSummaryPath=$latestSummaryPath; SummarySharePointUploads=@($summarySharePointUploads)
+            ShowMailLinks=$ShowMailLinks; DomainCounts=$script:SmartM365AdDailyDomainCounts; DomainNames=@($script:SmartM365AdDailyDomainNames)
+            Tenant=$Tenant; ReportHost=$env:COMPUTERNAME; ReportGeneratedAt=(Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
         }
-
-        $pathRows = @(
-            [pscustomobject]@{ Label = 'Source folder'; Path = $SourceFolder }
-            [pscustomobject]@{ Label = 'Daily summary'; Path = $summaryCsvPath }
-        )
-        if (-not [string]::IsNullOrWhiteSpace($latestSummaryPath)) {
-            $pathRows += [pscustomobject]@{ Label = 'Latest summary'; Path = $latestSummaryPath }
+        if ($LatestFolderPath -and -not $ReportOnly) {
+            $reportFiles = @('AD_Users_AllDomains.csv','AD_Computers_AllDomains.csv')
+            $savedInputs = $mailInputs.Clone()
+            if ($ShowMailLinks) {
+                $paths = @($SourceFolder,$summaryCsvPath,$latestSummaryPath)
+                if ($IdentityContext) { $paths += @($IdentityContext.PathRows | Select-Object -ExpandProperty Path) }
+                $savedInputs.PathSharePointUploads = @(Get-SmartM365ReportUploadReference -Paths $paths)
+            }
+            if ($IdentityContext) {
+                $reportFiles += @(Get-SmartM365AdDiagnosticWorkbookSource -Folder $LatestFolderPath | Select-Object -ExpandProperty Name)
+                $savedInputs.Identity = @{
+                    SharePointUploads=$IdentityContext.SharePointUploads; PathRows=$IdentityContext.PathRows
+                    WorkbookFile=$IdentityContext.WorkbookFile; PreviewLimit=$IdentityContext.PreviewLimit; UserDomains=$IdentityContext.UserDomains
+                }
+            }
+            Save-SmartM365ReportInputs -Producer 'SmartM365-ActiveDirectory-Inventory' -LatestFolder $LatestFolderPath -TenantKey $global:SmartM365TenantKey -Files $reportFiles -InputData $savedInputs
         }
-
-        if ($IdentityContext -and $ShowMailLinks) { $pathRows += @($IdentityContext.PathRows) }
-        if (-not $ShowMailLinks) { $pathRows = @() }
-        $mailTitle = if ($IdentityContext) { 'Active Directory daily summary and identity diagnostics' } else { 'Active Directory daily summary' }
-        $mailSubject = 'SmartM365 ' + $mailTitle
-        $mailFooter = if ($ShowMailLinks) { 'This automated message was generated by SmartM365. Use the exported CSV paths and SharePoint links as the inventory source of truth.' } elseif ($IdentityContext) { 'This automated message was generated by SmartM365. Use the exported CSV files and attached workbook as the inventory source of truth.' } else { 'This automated message was generated by SmartM365. Use the exported CSV files as the inventory source of truth.' }
-
-        $emailBody = New-SmartM365EmailBody `
-            -Title $mailTitle `
-            -Category 'SmartM365 Active Directory' `
-            -Severity $severity `
-            -Tenant $Tenant `
-            -HostName $env:COMPUTERNAME `
-            -Message 'Daily Active Directory inventory summary with previous, seven-day, and thirty-day comparisons.' `
-            -ActionTitle $actionTitle `
-            -ActionHtml $actionHtml `
-            -SummaryHtml $summaryHtml `
-            -PathRows $pathRows `
-            -Sections $sections `
-            -Footer $mailFooter
-
-        $attachments = if ($IdentityContext) { @($IdentityContext.WorkbookPath) } else { @() }
-        Send-SmartM365AdInventoryEmailHtmlReport -Subject $mailSubject -BodyHtml $emailBody -To $dailySummaryTo -Attachments $attachments -ShowLinks $ShowMailLinks
+        if ($alreadySent -or [string]::IsNullOrWhiteSpace($dailySummaryTo)) { return $false }
+        $reportMail = New-SmartM365AdInventoryMailReport @mailInputs -IdentityContext $IdentityContext
+        Send-SmartM365AdInventoryEmailHtmlReport -Subject $reportMail.Subject -BodyHtml $reportMail.BodyHtml -To $dailySummaryTo -Attachments $reportMail.Attachments -ShowLinks $ShowMailLinks -ReportCadenceKey $(if (-not $ForceSend) { 'AD.Summary' })
+        if ((Get-Variable SmartM365LastMailDelivery -Scope Global -ValueOnly -ErrorAction SilentlyContinue) -in @('Skipped','Busy')) { return $false }
         if ($IdentityContext -and -not [string]::IsNullOrWhiteSpace([string]$IdentityContext.LastSentFilePath)) {
             Set-Content -LiteralPath $IdentityContext.LastSentFilePath -Value $todayStamp -Encoding UTF8
         }
@@ -3762,7 +3170,9 @@ $($rows -join "`n")
 
                     $dailyMarkerPath = if ([string]::IsNullOrWhiteSpace($DailySummaryLastSentFilePath)) { Join-Path $OutputPath 'AD_DailySummary_LastSent.txt' } else { $DailySummaryLastSentFilePath }
                     $dailyAlreadySent = (Test-Path -LiteralPath $dailyMarkerPath) -and ((Get-Content -LiteralPath $dailyMarkerPath -Raw -ErrorAction SilentlyContinue).Trim() -eq $todayStamp)
-                    $deferToDailySummary = (-not $DuplicateAnalysisOnly -and -not $SkipDailyReport -and $EnableDailySummaryEmail -and (-not $dailyAlreadySent -or $ForceSendDailySummary -or $ForceSendDuplicateNotification))
+                    # An incident must not depend on a cadenced summary being delivered.
+                    $summaryHasCadence = $null -ne (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ReportMailCadence' -DefaultValue $null)
+                    $deferToDailySummary = (-not $summaryHasCadence -and -not $DuplicateAnalysisOnly -and -not $SkipDailyReport -and $EnableDailySummaryEmail -and (-not $dailyAlreadySent -or $ForceSendDailySummary -or $ForceSendDuplicateNotification))
                     if ($lastSentStamp -eq $todayStamp -and -not $ForceSendDuplicateNotification -and -not $deferToDailySummary) {
                         WriteLog -Message ("Duplicate identity notification already sent today ({0}). Use -ForceSendDuplicateNotification to resend." -f $todayStamp)
                     }
@@ -3773,12 +3183,7 @@ $($rows -join "`n")
                         }
 
                         $emailSubject = "SmartM365 Active Directory identity and mail routing issues detected"
-                        $diagnosticWorkbookPath = Export-SmartM365AdDiagnosticsWorkbook -Path (Join-Path $OutputPath 'AD_Users_IdentityAndMailRoutingIssues.xlsx') -Sources @(
-                            [pscustomobject]@{ CsvPath = $duplicateUpnCsv; WorksheetName = 'Duplicate UPN'; TableName = 'DuplicateUPN' }
-                            [pscustomobject]@{ CsvPath = $duplicateSmtpCsv; WorksheetName = 'Duplicate SMTP'; TableName = 'DuplicateSMTP' }
-                            [pscustomobject]@{ CsvPath = $duplicateRemoteRoutingCsv; WorksheetName = 'Duplicate RemoteRouting'; TableName = 'DuplicateRemoteRouting' }
-                            [pscustomobject]@{ CsvPath = $remoteRoutingIssuesCsv; WorksheetName = 'RemoteRouting Issues'; TableName = 'RemoteRoutingIssues' }
-                        )
+                        $diagnosticWorkbookPath = Export-SmartM365AdDiagnosticsWorkbook -Path (Join-Path $OutputPath 'AD_Users_IdentityAndMailRoutingIssues.xlsx') -Sources @(Get-SmartM365AdDiagnosticWorkbookSource -Folder $OutputPath)
                         $workbookUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $diagnosticWorkbookPath
                         $workbookUpload = Add-SmartM365SharePointUploadLabel -UploadRecord $workbookUpload -Label 'Diagnostic workbook'
                         if ($workbookUpload) { $duplicateSharePointUploads += $workbookUpload }
@@ -3786,16 +3191,8 @@ $($rows -join "`n")
                             [pscustomobject]@{ Label = 'Source users'; Path = $combinedUsersCsv }
                             [pscustomobject]@{ Label = 'Diagnostic workbook'; Path = $(if ($workbookUpload -and $workbookUpload.WebUrl) { $diagnosticWorkbookPath } else { 'Attached workbook; SharePoint upload unavailable' }) }
                         )
-                        $duplicateUpnPreviewSection = New-SmartM365AdDuplicatePreviewSection -Rows $duplicateUpnRows -DuplicateType 'UPN' -Limit $DuplicateNotificationPreviewLimit
-                        $duplicateSmtpPreviewSection = New-SmartM365AdDuplicatePreviewSection -Rows $duplicateSmtpRows -DuplicateType 'SMTP' -Limit $DuplicateNotificationPreviewLimit
                         $duplicateSharePointSection = New-SmartM365SharePointLinksSection -UploadRecords $duplicateSharePointUploads
-                        $duplicateRemoteRoutingPreviewSection = New-SmartM365AdDuplicatePreviewSection -Rows $duplicateRemoteRoutingRows -DuplicateType 'REMOTE' -Limit $DuplicateNotificationPreviewLimit
-                        $remoteRoutingIssuePreviewSection = New-SmartM365AdRemoteRoutingIssuePreviewSection -Rows $remoteRoutingIssueRowsArray -Limit $DuplicateNotificationPreviewLimit
-                        $duplicateSections = @()
-                        if ($duplicateUpnPreviewSection) { $duplicateSections += $duplicateUpnPreviewSection }
-                        if ($duplicateSmtpPreviewSection) { $duplicateSections += $duplicateSmtpPreviewSection }
-                        if ($duplicateRemoteRoutingPreviewSection) { $duplicateSections += $duplicateRemoteRoutingPreviewSection }
-                        if ($remoteRoutingIssuePreviewSection) { $duplicateSections += $remoteRoutingIssuePreviewSection }
+                        $duplicateSections = @(New-SmartM365AdIdentityMailSections -DuplicateUpnRows $duplicateUpnRows -DuplicateSmtpRows $duplicateSmtpRows -DuplicateRemoteRows $duplicateRemoteRoutingRows -RoutingIssueRows $remoteRoutingIssueRowsArray -Limit $DuplicateNotificationPreviewLimit | Where-Object { $_ })
                         $identitySummaryHtml = New-SmartM365AdIdentitySummaryHtml -AllUsers $allUsers -DuplicateUpnRows $duplicateUpnRows -DuplicateSmtpRows $duplicateSmtpRows -DuplicateRemoteRows $duplicateRemoteRoutingRows -RoutingIssueRows $remoteRoutingIssueRowsArray
                         if ($deferToDailySummary) {
                             $script:SmartM365AdIdentityMailContext = [pscustomobject]@{
@@ -3804,6 +3201,9 @@ $($rows -join "`n")
                                 SharePointUploads = $duplicateSharePointUploads
                                 PathRows = $duplicatePathRows
                                 WorkbookPath = $diagnosticWorkbookPath
+                                WorkbookFile = Get-SmartM365ReportFileReference -Path $diagnosticWorkbookPath
+                                PreviewLimit = $DuplicateNotificationPreviewLimit
+                                UserDomains = @($allUsers | ForEach-Object { [string]$_.DomainName } | Sort-Object -Unique)
                                 LastSentFilePath = $DuplicateNotificationLastSentFilePath
                             }
                             WriteLog -Message 'Identity diagnostics prepared for the combined daily summary email.'
@@ -4148,10 +3548,10 @@ finally {
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBo0nuhH5J5n+gs
-# pp6s14f5uH4lyybThgVOqsrDmli9PKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDAy2pjHemITpC2
+# /gl2ejCrE9jAcoWE4Erk2wRCrexKu6CCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4176,139 +3576,143 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIO5dd7cNY+SssSq4Igy1GwTi5dgzE7TH1+tQ2YiDWhYtMA0GCSqG
-# SIb3DQEBAQUABIIBgHOoJzrcEsNXsHFq55aVcIyrouvOyCnds7JY9cD1pXA2byI+
-# Wv+v5OxSdRk/dXPK4kBoc0pOKOtHy7VVwcmmPMeuAtqqBeioomAPWpL/0+sbeEG8
-# cMHW32wjjlzJzqvEu3sizbIX7Ra/E4TxAk91gIo4dVtOG24Y1+lp0/7MJhPxYBdR
-# 2zerKWbBpfl6IyxHeOEtCS0Y/0Z45ZYoxm6uwS0DeaGcvDBNdXPuYv5WbRz59D4v
-# 1hbd5SnRXg9eZKSWiaCt4wAGz4xhNQHlx9vodTmwNAqzhN/l/NVSJxgpFyDqOzA3
-# ZjySQPnnb3a/6VQ/eJp7+RFnECf1DXMNV6CT3kUb4LEaayGCazL/l85nSXVzp+h9
-# kycUxxvYjgn7C2oyiiZ9hbVWpUJfFGvhIDTCkVgaSojHixCkW6VCz1DDBKMYOsaj
-# tGuKZJkwWjhgqKEqW7AS02BiVquVoxbKtogJB+BqCLWHsAIj//fYC+nfFv6gwxv1
-# +H0PDmi1M+LdXMOgLKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDkxMjUy
-# NDNaMC8GCSqGSIb3DQEJBDEiBCAo5P7rgokXkFV7OGKeiWO3AqSRGLIZb+KjlKEg
-# 2vvowzANBgkqhkiG9w0BAQEFAASCAgA+lYLhaM00P5LcyU98T5oaxingSavPqg4R
-# RNZDb8ibrnZRs1Mumg5YClGBDzt4yM9PSxSjPDzIheMTVT6oOThoXfTuGL6zq6pU
-# UgbiCdY2Fyc1MBOKLW0fVdzHV77a85ysAUYrVH5KjDK/wNRetytv54ZD4kmCM13m
-# 4AY7+VY5ODgG0q6oGE+WYt3V6H++B8ov2KAaCdVFUWGVo13Hy7CFUk4e+vMv14dF
-# 0JdJC2Uz8DoWlP4JlbNMxC+luKDgFukdcjP3o7kytDzi6qT8N3PfgCJW5EYitEAk
-# crHrFabBNX3iG+tefbIiZWRE3Dgeq0dJKjs7h7hzabKJZiD25ChFXgah7JKfchXP
-# 6x0GVADZwRMd6KAeyCn9EvIjLAHRtzOXrgtejY0DQ1WrqqDjnd5bFJtPDu/Xwtue
-# ghDPKAKGWuqo/NBWOBP24S90lHr8xNDkPKpBHm77ohJxtgH/nRTVCSCN3aSB5GbA
-# BAYOSdJwXnMWHaVES3SMinZPAAnvu+jOmKBrmh2g7YQNIgJd0DIuy9GZ/Xsf4YsO
-# wcYC8spKzQFdJO0Cwn9+MImozfcQ9C6VMKUXp+w6dQCd22IBfsm4jKX/gGFLHmdq
-# XlEWalCVpENVFsgsFaPaWD3WH+Leu9WJhlpf6gAv+MW8uVd5g+P8nOylmCm03P6U
-# Mpl4AsmIWQ==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBoIw
+# ggRqoAMCAQICEDbCsL18Gzrno7PdNsvJdWgwDQYJKoZIhvcNAQEMBQAwgYgxCzAJ
+# BgNVBAYTAlVTMRMwEQYDVQQIEwpOZXcgSmVyc2V5MRQwEgYDVQQHEwtKZXJzZXkg
+# Q2l0eTEeMBwGA1UEChMVVGhlIFVTRVJUUlVTVCBOZXR3b3JrMS4wLAYDVQQDEyVV
+# U0VSVHJ1c3QgUlNBIENlcnRpZmljYXRpb24gQXV0aG9yaXR5MB4XDTIxMDMyMjAw
+# MDAwMFoXDTM4MDExODIzNTk1OVowVzELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
+# Y3RpZ28gTGltaXRlZDEuMCwGA1UEAxMlU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFt
+# cGluZyBSb290IFI0NjCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAIid
+# 2LlFZ50d3ei5JoGaVFTAfEkFm8xaFQ/ZlBBEtEFAgXcUmanU5HYsyAhTXiDQkiUv
+# pVdYqZ1uYoZEMgtHES1l1Cc6HaqZzEbOOp6YiTx63ywTon434aXVydmhx7Dx4IBr
+# Aou7hNGsKioIBPy5GMN7KmgYmuu4f92sKKjbxqohUSfjk1mJlAjthgF7Hjx4vvyV
+# DQGsd5KarLW5d73E3ThobSkob2SL48LpUR/O627pDchxll+bTSv1gASn/hp6IuHJ
+# orEu6EopoB1CNFp/+HpTXeNARXUmdRMKbnXWflq+/g36NJXB35ZvxQw6zid61qmr
+# lD/IbKJA6COw/8lFSPQwBP1ityZdwuCysCKZ9ZjczMqbUcLFyq6KdOpuzVDR3ZUw
+# xDKL1wCAxgL2Mpz7eZbrb/JWXiOcNzDpQsmwGQ6Stw8tTCqPumhLRPb7YkzM8/6N
+# nWH3T9ClmcGSF22LEyJYNWCHrQqYubNeKolzqUbCqhSqmr/UdUeb49zYHr7ALL8b
+# AJyPDmubNqMtuaobKASBqP84uhqcRY/pjnYd+V5/dcu9ieERjiRKKsxCG1t6tG9o
+# j7liwPddXEcYGOUiWLm742st50jGwTzxbMpepmOP1mLnJskvZaN5e45NuzAHteOR
+# lsSuDt5t4BBRCJL+5EZnnw0ezntk9R8QJyAkL6/bAgMBAAGjggEWMIIBEjAfBgNV
+# HSMEGDAWgBRTeb9aqitKz1SA4dibwJ3ysgNmyzAdBgNVHQ4EFgQU9ndq3T/9ARP/
+# FqFsggIv0Ao9FCUwDgYDVR0PAQH/BAQDAgGGMA8GA1UdEwEB/wQFMAMBAf8wEwYD
+# VR0lBAwwCgYIKwYBBQUHAwgwEQYDVR0gBAowCDAGBgRVHSAAMFAGA1UdHwRJMEcw
+# RaBDoEGGP2h0dHA6Ly9jcmwudXNlcnRydXN0LmNvbS9VU0VSVHJ1c3RSU0FDZXJ0
+# aWZpY2F0aW9uQXV0aG9yaXR5LmNybDA1BggrBgEFBQcBAQQpMCcwJQYIKwYBBQUH
+# MAGGGWh0dHA6Ly9vY3NwLnVzZXJ0cnVzdC5jb20wDQYJKoZIhvcNAQEMBQADggIB
+# AA6+ZUHtaES45aHF1BGH5Lc7JYzrftrIF5Ht2PFDxKKFOct/awAEWgHQMVHol9ZL
+# Syd/pYMbaC0IZ+XBW9xhdkkmUV/KbUOiL7g98M/yzRyqUOZ1/IY7Ay0YbMniIibJ
+# rPcgFp73WDnRDKtVutShPSZQZAdtFwXnuiWl8eFARK3PmLqEm9UsVX+55DbVIz33
+# Mbhba0HUTEYv3yJ1fwKGxPBsP/MgTECimh7eXomvMm0/GPxX2uhwCcs/YLxDnBdV
+# VlxvDjHjO1cuwbOpkiJGHmLXXVNbsdXUC2xBrq9fLrfe8IBsA4hopwsCj8hTuwKX
+# JlSTrZcPRVSccP5i9U28gZ7OMzoJGlxZ5384OKm0r568Mo9TYrqzKeKZgFo0fj2/
+# 0iHbj55hc20jfxvK3mQi+H7xpbzxZOFGm/yVQkpo+ffv5gdhp+hv1GDsvJOtJinJ
+# mgGbBFZIThbqI+MHvAmMmkfb3fTxmSkop2mSJL1Y2x/955S29Gu0gSJIkc3z30vU
+# /iXrMpWx2tS7UVfVP+5tKuzGtgkP7d/doqDrLF1u6Ci3TpjAZdeLLlRQZm867eVe
+# XED58LXd1Dk6UvaAhvmWYXoiLz4JA5gPBcz7J311uahxCweNxE+xxxR3kT0WKzAS
+# o5G/PyDez6NHdIUKBeE3jDPs2ACc6CkJ1Sji4PKWVT0/MIIGpzCCBI+gAwIBAgIR
+# AJCsCHIg/cWnxGtcxw33PQYwDQYJKoZIhvcNAQEMBQAwVzELMAkGA1UEBhMCR0Ix
+# GDAWBgNVBAoTD1NlY3RpZ28gTGltaXRlZDEuMCwGA1UEAxMlU2VjdGlnbyBQdWJs
+# aWMgVGltZSBTdGFtcGluZyBSb290IFI0NjAeFw0yNjAzMjUwMDAwMDBaFw00MTAz
+# MjQyMzU5NTlaMFUxCzAJBgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0
+# ZWQxLDAqBgNVBAMTI1NlY3RpZ28gUHVibGljIFRpbWUgU3RhbXBpbmcgQ0EgUjQx
+# MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAruRKogGtghxi+WYtW5oD
+# zPDVF8GGSfgbUKh6bONxi0wvrI1S8qbAYfvLr/ky5ILVRg//70pgNKq8xC3/WEQo
+# djEwAP2hmkGShoNAUQps4kd6Wwp74Fo7RlwQ1Mp949ytpWQDvCsYBbZccDmBAJC/
+# ggqiuL/c805fGcMw6TzIgyBWuUx5PGp9YnheSNPXFzaz0MPtREdZYk4WhtM+hazq
+# asMWVpj0WUAcNhN9vO/FAdWy9Gafdb7lmYLDKTTYjwqAY9P9RfixPPjUaJH6mnBS
+# NBdrX7a0Qdlux0ApS0fc48RW1m+W3tq3HiHzch1FHyhiLzCNjc6MUpcV5xalBvPO
+# w/FtQo/AxaJOvPCSsVrx0f/WkMpEm3fvVbrY9+oo9rIKv9ducE6VGfwIAtKYedG0
+# bO4Ba1MmlxPcErDqjLwggvrBJu73fwXpkhtE0hzV0psgm2vhQs3pHll9N00SHBdy
+# 2qndEcNuDh+46XouM2hoXCO533YQQOHPEUnMTWOo3hyxx5kjDE5PVqp+x+HS4VAT
+# +WBMG4GzeLr9YvZbU5x5YvLdcR1dErV/QRYK55rp019fZFF2NR+TkSW0WcmQ3b5t
+# aGcrXg49EpzKM6/mEpnSJXg1E13X6GO29rWs/LNvkGzsS8XGoRCGBls6ruofeebS
+# sHADR3GeIE5gIU927bjokLECAwEAAaOCAW4wggFqMB8GA1UdIwQYMBaAFPZ3at0/
+# /QET/xahbIICL9AKPRQlMB0GA1UdDgQWBBQ6dKUMZ8ZCUML9tfzHuyk0gvR6uTAO
+# BgNVHQ8BAf8EBAMCAYYwEgYDVR0TAQH/BAgwBgEB/wIBADATBgNVHSUEDDAKBggr
+# BgEFBQcDCDAjBgNVHSAEHDAaMAgGBmeBDAEEAjAOBgwrBgEEAbIxAQIBAwgwTAYD
+# VR0fBEUwQzBBoD+gPYY7aHR0cDovL2NybC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVi
+# bGljVGltZVN0YW1waW5nUm9vdFI0Ni5jcmwwfAYIKwYBBQUHAQEEcDBuMEcGCCsG
+# AQUFBzAChjtodHRwOi8vY3J0LnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNUaW1l
+# U3RhbXBpbmdSb290UjQ2LnA3YzAjBggrBgEFBQcwAYYXaHR0cDovL29jc3Auc2Vj
+# dGlnby5jb20wDQYJKoZIhvcNAQEMBQADggIBADLeUkdm8Z4DZvjfKHOhqu+hsdXN
+# t+X5F+48PB6PTAJCRgA3qxxO3YbAV7baps4K/+2WWoWUspBkT4T2NXK49NvJAfCs
+# ztHSgtqkAQMLX4KjCypJF/+m2Ktrk993g+gcgKdv1yg9C3JmYdJCnnL0ga+pZ/Wo
+# 1+rtXZ8dnwO8RCstTN6gYX0ElFi7Y7NpxbdBC1S6bc05V/SA9HC/ojj33W6Gdwnp
+# U/iVylSkdkoHtHeGIhQLT2ZH0qPM9Wdce8v2fZsDCJQQJ8rll7OGLDbsXa2CLf0M
+# RN9TwzifQ3rEuAXOx/TkzkZRFfwL34hf1XqSmaYq2tTMy2LgsPrqC2Z/6ZKb3fgr
+# zU0vphB4wSTWulitY/KlxbvoyKvrBvUCCx4sgeqf8aR65CbvM5MN/d/lahfXipU2
+# NlY0cXcnGS61XpmeGKd8It92/lufApZR9x6o5qMJWe0jq4JsfGMGDpIKx7FzkB8g
+# aejuBUW/CJ9Phc40+xJRonvVewn4S9yJVRWeM47irGbR9YlN3xruM/yZzhk+rAm9
+# AW06nv7ob6RQkAXR+cTxiAPy620FF41NrViYB4UyKpzfx7x8jh4ubTOMz954YIdq
+# yeiqqtsbBwXjWLP0dfMUPA3iIPnPdBKGnodGJTdSlPAMmKJdyvTPqmOXs/LMnf+2
+# Za0Z6FXsIB9z9aXLMIIG4jCCBMqgAwIBAgIRAOdO8lWwUE/626bf9/yLoxUwDQYJ
+# KoZIhvcNAQEMBQAwVTELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1NlY3RpZ28gTGlt
+# aXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFtcGluZyBDQSBS
+# NDEwHhcNMjYwMzI1MDAwMDAwWhcNMzcwNjI0MjM1OTU5WjByMQswCQYDVQQGEwJH
+# QjEXMBUGA1UECBMOR3JlYXRlciBMb25kb24xGDAWBgNVBAoTD1NlY3RpZ28gTGlt
+# aXRlZDEwMC4GA1UEAxMnU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFtcGluZyBTaWdu
+# ZXIgUjM3MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAsv/DbUvcUNlF
+# LQURd9m4+1St5+JudFKo5P803Iks4mFeNB9SymodP6BJJWBuNhOFQj9w77AVAeg5
+# qQpA2dIwp2QTyBHr2h9eWSTkMBVj9mV6+WI5SaW+vDZW7PhJTbysd9v9WB3Xt6ql
+# Ei8m47pcTy8+k/OfhziKiuzNQXqfC7KcoRD/6up8OZBsU0qxr7n5nh/iRfAp1QXF
+# TBQONBZSGIdHAyVRYYX033VoC8v71rizEKCpH97Pxbwcn9eq9K7W8h5v4npsMUoq
+# CS/c8mQwylDQGx15dHYV6NlcVFdjXD11l7qCrIy/unH5OlZtgx58QJRXRbGgQyBd
+# STpEpwuj3i5Qc52Z9m7hd7yCGCXKujf83hUQpOPx1w8+84EbEUTHVAfq4cpORaGW
+# gY8NJy6txmd3wpS1MeXrOaVAMczTgzAZ+yZBWIqdgQBgTxEeXldEToZOrRkxvn1I
+# jIlfr4I4NWJz+Rb52FshLVnkA/wdoad789Eb7XZDNKd4oMmnc636TgauaaVZP2LL
+# oU0JD/fYr53hwBn4uXu5ZsSfpnqAT60S7szJm/Na882xEoyRzLJ+UVbXOlHLO63D
+# KkAtdz1CDuwWxgRE1drnwplepT06dz+1yTr5p1AkUz21bzE6cT/8/kjh4OPzggYY
+# qrOBQPfuKEL5ZJPcN9jRgEpYvRlq5ucCAwEAAaOCAY4wggGKMB8GA1UdIwQYMBaA
+# FDp0pQxnxkJQwv21/Me7KTSC9Hq5MB0GA1UdDgQWBBRhEOl6Eq9RxIXU8s+kdA9Q
+# zSCv+DAOBgNVHQ8BAf8EBAMCBsAwDAYDVR0TAQH/BAIwADAWBgNVHSUBAf8EDDAK
+# BggrBgEFBQcDCDBKBgNVHSAEQzBBMAgGBmeBDAEEAjA1BgwrBgEEAbIxAQIBAwgw
+# JTAjBggrBgEFBQcCARYXaHR0cHM6Ly9zZWN0aWdvLmNvbS9DUFMwSgYDVR0fBEMw
+# QTA/oD2gO4Y5aHR0cDovL2NybC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVibGljVGlt
+# ZVN0YW1waW5nQ0FSNDEuY3JsMHoGCCsGAQUFBwEBBG4wbDBFBggrBgEFBQcwAoY5
+# aHR0cDovL2NydC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVibGljVGltZVN0YW1waW5n
+# Q0FSNDEuY3J0MCMGCCsGAQUFBzABhhdodHRwOi8vb2NzcC5zZWN0aWdvLmNvbTAN
+# BgkqhkiG9w0BAQwFAAOCAgEAA+o9jdGszfoZepOmygef1OlbkjrPd2QW9z3M8vVb
+# QSCruPeO2eRsC9GhZ4CMZfhkrixayYD67gQkbyiRCbJu5L/i0NQjlQhBvbWfiEba
+# +KHFKGud5YHRWhDZUtDeMIJGZG0BD7/sftZUo2Ifk+CXi/ZlM50+xK3OkqeXVi5G
+# ubDD/5txmYuqCT3T3LAilmoB+5th9sQxiMhyQuT3R/aYb4vypoZJLYklUzTalXle
+# W1nV9s4UROlE389CHDKAi/fepRSMnV8TghODDQxwzNGrOJZ04k/yhzHHDupfHPU5
+# 1FYJqXIvWq9SAAWdlNV1JGIxhkp/TAtxBwz/Vd/VbgVb2d9/wRFfxFkka39O0+4x
+# aZSl/oEK/1DqjxjJRO2Se9lGlJDScu21Zd23Cys3aYyB8y5H/+DFWtVe8PMKgr+V
+# uIDp0Rk5bneVDAEW0TPAT8Ufwl2F6DJiDg/KZk5NmsYES+CxvF7bnISEnQh0ZrWn
+# AJixquV0mElUx01wA5TuPIgyodxzNq/fC0hen9LBtdnfFfSZ+wt8A1Injsbio+DH
+# Vq1voYiVNpBfO7+nh9NB4AhRXNldPgr3zgjJ+47s0uNYy2iDXAZSlkP3ym/7gy31
+# jlu989SNpRWO14/LUNV2LSuXkRI1iLTPI6ZdXG0DnPPG7UftF0tk5m6BP9eNfr2t
+# j1sxggW7MIIFtwIBATBiME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNv
+# bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
+# EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
+# DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgUcLyvKKs8xxO
+# peIEqclyaQLglUCvYSX8ykPEk4I3eKQwDQYJKoZIhvcNAQEBBQAEggGAOKaRpY62
+# Cs3vIVLBD2KgZKsemtk03qwa3i2H+ZabrMxF+Z/OQJZnOahSuM551tXCMDdpRrZH
+# b5Ge4f0xBEMKh732osUS9NrO7nWr5cEyeENo9nHJSbJWKHbEDmor8j4ZtCxO3n91
+# iqIgUAYfgPyFiRfFLRN/8amtmRQN+KtlijRsnrCL4UYWG/9CTdNgXS/DC9ATQ7QQ
+# +rJ5nYzSX9676CugZiTUhK4lllCek/JZUm86+VbupIXmuO++89iQBDjLHrbDL+Ga
+# SCdxcGRncBUa7i03D7gSYCq6/1YfuS2SjMHNwYs3lbkaPpq7gqt7Tqw8UFNJFzVo
+# 1Mef5rNw4JRRTtW8UFxflEMYOPjH6tVGuNpHi7MkvnlnUMj4GD07WuLh73b9/T7d
+# 3T7/Af9SblyISiV/eVOV1V7JYwBuDDaygEiVSeqMNSlJe4bFW0vlZugyBkZF3BMS
+# 6QxSAeCunmdqldMRpEWsnOg7ZZK4A0w9ihe/+xmFjYRnvFSsQugizB1yoYIDIzCC
+# Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
+# BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
+# ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
+# AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
+# MjYxMTE5MDkxNDQ1WjA/BgkqhkiG9w0BCQQxMgQwNiCIFLfusBGAyHvDKQah/Tlt
+# RJQ+LBLz9D7ewHy6V9fZwywMfz8GvecbTL9GYVbiMA0GCSqGSIb3DQEBAQUABIIC
+# ABSDUimVRY/DMg+if+a6kTIXUwC/4QQt1Zu8+K+EEZylsjvobaUGaZ3jip+Tu2uf
+# 0esjCpMIjr335OOtdR4XDSmod4NlX/jAK28nvLUKdkZ+RLZbokPm8owBn591Exm4
+# VUZuo7JvNNdWJn4MGxjcRNPiGvL3FRRb36jc/aRtGFgsQqmfyKELSVhZbyTM5v3i
+# HBDVA1+yDEGd5APr+7Sa8KAnDOdg50s97sHljBCRwnWHh9wEFHaiqfQvtAWR4MEJ
+# QnzuhwAWb7anWiFiRZyh7T0u3hqhcXVTvFpwWSWsjtc4IuuTSXaU4ovdlnXbGvUY
+# u6AjIcoASCSl5/ibKY+c/HnnCSvbQTBu7y0qio4U2qPw+6ZKcEyhtfe93uOAzHo2
+# RETBTQ1m3ug6zP0g5mETmroWTOEx2L/y4a2INMRaBBhK5FlBRn5wisVPi1iRxmXY
+# wJsj/M0n6ZT+6zyGJPkvGjLheAnnih1glCzsYeRPFMpakJ6ErrPuhfTMomLPV8hU
+# D2hbIVLsTe77jp0xTuN5AR6+AEPeRt8KWyFqYhBPyMiteENTV4LCLI3NnPwTlzAW
+# IczzZiZn+raLtuydLRZ5UuOzX3URXCF4fkRk5SzDVkPtsPdgaEAM8+ZRlyETCNFF
+# 8XNWYb4WYEZcGpRXm7wX36XtylHDu23UqooEIROcLFM2
 # SIG # End signature block

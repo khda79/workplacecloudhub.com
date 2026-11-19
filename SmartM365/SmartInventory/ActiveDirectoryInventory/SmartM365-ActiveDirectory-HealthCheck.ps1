@@ -2,7 +2,7 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-1.0.37
+1.0.38
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -59,6 +59,8 @@ while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $sma
 }
 if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
 . (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+. (Join-Path $smartM365LifecycleRoot 'SmartInventory/Common/SmartM365.ReportRenderers.ps1')
+. (Join-Path $smartM365LifecycleRoot 'SmartInventory/Common/SmartM365.ReportInputs.ps1')
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
 try {
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
@@ -87,7 +89,7 @@ $Rows = [System.Collections.ArrayList]::new()
 $DomainFacts = [System.Collections.ArrayList]::new()
 $script:PrivilegedUserPasswordNeverExpiresCache = @{}
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = "1.0.37"
+$ScriptVersion = "1.0.38"
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -111,7 +113,7 @@ else {
     $TenantContextDirectory
 }
 $CoreModulePath = Join-Path $SmartM365ProjectRoot 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module -Name $CoreModulePath -MinimumVersion '1.0.121' -Force -ErrorAction Stop
+Import-Module -Name $CoreModulePath -MinimumVersion '1.0.130' -Force -ErrorAction Stop
 $LocalConfigPath = Join-Path $PSScriptRoot ("$ScriptBaseName.local.json"); $LocalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $LocalConfigPath
 $LegacyLocalConfigPath = Join-Path $PSScriptRoot 'AD-HealthCheck.local.json'; $LegacyLocalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $LegacyLocalConfigPath
 $LocalTemplatePath = (Get-SmartM365JsonTemplateName -Path $LocalConfigPath)
@@ -161,7 +163,7 @@ if ($To.Count -eq 0) {
     if ([string]::IsNullOrWhiteSpace($configuredTo)) { $configuredTo = [string](Get-LocalConfigValue 'ErrorMailTo' '') }
     if (-not [string]::IsNullOrWhiteSpace($configuredTo)) { $To = @($configuredTo -split '[;,]' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
 }
-function ConvertTo-IsoUtc([datetime]$d){ if($null -eq $d -or $d -eq [datetime]::MinValue){''}else{$d.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture)} }
+
 function Num($v){ if($null -eq $v -or [string]::IsNullOrWhiteSpace([string]$v)){''}else{ try{([double]$v).ToString('0.########',[Globalization.CultureInfo]::InvariantCulture)}catch{[string]$v} } }
 function Ms($s){ [int64][math]::Max(0,((Get-Date)-$s).TotalMilliseconds) }
 function Add-Row{
@@ -244,9 +246,8 @@ function Add-ForestReplicationAgeRows([string]$ForestName,[string]$RootDomain,[s
 function Test-Port([string]$Computer,[int]$Port){
     $c=[Net.Sockets.TcpClient]::new(); try{ $a=$c.BeginConnect($Computer,$Port,$null,$null); if(-not $a.AsyncWaitHandle.WaitOne($TcpTimeoutMs,$false)){return $false}; $c.EndConnect($a); $true }catch{$false}finally{try{$c.Close()}catch{ $null = $_ }}
 }
-function Worst($r){ if($r|Where-Object Status -eq Critical){'Critical'}elseif($r|Where-Object Status -eq Warning){'Warning'}elseif($r|Where-Object Status -eq NotMeasured){'NotMeasured'}else{'OK'} }
-function Rank($s){ if($s -eq 'Critical'){0}elseif($s -eq 'Warning'){1}elseif($s -eq 'NotMeasured'){2}else{3} }
-function ConvertTo-HtmlSafe($s){ [Net.WebUtility]::HtmlEncode([string]$s) }
+
+
 function Get-ObjectPropertyValue([object]$Object,[string[]]$Names){
     foreach($name in $Names){
         $prop = if($null -ne $Object){$Object.PSObject.Properties[$name]}else{$null}
@@ -330,7 +331,7 @@ function Get-DfsrBacklog([string]$Src,[string]$Dst){
     }
     return [pscustomobject]@{Count=$null;Reason="DfsrdiagOutputUnrecognized: $excerpt"}
 }
-function Send-ReportMail([string]$Subject,[string]$Body,[ValidateSet('Report','Error')][string]$MailPurpose='Report'){
+function Send-ReportMail([string]$Subject,[string]$Body,[ValidateSet('Report','Error')][string]$MailPurpose='Report',[string]$ReportCadenceKey=''){
     $mailParams = @{ Subject = $Subject; BodyHtml = $Body; VerboseLog = $true; MailPurpose = $MailPurpose }
     if (-not [string]::IsNullOrWhiteSpace($SmtpServer)) { $mailParams.SmtpServer = $SmtpServer }
     if (-not [string]::IsNullOrWhiteSpace($SendMailMode)) { $mailParams.SendMailMode = $SendMailMode }
@@ -338,78 +339,10 @@ function Send-ReportMail([string]$Subject,[string]$Body,[ValidateSet('Report','E
     if ($To.Count -gt 0) { $mailParams.To = ($To -join ';') }
     if (-not [string]::IsNullOrWhiteSpace($Cc)) { $mailParams.Cc = $Cc }
     if ($SmtpPort -ne 25) { $mailParams.SmtpPort = $SmtpPort }
+    if ($ReportCadenceKey) { $mailParams.ReportCadenceKey = $ReportCadenceKey }
     SendEmailHtmlReport @mailParams
 }
-function ConvertTo-ReportHtml([object[]]$r,[string]$status,[datetime]$started,[datetime]$ended,[string]$csv,[AllowNull()][object]$forestInfo=$null,[bool]$RemoteDcAdminChecksEnabled=$false){
-    $r = @($r)
-    $facts = @($DomainFacts.ToArray())
-    $c = @{OK='#107c10';Warning='#ff8c00';Critical='#d13438';NotMeasured='#667085'}[$status]
-    $criticalRows = @($r | Where-Object Status -eq Critical)
-    $warningRows = @($r | Where-Object Status -eq Warning)
-    $okRows = @($r | Where-Object Status -eq OK)
-    $notMeasuredRows = @($r | Where-Object Status -eq NotMeasured)
-    $find = @($r | Where-Object { $_.Status -in @('Critical','Warning') } | Sort-Object @{Expression={Rank $_.Status}},Domain,DC,Category,Check | Select-Object -First 200)
-    $forestName = if ($forestInfo -and $forestInfo.Name) { [string]$forestInfo.Name } else { [string]($r | Where-Object Forest | Select-Object -ExpandProperty Forest -First 1) }
-    $rootDomain = if ($forestInfo -and $forestInfo.RootDomain) { [string]$forestInfo.RootDomain } else { [string]($r | Where-Object Domain | Select-Object -ExpandProperty Domain -First 1) }
-    if ([string]::IsNullOrWhiteSpace($forestName)) { $forestName = 'NotAvailable' }
-    if ([string]::IsNullOrWhiteSpace($rootDomain)) { $rootDomain = 'NotAvailable' }
-    $forestMode = if ($forestInfo -and $forestInfo.ForestMode) { [string]$forestInfo.ForestMode } else { 'NotAvailable' }
-    $domains = if ($forestInfo -and $forestInfo.Domains) { @($forestInfo.Domains | Sort-Object) } else { @($r | Where-Object Domain | Select-Object -ExpandProperty Domain -Unique | Sort-Object) }
-    $domainBadges = (@($domains) | ForEach-Object { '<span class="tag">' + (ConvertTo-HtmlSafe $_) + '</span>' }) -join ' '
-    $dcNames = @($r | Where-Object { $_.Category -eq 'Connectivity' -and $_.Check -eq 'Ping' -and $_.DC } | Select-Object -ExpandProperty DC -Unique | Sort-Object)
-    $gcCount = if ($facts.Count -gt 0) { ($facts | Measure-Object -Property GlobalCatalogCount -Sum).Sum } else { 'NotMeasured' }
-    $lockedTotal = 0
-    $lockedRows = @($r | Where-Object { $_.Category -eq 'DomainStats' -and $_.Check -eq 'LockedUserAccounts' })
-    foreach ($row in $lockedRows) {
-        $value = 0.0
-        if ([double]::TryParse([string]$row.NumericValue,[Globalization.NumberStyles]::Float,[Globalization.CultureInfo]::InvariantCulture,[ref]$value)) { $lockedTotal += [int]$value }
-    }
-    if ($lockedRows.Count -eq 0) { $lockedTotal = 'NotMeasured' }
-    $domainsWithCritical = @($criticalRows | Where-Object Domain | Select-Object -ExpandProperty Domain -Unique).Count
-    $dcsWithCritical = @($criticalRows | Where-Object DC | Select-Object -ExpandProperty DC -Unique).Count
-    $unreachableDcs = @($criticalRows | Where-Object { $_.Category -eq 'Connectivity' -and $_.DC } | Select-Object -ExpandProperty DC -Unique).Count
-    $replicationCritical = @($criticalRows | Where-Object Category -eq Replication).Count
-    $sysvolCritical = @($criticalRows | Where-Object { $_.Category -eq 'SYSVOL' -and $_.Check -in @('SYSVOL','NETLOGON') }).Count
-    $b = [Text.StringBuilder]::new()
-    [void]$b.AppendLine('<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Segoe UI,Arial;background:#f5f8fb;color:#1f2937;padding:24px}.card{background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin:0 0 16px}.muted{color:#52657a}.small{font-size:11px}.metric{font-size:22px;font-weight:700;color:#0f172a}.tag{display:inline-block;border:1px solid #cbd8e6;background:#f8fbfe;border-radius:999px;padding:3px 8px;margin:2px;font-size:11px}.pill{color:#fff;border-radius:999px;padding:4px 10px;font-weight:600}.grid{width:100%;border-collapse:separate;border-spacing:8px}.grid td{border:1px solid #dde7f0;background:#f8fbfe;border-radius:6px;padding:10px}.riskCritical{color:#b42318;font-weight:700}.riskWarning{color:#b54708;font-weight:700}.riskNotMeasured{color:#667085;font-weight:700}.riskOK{color:#067647;font-weight:700}table{border-collapse:collapse;width:100%}th,td{border:1px solid #dde7f0;padding:7px;font-size:12px;text-align:left;vertical-align:top}th{background:#eef6fc}.rowOK{background:#f3fbf3}.rowWarning{background:#fff7e6}.rowCritical{background:#fde7e9}.rowNotMeasured{background:#f2f4f7}</style></head><body>')
-    [void]$b.AppendLine(("<div class='card'><h1>Active Directory Health Check <span class='pill' style='background:{0}'>{1}</span></h1><p class='muted'>RunId: {2}<br>Machine: {3}<br>Started UTC: {4}<br>Ended UTC: {5}<br>Duration: {6}</p></div>" -f $c,$status,(ConvertTo-HtmlSafe $RunId),(ConvertTo-HtmlSafe $env:COMPUTERNAME),(ConvertTo-IsoUtc $started),(ConvertTo-IsoUtc $ended),(ConvertTo-HtmlSafe ((New-TimeSpan -Start $started -End $ended).ToString()))))
-    [void]$b.AppendLine(("<div class='card'><h2>Forest recap</h2><table><tr><th>Forest</th><td>{0}</td><th>Root domain</th><td>{1}</td></tr><tr><th>Forest mode</th><td>{2}</td><th>Remote DC admin checks</th><td>{3}</td></tr><tr><th>Domains</th><td>{4}</td><th>Domain controllers</th><td>{5}</td></tr><tr><th>Global catalogs</th><td>{6}</td><th>Domains scanned</th><td>{7}</td></tr></table></div>" -f (ConvertTo-HtmlSafe $forestName),(ConvertTo-HtmlSafe $rootDomain),(ConvertTo-HtmlSafe $forestMode),$(if($RemoteDcAdminChecksEnabled){'Enabled'}else{'Disabled'}),@($domains).Count,$dcNames.Count,$gcCount,$domainBadges))
-    [void]$b.AppendLine(("<div class='card'><h2>Operational recap</h2><table class='grid'><tr><td><div class='metric'>{0}</div><div>Total checks</div></td><td><div class='metric riskCritical'>{1}</div><div>Critical</div></td><td><div class='metric riskWarning'>{2}</div><div>Warning</div></td><td><div class='metric riskOK'>{3}</div><div>OK</div></td></tr><tr><td><div class='metric'>{4}</div><div>Domains with critical findings</div></td><td><div class='metric'>{5}</div><div>DCs with critical findings</div></td><td><div class='metric'>{6}</div><div>Unreachable DCs</div></td><td><div class='metric'>{7}</div><div>Locked user accounts</div></td></tr><tr><td><div class='metric'>{8}</div><div>Replication critical rows</div></td><td><div class='metric'>{9}</div><div>SYSVOL/NETLOGON critical rows</div></td><td><div class='metric'>{10}</div><div>Total DCs</div></td><td><div class='metric'>{11}</div><div>Domains</div></td></tr></table></div>" -f $r.Count,$criticalRows.Count,$warningRows.Count,$okRows.Count,$domainsWithCritical,$dcsWithCritical,$unreachableDcs,$lockedTotal,$replicationCritical,$sysvolCritical,$dcNames.Count,@($domains).Count))
-    [void]$b.AppendLine(("<div class='card'><h2>Measurement coverage</h2><p><span class='riskNotMeasured'>{0} NotMeasured</span> checks were not executed or could not be measured. They are excluded from the OK count and do not imply healthy results.</p></div>" -f $notMeasuredRows.Count))
-    [void]$b.AppendLine('<div class="card"><h2>FSMO roles</h2><table><tr><th>Scope</th><th>Domain</th><th>Role</th><th>Holder</th><th>Status</th></tr>')
-    foreach ($x in @($r | Where-Object Category -eq FSMO | Sort-Object Domain,Check)) { $scope = if ($x.Check -in @('SchemaMaster','DomainNamingMaster')) { 'Forest' } else { 'Domain' }; [void]$b.AppendLine(("<tr class='row{0}'><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td><td>{0}</td></tr>" -f (ConvertTo-HtmlSafe $x.Status),(ConvertTo-HtmlSafe $scope),(ConvertTo-HtmlSafe $x.Domain),(ConvertTo-HtmlSafe $x.Check),(ConvertTo-HtmlSafe $x.DC))) }
-    [void]$b.AppendLine('</table></div>')
-    [void]$b.AppendLine('<div class="card"><h2>Priority findings</h2><table><tr><th>Type</th><th>Name</th><th>Critical</th><th>Warning</th></tr>')
-    $priorityGroups = @()
-    $priorityGroups += @($r | Where-Object DC | Group-Object DC | ForEach-Object { $it = @($_.Group); [pscustomobject]@{ Type='DC'; Name=$_.Name; Critical=@($it | Where-Object Status -eq Critical).Count; Warning=@($it | Where-Object Status -eq Warning).Count } })
-    $priorityGroups += @($r | Group-Object Category | ForEach-Object { $it = @($_.Group); [pscustomobject]@{ Type='Category'; Name=$_.Name; Critical=@($it | Where-Object Status -eq Critical).Count; Warning=@($it | Where-Object Status -eq Warning).Count } })
-    foreach ($g in @($priorityGroups | Where-Object { $_.Critical -gt 0 -or $_.Warning -gt 0 } | Sort-Object @{Expression='Critical';Descending=$true},@{Expression='Warning';Descending=$true},Type,Name | Select-Object -First 20)) { [void]$b.AppendLine(("<tr><td>{0}</td><td>{1}</td><td class='riskCritical'>{2}</td><td class='riskWarning'>{3}</td></tr>" -f (ConvertTo-HtmlSafe $g.Type),(ConvertTo-HtmlSafe $g.Name),$g.Critical,$g.Warning)) }
-    [void]$b.AppendLine('</table></div>')
-    [void]$b.AppendLine('<div class="card"><h2>Domain status summary</h2><table><tr><th>Domain</th><th>DCs</th><th>OK</th><th>Warning</th><th>Critical</th><th>NotMeasured</th><th>Locked users</th><th>FSMO</th><th>Replication</th><th>SYSVOL</th></tr>')
-    foreach ($g in ($r | Where-Object Domain | Group-Object Domain | Sort-Object Name)) {
-        $it = @($g.Group)
-        # A failed domain scan can leave findings without facts or account measurements.
-        $fact = $facts | Where-Object Domain -eq $g.Name | Select-Object -First 1
-        $locked = $it | Where-Object { $_.Category -eq 'DomainStats' -and $_.Check -eq 'LockedUserAccounts' } | Select-Object -First 1
-        $lockedValue = if ($locked) { $locked.NumericValue } else { 'NotMeasured' }
-        $fsmoRows = @($it | Where-Object Category -eq FSMO)
-        $repRows = @($it | Where-Object Category -eq Replication)
-        $sysvolRows = @($it | Where-Object Category -eq SYSVOL)
-        $fsmoWorst = if ($fsmoRows.Count -gt 0) { Worst $fsmoRows } else { 'NotMeasured' }
-        $repWorst = if ($repRows.Count -gt 0) { Worst $repRows } else { 'NotMeasured' }
-        $sysvolWorst = if ($sysvolRows.Count -gt 0) { Worst $sysvolRows } else { 'NotMeasured' }
-        $dcCount = if ($fact) { $fact.DCCount } else { 'NotMeasured' }
-        [void]$b.AppendLine(("<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td><td>{5}</td><td>{6}</td><td class='risk{7}'>{7}</td><td class='risk{8}'>{8}</td><td class='risk{9}'>{9}</td></tr>" -f (ConvertTo-HtmlSafe $g.Name),$dcCount,@($it | Where-Object Status -eq OK).Count,@($it | Where-Object Status -eq Warning).Count,@($it | Where-Object Status -eq Critical).Count,@($it | Where-Object Status -eq NotMeasured).Count,(ConvertTo-HtmlSafe $lockedValue),$fsmoWorst,$repWorst,$sysvolWorst))
-    }
-    [void]$b.AppendLine('</table></div>')
-    [void]$b.AppendLine('<div class="card"><h2>Critical and warning findings</h2><table><tr><th>Status</th><th>Domain</th><th>DC</th><th>Category</th><th>Check</th><th>Value</th><th>Threshold</th><th>Details</th></tr>')
-    if ($r.Count -eq 0) { [void]$b.AppendLine('<tr class="rowNotMeasured"><td colspan="8">No health measurements are available.</td></tr>') }
-    elseif ($find.Count -eq 0 -and $notMeasuredRows.Count -gt 0) { [void]$b.AppendLine('<tr class="rowNotMeasured"><td colspan="8">No critical or warning findings; unmeasured checks do not imply healthy results.</td></tr>') }
-    elseif ($find.Count -eq 0) { [void]$b.AppendLine('<tr class="rowOK"><td colspan="8">No critical or warning findings.</td></tr>') }
-    foreach ($x in $find) { [void]$b.AppendLine(("<tr class='row{0}'><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td><td>{5}</td><td>{6}</td><td>{7}</td></tr>" -f (ConvertTo-HtmlSafe $x.Status),(ConvertTo-HtmlSafe $x.Domain),(ConvertTo-HtmlSafe $x.DC),(ConvertTo-HtmlSafe $x.Category),(ConvertTo-HtmlSafe $x.Check),(ConvertTo-HtmlSafe $x.NumericValue),(ConvertTo-HtmlSafe $x.Threshold),(ConvertTo-HtmlSafe $x.Details))) }
-    [void]$b.AppendLine('</table></div><div class="card small"><h2>Technical files</h2><p>CSV: ' + (ConvertTo-HtmlSafe $csv) + '</p></div></body></html>')
-    $b.ToString()
-}
+
 function Invoke-DcCheck($ForestName,$DomainName,$DC,$AllDcs){
     $dcName=if($DC.HostName){[string]$DC.HostName}else{[string]$DC.Name}
     foreach($port in 389,3268,445){$s=Get-Date;try{$ok=Invoke-Retry {Test-Port $dcName $port};$stat=if($ok -or ($port -eq 3268 -and -not $DC.IsGlobalCatalog)){'OK'}else{'Critical'};Add-Row $ForestName $DomainName $dcName Connectivity "TCP $port" $stat ([int]$ok) "Reachable=$ok" 'Open' "TCP port $port" (Ms $s)}catch{Add-Row $ForestName $DomainName $dcName Connectivity "TCP $port" Critical 0 Error Open $_.Exception.Message (Ms $s)}}
@@ -511,7 +444,22 @@ try{
     Remove-SmartM365TimestampedFilesOlderThan -FolderPath $OutputFolder -FilePattern '*.csv' -RetentionDays 7 -LogFile $global:LogTextFile
     Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csv
     Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestCsv
-    $end=Get-Date;$worst=Worst $all;$subject="SMART365 - [$($worst.ToUpperInvariant())] Active Directory Health Check - $forestName - $RunDateUtc";$html=ConvertTo-ReportHtml -r $all -status $worst -started $RunStarted -ended $end -csv $csv -forestInfo $forest -RemoteDcAdminChecksEnabled:$EnableRemoteDcAdminChecks;if($AlwaysSend -or $worst -ne 'OK'){Send-ReportMail $subject $html}
+    $end=Get-Date
+    $worst=Worst $all
+    $subject="SMART365 - [$($worst.ToUpperInvariant())] Active Directory Health Check - $forestName - $RunDateUtc"
+    $mailInputs = @{
+        Status=$worst; Started=$RunStarted.ToString('o'); Ended=$end.ToString('o'); Csv=$csv
+        ForestInfo=@{Name=$forestName; RootDomain=[string]$forest.RootDomain; ForestMode=[string]$forest.ForestMode; Domains=@($forest.Domains)}
+        RemoteDcAdminChecksEnabled=[bool]$EnableRemoteDcAdminChecks; Facts=@($DomainFacts.ToArray())
+        ReportRunId=$RunId; ReportHost=$env:COMPUTERNAME; RunDateUtc=$RunDateUtc
+        PathSharePointUploads=@(Get-SmartM365ReportUploadReference -Paths @($csv,$latestCsv))
+    }
+    Save-SmartM365ReportInputs -Producer 'SmartM365-ActiveDirectory-HealthCheck' -LatestFolder $LatestCsvFolderPath -TenantKey $global:SmartM365TenantKey -Files 'AD_HealthCheck.csv' -InputData $mailInputs
+    $html=ConvertTo-ReportHtml -r $all -status $worst -started $RunStarted -ended $end -csv $csv -forestInfo $forest -RemoteDcAdminChecksEnabled:$EnableRemoteDcAdminChecks
+    if ($AlwaysSend -or $worst -ne 'OK' -or (Get-LocalConfigValue 'ReportMailCadence' $null)) {
+        $reportCadenceKey = if ($worst -eq 'OK') { 'AD.HealthCheck' }
+        Send-ReportMail $subject $html -ReportCadenceKey $reportCadenceKey
+    }
     $summaryStatus=if($worst -eq 'OK'){'Success'}else{'CompletedWithWarnings'}
     $businessCriticalCount = @($all | Where-Object Status -eq Critical).Count
     $businessWarningCount = @($all | Where-Object Status -eq Warning).Count
@@ -550,12 +498,11 @@ try{
 }
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 
-
 # SIG # Begin signature block
 # MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDAg4ipv+J4lzML
-# 6sOmORYTOyPRsY8g4eO0DX+mnEze4aCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDAG+rmBzzyjTOI
+# mGHAF6876XX8jg9CTMjgqtPsnb5qDaCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -692,31 +639,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
 # EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
 # DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
-# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg4mrA6OCkujSH
-# VP3DIPgN8TfzsDtEKKIsJ9izFvA3z9EwDQYJKoZIhvcNAQEBBQAEggGAqAyJhC9T
-# uSf0QQ+6fyUqBCG0JCRYY/MWvAG0yd0dXVexeiSXeA+VTZMaYbEhMhqwAQ++5G+o
-# 3QSGGrk3XaVHuSKeIeM23ozwk21nkMgrGQsMUXbjXcrCLTGq/NI98jSYff0JjkcK
-# IcKEelfTEkuXPuiSbu76M31cSUSBJXi+XKhjW/f3m6wEZJMZPNBu1Zl/Cg93yT9o
-# ZuQJId+bTTCiCouOraW/HOayHNknx8Hdy1Pn3DUOeMcC/Z+4awDJpeai9Yt3GBm1
-# Ks3FF/bJ1l5qojSiNOoZvFRo56dy19wP446zLrtPelJmNJqV9IVH+7nbfQbRDypj
-# 1VYkHiOjFBhHJLIZlBGRlU1NoWbb+vsKMMT5uSRghElSoPPR8AHoCwoqa/YsZTT4
-# I1Y8ZRyX3rt0MXRvMBkBaw88NIphOWkYjkHaLfAwsoRtEvVmqf2JrFbsQXx+gPls
-# p3PtSDBqBYbQPUY8+C+Kg3Fch/6ViYwyQg+T0vgBAai7z5cuEnXdnFsooYIDIzCC
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg23OCjf8v3qHT
+# 2Z4xobxwqMEw5hvPukHq1IA80jpwj+YwDQYJKoZIhvcNAQEBBQAEggGAPskyFw1k
+# 2R0F2V9iiWTeaKl49T8GH2ukgKJUDqxmfzKCVTXiG7CQ1Vbyozkl0CiqAb3LAXsJ
+# 8gWCSh/jyCSRoi64VgaDhkoAB7/Way89m9aNQf2s7UqM2UI1NRekSY/uQIsnNvmo
+# V+VRKuL+ceGvm8tD8YDffnPt1KDZZFqscTLvOyzWsepDrVdbUwzYjo3JkF1tYbDW
+# wvT2r8cQkMbhqtfXtqfpk5PHpjQAmSkW4QSxLb1KMVROP79Cbpwq7ADnZJhYoCAe
+# 8WDG4u3O6UWNVpqzTsfousKCh7kYZzp1Sb69wxJQzUTTni+Tp4QgkiZKQcUUaMgy
+# JPy3MidODTVmRg1922QicOGj/SWfZYcSqfpXrFGUe6JKq9afwCKe2Cu95ftCyC08
+# +GtGshPPllluIHrUaqG3oqOEZmZrjpHrNLPSRofciLJYgXZpj5zWC+q6NmQfCyXF
+# nMJl+WFiMHMf/sftEY+YIE28yfhPOBJdhZcOGNZUF8+H2pfrfScRXqhZoYIDIzCC
 # Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
 # BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
 # ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
 # AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
-# MjYxMTAxMTY1OTA0WjA/BgkqhkiG9w0BCQQxMgQwXIHy+nTLUtHJVeaZxaUVKgt6
-# HfNjo7CXrpnQLIvGDTITZ3x8ILiVMOLpPW6lEeJ5MA0GCSqGSIb3DQEBAQUABIIC
-# AImgOAsNhA2dBi3GPEDsH9/9GcZZAkzHkTNH0xgca/EMhvU4cZxaa8szSY/W8IGz
-# 8JfgWuhnQBhfhALpVbT/VwinVw5DdyqxoeHZtnt/T8Gm2sp/dkgE+GoNp5+tvHvY
-# TfYJkp8PQATPlvB9YM8iIYF/W/+gaBJblSk+GN2P6aMTG5CRiCYWA45k/ozpQ04p
-# VH0ZpFPizIXuQ2HNh7sl1Poa+r4UKY3/xlrARHHN6QYjBfZ0nhxx9l6pKWq+A8oy
-# dprenei+gW2X1Y8uUuSwhjJqUUz/z+9H+PQH7UrQgQBReUyv/e2CCPXVpNdwNbyO
-# ucfvwVlTPlrIBNT9GYTNOrd7MhiKYUehGi7NTZp+JAZmeLpp6Fr4hSR6xKSgpfca
-# 1m4OtInx9eLV5IBQUb+WP4bEByZNeGGjFYoDte3Kgmcfj+6hq5VsMLgZ1YhbAh1H
-# aihR5IOMECOu/5ki5Vi4N6s2ip45oILAQyDhibRnvfH3yO2NnNXErH+JMeP6AZjW
-# KLj+HGK7Oxy4H8gDrINKQn1tKCvpsPNehcoBM+Mnz1ASCnjwFJsCPJ5qs3+QmOkr
-# snOnBkbAIZL0qAKHmOcE7EY/+dw3uojVdSKu9vwIjVc9+kbvtuO6S5/AhYlodPJD
-# fgJD6vxAiHkd5CVn2HE2kh60R96mZVEaw6rwvzhrqEaB
+# MjYxMTE5MDkxNDQ5WjA/BgkqhkiG9w0BCQQxMgQwOxZZMx5wnTlmUWq0WCnEs/Xy
+# qRDhwEFR8EU8BHp7N2pPwEamM3NNwyLqdgYPRtCRMA0GCSqGSIb3DQEBAQUABIIC
+# AAd7vtPs0q+geHK5XA1YedUNvahXAt0Bj14MRKNdGoIPvFSV01WqEYnG90LyMWn1
+# 12eAKjAeQ5bkjCcYMH97WqNqm7T1x4uA4U0YN0pg/bYVZJ2b3v6a2tvLOvdaz5dO
+# 64bulgjvKZ4YlsOcjL3Kfm+TSsrbpp/2IWWyPCNWcE7l9gjo9QQqHym1goFNPxrC
+# 4+Y6+8xCQsnx8wMAVAl1QlShPdDTTY3Z2SJ4HAZIWQSOB/xqytablmoRPlfyTJrf
+# /T2G5EkZTyfaovOAc63Sai+0XwmIy84e3u2ur5kFMFpwwrzGEtRbMYyweJgNiDdd
+# qTJvOtwCo0lzQjmqR1RyFcaZ0zRhqLkgHCNdai2cL8Oa4zr7zVrpDu07s6J+VpNd
+# kxK/SLlR/Go18y4XU4ZRjeOf62NCqFSSf1l994flaA2LjBNfzKCf90nEKTBrmF9D
+# zoiXHlLjfywvSa0rl6xtOYt8cGbXpOEwKskOYgz5XLb4L+E0MGABnE82Z0IIwlVG
+# JHpv/8V8/E884/bGxbor/6ivj5gJh/LrMvcjTFpf8c0gMacY5Q7ZTzhRZ/a41YJM
+# AP29lztklUEDfOY3D9mJP/H/VexhI+67p1Km8j9NLVHsP3gNc/69tdtEekhHBwnu
+# 0OPp4wGSRh+GE0+1JJW35cm+kjRM2aGV2WrF1m4740Gf
 # SIG # End signature block

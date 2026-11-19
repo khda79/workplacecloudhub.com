@@ -26,7 +26,7 @@
     New-CimSession is used over DCOM only, to start the Health Checker scheduled task.
 
 .VERSION
-1.8.17
+1.8.18
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in;
@@ -38,7 +38,7 @@
     and the Health Checker scheduled task must be installed there.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.8.17
+    Version     : 1.8.18
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -49,7 +49,7 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
-    1.8.17
+    1.8.18
       - The SharePoint upload helper no longer returns its record, which leaked into the job log
         as a LocalFilePath object.
 
@@ -233,6 +233,8 @@ while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $sma
 }
 if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
 . (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+. (Join-Path $smartM365LifecycleRoot 'SmartInventory/Common/SmartM365.ReportRenderers.ps1')
+. (Join-Path $smartM365LifecycleRoot 'SmartInventory/Common/SmartM365.ReportInputs.ps1')
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
 try {
 function Repair-HealthCheckerModulePath {
@@ -289,7 +291,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.8.17"
+$ScriptVersion = "1.8.18"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 # Vendored Microsoft CSS-Exchange Health Checker (see ThirdParty\CSS-Exchange\HealthChecker\PROVENANCE.md).
 $HealthCheckerRelativePath = 'ThirdParty\CSS-Exchange\HealthChecker\HealthChecker.ps1'
@@ -475,7 +477,7 @@ function Import-SmartM365CoreModule {
 
         foreach ($modulePath in $moduleCandidates) {
             if (Test-Path -LiteralPath $modulePath) {
-                $minimumVersion = if ($modulePath -like '*WindowsPowerShell5*') { '1.0.67' } else { '1.0.118' }
+                $minimumVersion = if ($modulePath -like '*WindowsPowerShell5*') { '1.0.76' } else { '1.0.130' }
                 Import-Module -Name $modulePath -MinimumVersion $minimumVersion -Prefix Core -ErrorAction Stop
                 return
             }
@@ -528,31 +530,6 @@ function Invoke-ServersAndStorageSharePointUpload {
     }
 }
 
-function ConvertTo-ServersAndStorageEmailHtmlText {
-    param([AllowNull()]$Value)
-
-    if (Get-Command ConvertTo-CoreSmartM365EmailHtmlText -ErrorAction SilentlyContinue) {
-        return ConvertTo-CoreSmartM365EmailHtmlText -Value $Value
-    }
-
-    if ($null -eq $Value) { return '' }
-    return [System.Net.WebUtility]::HtmlEncode([string]$Value)
-}
-
-function New-ServersAndStorageEmailLinkHtml {
-    param(
-        [AllowNull()][string]$Text,
-        [AllowNull()][string]$Url
-    )
-
-    $safeText = ConvertTo-ServersAndStorageEmailHtmlText -Value $Text
-    if (-not [string]::IsNullOrWhiteSpace($Url)) {
-        $safeUrl = ConvertTo-ServersAndStorageEmailHtmlText -Value $Url
-        return "<a href=`"$safeUrl`" style=`"color:#2563eb;text-decoration:underline;`">$safeText</a>"
-    }
-
-    return $safeText
-}
 
 function New-ServersAndStorageSharePointLinksSectionHtml {
     param([array]$UploadRecords)
@@ -574,84 +551,6 @@ function New-ServersAndStorageSharePointLinksSectionHtml {
 "@
 }
 
-function ConvertTo-ServersAndStorageMailNumber {
-    param([AllowNull()]$Value)
-
-    if ($null -eq $Value) { return $null }
-    if ($Value -is [int] -or $Value -is [long] -or $Value -is [double] -or $Value -is [decimal]) { return [double]$Value }
-    $text = ([string]$Value).Trim()
-    if (-not $text) { return $null }
-    $number = 0.0
-    # Regenerated runs read numbers back from CSV text.
-    foreach ($culture in @([Globalization.CultureInfo]::InvariantCulture, [Globalization.CultureInfo]::CurrentCulture)) {
-        if ([double]::TryParse($text, [Globalization.NumberStyles]::Float, $culture, [ref]$number)) { return $number }
-    }
-    return $null
-}
-
-function Format-ServersAndStorageMailNumber {
-    param([AllowNull()]$Value, [int]$Decimals = 0, [string]$Unit)
-
-    $number = ConvertTo-ServersAndStorageMailNumber -Value $Value
-    if ($null -eq $number) { return 'N/A' }
-    $text = $number.ToString(('N{0}' -f $Decimals), [Globalization.CultureInfo]::InvariantCulture)
-    if ($Unit) { return "$text $Unit" }
-    return $text
-}
-
-function Limit-ServersAndStorageMailText {
-    param([AllowNull()]$Value, [int]$MaxLength = 140)
-
-    $text = (([string]$Value) -replace '\s+', ' ').Trim()
-    if ($text.Length -le $MaxLength) { return $text }
-    return $text.Substring(0, $MaxLength - 3) + '...'
-}
-
-function ConvertTo-ServersAndStorageMailDate {
-    param([AllowNull()]$Value)
-
-    if ($Value -is [datetime]) { return $Value }
-    $text = ([string]$Value).Trim()
-    if (-not $text -or $text -eq 'Unknown') { return $null }
-    $date = [datetime]::MinValue
-    # [string] of a DateTime is invariant; values read on the server may follow its culture.
-    foreach ($culture in @([Globalization.CultureInfo]::InvariantCulture, [Globalization.CultureInfo]::CurrentCulture)) {
-        if ([datetime]::TryParse($text, $culture, [Globalization.DateTimeStyles]::None, [ref]$date)) { return $date }
-    }
-    return $null
-}
-
-function New-ServersAndStorageMailTableHtml {
-    param(
-        [Parameter(Mandatory)][string[]]$Headers,
-        [Parameter(Mandatory)][object[]]$Rows,
-        [Parameter(Mandatory)][int[]]$ColumnWidths,
-        [int[]]$NoWrapColumns = @(),
-        [switch]$BreakAll
-    )
-
-    # Shared Core table, made fixed-layout with explicit column widths so long values wrap inside the 760px frame.
-    $html = [string](New-CoreSmartM365EmailTableHtml -Headers $Headers -Rows $Rows -NoWrapColumns $NoWrapColumns)
-    $html = $html.Replace('<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;', '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed;')
-    $headerMarker = '<th align="left" style="'
-    $parts = $html.Split([string[]]@($headerMarker), [StringSplitOptions]::None)
-    $builder = New-Object System.Text.StringBuilder
-    [void]$builder.Append($parts[0])
-    for ($index = 1; $index -lt $parts.Count; $index++) {
-        $width = if ($index -le $ColumnWidths.Count) { $ColumnWidths[$index - 1] } else { 0 }
-        if ($width -gt 0) { [void]$builder.Append(('<th align="left" width="{0}%" style="width:{0}%;' -f $width)) }
-        else { [void]$builder.Append($headerMarker) }
-        [void]$builder.Append($parts[$index])
-    }
-    $breakStyle = if ($BreakAll) { 'word-break:break-all;' } else { 'word-break:break-word;' }
-    return $builder.ToString().Replace('word-break:break-word;', $breakStyle + 'overflow-wrap:anywhere;')
-}
-
-function New-ServersAndStorageMailNoteHtml {
-    param([Parameter(Mandatory)][string]$Text)
-
-    return '<div style="font-size:12px;line-height:18px;color:#475569;margin-top:8px;">{0}</div>' -f (ConvertTo-ServersAndStorageEmailHtmlText -Value $Text)
-}
 
 function Get-ServersAndStorageMailFile {
     param([string[]]$Paths = @())
@@ -680,237 +579,6 @@ function Get-ServersAndStorageMailFile {
     }
 }
 
-function New-ServersAndStorageMailBodyHtml {
-    param(
-        [Parameter(Mandatory)][object]$Summary,
-        [AllowNull()][object[]]$PerServerSummary = @(),
-        [AllowNull()][object[]]$ReadinessInventory = @(),
-        [AllowNull()][object[]]$HealthCheckerSummary = @(),
-        [AllowNull()][object[]]$HealthCheckerFindings = @(),
-        [AllowNull()][object[]]$Files = @(),
-        [string]$Tenant,
-        [int]$WarningCount = 0,
-        [int]$ErrorCount = 0,
-        [AllowNull()]$CertificateBudgetSeconds = 120,
-        [int]$CertificateExpiryDays = 60,
-        [datetime]$ReferenceDate = (Get-Date)
-    )
-
-    $servers = @($PerServerSummary | Where-Object { $null -ne $_ } | Sort-Object ExchangeServerName)
-    $readinessRows = @($ReadinessInventory | Where-Object { $null -ne $_ })
-    $hcRows = @($HealthCheckerSummary | Where-Object { $null -ne $_ })
-    $hcFindings = @($HealthCheckerFindings | Where-Object { $null -ne $_ })
-    $toInt = { param($Value) $number = ConvertTo-ServersAndStorageMailNumber -Value $Value; if ($null -eq $number) { 0 } else { [int]$number } }
-    $summaryValue = { param($Name) Get-ObjectPropertyValue -InputObject $Summary -Name $Name }
-
-    $excludedServerNames = @(([string](& $summaryValue 'ExcludedServers') -split ';') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-
-    # Health Checker: an empty summary means it was not part of this run (switch or configuration).
-    $hcIncluded = $hcRows.Count -gt 0
-    $hcExcludedRows = @($hcRows | Where-Object { [string]$_.RunStatus -eq 'NotRun' -and [string]$_.RunMessage -match 'excluded by configuration' })
-    $hcScopedRows = @($hcRows | Where-Object { $hcExcludedRows -notcontains $_ })
-    $hcCompletedRows = @($hcScopedRows | Where-Object { [string]$_.RunStatus -eq 'Completed' })
-    $hcNotCompletedRows = @($hcScopedRows | Where-Object { [string]$_.RunStatus -ne 'Completed' })
-    $hcVulnerabilities = 0; $hcWarnings = 0
-    foreach ($row in $hcCompletedRows) { $hcVulnerabilities += & $toInt $row.VulnerabilityCount; $hcWarnings += & $toInt $row.WarningCount }
-    $hcCriticalFindings = @($hcFindings | Where-Object { [string]$_.Status -eq 'Error' }).Count
-
-    # Certificates: rows of category ExchangeCertificate written by the certificate phase (LocalFirst/RemoteRetry).
-    $certificateRows = @($readinessRows | Where-Object { [string]$_.Category -eq 'ExchangeCertificate' })
-    $certificateItemGroups = @($certificateRows | Where-Object { [string]$_.ObjectName -match ':' } | Group-Object ObjectName)
-    $certificateFailures = @($certificateRows | Where-Object { [string]$_.Setting -eq 'Collection' -and [string]$_.Value -eq 'Failed' })
-    $certificateRetries = @($certificateRows | Where-Object { [string]$_.Setting -eq 'CollectionPath' -and [string]$_.Value -eq 'RemoteRetry' })
-    $certificateUnknownRows = @($certificateRows | Where-Object { [string]$_.Value -eq 'Unknown' -and [string]$_.CollectionStatus -eq 'WARNING' })
-    $certificates = @(foreach ($group in $certificateItemGroups) {
-        $values = @{}
-        foreach ($row in $group.Group) { if (-not $values.ContainsKey([string]$row.Setting)) { $values[[string]$row.Setting] = $row.Value } }
-        $serverName = if ($values['Server']) { [string]$values['Server'] } else { ([string]$group.Name -split ':')[0] }
-        $notAfter = ConvertTo-ServersAndStorageMailDate -Value $values['NotAfter']
-        [pscustomobject]@{
-            Server   = $serverName
-            Subject  = [string]$values['Subject']
-            Services = [string]$values['Services']
-            NotAfter = $notAfter
-            DaysLeft = $(if ($null -ne $notAfter) { [int][Math]::Ceiling(($notAfter - $ReferenceDate).TotalDays) } else { $null })
-            Expired  = ($null -ne $notAfter -and $notAfter -lt $ReferenceDate)
-        }
-    })
-    $expiringCertificates = @($certificates | Where-Object { $null -ne $_.DaysLeft -and $_.DaysLeft -le $CertificateExpiryDays } | Sort-Object DaysLeft, Server)
-    $undatedCertificates = @($certificates | Where-Object { $null -eq $_.DaysLeft })
-
-    $infrastructureErrors = (& $toInt (& $summaryValue 'ComputeCollectionErrors')) + (& $toInt (& $summaryValue 'DiskDriveCollectionErrors')) + (& $toInt (& $summaryValue 'LogicalDiskCollectionErrors'))
-    $readinessErrorRows = @($readinessRows | Where-Object { $_.CollectionStatus -eq 'ERROR' -or $_.Importance -eq 'Error' })
-    $readinessWarningRows = @($readinessRows | Where-Object { $_.CollectionStatus -eq 'WARNING' -or $_.Importance -eq 'Warning' })
-    $lowSpaceWarnings = & $toInt (& $summaryValue 'LowSpaceWarnings')
-
-    $severity = 'Success'
-    if ($ErrorCount -gt 0 -or $infrastructureErrors -gt 0 -or $readinessErrorRows.Count -gt 0) { $severity = 'Error' }
-    elseif ($WarningCount -gt 0 -or $readinessWarningRows.Count -gt 0 -or $lowSpaceWarnings -gt 0 -or $hcNotCompletedRows.Count -gt 0 -or $hcVulnerabilities -gt 0) { $severity = 'Warning' }
-    $statusBadge = switch ($severity) { 'Error' { 'Completed with errors'; break } 'Warning' { 'Completed with warnings'; break } default { 'Completed' } }
-
-    $okCard = @{ Background = '#f0fdf4'; Border = '#bbf7d0'; Accent = '#166534' }
-    $warnCard = @{ Background = '#fff7ed'; Border = '#fed7aa'; Accent = '#9a3412' }
-    $errorCard = @{ Background = '#fef2f2'; Border = '#fecaca'; Accent = '#b91c1c' }
-    $newCard = {
-        param($Label, $Value, $Detail, $Colors)
-        [pscustomobject]@{ Label = $Label; Value = $Value; Detail = $Detail; Background = $Colors.Background; Border = $Colors.Border; Accent = $Colors.Accent; Span = 1; FontSize = 24 }
-    }
-    $neutral = @{ Background = '#f8fafc'; Border = '#dbe3ef'; Accent = '#0f172a' }
-    $blue = @{ Background = '#eff6ff'; Border = '#bfdbfe'; Accent = '#1d4ed8' }
-    $indigo = @{ Background = '#eef2ff'; Border = '#c7d2fe'; Accent = '#4338ca' }
-
-    $virtualMachines = @($servers | Where-Object { [string]$_.IsVirtualMachine -eq 'True' }).Count
-    $serversWithCompute = @($servers | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.IsVirtualMachine) }).Count
-    $hcCard = if (-not $hcIncluded) {
-        & $newCard 'Health Checker' 'Not run' 'disabled for this run' $neutral
-    } else {
-        $colors = if ($hcNotCompletedRows.Count -gt 0 -or $hcVulnerabilities -gt 0) { $warnCard } else { $okCard }
-        & $newCard 'Health Checker' ('{0}/{1}' -f $hcCompletedRows.Count, $hcScopedRows.Count) ('{0} vulnerabilities, {1} errors' -f $hcVulnerabilities, $hcCriticalFindings) $colors
-    }
-    $certificateCard = if ($certificateRows.Count -eq 0) {
-        & $newCard 'Certificates' 'N/A' 'no certificate data' $neutral
-    } else {
-        $colors = if ($certificateFailures.Count -gt 0) { $errorCard } elseif ($expiringCertificates.Count -gt 0 -or $certificateUnknownRows.Count -gt 0) { $warnCard } else { $okCard }
-        & $newCard 'Certificates' $certificates.Count ('{0} expiring, {1} failed' -f $expiringCertificates.Count, $certificateFailures.Count) $colors
-    }
-    $cards = @(
-        & $newCard 'Servers' (Format-ServersAndStorageMailNumber (& $summaryValue 'ExchangeServersCount')) ('{0} excluded' -f $excludedServerNames.Count) $neutral
-        & $newCard 'Virtual machines' $virtualMachines ('of {0} with compute data' -f $serversWithCompute) $blue
-        & $newCard 'vCPU' (Format-ServersAndStorageMailNumber (& $summaryValue 'TotalLogicalProcessorCount')) ('{0} physical cores' -f (Format-ServersAndStorageMailNumber (& $summaryValue 'TotalPhysicalCoreCount'))) $blue
-        & $newCard 'RAM' (Format-ServersAndStorageMailNumber (& $summaryValue 'TotalMemoryGB') -Unit 'GB') 'total memory' $blue
-        & $newCard 'Disks' (Format-ServersAndStorageMailNumber (& $summaryValue 'TotalDiskDriveCount')) 'physical disk drives' $indigo
-        & $newCard 'Provisioned storage' (Format-ServersAndStorageMailNumber (& $summaryValue 'TotalDiskDriveSizeTB') -Decimals 2 -Unit 'TB') ('{0} used' -f (Format-ServersAndStorageMailNumber (& $summaryValue 'TotalLogicalDiskUsedTB') -Decimals 2 -Unit 'TB')) $indigo
-        $hcCard
-        $certificateCard
-    )
-    $sections = New-Object System.Collections.Generic.List[object]
-    $sections.Add([pscustomobject]@{ Title = 'Key figures'; Html = (New-CoreSmartM365EmailKpiGridHtml -Cards $cards -RowSizes @(4, 4)) })
-
-    # Per-server summary.
-    $serverRows = New-Object System.Collections.Generic.List[object]
-    foreach ($server in $servers) {
-        $name = [string]$server.ExchangeServerName
-        $failedParts = @()
-        if ([string]$server.ComputeCollectionStatus -eq 'ERROR') { $failedParts += 'compute' }
-        if ([string]$server.DiskDriveCollectionStatus -eq 'ERROR') { $failedParts += 'disks' }
-        if ([string]$server.LogicalDiskCollectionStatus -eq 'ERROR') { $failedParts += 'volumes' }
-        $collection = if ($failedParts.Count -gt 0) { 'ERROR: ' + ($failedParts -join ', ') } elseif ((& $toInt $server.LowSpaceLogicalDiskCount) -gt 0) { 'Low space' } else { 'OK' }
-        $hcRow = @($hcRows | Where-Object { [string]$_.ServerName -eq $name } | Select-Object -First 1)
-        $hcText = if (-not $hcIncluded) { 'Not run' }
-            elseif ($hcRow.Count -eq 0) { 'No result' }
-            elseif ([string]$hcRow[0].RunStatus -eq 'Completed') { '{0} vuln, {1} err' -f (& $toInt $hcRow[0].VulnerabilityCount), (& $toInt $hcRow[0].ErrorCount) }
-            else { [string]$hcRow[0].RunStatus }
-        $certificateText = if ($certificateRows.Count -eq 0) { 'N/A' }
-            elseif (@($certificateFailures | Where-Object { [string]$_.ObjectName -eq $name }).Count -gt 0) { 'Failed' }
-            else {
-                $text = [string]@($certificates | Where-Object { $_.Server -eq $name }).Count
-                if (@($certificateRetries | Where-Object { [string]$_.ObjectName -eq $name }).Count -gt 0) { $text += ' (RemoteRetry)' }
-                $text
-            }
-        $serverRows.Add(@($name, (Format-ServersAndStorageMailNumber $server.LogicalProcessorCount), (Format-ServersAndStorageMailNumber $server.MemoryGB), ('{0} / {1} GB' -f (Format-ServersAndStorageMailNumber $server.DiskDriveCount), (Format-ServersAndStorageMailNumber $server.DiskDriveTotalSizeGB)), $collection, $hcText, $certificateText))
-    }
-    foreach ($name in $excludedServerNames) { $serverRows.Add(@($name, 'N/A', 'N/A', 'N/A', 'Excluded', 'Excluded', 'Excluded')) }
-    $maxServerRows = 25
-    if ($serverRows.Count -gt 0) {
-        $serverHtml = New-ServersAndStorageMailTableHtml -Headers @('Server', 'vCPU', 'RAM GB', 'Disks / size', 'Collection', 'Health Checker', 'Certificates') -Rows @($serverRows | Select-Object -First $maxServerRows) -ColumnWidths @(22, 8, 10, 16, 14, 15, 15) -NoWrapColumns @(1, 2)
-        if ($serverRows.Count -gt $maxServerRows) { $serverHtml += New-ServersAndStorageMailNoteHtml -Text ('Showing {0} of {1} servers; all servers are in the full report.' -f $maxServerRows, $serverRows.Count) }
-    } else {
-        $serverHtml = New-ServersAndStorageMailNoteHtml -Text 'No per-server data is available for this run.'
-    }
-    $sections.Add([pscustomobject]@{ Title = 'Per-server summary'; Html = $serverHtml })
-
-    # Collection issues: errors first, then warnings and partial reads.
-    $issues = New-Object System.Collections.Generic.List[object]
-    foreach ($server in $servers) {
-        $name = [string]$server.ExchangeServerName
-        foreach ($pair in @(@('ComputeCollectionStatus', 'Compute', 'CPU/RAM inventory failed or returned no data.'), @('DiskDriveCollectionStatus', 'Disk drives', 'Physical disk inventory failed or returned errors.'), @('LogicalDiskCollectionStatus', 'Logical disks', 'Logical disk inventory failed or returned errors.'))) {
-            if ([string](Get-ObjectPropertyValue -InputObject $server -Name $pair[0]) -eq 'ERROR') { $issues.Add([pscustomobject]@{ Rank = 0; Values = @('Infrastructure', $name, $pair[1], $pair[2]) }) }
-        }
-        $lowSpace = & $toInt $server.LowSpaceLogicalDiskCount
-        if ($lowSpace -gt 0) { $issues.Add([pscustomobject]@{ Rank = 2; Values = @('Capacity', $name, 'Low disk space', ('{0} logical disk(s) below the free-space threshold.' -f $lowSpace)) }) }
-    }
-    foreach ($row in $certificateFailures) {
-        $issues.Add([pscustomobject]@{ Rank = 0; Values = @('Certificates', [string]$row.ObjectName, 'Collection failed', (Limit-ServersAndStorageMailText -Value $row.ErrorMessage -MaxLength 180)) })
-    }
-    foreach ($row in $certificateRetries) {
-        $retryServer = [string]$row.ObjectName
-        $retryText = if (@($certificates | Where-Object { $_.Server -eq $retryServer }).Count -gt 0) { 'Native read failed or timed out; certificates were read through the remote session.' } else { 'Native read failed or timed out; remote retry attempted.' }
-        $issues.Add([pscustomobject]@{ Rank = 3; Values = @('Certificates', $retryServer, 'RemoteRetry', $retryText) })
-    }
-    foreach ($group in @($certificateUnknownRows | Group-Object { ([string]$_.ObjectName -split ':')[0] } | Sort-Object Name)) {
-        $settings = @($group.Group | ForEach-Object { [string]$_.Setting } | Sort-Object -Unique) -join ', '
-        $certificateCount = @($group.Group | ForEach-Object { [string]$_.ObjectName } | Sort-Object -Unique).Count
-        $issues.Add([pscustomobject]@{ Rank = 2; Values = @('Certificates', $group.Name, 'Unknown metadata', ('{0} certificate(s): {1} unavailable; no value inferred.' -f $certificateCount, $settings)) })
-    }
-    foreach ($row in @($readinessRows | Where-Object { [string]$_.Category -eq 'CollectorError' })) {
-        $issues.Add([pscustomobject]@{ Rank = 1; Values = @('Readiness', [string]$row.ObjectName, 'Collector failed', (Limit-ServersAndStorageMailText -Value $row.ErrorMessage -MaxLength 180)) })
-    }
-    foreach ($row in $hcNotCompletedRows) {
-        $issues.Add([pscustomobject]@{ Rank = 1; Values = @('Health Checker', [string]$row.ServerName, [string]$row.RunStatus, (Limit-ServersAndStorageMailText -Value $row.RunMessage -MaxLength 180)) })
-    }
-    $maxIssueRows = 15
-    $sortedIssues = @($issues | Sort-Object Rank, @{ Expression = { $_.Values[0] } }, @{ Expression = { $_.Values[1] } })
-    $issueNote = 'Readiness: {0} error(s), {1} warning(s) in total; every row is in the full report and Exchange_OnPrem_MigrationReadiness_Config.csv.' -f $readinessErrorRows.Count, $readinessWarningRows.Count
-    if ($sortedIssues.Count -gt 0) {
-        $issueHtml = New-ServersAndStorageMailTableHtml -Headers @('Area', 'Object', 'Issue', 'Details') -Rows @($sortedIssues | Select-Object -First $maxIssueRows | ForEach-Object { , $_.Values }) -ColumnWidths @(15, 22, 17, 46) -BreakAll
-        if ($sortedIssues.Count -gt $maxIssueRows) { $issueNote = ('Showing {0} of {1} issues. ' -f $maxIssueRows, $sortedIssues.Count) + $issueNote }
-        $issueHtml += New-ServersAndStorageMailNoteHtml -Text $issueNote
-    } else {
-        $issueHtml = New-ServersAndStorageMailNoteHtml -Text ('No collection failure was detected. ' + $issueNote)
-    }
-    $sections.Add([pscustomobject]@{ Title = 'Collection issues'; Html = $issueHtml })
-
-    # Health Checker status, explicit when it did not run.
-    $hcHtml = if (-not $hcIncluded) {
-        New-ServersAndStorageMailNoteHtml -Text 'Health Checker was not run in this run (disabled by parameter or configuration). No Health Checker state is reported.'
-    } else {
-        $hcVersion = @($hcRows | ForEach-Object { [string]$_.HealthCheckerVersion } | Where-Object { $_ } | Select-Object -Unique) -join ', '
-        $text = 'Health Checker {0} completed on {1} of {2} server(s). Vulnerabilities: {3}; critical findings (Status=Error): {4}; warnings: {5}.' -f $hcVersion, $hcCompletedRows.Count, $hcScopedRows.Count, $hcVulnerabilities, $hcCriticalFindings, $hcWarnings
-        if ($hcNotCompletedRows.Count -gt 0) { $text += ' Not completed: {0} server(s); their state is not measured.' -f $hcNotCompletedRows.Count }
-        if ($hcExcludedRows.Count -gt 0) { $text += ' Excluded by configuration: {0} server(s).' -f $hcExcludedRows.Count }
-        New-ServersAndStorageMailNoteHtml -Text $text
-    }
-    $sections.Add([pscustomobject]@{ Title = 'Health Checker'; Html = $hcHtml })
-
-    # Certificates expiring soon, when certificate data exists.
-    if ($certificateRows.Count -gt 0) {
-        $certificateText = '{0} certificate(s) read; {1} expiring within {2} days or expired; {3} server(s) failed; {4} RemoteRetry; per-server budget {5} s.' -f $certificates.Count, $expiringCertificates.Count, $CertificateExpiryDays, $certificateFailures.Count, $certificateRetries.Count, (Format-ServersAndStorageMailNumber $CertificateBudgetSeconds)
-        if ($undatedCertificates.Count -gt 0) { $certificateText += ' Expiry date unavailable: {0}.' -f $undatedCertificates.Count }
-        $certificateHtml = ''
-        if ($expiringCertificates.Count -gt 0) {
-            $maxCertificateRows = 10
-            $certificateTableRows = @($expiringCertificates | Select-Object -First $maxCertificateRows | ForEach-Object {
-                , @($_.Server, (Limit-ServersAndStorageMailText -Value $_.Subject -MaxLength 90), $_.NotAfter.ToString('yyyy-MM-dd'), $(if ($_.Expired) { 'Expired' } else { [string]$_.DaysLeft }), (Limit-ServersAndStorageMailText -Value $_.Services -MaxLength 40))
-            })
-            $certificateHtml = New-ServersAndStorageMailTableHtml -Headers @('Server', 'Subject', 'Expires', 'Days', 'Services') -Rows $certificateTableRows -ColumnWidths @(18, 40, 15, 10, 17) -NoWrapColumns @(2, 3) -BreakAll
-            if ($expiringCertificates.Count -gt $maxCertificateRows) { $certificateText += ' Showing {0} of {1}.' -f $maxCertificateRows, $expiringCertificates.Count }
-        }
-        $sections.Add([pscustomobject]@{ Title = 'Certificates'; Html = ($certificateHtml + (New-ServersAndStorageMailNoteHtml -Text $certificateText)) })
-    }
-
-    # Files: the full HTML report and CSV files, linked to SharePoint when uploaded.
-    $fileRows = foreach ($file in @($Files | Where-Object { $null -ne $_ })) {
-        $locationText = if ($file.SharePointPath) { [string]$file.SharePointPath } else { [string]$file.Path }
-        $locationHtml = New-ServersAndStorageEmailLinkHtml -Text $locationText -Url ([string]$file.WebUrl)
-        "<tr><td width=`"30%`" style=`"width:30%;border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;font-weight:700;color:#334155;word-break:break-all;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $file.Name)</td><td width=`"56%`" style=`"width:56%;border-bottom:1px solid #eef2f7;padding:9px 10px;font-family:Consolas,'Courier New',monospace;font-size:11px;color:#334155;word-break:break-all;`">$locationHtml</td><td width=`"14%`" align=`"right`" style=`"width:14%;border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;white-space:nowrap;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value ('{0} KB' -f $file.SizeKB))</td></tr>"
-    }
-    $filesHtml = if (@($fileRows).Count -gt 0) {
-        "<table role=`"presentation`" width=`"100%`" cellpadding=`"0`" cellspacing=`"0`" style=`"width:100%;table-layout:fixed;border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;`">$($fileRows -join "`r`n")</table>"
-    } else { New-ServersAndStorageMailNoteHtml -Text 'No output file is available.' }
-    $sections.Add([pscustomobject]@{ Title = 'Files'; Html = $filesHtml })
-
-    $runId = [string](& $summaryValue 'RunId')
-    $executionDate = [string](& $summaryValue 'ExecutionDate')
-    return New-CoreSmartM365EmailBody `
-        -Title 'Infrastructure and readiness summary' `
-        -Category 'SmartM365 Exchange OnPrem' `
-        -Severity $severity `
-        -StatusBadge $statusBadge `
-        -Tenant $Tenant `
-        -Message ('Exchange on-premises infrastructure and readiness inventory, run {0} ({1}). The complete HTML report is unchanged and linked in Files.' -f $runId, $executionDate) `
-        -Sections $sections.ToArray() `
-        -Footer 'This automated message was generated by SmartM365 from Exchange on-premises infrastructure and readiness inventory data.'
-}
 
 function Send-ServersAndStorageHtmlReport {
     param(
@@ -936,7 +604,8 @@ function Send-ServersAndStorageHtmlReport {
         [object[]]$HealthCheckerSummary = @(),
 
         [AllowNull()]
-        [object[]]$HealthCheckerFindings = @()
+        [object[]]$HealthCheckerFindings = @(),
+        [switch]$Manual
     )
 
     if (-not (Test-Path -LiteralPath $HtmlReportPath -PathType Leaf)) {
@@ -960,17 +629,20 @@ function Send-ServersAndStorageHtmlReport {
     $files = @(Get-ServersAndStorageMailFile -Paths (@($HtmlReportPath) + @($Attachments)))
     $counterValue = { param($Name) $variable = Get-Variable -Name $Name -Scope Script -ErrorAction SilentlyContinue; if ($variable) { [int]$variable.Value } else { 0 } }
     $tenantVariable = Get-Variable -Name Tenant -Scope Script -ErrorAction SilentlyContinue
-    $bodyHtml = New-ServersAndStorageMailBodyHtml `
-        -Summary $Summary `
-        -PerServerSummary @($PerServerSummary) `
-        -ReadinessInventory @($ReadinessInventory) `
-        -HealthCheckerSummary @($HealthCheckerSummary) `
-        -HealthCheckerFindings @($HealthCheckerFindings) `
-        -Files $files `
-        -Tenant $(if ($tenantVariable) { [string]$tenantVariable.Value } else { '' }) `
-        -WarningCount (& $counterValue 'ServersAndStorageWarningCount') `
-        -ErrorCount (& $counterValue 'ServersAndStorageErrorCount') `
-        -CertificateBudgetSeconds (Get-SmartM365EffectiveConfigValue -Name 'CertificateTimeoutSecondsPerServer' -DefaultValue 120)
+    $reportStamp = Get-Date
+    $mailInputs = @{
+        Files=$files; Tenant=$(if ($tenantVariable) { [string]$tenantVariable.Value } else { '' })
+        WarningCount=(& $counterValue 'ServersAndStorageWarningCount'); ErrorCount=(& $counterValue 'ServersAndStorageErrorCount')
+        CertificateBudgetSeconds=(Get-SmartM365EffectiveConfigValue -Name 'CertificateTimeoutSecondsPerServer' -DefaultValue 120)
+        ReferenceDate=$reportStamp; ReportHost=$env:COMPUTERNAME; Subject=$Subject
+    }
+    $reportLatest = [string](Get-SmartM365EffectiveConfigValue -Name 'LatestCsvFolderPath' -DefaultValue '')
+    if (-not $Manual -and $reportLatest) {
+        $mailSourceFiles = @($Attachments | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | ForEach-Object { [IO.Path]::GetFileName($_) })
+        Save-SmartM365ReportInputs -Producer 'SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory' -LatestFolder $reportLatest -TenantKey $global:SmartM365TenantKey -Files $mailSourceFiles -InputData $mailInputs
+    }
+    $mailInputs.Remove('Subject')
+    $bodyHtml = New-ServersAndStorageMailBodyHtml @mailInputs -Summary $Summary -PerServerSummary $PerServerSummary -ReadinessInventory $ReadinessInventory -HealthCheckerSummary $HealthCheckerSummary -HealthCheckerFindings $HealthCheckerFindings
 
     $mailParams = @{
         From     = $from
@@ -982,6 +654,7 @@ function Send-ServersAndStorageHtmlReport {
     if (-not [string]::IsNullOrWhiteSpace($sendMailMode)) { $mailParams['SendMailMode'] = $sendMailMode }
     if (-not [string]::IsNullOrWhiteSpace($cc)) { $mailParams['Cc'] = $cc }
 
+    if (-not $Manual) { $mailParams.ReportCadenceKey = 'Exchange.InfrastructureReadiness' }
     CoreSendEmailHtmlReport @mailParams
 }
 function Export-ServersAndStorageCsv {
@@ -2548,17 +2221,6 @@ function ConvertTo-ReadinessText {
     return [string]$Value
 }
 
-function Get-ObjectPropertyValue {
-    param(
-        [AllowNull()][object]$InputObject,
-        [Parameter(Mandatory)][string]$Name
-    )
-
-    if ($null -eq $InputObject) { return $null }
-    $property = $InputObject.PSObject.Properties[$Name]
-    if ($null -eq $property) { return $null }
-    return $property.Value
-}
 
 function Add-ExchangeReadinessRow {
     param(
@@ -3535,7 +3197,7 @@ function Invoke-ServersAndStorageHtmlReportRegeneration {
     if ($SendMail) {
         $subjectRunId = if (-not [string]::IsNullOrWhiteSpace([string]$summary.RunId)) { [string]$summary.RunId } else { Split-Path -Path $RunFolder -Leaf }
         $mailSubject = "SmartM365 Exchange OnPrem Servers and Storage inventory - $subjectRunId"
-        Send-ServersAndStorageHtmlReport `
+        Send-ServersAndStorageHtmlReport -Manual `
             -HtmlReportPath $htmlSummaryPath `
             -Subject $mailSubject `
             -Attachments @($summaryPath, $perServerSummaryPath, $exchangeReadinessPath, $healthCheckerSummaryPath, $healthCheckerFindingsPath) `
@@ -3909,12 +3571,11 @@ finally {
 }
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 
-
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBdO6CfK2yfhuNw
-# gwxh3myo/fRyd7n1g92nNmXnhuTtSqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAtIzICuJkbH30J
+# uaxqy9MO9v1PNhxkVdrmezVhfHKgWKCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3939,139 +3600,143 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIG4PybxZLr2K4kRBfg0wE3Hjh+sVOUYJdKAbGHcjYT8JMA0GCSqG
-# SIb3DQEBAQUABIIBgBqEL+crAHqGtGRc9l7mTjusKDU0GEFi2jTHTfB0mIsiogKy
-# /Ph3jS48kJYaZYhXFQRkXrKXwFMxsvRJVOsPmdjG+RE/bUiJ7W5/Chzhwzuymm2k
-# exbHN/zdvU6Dez9FMRd03XYivvxpELpwpcAZWPODHiXaYHuyWqUbGM0R8UqnrkLu
-# DWzGLzLpPv/aSoXo/PYQu7agLSMDCayxm6SANppqEn4HDR8we/tXv+/3RhHIoxA0
-# /9pwvz8faKIRD+/CCBGNqjmPO/9KhSnhnhIHGPCgmw31TdITf/GbWALuACO8/lyF
-# RKc09TbTyCPfhJxwmWn3R7qeytrL1+kvILV0PHOyV3sSuoOMlIK/9HihPrdzcBio
-# Qz5VTxCVm6WbTkemH6tzvb9YASZL33cy1sQPWN6o+2/sBilgBUUzRUX769i9O1A0
-# 3+vW+c6LcHLRyAKjZrd/hVDbLHvvuVhQ7HGJl+ZMAoUwKaCukDyDD23fcVjTdgB9
-# JVtQdgxn3SNwlSEsn6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTgwODQ0
-# MjRaMC8GCSqGSIb3DQEJBDEiBCAJP4+Wtqfizjcec2sSnBPv2zAcZR4h4Ulqrs5D
-# zXu5cDANBgkqhkiG9w0BAQEFAASCAgB5W7RnfNXUHQzPQFh3JYB7pueGoS/FLpR5
-# QiEUTp4pIjJKG96Hqm4vntIkb8bWW0KkXVDkudnc/sqWnRg1Yj8/2+pooO+t60FP
-# vowlV4MJhTkjLGLmD1sKJ/goX6mR87iR/+i0K6lXwkaiLsc1tL1yY+FlzWoPsPbM
-# IIfnUSSYlZTDQ9G+hwFa0qxIiebyDP9yXVBksdmhJhZDXeDHRGIrY+pslsttSGuq
-# jWjgfPWsoZwhUlaEJE+RJ9Ex011ngZLGi6DBv2U/OP3ZlIZG0IIKoWYbu6WJVjy7
-# 0guJdlwMcfYuNtu4kuNuAMb+o8xXkdESii+Qw6vfaVyS3/fD10eKqgnUfjQT9pCt
-# 6GmUTIzumsxfYXtCJ/OqCNsYUBGQomk9jEYOc3rJLYv0gOvotF5zL2mOHwOLYCaZ
-# rLJdN9N18yjV31k6KrZQKnzaZ990ToiHgEnrMeh9Miv/PI3NAvqoJRqGKRBltz7Z
-# GuJPZSXXF0pm5bQVDxvQH4iXg0GCEknA5vFNHk8tn78QAPezXMvWSt/NlCJqtcR2
-# UbxlnxSGAP6WGVpSJ/TplyDDhM1PQ2SijgQ2obhM4uzIj5JsWSt81+VoTqkbz7Tb
-# bFL1u6CLmgqhCONN8vf1cnaCYonRkj7TBsE1Vb+6SWo5r3J5kdwDicLVrJgQ9gcm
-# cCXeMIDrjg==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBoIw
+# ggRqoAMCAQICEDbCsL18Gzrno7PdNsvJdWgwDQYJKoZIhvcNAQEMBQAwgYgxCzAJ
+# BgNVBAYTAlVTMRMwEQYDVQQIEwpOZXcgSmVyc2V5MRQwEgYDVQQHEwtKZXJzZXkg
+# Q2l0eTEeMBwGA1UEChMVVGhlIFVTRVJUUlVTVCBOZXR3b3JrMS4wLAYDVQQDEyVV
+# U0VSVHJ1c3QgUlNBIENlcnRpZmljYXRpb24gQXV0aG9yaXR5MB4XDTIxMDMyMjAw
+# MDAwMFoXDTM4MDExODIzNTk1OVowVzELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
+# Y3RpZ28gTGltaXRlZDEuMCwGA1UEAxMlU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFt
+# cGluZyBSb290IFI0NjCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAIid
+# 2LlFZ50d3ei5JoGaVFTAfEkFm8xaFQ/ZlBBEtEFAgXcUmanU5HYsyAhTXiDQkiUv
+# pVdYqZ1uYoZEMgtHES1l1Cc6HaqZzEbOOp6YiTx63ywTon434aXVydmhx7Dx4IBr
+# Aou7hNGsKioIBPy5GMN7KmgYmuu4f92sKKjbxqohUSfjk1mJlAjthgF7Hjx4vvyV
+# DQGsd5KarLW5d73E3ThobSkob2SL48LpUR/O627pDchxll+bTSv1gASn/hp6IuHJ
+# orEu6EopoB1CNFp/+HpTXeNARXUmdRMKbnXWflq+/g36NJXB35ZvxQw6zid61qmr
+# lD/IbKJA6COw/8lFSPQwBP1ityZdwuCysCKZ9ZjczMqbUcLFyq6KdOpuzVDR3ZUw
+# xDKL1wCAxgL2Mpz7eZbrb/JWXiOcNzDpQsmwGQ6Stw8tTCqPumhLRPb7YkzM8/6N
+# nWH3T9ClmcGSF22LEyJYNWCHrQqYubNeKolzqUbCqhSqmr/UdUeb49zYHr7ALL8b
+# AJyPDmubNqMtuaobKASBqP84uhqcRY/pjnYd+V5/dcu9ieERjiRKKsxCG1t6tG9o
+# j7liwPddXEcYGOUiWLm742st50jGwTzxbMpepmOP1mLnJskvZaN5e45NuzAHteOR
+# lsSuDt5t4BBRCJL+5EZnnw0ezntk9R8QJyAkL6/bAgMBAAGjggEWMIIBEjAfBgNV
+# HSMEGDAWgBRTeb9aqitKz1SA4dibwJ3ysgNmyzAdBgNVHQ4EFgQU9ndq3T/9ARP/
+# FqFsggIv0Ao9FCUwDgYDVR0PAQH/BAQDAgGGMA8GA1UdEwEB/wQFMAMBAf8wEwYD
+# VR0lBAwwCgYIKwYBBQUHAwgwEQYDVR0gBAowCDAGBgRVHSAAMFAGA1UdHwRJMEcw
+# RaBDoEGGP2h0dHA6Ly9jcmwudXNlcnRydXN0LmNvbS9VU0VSVHJ1c3RSU0FDZXJ0
+# aWZpY2F0aW9uQXV0aG9yaXR5LmNybDA1BggrBgEFBQcBAQQpMCcwJQYIKwYBBQUH
+# MAGGGWh0dHA6Ly9vY3NwLnVzZXJ0cnVzdC5jb20wDQYJKoZIhvcNAQEMBQADggIB
+# AA6+ZUHtaES45aHF1BGH5Lc7JYzrftrIF5Ht2PFDxKKFOct/awAEWgHQMVHol9ZL
+# Syd/pYMbaC0IZ+XBW9xhdkkmUV/KbUOiL7g98M/yzRyqUOZ1/IY7Ay0YbMniIibJ
+# rPcgFp73WDnRDKtVutShPSZQZAdtFwXnuiWl8eFARK3PmLqEm9UsVX+55DbVIz33
+# Mbhba0HUTEYv3yJ1fwKGxPBsP/MgTECimh7eXomvMm0/GPxX2uhwCcs/YLxDnBdV
+# VlxvDjHjO1cuwbOpkiJGHmLXXVNbsdXUC2xBrq9fLrfe8IBsA4hopwsCj8hTuwKX
+# JlSTrZcPRVSccP5i9U28gZ7OMzoJGlxZ5384OKm0r568Mo9TYrqzKeKZgFo0fj2/
+# 0iHbj55hc20jfxvK3mQi+H7xpbzxZOFGm/yVQkpo+ffv5gdhp+hv1GDsvJOtJinJ
+# mgGbBFZIThbqI+MHvAmMmkfb3fTxmSkop2mSJL1Y2x/955S29Gu0gSJIkc3z30vU
+# /iXrMpWx2tS7UVfVP+5tKuzGtgkP7d/doqDrLF1u6Ci3TpjAZdeLLlRQZm867eVe
+# XED58LXd1Dk6UvaAhvmWYXoiLz4JA5gPBcz7J311uahxCweNxE+xxxR3kT0WKzAS
+# o5G/PyDez6NHdIUKBeE3jDPs2ACc6CkJ1Sji4PKWVT0/MIIGpzCCBI+gAwIBAgIR
+# AJCsCHIg/cWnxGtcxw33PQYwDQYJKoZIhvcNAQEMBQAwVzELMAkGA1UEBhMCR0Ix
+# GDAWBgNVBAoTD1NlY3RpZ28gTGltaXRlZDEuMCwGA1UEAxMlU2VjdGlnbyBQdWJs
+# aWMgVGltZSBTdGFtcGluZyBSb290IFI0NjAeFw0yNjAzMjUwMDAwMDBaFw00MTAz
+# MjQyMzU5NTlaMFUxCzAJBgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0
+# ZWQxLDAqBgNVBAMTI1NlY3RpZ28gUHVibGljIFRpbWUgU3RhbXBpbmcgQ0EgUjQx
+# MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAruRKogGtghxi+WYtW5oD
+# zPDVF8GGSfgbUKh6bONxi0wvrI1S8qbAYfvLr/ky5ILVRg//70pgNKq8xC3/WEQo
+# djEwAP2hmkGShoNAUQps4kd6Wwp74Fo7RlwQ1Mp949ytpWQDvCsYBbZccDmBAJC/
+# ggqiuL/c805fGcMw6TzIgyBWuUx5PGp9YnheSNPXFzaz0MPtREdZYk4WhtM+hazq
+# asMWVpj0WUAcNhN9vO/FAdWy9Gafdb7lmYLDKTTYjwqAY9P9RfixPPjUaJH6mnBS
+# NBdrX7a0Qdlux0ApS0fc48RW1m+W3tq3HiHzch1FHyhiLzCNjc6MUpcV5xalBvPO
+# w/FtQo/AxaJOvPCSsVrx0f/WkMpEm3fvVbrY9+oo9rIKv9ducE6VGfwIAtKYedG0
+# bO4Ba1MmlxPcErDqjLwggvrBJu73fwXpkhtE0hzV0psgm2vhQs3pHll9N00SHBdy
+# 2qndEcNuDh+46XouM2hoXCO533YQQOHPEUnMTWOo3hyxx5kjDE5PVqp+x+HS4VAT
+# +WBMG4GzeLr9YvZbU5x5YvLdcR1dErV/QRYK55rp019fZFF2NR+TkSW0WcmQ3b5t
+# aGcrXg49EpzKM6/mEpnSJXg1E13X6GO29rWs/LNvkGzsS8XGoRCGBls6ruofeebS
+# sHADR3GeIE5gIU927bjokLECAwEAAaOCAW4wggFqMB8GA1UdIwQYMBaAFPZ3at0/
+# /QET/xahbIICL9AKPRQlMB0GA1UdDgQWBBQ6dKUMZ8ZCUML9tfzHuyk0gvR6uTAO
+# BgNVHQ8BAf8EBAMCAYYwEgYDVR0TAQH/BAgwBgEB/wIBADATBgNVHSUEDDAKBggr
+# BgEFBQcDCDAjBgNVHSAEHDAaMAgGBmeBDAEEAjAOBgwrBgEEAbIxAQIBAwgwTAYD
+# VR0fBEUwQzBBoD+gPYY7aHR0cDovL2NybC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVi
+# bGljVGltZVN0YW1waW5nUm9vdFI0Ni5jcmwwfAYIKwYBBQUHAQEEcDBuMEcGCCsG
+# AQUFBzAChjtodHRwOi8vY3J0LnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNUaW1l
+# U3RhbXBpbmdSb290UjQ2LnA3YzAjBggrBgEFBQcwAYYXaHR0cDovL29jc3Auc2Vj
+# dGlnby5jb20wDQYJKoZIhvcNAQEMBQADggIBADLeUkdm8Z4DZvjfKHOhqu+hsdXN
+# t+X5F+48PB6PTAJCRgA3qxxO3YbAV7baps4K/+2WWoWUspBkT4T2NXK49NvJAfCs
+# ztHSgtqkAQMLX4KjCypJF/+m2Ktrk993g+gcgKdv1yg9C3JmYdJCnnL0ga+pZ/Wo
+# 1+rtXZ8dnwO8RCstTN6gYX0ElFi7Y7NpxbdBC1S6bc05V/SA9HC/ojj33W6Gdwnp
+# U/iVylSkdkoHtHeGIhQLT2ZH0qPM9Wdce8v2fZsDCJQQJ8rll7OGLDbsXa2CLf0M
+# RN9TwzifQ3rEuAXOx/TkzkZRFfwL34hf1XqSmaYq2tTMy2LgsPrqC2Z/6ZKb3fgr
+# zU0vphB4wSTWulitY/KlxbvoyKvrBvUCCx4sgeqf8aR65CbvM5MN/d/lahfXipU2
+# NlY0cXcnGS61XpmeGKd8It92/lufApZR9x6o5qMJWe0jq4JsfGMGDpIKx7FzkB8g
+# aejuBUW/CJ9Phc40+xJRonvVewn4S9yJVRWeM47irGbR9YlN3xruM/yZzhk+rAm9
+# AW06nv7ob6RQkAXR+cTxiAPy620FF41NrViYB4UyKpzfx7x8jh4ubTOMz954YIdq
+# yeiqqtsbBwXjWLP0dfMUPA3iIPnPdBKGnodGJTdSlPAMmKJdyvTPqmOXs/LMnf+2
+# Za0Z6FXsIB9z9aXLMIIG4jCCBMqgAwIBAgIRAOdO8lWwUE/626bf9/yLoxUwDQYJ
+# KoZIhvcNAQEMBQAwVTELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1NlY3RpZ28gTGlt
+# aXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFtcGluZyBDQSBS
+# NDEwHhcNMjYwMzI1MDAwMDAwWhcNMzcwNjI0MjM1OTU5WjByMQswCQYDVQQGEwJH
+# QjEXMBUGA1UECBMOR3JlYXRlciBMb25kb24xGDAWBgNVBAoTD1NlY3RpZ28gTGlt
+# aXRlZDEwMC4GA1UEAxMnU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFtcGluZyBTaWdu
+# ZXIgUjM3MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAsv/DbUvcUNlF
+# LQURd9m4+1St5+JudFKo5P803Iks4mFeNB9SymodP6BJJWBuNhOFQj9w77AVAeg5
+# qQpA2dIwp2QTyBHr2h9eWSTkMBVj9mV6+WI5SaW+vDZW7PhJTbysd9v9WB3Xt6ql
+# Ei8m47pcTy8+k/OfhziKiuzNQXqfC7KcoRD/6up8OZBsU0qxr7n5nh/iRfAp1QXF
+# TBQONBZSGIdHAyVRYYX033VoC8v71rizEKCpH97Pxbwcn9eq9K7W8h5v4npsMUoq
+# CS/c8mQwylDQGx15dHYV6NlcVFdjXD11l7qCrIy/unH5OlZtgx58QJRXRbGgQyBd
+# STpEpwuj3i5Qc52Z9m7hd7yCGCXKujf83hUQpOPx1w8+84EbEUTHVAfq4cpORaGW
+# gY8NJy6txmd3wpS1MeXrOaVAMczTgzAZ+yZBWIqdgQBgTxEeXldEToZOrRkxvn1I
+# jIlfr4I4NWJz+Rb52FshLVnkA/wdoad789Eb7XZDNKd4oMmnc636TgauaaVZP2LL
+# oU0JD/fYr53hwBn4uXu5ZsSfpnqAT60S7szJm/Na882xEoyRzLJ+UVbXOlHLO63D
+# KkAtdz1CDuwWxgRE1drnwplepT06dz+1yTr5p1AkUz21bzE6cT/8/kjh4OPzggYY
+# qrOBQPfuKEL5ZJPcN9jRgEpYvRlq5ucCAwEAAaOCAY4wggGKMB8GA1UdIwQYMBaA
+# FDp0pQxnxkJQwv21/Me7KTSC9Hq5MB0GA1UdDgQWBBRhEOl6Eq9RxIXU8s+kdA9Q
+# zSCv+DAOBgNVHQ8BAf8EBAMCBsAwDAYDVR0TAQH/BAIwADAWBgNVHSUBAf8EDDAK
+# BggrBgEFBQcDCDBKBgNVHSAEQzBBMAgGBmeBDAEEAjA1BgwrBgEEAbIxAQIBAwgw
+# JTAjBggrBgEFBQcCARYXaHR0cHM6Ly9zZWN0aWdvLmNvbS9DUFMwSgYDVR0fBEMw
+# QTA/oD2gO4Y5aHR0cDovL2NybC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVibGljVGlt
+# ZVN0YW1waW5nQ0FSNDEuY3JsMHoGCCsGAQUFBwEBBG4wbDBFBggrBgEFBQcwAoY5
+# aHR0cDovL2NydC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVibGljVGltZVN0YW1waW5n
+# Q0FSNDEuY3J0MCMGCCsGAQUFBzABhhdodHRwOi8vb2NzcC5zZWN0aWdvLmNvbTAN
+# BgkqhkiG9w0BAQwFAAOCAgEAA+o9jdGszfoZepOmygef1OlbkjrPd2QW9z3M8vVb
+# QSCruPeO2eRsC9GhZ4CMZfhkrixayYD67gQkbyiRCbJu5L/i0NQjlQhBvbWfiEba
+# +KHFKGud5YHRWhDZUtDeMIJGZG0BD7/sftZUo2Ifk+CXi/ZlM50+xK3OkqeXVi5G
+# ubDD/5txmYuqCT3T3LAilmoB+5th9sQxiMhyQuT3R/aYb4vypoZJLYklUzTalXle
+# W1nV9s4UROlE389CHDKAi/fepRSMnV8TghODDQxwzNGrOJZ04k/yhzHHDupfHPU5
+# 1FYJqXIvWq9SAAWdlNV1JGIxhkp/TAtxBwz/Vd/VbgVb2d9/wRFfxFkka39O0+4x
+# aZSl/oEK/1DqjxjJRO2Se9lGlJDScu21Zd23Cys3aYyB8y5H/+DFWtVe8PMKgr+V
+# uIDp0Rk5bneVDAEW0TPAT8Ufwl2F6DJiDg/KZk5NmsYES+CxvF7bnISEnQh0ZrWn
+# AJixquV0mElUx01wA5TuPIgyodxzNq/fC0hen9LBtdnfFfSZ+wt8A1Injsbio+DH
+# Vq1voYiVNpBfO7+nh9NB4AhRXNldPgr3zgjJ+47s0uNYy2iDXAZSlkP3ym/7gy31
+# jlu989SNpRWO14/LUNV2LSuXkRI1iLTPI6ZdXG0DnPPG7UftF0tk5m6BP9eNfr2t
+# j1sxggW7MIIFtwIBATBiME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNv
+# bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
+# EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
+# DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg31NAz2c5ILE1
+# UCj2akvA9+LxLvn0grU6q9jiF/nfH+EwDQYJKoZIhvcNAQEBBQAEggGAAedAJ2VV
+# +DUybx8ZXK75j0ZUmE/YsE1S9caFxcQVJOjvLwFgQAp0aU0keVFZdTPS9RrJ4YUg
+# mlQqX73e2OL5eZNXctvzhlxUd5NZ+phzX1g7zLif6YDWkHs/ywKxl6hE0GYguFlg
+# W/oqv+697sXxpx+wKOM+6RrH+FDPk10X0NUeeRoNOPfRaqJuMv/twE8HC7/t8tAx
+# YKeRbtvG6Ue8X4z+AcGaE2GVA9wk0xmRvVe32xv0wamLEWEDs2rRCrhJRIwl4+Uw
+# zy7+lcvvochytSlHCkUvk49b67GpPSQ5KXFiZ58EdLX5dsJgd/V/tFOmMpM7ZzUY
+# ayirKLPK0K0LbwH9N/IXAdiJYCf4RzT+k4XvK2K1b6jF60oLgpRAWTxQoPQr6XmC
+# J/Jp3IZ8kOFtn989z4xRV+V79LuSaZZCpcfTvcyCG/NyYb7vKTfsG/BaGumKtlRL
+# fLQCCstxRaL+xZP2IVsOBNH8bO103nsqct3TtzfpoP5Gb2DTtBrzhIDyoYIDIzCC
+# Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
+# BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
+# ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
+# AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
+# MjYxMTE5MDkxNTA2WjA/BgkqhkiG9w0BCQQxMgQw7JaCUW/4pmzxZvfqf5NIA8Ah
+# D1TCnJWdmI0ftxkPB50HM7RxaJvmvNWDn5Py7pCSMA0GCSqGSIb3DQEBAQUABIIC
+# AFG7nC53JaatDEjKmmsTN+uxTRwynN0JefrhhteMFU0qQE7cthMKnnJ5jJCeZdL5
+# TitJPuEm//aTC8ySmI9WTT+OfGLSpm2kW5clAU4Ork3QgA1OM/1Pxs1eVkZsevrm
+# ohyzWEdB1APdjr4lFOAAwknbbpbBuJpfz5Qz9Jmrqp9+lgBAUwm9Mpz3kjinWm3A
+# onaAd17zsCFA0LEq4TI/4so12rHOzoOetnMaYeSuvA5TlS2mH+8ok0113uMSGNu6
+# FDksyqG8cHzPweU/XvviGKWQ2fbq8j+WoO/V48Xp0JBiHMz+u+lKOcvyUa4EjHI/
+# QfvVEyffR1ZfbxGIhS8yhC07qd5qDUf+Jb2ej9e9vjg/cr3TsWiIomRsdmhvJfy/
+# Acyv4g/murtWxgJ3JawTq2Ho3srjG2FG19BpqkBNLcwLBcXutRYst582PiY/NNLM
+# X43iXwmS2Ya/9JtZW56ev//su3p47PpTwLGSo6AW9alt5wvPvq5cC7EnMVA6PAP9
+# 0Q7D4qhZoMqsCiYjiHqFUQ8kVUpY62OYUNtTCtVDVN4wSveyVGncxk6UcR1E0+H8
+# IlUeNF7zxncuK35khAR2pTWArNewdCBhvAmR0uTuX0F87cAKRk+D0lhXTDvWVmMk
+# Bcwc9i7YcBeZz/crjVkxZN1+ElzLEJdwWTsv6jDDaTTw
 # SIG # End signature block

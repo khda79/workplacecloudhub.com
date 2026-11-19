@@ -21,6 +21,7 @@ $tokens = $null
 $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
 if (@($errors).Count) { throw "Content parser errors: $($errors.Count)" }
+$reportAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path (Join-Path $folder '..\..\..') 'SmartInventory/Common/SmartM365.ReportRenderers.ps1'),[ref]$null,[ref]$null)
 $template = Get-Content $templatePath -Raw | ConvertFrom-Json
 if ($template.EnableSharePointUpload -ne $true -or $template.EnableWeeklyHistory -ne $true -or $template.SendMailMode -ne 'Graph') { throw 'Content template policy is invalid.' }
 $versionMatch = [regex]::Match($ast.Extent.Text, '(?s)\.VERSION\s+([0-9.]+)')
@@ -47,6 +48,9 @@ if ($ast.Extent.Text -notmatch '\$runBase\s*=\s*if\s*\(\$MaxItems\s*-gt\s*0\).*?
 if ($ast.Extent.Text -notmatch '\$databaseLockLookup\s*=\s*Get-LockStateLookup\s+-ContentDatabase\s+\$database' -or $ast.Extent.Text -match 'Get-LockStateLookup\s+[^\r\n]*-SiteUrl') { throw 'Limited runs must use the database-scoped lock-state lookup.' }
 foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-MySiteHostNames','Get-ObservedProperty','Test-MissingObservation','Resolve-SiteCategory','Resolve-QuotaUsage','Resolve-SiteLockObservation','Get-LockStateLookup','Assert-Deadline','Get-CollectionFailureStatus','Get-DatabaseCoverageStatus','Get-ContentPublicationDecision','Save-ContentWeeklyHistory','Write-RunCsv','Flush-RunRows','Ensure-GraphAuthenticationModule','Invoke-DailySummaryMail','Send-InventorySummaryMail','Get-ContentMailFarmEdition','Get-VerifiedInfrastructureMailData','New-ContentMailHtml','Send-ContentRunMail','Publish-QualifiedCsvUploads')) {
     $functionAst = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true))
+    if (-not $functionAst.Count) {
+        $functionAst = @($reportAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true))
+    }
     if ($functionAst.Count -ne 1) { throw "Missing function: $name" }
     . ([scriptblock]::Create($functionAst[0].Extent.Text))
 }
@@ -250,7 +254,7 @@ try {
     $script:mailParameters = $null
     $script:mailCalls = 0
     $script:mailShouldFail = $false
-    function SendEmailHtmlReport { [CmdletBinding()] param($From,$To,$Subject,$BodyHtml,$MailPurpose,$SmtpServer,$SmtpPort,$SendMailMode,$Cc) if ($script:mailShouldFail) { throw 'Simulated Graph mail failure' }; $script:mailParameters = $PSBoundParameters; $script:mailCalls++ }
+    function SendEmailHtmlReport { [CmdletBinding()] param($From,$To,$Subject,$BodyHtml,$MailPurpose,$SmtpServer,$SmtpPort,$SendMailMode,$Cc,$ReportCadenceKey) if ($script:mailShouldFail) { throw 'Simulated Graph mail failure' }; $script:mailParameters = $PSBoundParameters; $script:mailCalls++ }
     $script:EffectiveConfig = [pscustomobject]@{ From='sender@example.test'; To=''; ErrorMailTo='recipient@example.test'; SmtpServer='smtp.example.test'; SmtpPort=25; SendMailMode='SMTP'; Cc='' }
     Send-InventorySummaryMail -Subject 'Offline summary' -BodyHtml '<p>Summary</p>'
     if ($script:mailParameters.To -ne 'recipient@example.test' -or $script:mailParameters.From -ne 'sender@example.test' -or $script:mailParameters.SendMailMode -ne 'Graph' -or $script:mailParameters.ContainsKey('Attachments') -or $script:mailParameters.ContainsKey('SmtpServer')) { throw 'Content Graph mail routing or attachment policy failed.' }
@@ -326,6 +330,9 @@ try {
     $latestRoot = $infraRoot
     $global:SmartM365TenantKey = 'offline'
     $ForceSendDailySummary = $false
+    $ValidateOnly = $false
+    $MaxItems = 0
+    function Save-SmartM365ReportInputs { param($Producer,$LatestFolder,$TenantKey,$Files,$InputData) }
     Send-ContentRunMail -Status Qualified
     if (-not (Test-Path -LiteralPath (Join-Path $outputBase 'SmartM365-SharePoint-OnPrem-Content-DailySummary.sent')) -or $script:mailParameters.BodyHtml -notmatch 'SharePoint servers') { throw 'Qualified combined mail was not sent with infrastructure.' }
     Send-ContentRunMail -Status Failed -Failures @('Receipt lock is in use')
@@ -383,8 +390,8 @@ Write-Output 'PASS: content parser, nested configuration, persistent paths, lock
 # SIG # Begin signature block
 # MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBWFW8kY44Lo6rV
-# fN2RU7frD12YsO+zqnXX0udpcjKZ3aCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBfd3dilHIqs94C
+# IpvNBK1CJ5TwO9Ax0e+eDQ6Mdqh7j6CCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -521,31 +528,31 @@ Write-Output 'PASS: content parser, nested configuration, persistent paths, lock
 # bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
 # EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
 # DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
-# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgE5FyYiAPMkBm
-# hvRR2ZPk/mTZxsids0WgwbZ9KYrYbUswDQYJKoZIhvcNAQEBBQAEggGABy4OrbsF
-# Dq1o4a/AGuLjxDljgZFN69UejdWtSE37R30fDE0QKyrNjRc5OWfNxseAr2IKKE3f
-# p7qJZf4elwthz+4BJ6tXqOFNxCXtPF/rGh0MEQI9xBXYz/aDQblpf397ENG1QN/v
-# pbP33lisj2ZwandG8OnybUiJ2m+zfFsBSkOxjDpKqLCmAw8wvzUSIQ+HmOiRsZo5
-# /s0/8kn9LuTM7Qlesaksvf1HyzQu6irpBe9Y9AzL3chc0sWTsg6Ceo3VLVbC/nWN
-# nnFJ/yEbvUU7f6u6ht8KXQ+AfN75tvpqtRSpbOXJBJF5D3m520qr287G58Gepdws
-# 246i/jw+k5YFFUyKh5vIVL5auCI8xIgokN1tYcSNLmK5fEJIHUBD0nfxUJWnObbz
-# 3Zg0NwflNH5pfM7vRpVKBuL6UmnQDpe28++xDsubi3FUkgbhoR1xdrwhynPkmPlW
-# 1JiA/fCvtEzLLYusLbIL/cEitMX9MmhDci0ML8NzM94Kq8n7WZJ+NioUoYIDIzCC
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgnc5TXXv0G1qH
+# sg7nbADdRFlGUHgChGmSERTILiq7UIEwDQYJKoZIhvcNAQEBBQAEggGAqSRRvwpK
+# OPDnzdtQuj4ul/vD4XDs+tg7hW807/HzfR8W8YH7YcNihZYprcs6b9NEDD4Qqi3q
+# cwmXVWuSbhbzQwxqX+E8DGeoCox5zkoRKty636demfkkROdDp60MZj0X1H6ssf5M
+# yGSR2AI34nqXiTWc2ClVBrKKeFg2FfIGWXCgWmmH/VjrJv+yY1bUlgp9PK068o7T
+# Mh6cfuNY/LhL8tuu1FfFMfcJ4j4wGjP3L45B3cUuGpRrFWYkbLtZ+3nvU0O1mCpN
+# EM75lIhTRMRV566qM5XkRTC8bhel3wZ1hshWoRoZXj8ck3bcd2lOybr5P1W6B42m
+# IiFEV3oPSENKG97DHazQui7KgHjTz6VAmnOhof2La/VP8+N2p1ULyJ+uJB9B3sdW
+# OT1crQyjWWdONCYUAfHYXLEj2/gIvr3KhJo/UW8hgQS8BWJ2A0hCYGz7yPfTRGZF
+# rHsatfMngrS/BVCDx5cIwuQ2zIcmcw/K5kwaKye/GPkRKNk569efn3/noYIDIzCC
 # Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
 # BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
 # ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
 # AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
-# MjYxMTAxMTY1OTI2WjA/BgkqhkiG9w0BCQQxMgQwa9P5AIypahxxVxcBca1oTx5m
-# DgTjw3nEmAfgS5Qw3mEgHKH9gTTkebbZ+UJtePZTMA0GCSqGSIb3DQEBAQUABIIC
-# AKtnCNkNVOtdMvsfvKBwar223SDIHUKVpGKshYTff+1Xvn71kBierZbvrEV+Q0UU
-# punEViwzF+g5oz3At/t4w3KHSukIXXRPBW3kgOrvWUpnBkFz0+VftT4lCPVkVxuE
-# x2wZre6BBqHpyC+8AOn2XO+6p5CD9736CKa74CgEfYQdZFX7xLDMzQNpyAL479eU
-# 38nRveUEgZ4EeejuLirqTuBCXu6/P+3iMIWzMM19mm3G0Cue6Xsj4ldLD2r1Ho8J
-# vxckSnCWr1m6j1n2q9Fpko/pkoFN+RD+TzQVRr+EyC+M7oAv92aY4hFdmb9H1lYg
-# HGnzg0ZrDAPJdgckG1P0WXiesE3kjFfFa0pTVTWo66o9KpEouj62nf5uUX0S1vJi
-# ZlP3x4TMNvQa2UgUmxoh5KupKBuewCFxHHgHfsUcgLQb5wZ6qKIWGEFYzHX1e/rN
-# AxIObMFvY218mXM2Sh2QszsMjSb3k62W7A5bRTpy/U4/VapM7nEXXyYU1Bt4oKWF
-# ECA4UnmIFp87mDfbxlgsRUbEaB2jqw1nPddu+LMWm6yo82yiFymWOb/8JD0mD/YH
-# dihrPxqtBnBOssAbNFxN87GAPHKW/nmcHo9S4i/bpufMf0HP3XUhgPBpyrmNySeZ
-# TS3SwiOBlQVNShQGCNP65piMDyZ3uunUnbQ0X3Oz4AwN
+# MjYxMTE5MDkxNTIyWjA/BgkqhkiG9w0BCQQxMgQw4teb1XCCAul4k4+2rBtUhCyD
+# Ndj7fAxIMK+IwPr4704SRTjaDZ6MXFJTzHsLVQd6MA0GCSqGSIb3DQEBAQUABIIC
+# AHbo3BTNrfmYJR/2rvrrvv1bL7Vb1ZHOJCs1DIGP11JYpVEZfp6w2fCiQ6rb0st8
+# ZR+kRj4esrfZ/5353DjJvBeGZbm11fC25DcWcyGMjBszOaHuYyRPwTw8NZqH8kgG
+# hsZQx457b0lD+BJwYYIPGJ1tLwAFMaVWFCjc9hVXjYdxu87pcc3QbRorxICfmFwm
+# 5vSo43mPhYJ3dvSfcF6aK748RY1CLPwVcEb06BRX0qPQKjjnHRJVkW0QQN+o10Cb
+# ylkhdzN32iimmPXXuIYpdFj6BlveiAOM24i5ld8OeNVM90t035Ij7FE3B4Ckxp7a
+# tQ9ichMLSQYTPdHCaDC66plEp9SFsal8vqnzyvSmzXsqA3nngU0EN3HFZuY6GWee
+# rESLqa7pE6LhhAwUNJdPq5EhMNuujkJ9E02Sx0T+AYU68fSrEH8pGIJ7+TpcFm7G
+# fNCvS7tgCST13aufj2pxwlTMEcpBrpfG9MaFHjL2aW5PWizLIVUb0w6eiHjEaBbH
+# hgzKVSHXntDIklTLxYXOSAreC5/Tbt/l9kPss0VgBzRDWT8cWJLncuuoDI+hJQoI
+# u9AVVoLNziYiSuxo6oWw5j4A1LXjdnk/GLOqDzd2xZ2Ape24KUoLij9ypbm8H/W9
+# z8iKrE1aCKbi7fVOm6KUqfGXjWifbqqG/VKtF/8q1kEM
 # SIG # End signature block

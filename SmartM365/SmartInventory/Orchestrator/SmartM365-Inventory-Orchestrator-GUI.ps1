@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.42
+1.6.45
 #>
 [CmdletBinding()]
 param(
@@ -69,7 +69,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 }
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.42'
+$script:AppVersion = '1.6.45'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -1107,6 +1107,43 @@ $xaml = @'
                                 </TabControl>
                             </Grid>
                         </TabItem>
+                        <TabItem x:Name="ReportCadenceTab" Header="Report mail cadence">
+                            <Grid Margin="8">
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                <TextBlock Text="Automatic report email days (Europe/Paris). Changes apply to the script configuration shared by profiles using this installation." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                                <DataGrid x:Name="ReportCadenceGrid" Grid.Row="1" SelectionMode="Single" IsReadOnly="True" ClipboardCopyMode="None">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Script" Binding="{Binding Script}" Width="420"/>
+                                        <DataGridTextColumn Header="Mode" Binding="{Binding Mode}" Width="125"/>
+                                        <DataGridTextColumn Header="Days" Binding="{Binding Weekdays}" Width="*"/>
+                                        <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="150"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <WrapPanel Grid.Row="2" Margin="0,10,0,6">
+                                    <TextBlock Text="Mode" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <ComboBox x:Name="ReportCadenceMode" SelectedValuePath="Content" Width="130" IsEnabled="False" Margin="0,0,16,0">
+                                        <ComboBoxItem Content="Daily"/><ComboBoxItem Content="SelectedDays"/>
+                                    </ComboBox>
+                                    <WrapPanel x:Name="ReportCadenceDays" VerticalAlignment="Center" IsEnabled="False">
+                                        <CheckBox Content="Mon" Tag="Monday" Margin="0,0,9,0"/><CheckBox Content="Tue" Tag="Tuesday" Margin="0,0,9,0"/>
+                                        <CheckBox Content="Wed" Tag="Wednesday" Margin="0,0,9,0"/><CheckBox Content="Thu" Tag="Thursday" Margin="0,0,9,0"/>
+                                        <CheckBox Content="Fri" Tag="Friday" Margin="0,0,9,0"/><CheckBox Content="Sat" Tag="Saturday" Margin="0,0,9,0"/>
+                                        <CheckBox Content="Sun" Tag="Sunday" Margin="0,0,16,0"/>
+                                    </WrapPanel>
+                                    <Button x:Name="ReportCadenceSave" Content="Save cadence" IsEnabled="False" Margin="0,0,8,0"/>
+                                    <Button x:Name="ReportCadenceRefresh" Content="Refresh" Margin="0"/>
+                                </WrapPanel>
+                                <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,2,0,5">
+                                    <TextBlock Text="Rebuild and send report to" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <ComboBox x:Name="ReportReplayAudience" SelectedValuePath="Tag" SelectedIndex="0" Width="198" Margin="0,0,8,0">
+                                        <ComboBoxItem Content="Smart365Administrators only" Tag="Administrators"/>
+                                        <ComboBoxItem Content="Configured recipients" Tag="Configured"/>
+                                    </ComboBox>
+                                    <Button x:Name="ReportReplayButton" Content="Send mail only" IsEnabled="False" Margin="0"/>
+                                </StackPanel>
+                                <TextBlock x:Name="ReportCadenceStatus" Grid.Row="4" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text="Select a script."/>
+                            </Grid>
+                        </TabItem>
                     </TabControl>
                 </Grid>
             </TabItem>
@@ -1427,6 +1464,75 @@ function Update-OrchestratorServerMetricsChart {
     }
 }
 
+function Connect-OrchestratorReportCadenceEditor {
+    param([hashtable]$Controls, [scriptblock]$ReadRows, [scriptblock]$SaveRow, [scriptblock]$ReplayRow)
+    $grid = $Controls.ReportCadenceGrid
+    $mode = $Controls.ReportCadenceMode
+    $daysPanel = $Controls.ReportCadenceDays
+    $save = $Controls.ReportCadenceSave
+    $status = $Controls.ReportCadenceStatus
+    $replay = $Controls.ReportReplayButton
+    $audience = $Controls.ReportReplayAudience
+    $load = {
+        param([string]$SelectScript)
+        try {
+            $rows = @(& $ReadRows)
+            $grid.ItemsSource = $rows
+            $grid.SelectedItem = $rows | Where-Object Script -EQ $SelectScript | Select-Object -First 1
+            if (-not $grid.SelectedItem -and $rows.Count) { $grid.SelectedIndex = 0 }
+            if (-not $rows.Count) { $status.Text = 'No scripts with a report mail cadence template were found.' }
+        } catch {
+            $grid.ItemsSource = @()
+            $status.Text = $_.Exception.Message
+        }
+    }.GetNewClosure()
+    $updateButtons = {
+        $row = $grid.SelectedItem
+        $canEdit = $row -and $row.CanEdit
+        $mode.IsEnabled = $canEdit
+        $replay.IsEnabled = $null -ne $row -and [bool]$ReplayRow
+        $daysPanel.IsEnabled = $canEdit -and $mode.SelectedValue -eq 'SelectedDays'
+        $hasDay = @($daysPanel.Children | Where-Object IsChecked).Count -gt 0
+        $save.IsEnabled = $canEdit -and ($mode.SelectedValue -eq 'Daily' -or ($daysPanel.IsEnabled -and $hasDay))
+    }.GetNewClosure()
+    $grid.Add_SelectionChanged({
+        $row = $grid.SelectedItem
+        $mode.SelectedValue = if ($row) { $row.Mode } else { $null }
+        foreach ($check in $daysPanel.Children) { $check.IsChecked = $row -and [string]$check.Tag -in $row.Days }
+        $status.Text = if ($row) { $row.Status } else { 'Select a script.' }
+        & $updateButtons
+    }.GetNewClosure())
+    $mode.Add_SelectionChanged({ & $updateButtons }.GetNewClosure())
+    foreach ($check in $daysPanel.Children) {
+        $check.Add_Checked({ & $updateButtons }.GetNewClosure())
+        $check.Add_Unchecked({ & $updateButtons }.GetNewClosure())
+    }
+    $Controls.ReportCadenceRefresh.Add_Click({
+        $selected = $grid.SelectedItem
+        & $load $(if ($selected) { $selected.Script })
+    }.GetNewClosure())
+    $save.Add_Click({
+        $row = $grid.SelectedItem
+        if (-not $row -or -not $save.IsEnabled) { return }
+        $days = @($daysPanel.Children | Where-Object IsChecked | ForEach-Object { [string]$_.Tag })
+        try {
+            & $SaveRow $row ([string]$mode.SelectedValue) $days
+            & $load $row.Script
+            $status.Text = "Cadence saved for $($row.Script)."
+        } catch { $status.Text = $_.Exception.Message }
+    }.GetNewClosure())
+    $replay.Add_Click({
+        $row = $grid.SelectedItem
+        if ($row -and $ReplayRow) { & $ReplayRow $row ([string]$audience.SelectedValue) }
+    }.GetNewClosure())
+    $tab = $Controls.ReportCadenceTab
+    $Controls.ConfigurationTabs.Add_SelectionChanged({
+        param($sender,$eventArgs)
+        if ($sender -ne $eventArgs.OriginalSource -or -not $tab.IsSelected) { return }
+        if ($null -eq $grid.ItemsSource) { & $load }
+    }.GetNewClosure())
+}
+
 if ($Demo) {
     . (Join-Path $PSScriptRoot 'SmartM365-Inventory-Orchestrator-Demo.ps1')
     Invoke-OrchestratorDemo -Xaml $xaml -Scenario $DemoScenario -View $DemoView -Width $DemoWindowWidth -Height $DemoWindowHeight -ValidateOnly:$ValidateOnly
@@ -1460,6 +1566,7 @@ Import-Module -Name (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/Smart
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Pipeline.psm1') -ErrorAction Stop
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.GuiWorker.psm1') -ErrorAction Stop
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.ConfigView.psm1') -Force -ErrorAction Stop
+Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.ReportCadence.psm1') -Force -ErrorAction Stop
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Inventory.Launch.psm1') -Force -ErrorAction Stop
 $script:SmartInventoryRoot = Split-Path -Path $PSScriptRoot -Parent
 
@@ -2810,13 +2917,29 @@ function Get-GuiOrchestratorActionCommand {
     }
 }
 
+function Invoke-GuiPreparedReportReplay {
+    param([string]$Producer, [ValidateSet('Administrators','Configured')][string]$Audience)
+    if ($script:SendSummaryRun) { throw 'Another mail is already being sent.' }
+    $label = if ($Audience -eq 'Administrators') { 'Smart365Administrators only' } else { 'the configured recipients' }
+    $message = "Rebuild the $Producer report from the current published exports and send it to $label? No inventory will run."
+    if ($script:OrchestratorDialog.Show($message, 'Send mail only', 'YesNo', 'Question') -ne 'Yes') { return }
+    Start-GuiSendSummary -Command ([pscustomobject]@{
+        ScriptPath=(Join-Path $PSScriptRoot 'SmartM365-SendPreparedReportMail.ps1')
+        Arguments=@('-Tenant',$Tenant,'-Producer',$Producer,'-Audience',$Audience)
+    }) -PreparedReport
+}
+
 function Start-GuiSendSummary {
     # Hidden console: a wait window replaces it until the process ends (Receive-GuiSendSummary).
-    param([Parameter(Mandatory = $true)]$Command)
+    param([Parameter(Mandatory = $true)]$Command, [switch]$PreparedReport)
     $process = Start-GuiConsoleProcess -Runtime PowerShell7 -ScriptPath $Command.ScriptPath -Arguments $Command.Arguments -WindowStyle Hidden
     $null = $process.Handle  # keeps the exit code readable after the process ends
-    $script:SendSummaryRun = [pscustomobject]@{ Process = $process; Clock = [Diagnostics.Stopwatch]::StartNew(); Dialog = $null }
+    $script:SendSummaryRun = [pscustomobject]@{ Process = $process; Clock = [Diagnostics.Stopwatch]::StartNew(); Dialog = $null; PreparedReport = [bool]$PreparedReport }
     $script:Controls.SendSummaryButton.IsEnabled = $false
+    if ($PreparedReport) {
+        $script:SendSummaryRun.Dialog = New-GuiWaitDialog -Title 'Send mail only' -Message 'Rebuilding and sending the report. Please wait.' -Detail 'Reading the latest published exports and delivering the rebuilt report.'
+        return
+    }
     $script:SendSummaryRun.Dialog = New-GuiWaitDialog -Title 'Send summary' -Message ('Sending the execution summary email{0} Please wait.' -f [char]0x2026) -Detail 'Reading the job runs of this tenant. The resident orchestrator and its jobs are not affected.'
     $script:Controls.StatusText.Text = 'Send summary: sending in the background.'
 }
@@ -2827,12 +2950,27 @@ function Receive-GuiSendSummary {
     $process = $run.Process
     $timedOut = $run.Clock.Elapsed.TotalMinutes -ge $script:SendSummaryTimeoutMinutes
     if (-not $process.HasExited -and -not $timedOut) {
-        if ($null -ne $run.Dialog) { $run.Dialog.FindName('SubmitDetailText').Text = 'Reading the job runs and sending the email ({0:N0} s). The resident orchestrator and its jobs are not affected.' -f $run.Clock.Elapsed.TotalSeconds }
+        if ($null -ne $run.Dialog -and -not $run.PreparedReport) { $run.Dialog.FindName('SubmitDetailText').Text = 'Reading the job runs and sending the email ({0:N0} s). The resident orchestrator and its jobs are not affected.' -f $run.Clock.Elapsed.TotalSeconds }
         return
     }
     $script:SendSummaryRun = $null
     Close-GuiWaitDialog -Dialog $run.Dialog
     $script:Controls.SendSummaryButton.IsEnabled = $true
+    if ($run.PreparedReport) {
+        $label = 'Send mail only'
+        if (-not $process.HasExited) {
+            Show-GuiJobRunRequestResult -Message 'The mail process is still running. Check its log before sending again.' -Title $label -Icon Warning
+            return
+        }
+        $message = switch ($process.ExitCode) {
+            0 { 'The rebuilt report mail was accepted for delivery.' }
+            20 { 'A required current export is missing. Check the published inventory data.' }
+            23 { 'Delivery to configured recipients is currently restricted by mail policy.' }
+            default { 'The report could not be rebuilt or sent. Check the mail-only log before trying again.' }
+        }
+        Show-GuiJobRunRequestResult -Message $message -Title $label -Icon $(if ($process.ExitCode -eq 0) { 'Information' } else { 'Warning' })
+        return
+    }
     if (-not $process.HasExited) {
         Write-GuiActivity -Message ("Send summary still running after {0} minutes (PID {1}); the GUI stops waiting." -f $script:SendSummaryTimeoutMinutes, $process.Id) -Level WARN
         $script:Controls.StatusText.Text = 'Send summary: still running in the background.'
@@ -3776,6 +3914,7 @@ foreach ($name in @(
     'ExportCsvButton', 'ExportHtmlButton', 'HistoryGrid', 'ServersGrid', 'NewServerBox', 'AddServerButton', 'RemoveServerButton',
     'SelectedServerText', 'ServerActiveCheck', 'ServerWeightBox', 'ServerPolicyCombo', 'ApplyServerButton', 'TestServerButton', 'TestServerAsServiceAccountButton', 'ServerTestHintText', 'VersionsGrid', 'RollbackButton',
     'ConfigurationTabs', 'ConfigurationSettingsTab', 'ConfigurationServersTab', 'FooterText', 'VersionText',
+    'ReportCadenceTab', 'ReportCadenceGrid', 'ReportCadenceMode', 'ReportCadenceDays', 'ReportCadenceSave', 'ReportCadenceRefresh', 'ReportCadenceStatus', 'ReportReplayAudience', 'ReportReplayButton',
     'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'JobStopReasonBox', 'StopRunningJobButton', 'OperationsPendingGrid', 'CancelPendingWorkButton', 'RecoverJobsButton', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
     'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
     'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancellationProgressText', 'CancelRequestButton', 'CancelAllRequestsButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
@@ -3901,6 +4040,21 @@ $script:Controls.ConfigurationTabs.Add_SelectionChanged({
 $script:Controls.ConfigFilterBox.Add_TextChanged({ try { Update-GuiConfigurationView } catch { Write-GuiException -Context 'Configuration filter failed' -ErrorRecord $_ } })
 $script:Controls.ConfigShowSensitiveButton.Add_Click({ try { Show-GuiConfigurationSensitive } catch { Write-GuiException -Context 'Configuration display failed' -ErrorRecord $_ } })
 $script:Controls.ConfigRefreshButton.Add_Click({ Start-GuiRefresh -Mode Live })
+$cadenceInventoryRoot = $script:SmartInventoryRoot
+$cadenceReader = Get-Command Get-SmartM365OrchestratorReportCadence -ErrorAction Stop
+$cadenceWriter = Get-Command Set-SmartM365OrchestratorReportCadence -ErrorAction Stop
+$cadenceReplay = Get-Command Invoke-GuiPreparedReportReplay -ErrorAction Stop
+$cadenceDialog = $script:OrchestratorDialog
+Connect-OrchestratorReportCadenceEditor -Controls $script:Controls -ReadRows {
+    & $cadenceReader -InventoryRoot $cadenceInventoryRoot
+}.GetNewClosure() -SaveRow {
+    param($row,$mode,$days)
+    & $cadenceWriter -InventoryRoot $cadenceInventoryRoot -Script $row.Script -Mode $mode -Days $days -ExpectedPath $row.Path -ExpectedSHA256 $row.SHA256
+}.GetNewClosure() -ReplayRow {
+    param($row,$audience)
+    try { & $cadenceReplay -Producer $row.Script -Audience $audience }
+    catch { $cadenceDialog.Show($_.Exception.Message, 'Send mail only', 'OK', 'Error') | Out-Null }
+}.GetNewClosure()
 $script:Controls.ConfigOpenFolderButton.Add_Click({ try { Open-GuiConfigurationFolder } catch { Write-GuiException -Context 'Open configuration folder failed' -ErrorRecord $_ } })
 $script:ConfigurationTimer = [System.Windows.Threading.DispatcherTimer]::new()
 $script:ConfigurationTimer.Interval = [TimeSpan]::FromSeconds(1)
@@ -4376,10 +4530,10 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBjADPrVBHth1vE
-# LTxsGAEqAmZk67hA2w7w+1ZpiMRyXaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCNNBysnMbMH2d
+# 00ZFqDtR5dg5OcK7bNgVrlbRYUGuxaCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4404,139 +4558,143 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHZMNgmAyZUe0+Nn0Alrf5/pmIcKOd11C0Hb/t2c20mTMA0GCSqG
-# SIb3DQEBAQUABIIBgEyf5BO0P0tfjTgaKIpS7P+3QazM9FPsgO20KdzWQn5ufSxV
-# 47B81BUrs4MTfiHbiP334Oc/oFsyBz8y+TSLSHWg9n3jGH6A7nXKrZw2QOyZHIAH
-# WM8eli3s78yY+MvNi3sSGlDtaG2GqYTvZmJFz33SIMMFamONJdD6jOdNpo5Lovud
-# Y8MowrC45+UKRr3DGatKhxk0ZJ12olm+vEtcwkHg9+REI3riq90LtooXQrEwXyAj
-# b5k5VZQ0TAbmuKulsUzAPmYs7zYlvNyrfLEtMnqCSJryQf4KbEuvr8xlmNoF1KXX
-# XC5GmVCPnZ2G5bwgbhOh2DXTMo9bLNeIBgRS+6omTMB0yrpE9LIKfjRl5Q2sRoJx
-# D6Y6u/x4yncZygJAxDLFb0suosvFTmHdIczQ08l6VHUAEW0/fMsMSwD7gnR+JQd+
-# VfaibLi7WgQrfXWNyiaJ5hUbmWj6ME4nw4LzR0hP+Nx//enIi+KRHvrPdP4FBBkd
-# wb3Rvkwrs2Hw/sK1+qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTgxMzAx
-# NDlaMC8GCSqGSIb3DQEJBDEiBCCLgfcuGStOHvmyI/vil+6b5uQRaVPB4lMAkYom
-# w9+eNDANBgkqhkiG9w0BAQEFAASCAgAyERC+rcukslPLGRJ2L+OycfRjis9Uwvvk
-# tqchxqwa2+qIS1OiI+NGrVWR3JgQx/LT9/dfh9u+tSDbPzaDncFgVHEL4PE4cja0
-# /MTESynqP3b6kmsYFok958Ef+8ZH1Ahf3966VSWQ0K41KLC28B0OupaeQGtI+PUe
-# 2ox4UKVA0BlB+If7zL13za3gX3X925+fG/5EAgDKm2qzrWvqvP+WpjcHyfB2cZLH
-# obolG3ImFGoQrGR7HK9rsyVUxttCjCAJ2hYU+hH1xpRgPfW7bCjmP7jonAb1RzjC
-# L/0BpQL2WfvHs72SWvEkNb+3b1w7KdfvotdRvgqpNZvDL2AODaBYtWNEHKBIFA+/
-# w9gKHIB77CWjnR4UqFhxHwmhFX4nRCcSOlNJCvGhuatkrS16H6wvWrb3IIxUtk9S
-# S7Yow+mItEMBu7lko+4GrMcc28pzbPAJuKMPDB4O5tn8vWsgAsLEzA5lH/ut0zZC
-# hkC+IzbjbiZ7T7sP64BWXkiWQTRZYgX7nr1X/J2j9N3PBhjk9lvzWI5jqq6o5V8C
-# sofEqJcJ7hYUskbmeMEpVe+EvBgNr9mgZwTgK90ECaqzsuA4AGmNnkBONYmAVt9Y
-# FSAGMF3vrjlBHlrul5p01ex/LgwM8TqJIoL8OjhhZpDPNNoWCaGh8IYsLxNmfQKI
-# oXoWPMJf6w==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBoIw
+# ggRqoAMCAQICEDbCsL18Gzrno7PdNsvJdWgwDQYJKoZIhvcNAQEMBQAwgYgxCzAJ
+# BgNVBAYTAlVTMRMwEQYDVQQIEwpOZXcgSmVyc2V5MRQwEgYDVQQHEwtKZXJzZXkg
+# Q2l0eTEeMBwGA1UEChMVVGhlIFVTRVJUUlVTVCBOZXR3b3JrMS4wLAYDVQQDEyVV
+# U0VSVHJ1c3QgUlNBIENlcnRpZmljYXRpb24gQXV0aG9yaXR5MB4XDTIxMDMyMjAw
+# MDAwMFoXDTM4MDExODIzNTk1OVowVzELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
+# Y3RpZ28gTGltaXRlZDEuMCwGA1UEAxMlU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFt
+# cGluZyBSb290IFI0NjCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAIid
+# 2LlFZ50d3ei5JoGaVFTAfEkFm8xaFQ/ZlBBEtEFAgXcUmanU5HYsyAhTXiDQkiUv
+# pVdYqZ1uYoZEMgtHES1l1Cc6HaqZzEbOOp6YiTx63ywTon434aXVydmhx7Dx4IBr
+# Aou7hNGsKioIBPy5GMN7KmgYmuu4f92sKKjbxqohUSfjk1mJlAjthgF7Hjx4vvyV
+# DQGsd5KarLW5d73E3ThobSkob2SL48LpUR/O627pDchxll+bTSv1gASn/hp6IuHJ
+# orEu6EopoB1CNFp/+HpTXeNARXUmdRMKbnXWflq+/g36NJXB35ZvxQw6zid61qmr
+# lD/IbKJA6COw/8lFSPQwBP1ityZdwuCysCKZ9ZjczMqbUcLFyq6KdOpuzVDR3ZUw
+# xDKL1wCAxgL2Mpz7eZbrb/JWXiOcNzDpQsmwGQ6Stw8tTCqPumhLRPb7YkzM8/6N
+# nWH3T9ClmcGSF22LEyJYNWCHrQqYubNeKolzqUbCqhSqmr/UdUeb49zYHr7ALL8b
+# AJyPDmubNqMtuaobKASBqP84uhqcRY/pjnYd+V5/dcu9ieERjiRKKsxCG1t6tG9o
+# j7liwPddXEcYGOUiWLm742st50jGwTzxbMpepmOP1mLnJskvZaN5e45NuzAHteOR
+# lsSuDt5t4BBRCJL+5EZnnw0ezntk9R8QJyAkL6/bAgMBAAGjggEWMIIBEjAfBgNV
+# HSMEGDAWgBRTeb9aqitKz1SA4dibwJ3ysgNmyzAdBgNVHQ4EFgQU9ndq3T/9ARP/
+# FqFsggIv0Ao9FCUwDgYDVR0PAQH/BAQDAgGGMA8GA1UdEwEB/wQFMAMBAf8wEwYD
+# VR0lBAwwCgYIKwYBBQUHAwgwEQYDVR0gBAowCDAGBgRVHSAAMFAGA1UdHwRJMEcw
+# RaBDoEGGP2h0dHA6Ly9jcmwudXNlcnRydXN0LmNvbS9VU0VSVHJ1c3RSU0FDZXJ0
+# aWZpY2F0aW9uQXV0aG9yaXR5LmNybDA1BggrBgEFBQcBAQQpMCcwJQYIKwYBBQUH
+# MAGGGWh0dHA6Ly9vY3NwLnVzZXJ0cnVzdC5jb20wDQYJKoZIhvcNAQEMBQADggIB
+# AA6+ZUHtaES45aHF1BGH5Lc7JYzrftrIF5Ht2PFDxKKFOct/awAEWgHQMVHol9ZL
+# Syd/pYMbaC0IZ+XBW9xhdkkmUV/KbUOiL7g98M/yzRyqUOZ1/IY7Ay0YbMniIibJ
+# rPcgFp73WDnRDKtVutShPSZQZAdtFwXnuiWl8eFARK3PmLqEm9UsVX+55DbVIz33
+# Mbhba0HUTEYv3yJ1fwKGxPBsP/MgTECimh7eXomvMm0/GPxX2uhwCcs/YLxDnBdV
+# VlxvDjHjO1cuwbOpkiJGHmLXXVNbsdXUC2xBrq9fLrfe8IBsA4hopwsCj8hTuwKX
+# JlSTrZcPRVSccP5i9U28gZ7OMzoJGlxZ5384OKm0r568Mo9TYrqzKeKZgFo0fj2/
+# 0iHbj55hc20jfxvK3mQi+H7xpbzxZOFGm/yVQkpo+ffv5gdhp+hv1GDsvJOtJinJ
+# mgGbBFZIThbqI+MHvAmMmkfb3fTxmSkop2mSJL1Y2x/955S29Gu0gSJIkc3z30vU
+# /iXrMpWx2tS7UVfVP+5tKuzGtgkP7d/doqDrLF1u6Ci3TpjAZdeLLlRQZm867eVe
+# XED58LXd1Dk6UvaAhvmWYXoiLz4JA5gPBcz7J311uahxCweNxE+xxxR3kT0WKzAS
+# o5G/PyDez6NHdIUKBeE3jDPs2ACc6CkJ1Sji4PKWVT0/MIIGpzCCBI+gAwIBAgIR
+# AJCsCHIg/cWnxGtcxw33PQYwDQYJKoZIhvcNAQEMBQAwVzELMAkGA1UEBhMCR0Ix
+# GDAWBgNVBAoTD1NlY3RpZ28gTGltaXRlZDEuMCwGA1UEAxMlU2VjdGlnbyBQdWJs
+# aWMgVGltZSBTdGFtcGluZyBSb290IFI0NjAeFw0yNjAzMjUwMDAwMDBaFw00MTAz
+# MjQyMzU5NTlaMFUxCzAJBgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0
+# ZWQxLDAqBgNVBAMTI1NlY3RpZ28gUHVibGljIFRpbWUgU3RhbXBpbmcgQ0EgUjQx
+# MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAruRKogGtghxi+WYtW5oD
+# zPDVF8GGSfgbUKh6bONxi0wvrI1S8qbAYfvLr/ky5ILVRg//70pgNKq8xC3/WEQo
+# djEwAP2hmkGShoNAUQps4kd6Wwp74Fo7RlwQ1Mp949ytpWQDvCsYBbZccDmBAJC/
+# ggqiuL/c805fGcMw6TzIgyBWuUx5PGp9YnheSNPXFzaz0MPtREdZYk4WhtM+hazq
+# asMWVpj0WUAcNhN9vO/FAdWy9Gafdb7lmYLDKTTYjwqAY9P9RfixPPjUaJH6mnBS
+# NBdrX7a0Qdlux0ApS0fc48RW1m+W3tq3HiHzch1FHyhiLzCNjc6MUpcV5xalBvPO
+# w/FtQo/AxaJOvPCSsVrx0f/WkMpEm3fvVbrY9+oo9rIKv9ducE6VGfwIAtKYedG0
+# bO4Ba1MmlxPcErDqjLwggvrBJu73fwXpkhtE0hzV0psgm2vhQs3pHll9N00SHBdy
+# 2qndEcNuDh+46XouM2hoXCO533YQQOHPEUnMTWOo3hyxx5kjDE5PVqp+x+HS4VAT
+# +WBMG4GzeLr9YvZbU5x5YvLdcR1dErV/QRYK55rp019fZFF2NR+TkSW0WcmQ3b5t
+# aGcrXg49EpzKM6/mEpnSJXg1E13X6GO29rWs/LNvkGzsS8XGoRCGBls6ruofeebS
+# sHADR3GeIE5gIU927bjokLECAwEAAaOCAW4wggFqMB8GA1UdIwQYMBaAFPZ3at0/
+# /QET/xahbIICL9AKPRQlMB0GA1UdDgQWBBQ6dKUMZ8ZCUML9tfzHuyk0gvR6uTAO
+# BgNVHQ8BAf8EBAMCAYYwEgYDVR0TAQH/BAgwBgEB/wIBADATBgNVHSUEDDAKBggr
+# BgEFBQcDCDAjBgNVHSAEHDAaMAgGBmeBDAEEAjAOBgwrBgEEAbIxAQIBAwgwTAYD
+# VR0fBEUwQzBBoD+gPYY7aHR0cDovL2NybC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVi
+# bGljVGltZVN0YW1waW5nUm9vdFI0Ni5jcmwwfAYIKwYBBQUHAQEEcDBuMEcGCCsG
+# AQUFBzAChjtodHRwOi8vY3J0LnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNUaW1l
+# U3RhbXBpbmdSb290UjQ2LnA3YzAjBggrBgEFBQcwAYYXaHR0cDovL29jc3Auc2Vj
+# dGlnby5jb20wDQYJKoZIhvcNAQEMBQADggIBADLeUkdm8Z4DZvjfKHOhqu+hsdXN
+# t+X5F+48PB6PTAJCRgA3qxxO3YbAV7baps4K/+2WWoWUspBkT4T2NXK49NvJAfCs
+# ztHSgtqkAQMLX4KjCypJF/+m2Ktrk993g+gcgKdv1yg9C3JmYdJCnnL0ga+pZ/Wo
+# 1+rtXZ8dnwO8RCstTN6gYX0ElFi7Y7NpxbdBC1S6bc05V/SA9HC/ojj33W6Gdwnp
+# U/iVylSkdkoHtHeGIhQLT2ZH0qPM9Wdce8v2fZsDCJQQJ8rll7OGLDbsXa2CLf0M
+# RN9TwzifQ3rEuAXOx/TkzkZRFfwL34hf1XqSmaYq2tTMy2LgsPrqC2Z/6ZKb3fgr
+# zU0vphB4wSTWulitY/KlxbvoyKvrBvUCCx4sgeqf8aR65CbvM5MN/d/lahfXipU2
+# NlY0cXcnGS61XpmeGKd8It92/lufApZR9x6o5qMJWe0jq4JsfGMGDpIKx7FzkB8g
+# aejuBUW/CJ9Phc40+xJRonvVewn4S9yJVRWeM47irGbR9YlN3xruM/yZzhk+rAm9
+# AW06nv7ob6RQkAXR+cTxiAPy620FF41NrViYB4UyKpzfx7x8jh4ubTOMz954YIdq
+# yeiqqtsbBwXjWLP0dfMUPA3iIPnPdBKGnodGJTdSlPAMmKJdyvTPqmOXs/LMnf+2
+# Za0Z6FXsIB9z9aXLMIIG4jCCBMqgAwIBAgIRAOdO8lWwUE/626bf9/yLoxUwDQYJ
+# KoZIhvcNAQEMBQAwVTELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1NlY3RpZ28gTGlt
+# aXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFtcGluZyBDQSBS
+# NDEwHhcNMjYwMzI1MDAwMDAwWhcNMzcwNjI0MjM1OTU5WjByMQswCQYDVQQGEwJH
+# QjEXMBUGA1UECBMOR3JlYXRlciBMb25kb24xGDAWBgNVBAoTD1NlY3RpZ28gTGlt
+# aXRlZDEwMC4GA1UEAxMnU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFtcGluZyBTaWdu
+# ZXIgUjM3MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAsv/DbUvcUNlF
+# LQURd9m4+1St5+JudFKo5P803Iks4mFeNB9SymodP6BJJWBuNhOFQj9w77AVAeg5
+# qQpA2dIwp2QTyBHr2h9eWSTkMBVj9mV6+WI5SaW+vDZW7PhJTbysd9v9WB3Xt6ql
+# Ei8m47pcTy8+k/OfhziKiuzNQXqfC7KcoRD/6up8OZBsU0qxr7n5nh/iRfAp1QXF
+# TBQONBZSGIdHAyVRYYX033VoC8v71rizEKCpH97Pxbwcn9eq9K7W8h5v4npsMUoq
+# CS/c8mQwylDQGx15dHYV6NlcVFdjXD11l7qCrIy/unH5OlZtgx58QJRXRbGgQyBd
+# STpEpwuj3i5Qc52Z9m7hd7yCGCXKujf83hUQpOPx1w8+84EbEUTHVAfq4cpORaGW
+# gY8NJy6txmd3wpS1MeXrOaVAMczTgzAZ+yZBWIqdgQBgTxEeXldEToZOrRkxvn1I
+# jIlfr4I4NWJz+Rb52FshLVnkA/wdoad789Eb7XZDNKd4oMmnc636TgauaaVZP2LL
+# oU0JD/fYr53hwBn4uXu5ZsSfpnqAT60S7szJm/Na882xEoyRzLJ+UVbXOlHLO63D
+# KkAtdz1CDuwWxgRE1drnwplepT06dz+1yTr5p1AkUz21bzE6cT/8/kjh4OPzggYY
+# qrOBQPfuKEL5ZJPcN9jRgEpYvRlq5ucCAwEAAaOCAY4wggGKMB8GA1UdIwQYMBaA
+# FDp0pQxnxkJQwv21/Me7KTSC9Hq5MB0GA1UdDgQWBBRhEOl6Eq9RxIXU8s+kdA9Q
+# zSCv+DAOBgNVHQ8BAf8EBAMCBsAwDAYDVR0TAQH/BAIwADAWBgNVHSUBAf8EDDAK
+# BggrBgEFBQcDCDBKBgNVHSAEQzBBMAgGBmeBDAEEAjA1BgwrBgEEAbIxAQIBAwgw
+# JTAjBggrBgEFBQcCARYXaHR0cHM6Ly9zZWN0aWdvLmNvbS9DUFMwSgYDVR0fBEMw
+# QTA/oD2gO4Y5aHR0cDovL2NybC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVibGljVGlt
+# ZVN0YW1waW5nQ0FSNDEuY3JsMHoGCCsGAQUFBwEBBG4wbDBFBggrBgEFBQcwAoY5
+# aHR0cDovL2NydC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVibGljVGltZVN0YW1waW5n
+# Q0FSNDEuY3J0MCMGCCsGAQUFBzABhhdodHRwOi8vb2NzcC5zZWN0aWdvLmNvbTAN
+# BgkqhkiG9w0BAQwFAAOCAgEAA+o9jdGszfoZepOmygef1OlbkjrPd2QW9z3M8vVb
+# QSCruPeO2eRsC9GhZ4CMZfhkrixayYD67gQkbyiRCbJu5L/i0NQjlQhBvbWfiEba
+# +KHFKGud5YHRWhDZUtDeMIJGZG0BD7/sftZUo2Ifk+CXi/ZlM50+xK3OkqeXVi5G
+# ubDD/5txmYuqCT3T3LAilmoB+5th9sQxiMhyQuT3R/aYb4vypoZJLYklUzTalXle
+# W1nV9s4UROlE389CHDKAi/fepRSMnV8TghODDQxwzNGrOJZ04k/yhzHHDupfHPU5
+# 1FYJqXIvWq9SAAWdlNV1JGIxhkp/TAtxBwz/Vd/VbgVb2d9/wRFfxFkka39O0+4x
+# aZSl/oEK/1DqjxjJRO2Se9lGlJDScu21Zd23Cys3aYyB8y5H/+DFWtVe8PMKgr+V
+# uIDp0Rk5bneVDAEW0TPAT8Ufwl2F6DJiDg/KZk5NmsYES+CxvF7bnISEnQh0ZrWn
+# AJixquV0mElUx01wA5TuPIgyodxzNq/fC0hen9LBtdnfFfSZ+wt8A1Injsbio+DH
+# Vq1voYiVNpBfO7+nh9NB4AhRXNldPgr3zgjJ+47s0uNYy2iDXAZSlkP3ym/7gy31
+# jlu989SNpRWO14/LUNV2LSuXkRI1iLTPI6ZdXG0DnPPG7UftF0tk5m6BP9eNfr2t
+# j1sxggW7MIIFtwIBATBiME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNv
+# bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
+# EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
+# DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgwNgJKd1+LCoA
+# 569EjbKdmN+UCYdCjnVHOhjBV8ajanYwDQYJKoZIhvcNAQEBBQAEggGAT+AD0lU7
+# FwNCGsToRvkHItwi0+rR6RG4WnxIMwNB5uqDp4VDAS7dG5TKJVFcTrD5HkOR7AXq
+# M700TlJWZ5TBaQSn/ydTwPZTRvXnd5ORuWvqTXVpeA9B3kEvn0VAszdTV3AdXcgk
+# qPl1eCBYpzVrdVxEW6jw8M7FwX/L3pG0ZV0/IIoqMjicSHGW4sseY3SROVI8pVKU
+# vK48Uhi+s/aV+F1pKtJg+q7t7b2bvrSDLZnsvGMsYvsSbw2TC9og/XJIkACmTiLw
+# Q3cGGFPaBX0a5JrGcjkcSoNBSnWYXU+VAHcW+CRtGiUEK3JR+fFX6LsyecUzu4Xa
+# ssbivtnrZQ5BBNGQYYbjf/BmAQNp6gk+dR3zOG/IkWK5VN5Mh/K+JRmyzsxNabCp
+# UNLWec24MiBAIMVNyzb7tNV+zJD/4nk8vCEIrfhAGjANm49VK+zSVQvYGLpqPK+r
+# +C60wqZ1QRweinFSLD/UqQt4ICxQFTIbqsYheT4oQ5SNfsisA9h6Dr/GoYIDIzCC
+# Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
+# BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
+# ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
+# AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
+# MjYxMTE5MDgzNTE3WjA/BgkqhkiG9w0BCQQxMgQw/UiDbvDTcdDMdHA+kgOPOXdV
+# UnJJVWApSWakWFm01n3x70ca3CVXPJ+vTFvL1Zx1MA0GCSqGSIb3DQEBAQUABIIC
+# AEp+LLZuPgk5HdUartzYwMldFjXy0RtODteO8f47cKbwRVKLiMjaxQEQD6TXWP1z
+# BMmNLmHFAT9K5MvnFbggQdzhq22in/SxP6lmQ0B0N+2vWMFopCZboPSLq5oKFIgY
+# X2//56E4XzYVwSIWuHU5mVVxKygo1Y+0qh839HLBy7qsj+GXI6bJlyM+uGYJ8m5o
+# Usv/IhCpLUsh9NQ5emdlzp8iY94bEFip7LqLzHi6oR5GRSa+mS01CkUSn+TpG/dm
+# F8rrglJS8xH//lgeTbC7kzpm4e3huVbgX3MgAsPJwedQRjBq/O15egpRQ92Nr8nr
+# y9AVWObi71g9Z4Jxmpyj4XBTHv/kLp2W8nDlAbKGxV4BCKaxiAobNn9kZC1Q4Otq
+# /sTyAVaZCCO7iwEJQZP5GtNOrdAg8BjE+bUGkEO2Qc/LGbgODECAgbkHe3+ZJeAv
+# byYHVRTmpBqF8tO9AnuFUwDh1azmDWI4lrVda5lCR1bxNfAKJVO1ciOF0B4qa8QW
+# sc+EVHONIc97kqcsI4R/nZjaeRihHGnFthpqtWm2LK8ftgdSJ33zrg+7aNjFZ/y1
+# jvmcHNRJTWnfeOFTKGDKmJ9HjUMCWJ/WGUbJLO9p4rlL3iJWNAY7YH9eaKDxnKTZ
+# 3+14zusp7y6zi1Nx/d1xNxB4TOoJAmGlISWHiTMY1jhi
 # SIG # End signature block

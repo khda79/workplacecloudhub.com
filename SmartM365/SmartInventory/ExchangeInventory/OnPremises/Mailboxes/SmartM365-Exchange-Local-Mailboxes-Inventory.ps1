@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.79
+1.80
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules: SmartM365 WindowsPowerShell5 compatibility module; Exchange remote PowerShell (default) or local snap-in (rollback); ActiveDirectory when AD permission export is enabled.
@@ -26,7 +26,7 @@
     SendAs is read from the mailbox object DACL (nTSecurityDescriptor) with the ActiveDirectory module; Get-ADPermission is the per-mailbox fallback.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-Version: 1.79
+Version: 1.80
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access. Remote uses the current Windows identity with Kerberos.
@@ -79,6 +79,8 @@ while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $sma
 }
 if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
 . (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+. (Join-Path $smartM365LifecycleRoot 'SmartInventory/Common/SmartM365.ReportRenderers.ps1')
+. (Join-Path $smartM365LifecycleRoot 'SmartInventory/Common/SmartM365.ReportInputs.ps1')
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
 $script:ExchangeOnPremContext = $null
 try {
@@ -139,7 +141,6 @@ if ($script:ExchangeConnectionMode -notin @('Remote','LocalSnapin')) {
 }
 
 
-
 $global:RetentionMaxCSV = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxCSV' -DefaultValue 30)
 $global:RetentionMaxLogs = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RetentionMaxLogs' -DefaultValue 30)
 
@@ -151,7 +152,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.79"
+$ScriptVersion = "1.80"
 $script:SendAsRightGuids = $null
 $script:SendAsSidCache = @{}
 $script:SendAsAclReadCount = 0
@@ -1200,7 +1201,8 @@ function Send-SmartM365OptionalEmailHtmlReport {
 
         [Parameter(Mandatory = $false)]
         [string[]]$Attachments,
-        [ValidateSet('Report','Error')][string]$MailPurpose = 'Report'
+        [ValidateSet('Report','Error')][string]$MailPurpose = 'Report',
+        [string]$ReportCadenceKey = ''
     )
 
     $recipient = if ($MailPurpose -eq 'Error') { $script:MailErrorTo } elseif (-not [string]::IsNullOrWhiteSpace($script:MailTo)) { $script:MailTo } elseif (-not [string]::IsNullOrWhiteSpace($script:MailErrorTo)) { $script:MailErrorTo } else { '' }
@@ -1214,7 +1216,9 @@ function Send-SmartM365OptionalEmailHtmlReport {
         if (-not [string]::IsNullOrWhiteSpace($script:MailSendMailMode)) { $mailParams['SendMailMode'] = $script:MailSendMailMode }
         if (-not [string]::IsNullOrWhiteSpace($script:MailCc)) { $mailParams['Cc'] = $script:MailCc }
         if ($Attachments -and $Attachments.Count -gt 0) { $mailParams['Attachments'] = $Attachments }
+        if ($ReportCadenceKey) { $mailParams.ReportCadenceKey = $ReportCadenceKey }
         SendEmailHtmlReport @mailParams
+        if ($ReportCadenceKey -and ((Get-Variable SmartM365LastMailDelivery -Scope Global -ValueOnly -ErrorAction SilentlyContinue) -in @('Skipped','Busy'))) { return }
         WriteLog -Message ("Email notification sent. From: {0}; To: {1}" -f $script:MailFrom, $recipient)
     }
     catch {
@@ -1258,6 +1262,7 @@ function Invoke-SmartM365MailboxDailySummaryMail {
         }
 
         $null = & $SendAction
+        if ((Get-Variable SmartM365LastMailDelivery -Scope Global -ValueOnly -ErrorAction SilentlyContinue) -in @('Skipped','Busy')) { return $false }
         [IO.File]::WriteAllText($MarkerPath, $today, [Text.UTF8Encoding]::new($false))
         return $true
     }
@@ -1387,17 +1392,6 @@ function ConvertTo-SmartM365MailboxReportHtml {
     return [System.Net.WebUtility]::HtmlEncode([string]$Value)
 }
 
-function Get-SmartM365MailboxReportCsvRowCount {
-    param([string]$Path)
-
-    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return 0 }
-    try {
-        $lineCount = @(Get-Content -LiteralPath $Path -ErrorAction Stop | Measure-Object -Line).Lines
-        if ($lineCount -le 1) { return 0 }
-        return ($lineCount - 1)
-    }
-    catch { return 0 }
-}
 
 function Get-SmartM365ExchangeMailboxDailySnapshotColumns {
     return @('SnapshotDate','GeneratedAt','SchemaVersion','CompleteScope','DomainCount','TotalMailboxCount',
@@ -1473,61 +1467,6 @@ function Get-SmartM365ExchangeMailboxDailySnapshotHistory {
     return @($snapshots)
 }
 
-function New-SmartM365ExchangeMailboxDailyDiffSection {
-    [CmdletBinding()]
-    param([Parameter(Mandatory = $true)]$Current, [AllowEmptyCollection()][object[]]$History = @())
-
-    $earlier = @($History | Where-Object { $_.SnapshotDate -lt $Current.SnapshotDate } | Sort-Object SnapshotDate,GeneratedAt -Descending)
-    $previous = if ($earlier.Count) { $earlier[0] } else { $null }
-    $date = [datetime]::ParseExact([string]$Current.SnapshotDate, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
-    $weekDate = $date.AddDays(-7).ToString('yyyy-MM-dd')
-    $monthDate = $date.AddDays(-30).ToString('yyyy-MM-dd')
-    $week = @($earlier | Where-Object { $_.SnapshotDate -eq $weekDate } | Select-Object -First 1)
-    $month = @($earlier | Where-Object { $_.SnapshotDate -eq $monthDate } | Select-Object -First 1)
-    $comparisons = @(
-        [pscustomobject]@{ Label = 'Previous'; DateText = if ($previous) { $previous.SnapshotDate } else { 'n/a' }; Snapshot = $previous }
-        [pscustomobject]@{ Label = 'J-7'; DateText = $weekDate; Snapshot = if ($week.Count) { $week[0] } else { $null } }
-        [pscustomobject]@{ Label = 'J-30'; DateText = $monthDate; Snapshot = if ($month.Count) { $month[0] } else { $null } }
-    )
-    $metrics = @(
-        [pscustomobject]@{ Label = 'Domains'; Property = 'DomainCount'; Size = $false }
-        [pscustomobject]@{ Label = 'Total mailboxes'; Property = 'TotalMailboxCount'; Size = $false }
-        [pscustomobject]@{ Label = 'Local mailboxes'; Property = 'TotalLocalMailboxCount'; Size = $false }
-        [pscustomobject]@{ Label = 'Remote mailboxes'; Property = 'TotalRemoteMailboxCount'; Size = $false }
-        [pscustomobject]@{ Label = 'Enabled accounts'; Property = 'EnabledAccounts'; Size = $false }
-        [pscustomobject]@{ Label = 'Disabled accounts'; Property = 'DisabledAccounts'; Size = $false }
-        [pscustomobject]@{ Label = 'Local mailbox size (GB)'; Property = 'TotalLocalMailboxSizeGB'; Size = $true }
-    )
-    $format = { param($Value,$Size) if ($Size) { return ([double]$Value).ToString('N2') }; return ([long]$Value).ToString('N0') }
-    $headers = foreach ($comparison in $comparisons) {
-        '<th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:8px 6px;font-size:11px;color:#475569;">{0} ({1})</th>' -f $comparison.Label,(ConvertTo-SmartM365EmailHtmlText $comparison.DateText)
-    }
-    $bodyRows = foreach ($metric in $metrics) {
-        $currentValue = $Current.($metric.Property)
-        $currentHtml = ConvertTo-SmartM365EmailHtmlText (& $format $currentValue $metric.Size)
-        $cells = foreach ($comparison in $comparisons) {
-            $snapshot = $comparison.Snapshot
-            $comparable = ($null -ne $snapshot -and (-not $metric.Size -or ($Current.LocalSizeCoverageComplete -and $snapshot.LocalSizeCoverageComplete)))
-            $cell = 'n/a'
-            if ($comparable) {
-                $value = $snapshot.($metric.Property)
-                $delta = if ($metric.Size) { [math]::Round(([double]$currentValue - [double]$value), 2) } else { [long]$currentValue - [long]$value }
-                $deltaText = if ($delta -gt 0) { '+' + (& $format $delta $metric.Size) } elseif ($delta -lt 0) { '-' + (& $format ([math]::Abs($delta)) $metric.Size) } else { & $format 0 $metric.Size }
-                $color = if ($delta -gt 0) { '#1d4ed8' } elseif ($delta -lt 0) { '#b91c1c' } else { '#334155' }
-                $cell = '{0}<br /><strong style="color:{1};">{2}</strong>' -f (ConvertTo-SmartM365EmailHtmlText (& $format $value $metric.Size)),$color,(ConvertTo-SmartM365EmailHtmlText $deltaText)
-            }
-            '<td align="right" style="border-bottom:1px solid #eef2f7;padding:8px 6px;font-size:11px;color:#334155;">{0}</td>' -f $cell
-        }
-        '<tr><td style="border-bottom:1px solid #eef2f7;padding:8px 6px;font-size:11px;color:#334155;">{0}</td><td align="right" style="border-bottom:1px solid #eef2f7;padding:8px 6px;font-size:11px;font-weight:700;">{1}</td>{2}</tr>' -f (ConvertTo-SmartM365EmailHtmlText $metric.Label),$currentHtml,($cells -join '')
-    }
-    return [pscustomobject]@{ Title = 'Raw inventory diff against previous scans'; Html = @"
-<div style="font-size:12px;color:#64748b;margin-bottom:8px;">Each delta compares Current with a complete dated scan. n/a means no comparable scan on that date or unavailable local mailbox size statistics. Colors show direction, not health.</div>
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
-  <tr><th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:8px 6px;font-size:11px;color:#475569;">Metric</th><th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:8px 6px;font-size:11px;color:#475569;">Current ($($Current.SnapshotDate))</th>$($headers -join "`n")</tr>
-  $($bodyRows -join "`n")
-</table>
-"@ }
-}
 
 function Publish-SmartM365ExchangeMailboxDailySnapshot {
     [CmdletBinding()]
@@ -1549,282 +1488,6 @@ function Publish-SmartM365ExchangeMailboxDailySnapshot {
     WriteLog -Message ("Qualified mailbox daily summary snapshot stored: {0}; date: {1}" -f $Path,$Snapshot.SnapshotDate)
 }
 
-function New-SmartM365LocalMailboxIssueEmailSection {
-    [CmdletBinding()]
-    param([AllowEmptyCollection()][object[]]$Issues, [string]$IssuesCsvPath)
-
-    if (@($Issues).Count -eq 0) { return }
-    $rowsHtml = foreach ($group in @($Issues | Group-Object Category,Operation | Sort-Object Name)) {
-        $nativeIds = @($group.Group | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.ObjectGuid) } | Select-Object -ExpandProperty ObjectGuid -Unique)
-        $unbound = @($group.Group | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.ObjectGuid) }).Count
-        $objects = if ($unbound -gt 0) { '{0} identified; {1} unbound occurrences' -f $nativeIds.Count,$unbound } else { [string]$nativeIds.Count }
-        $blocking = @($group.Group | Where-Object { [string]$_.BlocksCmdbQualification -eq 'True' }).Count
-        @"
-<tr>
-  <td style="padding:8px;border-bottom:1px solid #fde68a;">$(ConvertTo-SmartM365EmailHtmlText $group.Group[0].Category)</td>
-  <td style="padding:8px;border-bottom:1px solid #fde68a;">$(ConvertTo-SmartM365EmailHtmlText $group.Group[0].Operation)</td>
-  <td style="padding:8px;border-bottom:1px solid #fde68a;">$(ConvertTo-SmartM365EmailHtmlText $objects)</td>
-  <td align="right" style="padding:8px;border-bottom:1px solid #fde68a;">$($group.Count)</td>
-  <td align="right" style="padding:8px;border-bottom:1px solid #fde68a;">$blocking</td>
-</tr>
-"@
-    }
-    [pscustomobject]@{ Title='Mailbox acquisition and recipient findings'; Html=@"
-<p>Recipient findings do not mean objects were omitted. Unbound warnings and acquisition failures still block CMDB qualification.</p>
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#fffbeb;color:#78350f;font-size:12px;">
-<tr style="background:#fef3c7;"><th align="left" style="padding:8px;">Finding</th><th align="left" style="padding:8px;">Operation</th><th align="left" style="padding:8px;">Affected objects</th><th align="right" style="padding:8px;">Occurrences</th><th align="right" style="padding:8px;">Blocking occurrences</th></tr>
-$($rowsHtml -join "`r`n")
-</table>
-<p>Detailed evidence: $(ConvertTo-SmartM365EmailHtmlText $IssuesCsvPath)</p>
-"@ }
-}
-
-function New-SmartM365ExchangeLocalMailboxReportEmailBody {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [object[]]$ReportRows,
-
-        [Parameter(Mandatory = $true)]
-        [string]$DailyStatsCsv,
-
-        [string]$LatestDailyStatsCsv,
-
-        [Parameter(Mandatory = $true)]
-        [string]$SummaryCsv,
-
-        [string]$LocalMailboxCsv,
-        [string]$LatestLocalMailboxCsv,
-        [string]$RemoteMailboxCsv,
-        [string]$LatestRemoteMailboxCsv,
-
-        [AllowNull()]$DailyStatsUpload,
-        [AllowNull()]$SummaryUpload,
-        [AllowNull()]$LocalMailboxUpload,
-        [AllowNull()]$RemoteMailboxUpload,
-
-        [object[]]$RemoteMailboxDataQualityWarnings = @(),
-        [object[]]$LocalMailboxCollectionIssues = @(),
-        [string]$CollectionIssuesCsvPath = '',
-        [AllowNull()]$ProxyEvidence,
-        [AllowNull()]$DailyDiffSection,
-
-        [AllowNull()]$LocalMailboxWithDatabaseCount,
-
-        [bool]$ShowMailLinks = $false,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Title
-    )
-
-    function Format-SmartM365ExchangeMailboxReportNumber {
-        param([AllowNull()]$Value)
-        if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return '0' }
-        try {
-            $number = [double]$Value
-            if ([math]::Abs($number % 1) -lt 0.000001) { return $number.ToString('N0') }
-            return $number.ToString('N2')
-        }
-        catch {
-            return [string]$Value
-        }
-    }
-
-    function New-SmartM365ExchangeMailboxReportLinkHtml {
-        param(
-            [string]$Text,
-            [string]$Url
-        )
-
-        $safeText = ConvertTo-SmartM365EmailHtmlText $Text
-        if (-not $ShowMailLinks -or [string]::IsNullOrWhiteSpace($Url)) { return $safeText }
-        $safeUrl = ConvertTo-SmartM365EmailHtmlText $Url
-        return ('<a href="{0}" style="color:#075985;text-decoration:underline;">{1}</a>' -f $safeUrl, $safeText)
-    }
-
-    $rows = @($ReportRows)
-    $domainCount = $rows.Count
-    $totalMailboxes = ($rows | Measure-Object -Property TotalMailboxCount -Sum).Sum
-    $totalLocalMailboxes = ($rows | Measure-Object -Property TotalLocalMailboxCount -Sum).Sum
-    $totalRemoteMailboxes = ($rows | Measure-Object -Property TotalRemoteMailboxCount -Sum).Sum
-    $totalEnabledAccounts = ($rows | Measure-Object -Property EnabledAccounts -Sum).Sum
-    $totalDisabledAccounts = ($rows | Measure-Object -Property DisabledAccounts -Sum).Sum
-    $totalSizeGb = ($rows | Measure-Object -Property TotalLocalMailboxSizeGB -Sum).Sum
-    if ($null -eq $totalMailboxes) { $totalMailboxes = 0 }
-    if ($null -eq $totalLocalMailboxes) { $totalLocalMailboxes = 0 }
-    if ($null -eq $totalRemoteMailboxes) { $totalRemoteMailboxes = 0 }
-    if ($null -eq $totalEnabledAccounts) { $totalEnabledAccounts = 0 }
-    if ($null -eq $totalDisabledAccounts) { $totalDisabledAccounts = 0 }
-    if ($null -eq $totalSizeGb) { $totalSizeGb = 0 }
-    $totalSizeGb = [math]::Round([double]$totalSizeGb, 2)
-    $qualifiedLocalValue = if ($null -eq $LocalMailboxWithDatabaseCount) { 'N/A' } else { Format-SmartM365ExchangeMailboxReportNumber -Value $LocalMailboxWithDatabaseCount }
-
-    $summaryCards = @(
-        [pscustomobject]@{ Label = 'Domains'; Value = Format-SmartM365ExchangeMailboxReportNumber -Value $domainCount; Detail = 'domains inventoried'; Background = '#f8fafc'; Border = '#dbe3ef'; Accent = '#0f172a'; Span = 1 }
-        [pscustomobject]@{ Label = 'Inventory objects'; Value = Format-SmartM365ExchangeMailboxReportNumber -Value $totalMailboxes; Detail = 'raw local + remote'; Background = '#eff6ff'; Border = '#bfdbfe'; Accent = '#1d4ed8'; Span = 1 }
-        [pscustomobject]@{ Label = 'Local mailboxes'; Value = $qualifiedLocalValue; Detail = 'distinct, with database'; Background = '#f0fdf4'; Border = '#bbf7d0'; Accent = '#166534'; Span = 1 }
-        [pscustomobject]@{ Label = 'Remote mailboxes'; Value = Format-SmartM365ExchangeMailboxReportNumber -Value $totalRemoteMailboxes; Detail = 'remote recipient objects'; Background = '#faf5ff'; Border = '#e9d5ff'; Accent = '#7e22ce'; Span = 1 }
-        [pscustomobject]@{ Label = 'Enabled accounts'; Value = Format-SmartM365ExchangeMailboxReportNumber -Value $totalEnabledAccounts; Detail = 'accounts enabled'; Background = '#f0fdfa'; Border = '#99f6e4'; Accent = '#0f766e'; Span = 1 }
-        [pscustomobject]@{ Label = 'Disabled accounts'; Value = Format-SmartM365ExchangeMailboxReportNumber -Value $totalDisabledAccounts; Detail = 'accounts disabled'; Background = '#fff7ed'; Border = '#fed7aa'; Accent = '#9a3412'; Span = 1 }
-        [pscustomobject]@{ Label = 'Local mailbox size'; Value = Format-SmartM365ExchangeMailboxReportNumber -Value $totalSizeGb; Detail = 'GB'; Background = '#eef2ff'; Border = '#c7d2fe'; Accent = '#4338ca'; Span = 2 }
-    )
-
-    $summaryCardsHtml = New-SmartM365EmailKpiGridHtml -Cards $summaryCards -RowSizes @(4,3)
-
-    $domainRowsHtml = foreach ($row in ($rows | Sort-Object -Property @{ Expression = 'TotalMailboxCount'; Descending = $true }, DomainName)) {
-        @"
-<tr>
-  <td style="border-bottom:1px solid #eef2f7;padding:9px 10px;color:#334155;">$(ConvertTo-SmartM365EmailHtmlText $row.DomainName)</td>
-  <td align="right" style="border-bottom:1px solid #eef2f7;padding:9px 10px;color:#334155;">$(ConvertTo-SmartM365EmailHtmlText (Format-SmartM365ExchangeMailboxReportNumber -Value $row.TotalMailboxCount))</td>
-  <td align="right" style="border-bottom:1px solid #eef2f7;padding:9px 10px;color:#334155;">$(ConvertTo-SmartM365EmailHtmlText (Format-SmartM365ExchangeMailboxReportNumber -Value $row.TotalLocalMailboxCount))</td>
-  <td align="right" style="border-bottom:1px solid #eef2f7;padding:9px 10px;color:#334155;">$(ConvertTo-SmartM365EmailHtmlText (Format-SmartM365ExchangeMailboxReportNumber -Value $row.TotalRemoteMailboxCount))</td>
-  <td align="right" style="border-bottom:1px solid #eef2f7;padding:9px 10px;color:#334155;">$(ConvertTo-SmartM365EmailHtmlText (Format-SmartM365ExchangeMailboxReportNumber -Value $row.EnabledAccounts))</td>
-  <td align="right" style="border-bottom:1px solid #eef2f7;padding:9px 10px;color:#334155;">$(ConvertTo-SmartM365EmailHtmlText (Format-SmartM365ExchangeMailboxReportNumber -Value $row.DisabledAccounts))</td>
-  <td align="right" style="border-bottom:1px solid #eef2f7;padding:9px 10px;color:#334155;">$(ConvertTo-SmartM365EmailHtmlText (Format-SmartM365ExchangeMailboxReportNumber -Value $row.TotalLocalMailboxSizeGB))</td>
-</tr>
-"@
-    }
-
-    $domainTableHtml = @"
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;">
-  <tr>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;color:#475569;text-transform:uppercase;">Domain</th>
-    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;color:#475569;text-transform:uppercase;">Total</th>
-    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;color:#475569;text-transform:uppercase;">Local</th>
-    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;color:#475569;text-transform:uppercase;">Remote</th>
-    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;color:#475569;text-transform:uppercase;">Enabled</th>
-    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;color:#475569;text-transform:uppercase;">Disabled</th>
-    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;color:#475569;text-transform:uppercase;">Local GB</th>
-  </tr>
-  $($domainRowsHtml -join "`r`n")
-</table>
-"@
-
-    $fileRows = @()
-    $localMailboxPathForMail = if (-not [string]::IsNullOrWhiteSpace($LatestLocalMailboxCsv)) { $LatestLocalMailboxCsv } else { $LocalMailboxCsv }
-    if (-not [string]::IsNullOrWhiteSpace($localMailboxPathForMail)) {
-        $fileRows += [pscustomobject]@{ Label = 'Mailbox inventory'; Path = $localMailboxPathForMail; WebUrl = if ($LocalMailboxUpload -and $LocalMailboxUpload.WebUrl) { [string]$LocalMailboxUpload.WebUrl } else { '' } }
-    }
-    $remoteMailboxPathForMail = if (-not [string]::IsNullOrWhiteSpace($LatestRemoteMailboxCsv)) { $LatestRemoteMailboxCsv } else { $RemoteMailboxCsv }
-    if (-not [string]::IsNullOrWhiteSpace($remoteMailboxPathForMail) -and (Test-Path -LiteralPath $remoteMailboxPathForMail -PathType Leaf)) {
-        $fileRows += [pscustomobject]@{ Label = 'Remote mailbox inventory'; Path = $remoteMailboxPathForMail; WebUrl = if ($RemoteMailboxUpload -and $RemoteMailboxUpload.WebUrl) { [string]$RemoteMailboxUpload.WebUrl } else { '' } }
-    }
-    if (-not [string]::IsNullOrWhiteSpace($LatestDailyStatsCsv)) {
-        $fileRows += [pscustomobject]@{ Label = 'Daily stats'; Path = $LatestDailyStatsCsv; WebUrl = if ($DailyStatsUpload -and $DailyStatsUpload.WebUrl) { [string]$DailyStatsUpload.WebUrl } else { '' } }
-    }
-    else {
-        $fileRows += [pscustomobject]@{ Label = 'Daily stats'; Path = $DailyStatsCsv; WebUrl = if ($DailyStatsUpload -and $DailyStatsUpload.WebUrl) { [string]$DailyStatsUpload.WebUrl } else { '' } }
-    }
-    $fileRows += [pscustomobject]@{ Label = 'Summary'; Path = $SummaryCsv; WebUrl = if ($SummaryUpload -and $SummaryUpload.WebUrl) { [string]$SummaryUpload.WebUrl } else { '' } }
-    $fileRowsHtml = foreach ($fileRow in $fileRows) {
-        $rowCount = Get-SmartM365MailboxReportCsvRowCount -Path $fileRow.Path
-        $pathHtml = New-SmartM365ExchangeMailboxReportLinkHtml -Text $fileRow.Path -Url $fileRow.WebUrl
-        @"
-<tr>
-  <td style="width:130px;background:#f8fafc;border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;font-weight:700;color:#334155;">$(ConvertTo-SmartM365EmailHtmlText $fileRow.Label)</td>
-  <td style="border-bottom:1px solid #eef2f7;padding:10px 12px;font-family:Consolas,'Courier New',monospace;font-size:12px;color:#334155;word-break:break-all;">$pathHtml</td>
-  <td align="right" style="width:80px;border-bottom:1px solid #eef2f7;padding:10px 12px;font-size:13px;color:#334155;">$(ConvertTo-SmartM365EmailHtmlText (Format-SmartM365ExchangeMailboxReportNumber -Value $rowCount))</td>
-</tr>
-"@
-    }
-
-    $filesTableHtml = @"
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #d9e2ec;">
-  <tr>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">File</th>
-    <th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Path / SharePoint link</th>
-    <th align="right" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px 12px;font-size:12px;color:#475569;text-transform:uppercase;">Rows</th>
-  </tr>
-  $($fileRowsHtml -join "`r`n")
-</table>
-"@
-
-    $sections = @(
-        [pscustomobject]@{ Title = 'Summary'; Html = $summaryCardsHtml }
-    )
-    if ($DailyDiffSection) { $sections += $DailyDiffSection }
-    $sections += [pscustomobject]@{ Title = 'Domain summary (raw inventory objects)'; Html = $domainTableHtml }
-    $localIssueSection = New-SmartM365LocalMailboxIssueEmailSection -Issues $LocalMailboxCollectionIssues -IssuesCsvPath $CollectionIssuesCsvPath
-    if ($localIssueSection) { $sections += $localIssueSection }
-
-    $exchangeDataQualityWarnings = @($RemoteMailboxDataQualityWarnings | Select-Object -First 100)
-    if ($exchangeDataQualityWarnings.Count -gt 0) {
-        $warningRowsHtml = foreach ($warningRow in $exchangeDataQualityWarnings) {
-            $issueLabel = switch ([string]$warningRow.Issue) {
-                'ExchangeObjectInconsistentState' { 'Inconsistent state'; break }
-                'MissingPrimarySmtpAddress' { 'Missing primary SMTP'; break }
-                'MissingExternalEmailAddress' { 'Missing external address'; break }
-                'InvalidExternalEmailAddress' { 'Invalid external address'; break }
-                'InvalidDisplayName' { 'Invalid display name'; break }
-                default { [string]$warningRow.Issue }
-            }
-            @"
-<tr>
-  <td valign="top" style="width:165px;border-bottom:1px solid #fde68a;padding:10px 12px;font-size:12px;color:#92400e;font-weight:700;line-height:1.35;">$(ConvertTo-SmartM365EmailHtmlText $issueLabel)</td>
-  <td valign="top" style="border-bottom:1px solid #fde68a;padding:10px 12px;font-size:12px;color:#78350f;line-height:1.4;">
-    <div style="font-weight:700;margin:0 0 6px 0;color:#78350f;">$(ConvertTo-SmartM365EmailHtmlText $warningRow.Warning)</div>
-    <div style="margin:0 0 6px 0;font-family:Consolas,'Courier New',monospace;font-size:11px;color:#92400e;word-break:break-word;overflow-wrap:anywhere;">$(ConvertTo-SmartM365EmailHtmlText $warningRow.ObjectPath)</div>
-    <div style="margin:0;color:#92400e;">$(ConvertTo-SmartM365EmailHtmlText $warningRow.SuggestedAction)</div>
-  </td>
-</tr>
-"@
-        }
-        $issueCountRowsHtml = foreach ($issueGroup in @($RemoteMailboxDataQualityWarnings | Group-Object Issue | Sort-Object @{ Expression = 'Count'; Descending = $true }, @{ Expression = 'Name'; Descending = $false })) {
-            $issueLabel = switch ([string]$issueGroup.Name) {
-                'ExchangeObjectInconsistentState' { 'Inconsistent state'; break }
-                'MissingPrimarySmtpAddress' { 'Missing primary SMTP'; break }
-                'MissingExternalEmailAddress' { 'Missing external address'; break }
-                'InvalidExternalEmailAddress' { 'Invalid external address'; break }
-                'InvalidDisplayName' { 'Invalid display name'; break }
-                default { [string]$issueGroup.Name }
-            }
-            @"
-<tr>
-  <td style="border-bottom:1px solid #fde68a;padding:8px 10px;font-size:12px;color:#78350f;font-weight:700;">$(ConvertTo-SmartM365EmailHtmlText $issueLabel)</td>
-  <td align="right" style="border-bottom:1px solid #fde68a;padding:8px 10px;font-size:12px;color:#78350f;font-weight:700;">$(ConvertTo-SmartM365EmailHtmlText $issueGroup.Count)</td>
-</tr>
-"@
-        }
-        $warningsTableHtml = @"
-<p style="margin:0 0 10px 0;color:#78350f;font-size:13px;">Exchange object data quality warnings captured during Get-RemoteMailbox.</p>
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:420px;border-collapse:collapse;border:1px solid #f59e0b;font-size:12px;background:#fffbeb;margin:0 0 14px 0;">
-  <tr>
-    <th align="left" style="background:#fef3c7;border-bottom:1px solid #f59e0b;padding:9px 10px;color:#92400e;text-transform:uppercase;">Issue</th>
-    <th align="right" style="width:90px;background:#fef3c7;border-bottom:1px solid #f59e0b;padding:9px 10px;color:#92400e;text-transform:uppercase;">Count</th>
-  </tr>
-  $($issueCountRowsHtml -join "`r`n")
-</table>
-<p style="margin:0 0 10px 0;color:#78350f;font-size:13px;">Top 100 detailed warnings.</p>
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #f59e0b;font-size:12px;background:#fffbeb;table-layout:fixed;">
-  <tr>
-    <th align="left" style="width:165px;background:#fef3c7;border-bottom:1px solid #f59e0b;padding:10px 12px;color:#92400e;text-transform:uppercase;">Issue</th>
-    <th align="left" style="background:#fef3c7;border-bottom:1px solid #f59e0b;padding:10px 12px;color:#92400e;text-transform:uppercase;">Details</th>
-  </tr>
-  $($warningRowsHtml -join "`r`n")
-</table>
-"@
-        $sections += [pscustomobject]@{ Title = 'Exchange object data quality warnings - Top 100'; Html = $warningsTableHtml }
-    }
-
-    if ($null -ne $ProxyEvidence) {
-        if (Get-Command New-SmartM365ProxyMailSections -ErrorAction SilentlyContinue) {
-            $sections += @(New-SmartM365ProxyMailSections -Evidence $ProxyEvidence -ShowMailLinks:$ShowMailLinks)
-        }
-        else {
-            $sections += [pscustomobject]@{ Title = 'Proxy address audit'; Html = '<p>ProxyAddresses report data is unavailable.</p>' }
-        }
-    }
-    $sections += [pscustomobject]@{ Title = 'Files'; Html = $filesTableHtml }
-
-    return New-SmartM365EmailBody `
-        -Title 'Mailbox inventory summary' `
-        -Category 'SmartM365 Exchange OnPrem' `
-        -Severity $(if ($ProxyEvidence -and (-not $ProxyEvidence.Available -or @($ProxyEvidence.Summary | Where-Object { $_.Summary -eq 'With expected address missing' -and [int]$_.Count -gt 0 }).Count -gt 0)) { 'Warning' } else { 'Success' }) `
-        -Tenant $Tenant `
-        -Message 'Exchange on-premises mailbox inventory summary generated from the latest SmartM365 CSV outputs.' `
-        -Sections $sections `
-        -Footer 'This automated message was generated by SmartM365 from Exchange on-premises mailbox inventory data.'
-}
 
 function Invoke-SmartM365ExchangeLocalMailboxReport {
     [CmdletBinding()]
@@ -1932,6 +1595,8 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
     $remoteMailboxDataQualityWarnings = @($Global:SmartM365ExchangeRemoteMailboxDataQualityWarnings)
     try {
         $dailyDiffSection = $null
+        $currentSnapshot = $null
+        $history = @()
         if ($UseCurrentInventoryData -and $script:LocalMailboxDailySummaryQualified) {
             $historyPath = Join-Path -Path $reportOutputPath -ChildPath 'Exchange_OnPrem_Mailboxes_DailySummary.csv'
             $latestHistoryPath = if ($latestCsvFolder) { Join-Path -Path $latestCsvFolder -ChildPath 'Exchange_OnPrem_Mailboxes_DailySummary.csv' } else { '' }
@@ -1952,10 +1617,41 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
             WriteLog -Message ("ProxyAddresses mail evidence unavailable: {0}" -f $proxyEvidence.Reason) -Level 'WARNING'
         }
         $localMailboxWithDatabaseCount = Get-SmartM365LocalMailboxWithDatabaseCount -Records $localRecordsForMail
-        $mailBody = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $report -DailyStatsCsv $dailyCsv -LatestDailyStatsCsv $latestDailyCsv -SummaryCsv $summaryCsvForMail -LocalMailboxCsv $localCsv -LatestLocalMailboxCsv $latestLocalCsv -RemoteMailboxCsv $remoteCsv -LatestRemoteMailboxCsv $latestRemoteCsv -DailyStatsUpload $latestDailyUpload -SummaryUpload $summaryUpload -LocalMailboxUpload $localMailboxUpload -RemoteMailboxUpload $remoteMailboxUpload -RemoteMailboxDataQualityWarnings $remoteMailboxDataQualityWarnings -LocalMailboxCollectionIssues @($script:LocalMailboxIssues.ToArray()) -CollectionIssuesCsvPath $issueCsvPath -ProxyEvidence $proxyEvidence -DailyDiffSection $dailyDiffSection -LocalMailboxWithDatabaseCount $localMailboxWithDatabaseCount -ShowMailLinks:$script:ShowMailLinks -Title ($TaskName + ' - Mailbox report')
+        $mailInputs = @{
+            ReportRows=$report; DailyStatsCsv=$dailyCsv; LatestDailyStatsCsv=$latestDailyCsv
+            SummaryCsv=$summaryCsvForMail; LocalMailboxCsv=$localCsv; LatestLocalMailboxCsv=$latestLocalCsv
+            RemoteMailboxCsv=$remoteCsv; LatestRemoteMailboxCsv=$latestRemoteCsv
+            DailyStatsUpload=$latestDailyUpload; SummaryUpload=$summaryUpload; LocalMailboxUpload=$localMailboxUpload; RemoteMailboxUpload=$remoteMailboxUpload
+            RemoteMailboxDataQualityWarnings=$remoteMailboxDataQualityWarnings; LocalMailboxCollectionIssues=@($script:LocalMailboxIssues.ToArray())
+            CollectionIssuesCsvPath=$issueCsvPath; ProxyEvidence=$proxyEvidence; LocalMailboxWithDatabaseCount=$localMailboxWithDatabaseCount
+            ShowMailLinks=[bool]$script:ShowMailLinks; Title=($TaskName + ' - Mailbox report'); TenantName=$Tenant
+            ReportHost=$env:COMPUTERNAME; ReportGeneratedAt=(Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
+        }
+        if ($UseCurrentInventoryData -and $latestCsvFolder -and $script:LocalMailboxDailySummaryQualified) {
+            $fileRowCounts = @{}
+            foreach ($path in @(
+                $(if ($latestLocalCsv) { $latestLocalCsv } else { $localCsv })
+                $(if ($latestRemoteCsv) { $latestRemoteCsv } else { $remoteCsv })
+                $(if ($latestDailyCsv) { $latestDailyCsv } else { $dailyCsv })
+                $summaryCsvForMail
+            )) {
+                if ($path -and (Test-Path -LiteralPath $path -PathType Leaf)) {
+                    $fileRowCounts[$path] = Get-SmartM365MailboxReportCsvRowCount -Path $path
+                }
+            }
+            $mailInputs.FileRowCounts = $fileRowCounts
+            $sourceFiles = @('Exchange_OnPrem_Mailboxes_AllDomains.csv')
+            if ($latestRemoteCsv -and (Test-Path -LiteralPath $latestRemoteCsv -PathType Leaf)) { $sourceFiles += [IO.Path]::GetFileName($latestRemoteCsv) }
+            Save-SmartM365ReportInputs -Producer 'SmartM365-Exchange-Local-Mailboxes-Inventory' -LatestFolder $latestCsvFolder -TenantKey $global:SmartM365TenantKey -Files $sourceFiles -InputData @{
+                Mail=$mailInputs; CurrentSnapshot=$currentSnapshot; History=@($history | Where-Object {
+                    $_.SnapshotDate -lt $currentSnapshot.SnapshotDate
+                } | Sort-Object SnapshotDate,GeneratedAt -Descending | Group-Object SnapshotDate | ForEach-Object { $_.Group[0] } | Select-Object -First 31)
+            }
+        }
+        $mailBody = New-SmartM365ExchangeLocalMailboxReportEmailBody @mailInputs -DailyDiffSection $dailyDiffSection
         $mailMarkerPath = Join-Path $reportOutputPath 'SmartM365-ExchangeLocalMailboxSummary.sent'
         Invoke-SmartM365MailboxDailySummaryMail -MarkerPath $mailMarkerPath -SendAction {
-            Send-SmartM365OptionalEmailHtmlReport -BodyHtml $mailBody
+            Send-SmartM365OptionalEmailHtmlReport -BodyHtml $mailBody -ReportCadenceKey 'Exchange.Mailboxes'
         } | Out-Null
     }
     catch {
@@ -1966,7 +1662,7 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
 }
 try {
     Write-Host "Loading module SmartM365-WindowsPowerShell5.psd1..."
-    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.70' -ErrorAction Stop
+    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.76' -ErrorAction Stop
 	$InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
     . (Join-ModulePath '..\..\SmartM365-SharePointUploadPolicy.ps1')
     Initialize-SmartM365CollectorUploadContext -LocalConfig $ScriptLocalConfig -GlobalConfig $global:SmartM365GlobalConfig -DataAllRoot $InitializeOutputPath -DataLastRoot (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -LogAllRoot $global:LogPath -ExternalActionsAllowed (-not $DryRun)
@@ -3875,10 +3571,10 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 #End of script
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBGuRbQb6fgEc5D
-# 5+KKd69dIWynGIklwq8MJ2MjAYf/N6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAM7Gso8/cv4qgo
+# eiqYloG4yTd6jjEAQViifhNaVwPovqCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3903,139 +3599,143 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFF37odeSlrKEXE68UBU1cj+SA4N+VaadqckuacQKJ2ZMA0GCSqG
-# SIb3DQEBAQUABIIBgEvV29iTFnue0rx1IH3CxL7aP3st4LjXHjsKwnZcALPbKrIm
-# cJWXi+lZSCCPAPpXhJ9D8hSPdAvKhTCMBLXX54qvQn4Cgt7+RyDbQI1xvEp1QI6Q
-# S95HdTF0pAJa+ibmiskPHViqchAolOc+ot4A6eNAliNWn7ovFAsfIzCnFzwapedm
-# ifD2HHcSD2FaXR4fmNowwN6sXYrgvDxFlcX7lEeApLGLeL2ZY07KyMOh/l7p8q53
-# OO6ZLppjB2b2PY67OFZfD1wr8f6K3tnQJvk7V4H0lvjlHXALKCL1YDDU6tSPIBVs
-# JuJHjG8iQeHcsdZwiKNEXTrBbXJEM1wh0PkjqwhB30G4DielJks51ylJZZ1pQhnb
-# 7e4HXNwdBETbJysxeGVWuuI8butkeno3askojQVO3OtSaQs6lItdrNLRlwVDa/NX
-# DEVTloVBZ7otbpCTBKDwxILwBhJRlLz8SCN36HyWrDtfqWDJPdb9YeenW4ngmDvF
-# WZBhLFS2rYlfAetUt6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMTIxMDIz
-# NDNaMC8GCSqGSIb3DQEJBDEiBCAowYa8RsAo8JhlMP7Ajs0QO6K/ZTdXUyopcmLY
-# uxfQYDANBgkqhkiG9w0BAQEFAASCAgBK9cNRj6Q7yZAvxycjDP8ksP/AisdUg+79
-# ZvuVIxZmIgcmlnTFaiQYSSst3+0ft34qfIhACRHjk1m8zLlbXtRS3gBENw1nOqWY
-# HxvJ0AmNHZvPyzKH/vOnG1vQ8PI12tnfCX99mAfY4sGXd2MDoKZ2pn/KXCOKlBLb
-# lwD0mADXXhlpCqLcTQZkvounVIMXQrvOU5d0KFRFEqbM2ry2M+c/2RvvI7qXP7y6
-# D+LBH7GfJSMQU89idSL8X4YzZtHFTx13Nl5nhvv7entDuNPw9Ey4OTf/iJ1OzBpK
-# jBzNccr1eSu9mrW5L83oxaSK8wmNLSadZUZR0NvYYr04/6qzxgcPx17o+fOl1lFf
-# gBPu1X0bP8VQCQ21cB/ScjSFECwbhO1A0KDZFSNSPmevNUWXurAa7liwGj4/6b25
-# 7n+ZMAxYJTCrclnd6f/27W3zfASNJ8Jn6gNUrPXjxVhrlws/NKpSQKLm9EvSp/Zr
-# akkWB9LkrJhcdUGT6NNR8/0BN3L5OLM1NT0OJom2FoWFoATo02bJadAkMOEje0Ta
-# geOzCikg5YHhdLKpY05XTXEqpBnDu1Rd3OyFMNp3D5inRYnpSJK+5JoxUiL2aOX/
-# JAnpQsate3VN6LxVUGhIC8S5BdFrnJpbkFO/x89V0KVvfbYo9Cruz7mrvwrA6dGS
-# KpZm9R4/Og==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBoIw
+# ggRqoAMCAQICEDbCsL18Gzrno7PdNsvJdWgwDQYJKoZIhvcNAQEMBQAwgYgxCzAJ
+# BgNVBAYTAlVTMRMwEQYDVQQIEwpOZXcgSmVyc2V5MRQwEgYDVQQHEwtKZXJzZXkg
+# Q2l0eTEeMBwGA1UEChMVVGhlIFVTRVJUUlVTVCBOZXR3b3JrMS4wLAYDVQQDEyVV
+# U0VSVHJ1c3QgUlNBIENlcnRpZmljYXRpb24gQXV0aG9yaXR5MB4XDTIxMDMyMjAw
+# MDAwMFoXDTM4MDExODIzNTk1OVowVzELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
+# Y3RpZ28gTGltaXRlZDEuMCwGA1UEAxMlU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFt
+# cGluZyBSb290IFI0NjCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAIid
+# 2LlFZ50d3ei5JoGaVFTAfEkFm8xaFQ/ZlBBEtEFAgXcUmanU5HYsyAhTXiDQkiUv
+# pVdYqZ1uYoZEMgtHES1l1Cc6HaqZzEbOOp6YiTx63ywTon434aXVydmhx7Dx4IBr
+# Aou7hNGsKioIBPy5GMN7KmgYmuu4f92sKKjbxqohUSfjk1mJlAjthgF7Hjx4vvyV
+# DQGsd5KarLW5d73E3ThobSkob2SL48LpUR/O627pDchxll+bTSv1gASn/hp6IuHJ
+# orEu6EopoB1CNFp/+HpTXeNARXUmdRMKbnXWflq+/g36NJXB35ZvxQw6zid61qmr
+# lD/IbKJA6COw/8lFSPQwBP1ityZdwuCysCKZ9ZjczMqbUcLFyq6KdOpuzVDR3ZUw
+# xDKL1wCAxgL2Mpz7eZbrb/JWXiOcNzDpQsmwGQ6Stw8tTCqPumhLRPb7YkzM8/6N
+# nWH3T9ClmcGSF22LEyJYNWCHrQqYubNeKolzqUbCqhSqmr/UdUeb49zYHr7ALL8b
+# AJyPDmubNqMtuaobKASBqP84uhqcRY/pjnYd+V5/dcu9ieERjiRKKsxCG1t6tG9o
+# j7liwPddXEcYGOUiWLm742st50jGwTzxbMpepmOP1mLnJskvZaN5e45NuzAHteOR
+# lsSuDt5t4BBRCJL+5EZnnw0ezntk9R8QJyAkL6/bAgMBAAGjggEWMIIBEjAfBgNV
+# HSMEGDAWgBRTeb9aqitKz1SA4dibwJ3ysgNmyzAdBgNVHQ4EFgQU9ndq3T/9ARP/
+# FqFsggIv0Ao9FCUwDgYDVR0PAQH/BAQDAgGGMA8GA1UdEwEB/wQFMAMBAf8wEwYD
+# VR0lBAwwCgYIKwYBBQUHAwgwEQYDVR0gBAowCDAGBgRVHSAAMFAGA1UdHwRJMEcw
+# RaBDoEGGP2h0dHA6Ly9jcmwudXNlcnRydXN0LmNvbS9VU0VSVHJ1c3RSU0FDZXJ0
+# aWZpY2F0aW9uQXV0aG9yaXR5LmNybDA1BggrBgEFBQcBAQQpMCcwJQYIKwYBBQUH
+# MAGGGWh0dHA6Ly9vY3NwLnVzZXJ0cnVzdC5jb20wDQYJKoZIhvcNAQEMBQADggIB
+# AA6+ZUHtaES45aHF1BGH5Lc7JYzrftrIF5Ht2PFDxKKFOct/awAEWgHQMVHol9ZL
+# Syd/pYMbaC0IZ+XBW9xhdkkmUV/KbUOiL7g98M/yzRyqUOZ1/IY7Ay0YbMniIibJ
+# rPcgFp73WDnRDKtVutShPSZQZAdtFwXnuiWl8eFARK3PmLqEm9UsVX+55DbVIz33
+# Mbhba0HUTEYv3yJ1fwKGxPBsP/MgTECimh7eXomvMm0/GPxX2uhwCcs/YLxDnBdV
+# VlxvDjHjO1cuwbOpkiJGHmLXXVNbsdXUC2xBrq9fLrfe8IBsA4hopwsCj8hTuwKX
+# JlSTrZcPRVSccP5i9U28gZ7OMzoJGlxZ5384OKm0r568Mo9TYrqzKeKZgFo0fj2/
+# 0iHbj55hc20jfxvK3mQi+H7xpbzxZOFGm/yVQkpo+ffv5gdhp+hv1GDsvJOtJinJ
+# mgGbBFZIThbqI+MHvAmMmkfb3fTxmSkop2mSJL1Y2x/955S29Gu0gSJIkc3z30vU
+# /iXrMpWx2tS7UVfVP+5tKuzGtgkP7d/doqDrLF1u6Ci3TpjAZdeLLlRQZm867eVe
+# XED58LXd1Dk6UvaAhvmWYXoiLz4JA5gPBcz7J311uahxCweNxE+xxxR3kT0WKzAS
+# o5G/PyDez6NHdIUKBeE3jDPs2ACc6CkJ1Sji4PKWVT0/MIIGpzCCBI+gAwIBAgIR
+# AJCsCHIg/cWnxGtcxw33PQYwDQYJKoZIhvcNAQEMBQAwVzELMAkGA1UEBhMCR0Ix
+# GDAWBgNVBAoTD1NlY3RpZ28gTGltaXRlZDEuMCwGA1UEAxMlU2VjdGlnbyBQdWJs
+# aWMgVGltZSBTdGFtcGluZyBSb290IFI0NjAeFw0yNjAzMjUwMDAwMDBaFw00MTAz
+# MjQyMzU5NTlaMFUxCzAJBgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0
+# ZWQxLDAqBgNVBAMTI1NlY3RpZ28gUHVibGljIFRpbWUgU3RhbXBpbmcgQ0EgUjQx
+# MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAruRKogGtghxi+WYtW5oD
+# zPDVF8GGSfgbUKh6bONxi0wvrI1S8qbAYfvLr/ky5ILVRg//70pgNKq8xC3/WEQo
+# djEwAP2hmkGShoNAUQps4kd6Wwp74Fo7RlwQ1Mp949ytpWQDvCsYBbZccDmBAJC/
+# ggqiuL/c805fGcMw6TzIgyBWuUx5PGp9YnheSNPXFzaz0MPtREdZYk4WhtM+hazq
+# asMWVpj0WUAcNhN9vO/FAdWy9Gafdb7lmYLDKTTYjwqAY9P9RfixPPjUaJH6mnBS
+# NBdrX7a0Qdlux0ApS0fc48RW1m+W3tq3HiHzch1FHyhiLzCNjc6MUpcV5xalBvPO
+# w/FtQo/AxaJOvPCSsVrx0f/WkMpEm3fvVbrY9+oo9rIKv9ducE6VGfwIAtKYedG0
+# bO4Ba1MmlxPcErDqjLwggvrBJu73fwXpkhtE0hzV0psgm2vhQs3pHll9N00SHBdy
+# 2qndEcNuDh+46XouM2hoXCO533YQQOHPEUnMTWOo3hyxx5kjDE5PVqp+x+HS4VAT
+# +WBMG4GzeLr9YvZbU5x5YvLdcR1dErV/QRYK55rp019fZFF2NR+TkSW0WcmQ3b5t
+# aGcrXg49EpzKM6/mEpnSJXg1E13X6GO29rWs/LNvkGzsS8XGoRCGBls6ruofeebS
+# sHADR3GeIE5gIU927bjokLECAwEAAaOCAW4wggFqMB8GA1UdIwQYMBaAFPZ3at0/
+# /QET/xahbIICL9AKPRQlMB0GA1UdDgQWBBQ6dKUMZ8ZCUML9tfzHuyk0gvR6uTAO
+# BgNVHQ8BAf8EBAMCAYYwEgYDVR0TAQH/BAgwBgEB/wIBADATBgNVHSUEDDAKBggr
+# BgEFBQcDCDAjBgNVHSAEHDAaMAgGBmeBDAEEAjAOBgwrBgEEAbIxAQIBAwgwTAYD
+# VR0fBEUwQzBBoD+gPYY7aHR0cDovL2NybC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVi
+# bGljVGltZVN0YW1waW5nUm9vdFI0Ni5jcmwwfAYIKwYBBQUHAQEEcDBuMEcGCCsG
+# AQUFBzAChjtodHRwOi8vY3J0LnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNUaW1l
+# U3RhbXBpbmdSb290UjQ2LnA3YzAjBggrBgEFBQcwAYYXaHR0cDovL29jc3Auc2Vj
+# dGlnby5jb20wDQYJKoZIhvcNAQEMBQADggIBADLeUkdm8Z4DZvjfKHOhqu+hsdXN
+# t+X5F+48PB6PTAJCRgA3qxxO3YbAV7baps4K/+2WWoWUspBkT4T2NXK49NvJAfCs
+# ztHSgtqkAQMLX4KjCypJF/+m2Ktrk993g+gcgKdv1yg9C3JmYdJCnnL0ga+pZ/Wo
+# 1+rtXZ8dnwO8RCstTN6gYX0ElFi7Y7NpxbdBC1S6bc05V/SA9HC/ojj33W6Gdwnp
+# U/iVylSkdkoHtHeGIhQLT2ZH0qPM9Wdce8v2fZsDCJQQJ8rll7OGLDbsXa2CLf0M
+# RN9TwzifQ3rEuAXOx/TkzkZRFfwL34hf1XqSmaYq2tTMy2LgsPrqC2Z/6ZKb3fgr
+# zU0vphB4wSTWulitY/KlxbvoyKvrBvUCCx4sgeqf8aR65CbvM5MN/d/lahfXipU2
+# NlY0cXcnGS61XpmeGKd8It92/lufApZR9x6o5qMJWe0jq4JsfGMGDpIKx7FzkB8g
+# aejuBUW/CJ9Phc40+xJRonvVewn4S9yJVRWeM47irGbR9YlN3xruM/yZzhk+rAm9
+# AW06nv7ob6RQkAXR+cTxiAPy620FF41NrViYB4UyKpzfx7x8jh4ubTOMz954YIdq
+# yeiqqtsbBwXjWLP0dfMUPA3iIPnPdBKGnodGJTdSlPAMmKJdyvTPqmOXs/LMnf+2
+# Za0Z6FXsIB9z9aXLMIIG4jCCBMqgAwIBAgIRAOdO8lWwUE/626bf9/yLoxUwDQYJ
+# KoZIhvcNAQEMBQAwVTELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1NlY3RpZ28gTGlt
+# aXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFtcGluZyBDQSBS
+# NDEwHhcNMjYwMzI1MDAwMDAwWhcNMzcwNjI0MjM1OTU5WjByMQswCQYDVQQGEwJH
+# QjEXMBUGA1UECBMOR3JlYXRlciBMb25kb24xGDAWBgNVBAoTD1NlY3RpZ28gTGlt
+# aXRlZDEwMC4GA1UEAxMnU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFtcGluZyBTaWdu
+# ZXIgUjM3MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAsv/DbUvcUNlF
+# LQURd9m4+1St5+JudFKo5P803Iks4mFeNB9SymodP6BJJWBuNhOFQj9w77AVAeg5
+# qQpA2dIwp2QTyBHr2h9eWSTkMBVj9mV6+WI5SaW+vDZW7PhJTbysd9v9WB3Xt6ql
+# Ei8m47pcTy8+k/OfhziKiuzNQXqfC7KcoRD/6up8OZBsU0qxr7n5nh/iRfAp1QXF
+# TBQONBZSGIdHAyVRYYX033VoC8v71rizEKCpH97Pxbwcn9eq9K7W8h5v4npsMUoq
+# CS/c8mQwylDQGx15dHYV6NlcVFdjXD11l7qCrIy/unH5OlZtgx58QJRXRbGgQyBd
+# STpEpwuj3i5Qc52Z9m7hd7yCGCXKujf83hUQpOPx1w8+84EbEUTHVAfq4cpORaGW
+# gY8NJy6txmd3wpS1MeXrOaVAMczTgzAZ+yZBWIqdgQBgTxEeXldEToZOrRkxvn1I
+# jIlfr4I4NWJz+Rb52FshLVnkA/wdoad789Eb7XZDNKd4oMmnc636TgauaaVZP2LL
+# oU0JD/fYr53hwBn4uXu5ZsSfpnqAT60S7szJm/Na882xEoyRzLJ+UVbXOlHLO63D
+# KkAtdz1CDuwWxgRE1drnwplepT06dz+1yTr5p1AkUz21bzE6cT/8/kjh4OPzggYY
+# qrOBQPfuKEL5ZJPcN9jRgEpYvRlq5ucCAwEAAaOCAY4wggGKMB8GA1UdIwQYMBaA
+# FDp0pQxnxkJQwv21/Me7KTSC9Hq5MB0GA1UdDgQWBBRhEOl6Eq9RxIXU8s+kdA9Q
+# zSCv+DAOBgNVHQ8BAf8EBAMCBsAwDAYDVR0TAQH/BAIwADAWBgNVHSUBAf8EDDAK
+# BggrBgEFBQcDCDBKBgNVHSAEQzBBMAgGBmeBDAEEAjA1BgwrBgEEAbIxAQIBAwgw
+# JTAjBggrBgEFBQcCARYXaHR0cHM6Ly9zZWN0aWdvLmNvbS9DUFMwSgYDVR0fBEMw
+# QTA/oD2gO4Y5aHR0cDovL2NybC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVibGljVGlt
+# ZVN0YW1waW5nQ0FSNDEuY3JsMHoGCCsGAQUFBwEBBG4wbDBFBggrBgEFBQcwAoY5
+# aHR0cDovL2NydC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVibGljVGltZVN0YW1waW5n
+# Q0FSNDEuY3J0MCMGCCsGAQUFBzABhhdodHRwOi8vb2NzcC5zZWN0aWdvLmNvbTAN
+# BgkqhkiG9w0BAQwFAAOCAgEAA+o9jdGszfoZepOmygef1OlbkjrPd2QW9z3M8vVb
+# QSCruPeO2eRsC9GhZ4CMZfhkrixayYD67gQkbyiRCbJu5L/i0NQjlQhBvbWfiEba
+# +KHFKGud5YHRWhDZUtDeMIJGZG0BD7/sftZUo2Ifk+CXi/ZlM50+xK3OkqeXVi5G
+# ubDD/5txmYuqCT3T3LAilmoB+5th9sQxiMhyQuT3R/aYb4vypoZJLYklUzTalXle
+# W1nV9s4UROlE389CHDKAi/fepRSMnV8TghODDQxwzNGrOJZ04k/yhzHHDupfHPU5
+# 1FYJqXIvWq9SAAWdlNV1JGIxhkp/TAtxBwz/Vd/VbgVb2d9/wRFfxFkka39O0+4x
+# aZSl/oEK/1DqjxjJRO2Se9lGlJDScu21Zd23Cys3aYyB8y5H/+DFWtVe8PMKgr+V
+# uIDp0Rk5bneVDAEW0TPAT8Ufwl2F6DJiDg/KZk5NmsYES+CxvF7bnISEnQh0ZrWn
+# AJixquV0mElUx01wA5TuPIgyodxzNq/fC0hen9LBtdnfFfSZ+wt8A1Injsbio+DH
+# Vq1voYiVNpBfO7+nh9NB4AhRXNldPgr3zgjJ+47s0uNYy2iDXAZSlkP3ym/7gy31
+# jlu989SNpRWO14/LUNV2LSuXkRI1iLTPI6ZdXG0DnPPG7UftF0tk5m6BP9eNfr2t
+# j1sxggW7MIIFtwIBATBiME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNv
+# bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
+# EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
+# DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgTr5c8cYsrilO
+# IyEo/6WJ97yv/JzkwqZZw1DNBF6dy5YwDQYJKoZIhvcNAQEBBQAEggGAangY8EeI
+# vuSI5/RZWQWXLce1prkgSlRqp+OAp6FMGJrIfc3WHUHZpudxX9NbWUQ9Tw9agszQ
+# pSwm9nYMErRdCTVcdLOaL2snndEPexw1O8bDZCoL4BrjsN+esG6UxbSKGX6twiQS
+# asXr46+JSHVhlL/VUKqAHt1/2k6lEZMMl6C2EhZICaYFQrUgXbUjV5tW6zXSaN23
+# fhynjR0wbL65Bi39SXYpknxgepW2a+j+hlO01X8uk1t8p4qYeSNwsEWE+M6z5NXW
+# M0ICyLofn88tcw3KYY7k9+GeXADItj5aS9+l2mKsgeehXPXLN8+dTqWvImeM9ddX
+# SLl6Xpq3PaDhCeKAlOKkOweQZjLJGXchnC6Qg04ugJoWHOwYA6fQn2oarxS4vF9Y
+# KTjPIENm2esXaDSqvccjjNaNzJqVQAtqCNLeHm88F0rPfD7YG0E1Y2lDXVewJSp6
+# WM9Ypa0+/ahuPrxYhMpXwLmwfi+hbfLCz1AjgSSb0SPyWpxo+z/AGoCkoYIDIzCC
+# Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
+# BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
+# ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
+# AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
+# MjYxMTE5MDkxNTA5WjA/BgkqhkiG9w0BCQQxMgQw28IiCmFFYrbUNMZWcdt0LwJW
+# yw3HhlXCE0REjA01lWDuCHX/Jk0CI7SfkWL/SC31MA0GCSqGSIb3DQEBAQUABIIC
+# AIX1gdKiv1N00m8fLcsqsQWDCMR53SEpie77H5s3XO/zPnyE5qiURbhyznAvhG5t
+# Xz6LGSAedyqbma6Tta13OwEYqZnoGQ2q8R7HJdRxmWuICMLBBha/q8TrDvfIzrU0
+# 7HfHcAEUMxZJRCMDoFr0w4f4MSHrkCEEuMYMdsxiujyx421cBNdmIzUara5B4RH+
+# h2EFL5TrM3niQDaxY0x5et6+UgsH5QjBC1txoMzabnHgjtOguQkxymZrfXy9pqc8
+# 0Nhj92m3N4xT0fiF3n+N2pXJaRJC0hKlVXvQVYbR6G2LhY5SwgrP4TWuu4pThsCU
+# ORAvda4NwWYzmxat3XBGnR4vb4f8Nxe9endWiHf0F+OrTxXS0rBG7J5pzF2k5PQn
+# pL7Y5yRWFufdKbh2QeNQRBJrO0XudRvnHH+3Rs3DTddCiTF4ngY7ktAlKGkzVRK/
+# IiyAc3al+h48f2sZ5vKZ00MdJ2c7k2aHuXMQD5jYN9s7q/n3rQECWPg2Smso2ZRL
+# dmsT6faijVH1YBC8rLC8M5acwL1/0cpL1IR49AAFxdbUm5cDwnACCCLzrX0OZ5Gr
+# WSWRLo7lTXvQy1Wt5JQNRI4YnPeFnHIdd/KPyxjD4ohSw3q8N5sLClcaqdKQeS1A
+# got45ijcy1DWPCWzLb4NwvhAXfw4VV1Ht5u4fmPcesgk
 # SIG # End signature block

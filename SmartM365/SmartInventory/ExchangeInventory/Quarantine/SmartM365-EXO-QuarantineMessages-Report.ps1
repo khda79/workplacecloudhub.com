@@ -31,7 +31,7 @@
     Generates and publishes the report without sending the report email.
 
 .VERSION
-1.0.15
+1.0.16
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -64,12 +64,14 @@ while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $sma
 }
 if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
 . (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+. (Join-Path $smartM365LifecycleRoot 'SmartInventory/Common/SmartM365.ReportRenderers.ps1')
+. (Join-Path $smartM365LifecycleRoot 'SmartInventory/Common/SmartM365.ReportInputs.ps1')
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
 try {
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:ScriptVersion = '1.0.15'
+$script:ScriptVersion = '1.0.16'
 $script:ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $script:TaskName = "$script:ScriptBaseName v$script:ScriptVersion"
 $script:CurrentOperation = 'Initialize'
@@ -116,7 +118,7 @@ else {
 }
 
 $coreModulePath = Join-Path -Path $script:SmartM365Root -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module -Name $coreModulePath -MinimumVersion '1.0.121' -Force -ErrorAction Stop
+Import-Module -Name $coreModulePath -MinimumVersion '1.0.130' -Force -ErrorAction Stop
 
 $script:ScriptConfig = Read-SmartM365ScriptConfiguration -ScriptPath $PSCommandPath
 
@@ -340,189 +342,6 @@ function Get-SmartM365BlockedQuarantineMessage {
     return $messages.ToArray()
 }
 
-function Export-SmartM365QuarantineWorkbook {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows,
-        [Parameter(Mandatory)][string[]]$DetailColumns,
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][datetime]$StartReceivedDateUtc,
-        [Parameter(Mandatory)][datetime]$EndReceivedDateUtc,
-        [Parameter(Mandatory)][int]$EffectiveLookbackDays
-    )
-
-    if (Test-Path -LiteralPath $Path) {
-        Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
-    }
-
-    $reasonGroups = @($Rows |
-        Group-Object -Property QuarantineType |
-        Sort-Object -Property @(
-            @{ Expression = 'Count'; Descending = $true },
-            @{ Expression = 'Name'; Descending = $false }
-        ))
-    $summaryRows = [System.Collections.Generic.List[object]]::new()
-    foreach ($item in @(
-        [pscustomobject]@{ Metric = 'Tenant'; Value = [string]$global:SmartM365TenantKey },
-        [pscustomobject]@{ Metric = 'Generated UTC'; Value = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') },
-        [pscustomobject]@{ Metric = 'Lookback days'; Value = $EffectiveLookbackDays },
-        [pscustomobject]@{ Metric = 'Window start UTC'; Value = $StartReceivedDateUtc.ToString('yyyy-MM-ddTHH:mm:ssZ') },
-        [pscustomobject]@{ Metric = 'Window end UTC'; Value = $EndReceivedDateUtc.ToString('yyyy-MM-ddTHH:mm:ssZ') },
-        [pscustomobject]@{ Metric = 'Blocked messages'; Value = $Rows.Count },
-        [pscustomobject]@{ Metric = 'Oldest message age days'; Value = $(if ($Rows.Count -gt 0) { ($Rows | Measure-Object -Property AgeDays -Maximum).Maximum } else { 0 }) }
-    )) {
-        [void]$summaryRows.Add($item)
-    }
-
-    $summaryRows.ToArray() | Export-Excel `
-        -Path $Path `
-        -WorksheetName 'Summary' `
-        -TableName 'QuarantineSummary' `
-        -TableStyle Medium2 `
-        -AutoSize `
-        -FreezeTopRow `
-        -BoldTopRow `
-        -AutoFilter
-
-    if ($reasonGroups.Count -gt 0) {
-        $reasonRows = @($reasonGroups | ForEach-Object {
-            [pscustomobject]@{
-                QuarantineType = $(if ([string]::IsNullOrWhiteSpace($_.Name)) { 'Unknown' } else { $_.Name })
-                Count          = $_.Count
-            }
-        })
-        $reasonRows | Export-Excel `
-            -Path $Path `
-            -WorksheetName 'By_Reason' `
-            -TableName 'QuarantineByReason' `
-            -TableStyle Medium4 `
-            -AutoSize `
-            -FreezeTopRow `
-            -BoldTopRow `
-            -AutoFilter
-    }
-
-    if ($Rows.Count -gt 0) {
-        $Rows |
-            Select-Object -Property $DetailColumns |
-            Export-Excel `
-                -Path $Path `
-                -WorksheetName 'Quarantine_Messages' `
-                -TableName 'QuarantineMessages' `
-                -TableStyle Medium2 `
-                -AutoSize `
-                -FreezeTopRow `
-                -BoldTopRow `
-                -AutoFilter
-    }
-    else {
-        $package = Open-ExcelPackage -Path $Path
-        try {
-            $worksheet = $package.Workbook.Worksheets.Add('Quarantine_Messages')
-            for ($columnIndex = 0; $columnIndex -lt $DetailColumns.Count; $columnIndex++) {
-                $cell = $worksheet.Cells.Item(1, $columnIndex + 1)
-                $cell.Value = $DetailColumns[$columnIndex]
-                $cell.Style.Font.Bold = $true
-            }
-            $worksheet.View.FreezePanes(2, 1)
-            $worksheet.Cells.Item(1, 1, 1, $DetailColumns.Count).AutoFilter = $true
-            $worksheet.Cells.AutoFitColumns(8, 60)
-            Close-ExcelPackage -ExcelPackage $package
-            $package = $null
-        }
-        finally {
-            if ($null -ne $package) { $package.Dispose() }
-        }
-    }
-
-    return $Path
-}
-
-function Format-SmartM365QuarantineMailBody {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows,
-        [Parameter(Mandatory)][datetime]$StartReceivedDateUtc,
-        [Parameter(Mandatory)][datetime]$EndReceivedDateUtc,
-        [Parameter(Mandatory)][string]$WorkbookPath
-    )
-
-    $topReasons = @($Rows |
-        Group-Object -Property QuarantineType |
-        Sort-Object -Property @(
-            @{ Expression = 'Count'; Descending = $true },
-            @{ Expression = 'Name'; Descending = $false }
-        ) |
-        Select-Object -First 8)
-    $reasonRows = if ($topReasons.Count -eq 0) {
-        '<tr><td colspan="2" style="padding:8px;border-bottom:1px solid #e2e8f0;">No blocked messages</td></tr>'
-    }
-    else {
-        @($topReasons | ForEach-Object {
-            $reason = [System.Net.WebUtility]::HtmlEncode($(if ([string]::IsNullOrWhiteSpace($_.Name)) { 'Unknown' } else { $_.Name }))
-            '<tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;">{0}</td><td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;">{1}</td></tr>' -f $reason, $_.Count
-        }) -join [Environment]::NewLine
-    }
-
-    # Daily history from the collected window: one Outlook-safe table bar per received day (UTC).
-    $countsByDay = @{}
-    foreach ($row in $Rows) {
-        $receivedText = [string]$row.ReceivedTimeUtc
-        if ($receivedText.Length -lt 10) { continue }
-        $dayKey = $receivedText.Substring(0, 10)
-        $countsByDay[$dayKey] = 1 + $(if ($countsByDay.ContainsKey($dayKey)) { $countsByDay[$dayKey] } else { 0 })
-    }
-    $historyDays = [System.Collections.Generic.List[object]]::new()
-    $day = $StartReceivedDateUtc.Date
-    while ($day -le $EndReceivedDateUtc.Date) {
-        $dayKey = $day.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
-        [void]$historyDays.Add([pscustomobject]@{
-            Day   = $day
-            Count = $(if ($countsByDay.ContainsKey($dayKey)) { [int]$countsByDay[$dayKey] } else { 0 })
-        })
-        $day = $day.AddDays(1)
-    }
-    $maxDayCount = [int](($historyDays | Measure-Object -Property Count -Maximum).Maximum)
-    $historyRows = @($historyDays | Sort-Object -Property Day -Descending | ForEach-Object {
-        $dayLabel = $_.Day.ToString('ddd dd/MM', [Globalization.CultureInfo]::GetCultureInfo('fr-FR'))
-        $barCell = if ($_.Count -gt 0 -and $maxDayCount -gt 0) {
-            $barPercent = [math]::Max(1, [math]::Round(100 * $_.Count / $maxDayCount))
-            '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="{0}%"><tr><td height="14" bgcolor="#0f4c81" style="background:#0f4c81;height:14px;font-size:1px;line-height:1px;">&nbsp;</td></tr></table>' -f $barPercent
-        }
-        else {
-            '&nbsp;'
-        }
-        '<tr><td style="padding:2px 8px;white-space:nowrap;font-size:12px;color:#475569;">{0}</td><td style="padding:2px 0;width:100%;">{1}</td><td style="padding:2px 8px;text-align:right;font-size:12px;">{2}</td></tr>' -f $dayLabel, $barCell, $_.Count
-    }) -join [Environment]::NewLine
-
-    $workbookName = [System.Net.WebUtility]::HtmlEncode((Split-Path -Path $WorkbookPath -Leaf))
-    return @"
-<!DOCTYPE html>
-<html>
-<body style="font-family:Segoe UI,Arial,sans-serif;color:#1f2937;">
-  <h2 style="color:#0f4c81;">Exchange Online quarantine report</h2>
-  <p>The attached Excel workbook contains read-only metadata for email messages that remain blocked in quarantine.</p>
-  <table role="presentation" style="border-collapse:collapse;width:100%;max-width:720px;">
-    <tr><td style="padding:8px;font-weight:600;">Tenant</td><td style="padding:8px;">$([System.Net.WebUtility]::HtmlEncode([string]$global:SmartM365TenantKey))</td></tr>
-    <tr><td style="padding:8px;font-weight:600;">Blocked messages</td><td style="padding:8px;">$($Rows.Count)</td></tr>
-    <tr><td style="padding:8px;font-weight:600;">Window UTC</td><td style="padding:8px;">$($StartReceivedDateUtc.ToString('yyyy-MM-dd HH:mm')) to $($EndReceivedDateUtc.ToString('yyyy-MM-dd HH:mm'))</td></tr>
-    <tr><td style="padding:8px;font-weight:600;">Workbook</td><td style="padding:8px;">$workbookName</td></tr>
-  </table>
-  <h3 style="color:#0f4c81;">Top quarantine reasons</h3>
-  <table style="border-collapse:collapse;width:100%;max-width:720px;border:1px solid #e2e8f0;">
-    <tr><th style="padding:8px;text-align:left;background:#f8fafc;">Reason</th><th style="padding:8px;text-align:right;background:#f8fafc;">Count</th></tr>
-    $reasonRows
-  </table>
-  <h3 style="color:#0f4c81;">Blocked messages per received day (UTC)</h3>
-  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;max-width:720px;border:1px solid #e2e8f0;">
-    $historyRows
-  </table>
-  <p style="font-size:12px;color:#64748b;">Daily counts cover messages still blocked at collection time; messages released since then are not counted.</p>
-  <p style="font-size:12px;color:#64748b;">No message body or attachment content is collected by this report.</p>
-</body>
-</html>
-"@
-}
 
 function Send-QuarantineTeamsSuccess {
     [CmdletBinding()]
@@ -650,26 +469,7 @@ if ($script:ReleaseStatuses.Count -eq 0) {
 }
 if ([string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath = $script:OutputPathFromConfig }
 
-$detailColumns = @(
-    'TenantKey',
-    'RunId',
-    'CollectedAtUtc',
-    'ReceivedTimeUtc',
-    'AgeDays',
-    'SenderAddress',
-    'RecipientAddress',
-    'Subject',
-    'QuarantineType',
-    'PolicyName',
-    'PolicyType',
-    'Direction',
-    'ReleaseStatus',
-    'ExpiresUtc',
-    'Reported',
-    'SystemReleased',
-    'MessageId',
-    'Identity'
-)
+$detailColumns = @(Get-SmartM365QuarantineReportColumns)
 $csvColumns = @($detailColumns | Where-Object { $_ -ne 'TenantKey' })
 
 try {
@@ -802,13 +602,15 @@ try {
     else {
         @()
     }
+    $workbookGeneratedUtc = [datetime]::UtcNow
     Export-SmartM365QuarantineWorkbook `
         -Rows $workbookRows `
         -DetailColumns $detailColumns `
         -Path $script:WorkbookPath `
         -StartReceivedDateUtc $startReceivedDateUtc `
         -EndReceivedDateUtc $endReceivedDateUtc `
-        -EffectiveLookbackDays $LookbackDays | Out-Null
+        -EffectiveLookbackDays $LookbackDays -GeneratedUtc $workbookGeneratedUtc | Out-Null
+    $reportLocalDate = Get-Date -Format 'yyyy-MM-dd'
     WriteLog -Message ("Excel workbook generated: {0}" -f $script:WorkbookPath) -Level 'SUCCESS'
 
     if ($MaxItems -eq 0 -and $global:EnableSharePointUpload) {
@@ -819,7 +621,15 @@ try {
         WriteLog -Message 'MaxItems mode: workbook SharePoint upload skipped.' -Level 'WARNING'
     }
 
+    if ($MaxItems -eq 0) {
+        Save-SmartM365ReportInputs -Producer 'SmartM365-EXO-QuarantineMessages-Report' -LatestFolder $script:LatestCsvFolderPath -TenantKey $global:SmartM365TenantKey -Files 'Exchange_EXO_QuarantineMessages.csv' -InputData @{
+            EndUtc=$endReceivedDateUtc.ToString('o'); LookbackDays=$LookbackDays; WorkbookGeneratedUtc=$workbookGeneratedUtc.ToString('o'); LocalDate=$reportLocalDate
+            WorkbookFile=(Get-SmartM365ReportFileReference -Path $script:WorkbookPath)
+        }
+    }
+
     $mailSuppressed = $NoMail -or -not $script:SendReportMail -or $MaxItems -gt 0
+    $mailAccepted = $false
     if ($mailSuppressed) {
         $reason = if ($NoMail) {
             'NoMail switch'
@@ -834,7 +644,7 @@ try {
     }
     else {
         $script:CurrentOperation = 'Send quarantine Excel report email'
-        $mailSubject = '[SmartM365] Quarantaine EXO | {0} message(s) bloque(s) | {1}' -f $script:ReportRowCount, (Get-Date -Format 'yyyy-MM-dd')
+        $mailSubject = Get-SmartM365QuarantineReportSubject -Count $script:ReportRowCount -LocalDate $reportLocalDate
         $mailBody = Format-SmartM365QuarantineMailBody `
             -Rows $reportRows `
             -StartReceivedDateUtc $startReceivedDateUtc `
@@ -844,8 +654,9 @@ try {
             -Subject $mailSubject `
             -BodyHtml $mailBody `
             -Attachments @($script:WorkbookPath) `
-            -AllowAttachments
-        WriteLog -Message ("Quarantine report email accepted for delivery: {0}" -f $mailSubject) -Level 'SUCCESS'
+            -AllowAttachments -ReportCadenceKey 'EXO.Quarantine'
+        $mailAccepted = (Get-Variable SmartM365LastMailDelivery -Scope Global -ValueOnly -ErrorAction SilentlyContinue) -notin @('Skipped','Busy')
+        if ($mailAccepted) { WriteLog -Message ("Quarantine report email accepted for delivery: {0}" -f $mailSubject) -Level 'SUCCESS' }
     }
 
     $script:CurrentOperation = 'Apply retention'
@@ -866,7 +677,7 @@ try {
         $script:ReportRowCount,
         $script:TimestampedCsvPath,
         $script:WorkbookPath,
-        (-not $mailSuppressed)
+        $mailAccepted
     WriteLog -Message ("Result summary: {0}" -f $resultSummary) -Level 'INFO'
     Write-Host ("EXO quarantine report completed. {0}" -f $resultSummary)
 
@@ -965,10 +776,10 @@ finally {
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 
 # SIG # Begin signature block
-# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD9jY/TPDMZbxx2
-# wqjIL7T1Z3hzN9RFIS1TWoedQ7ew1qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBzJM1lMGqSY/41
+# hgSsxkCrVVXPkflruXxjP4VPVXs4P6CCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -993,19 +804,143 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
-# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
-# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
-# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
-# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCByH7b+LMFd4kGK9U1sHAEu
-# IiMnKU3vgpYCmLGV5layDzANBgkqhkiG9w0BAQEFAASCAYB5/51dQbbse7ZL2ldm
-# ZNbpoNdWb4b3jUIlv9y5/3BxbjXPet9/yk7Q1bX9SK7dYpsdMvmKc1WyhuYGWMGx
-# FJ4f2MR9JpSemLfMnwCdd8u9gK85F6Di05iD+zipuhit+hls8pw7xjCQ7DQgwg0C
-# vL9n1FRDbnSV7QLPhmaoJiw1gQZtDt2qxA17tQJngvas3P0lI6icvVvw2L/Db83K
-# b6mW7Koh1REiHTMu8+fX1Gco5wFbmIw/2BjDrwNyU3WyugDi6Ma/q8IoMRP3sHGq
-# X5A7lnN214eymLX5pPtBaF9B1wJ3XjvUjvH3beZ7cGWkKOFCEd7hxMC7BJy/rV+R
-# U8wDzrCjWJ0L3uB+jue2FLEl6T1erERfeWo3kZmbLfXlhNK1ywac3KyoLR+PIRTJ
-# KDM2GvVcRheosSbprQDatCQRbMhUyiEYTHN5lpraczrM608jp+4R/NHKmyOthI/X
-# 5BGE7mTINUUvZa+slGmO2KT8jv/0rTsdcglJS7aFqVRMLuc=
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBoIw
+# ggRqoAMCAQICEDbCsL18Gzrno7PdNsvJdWgwDQYJKoZIhvcNAQEMBQAwgYgxCzAJ
+# BgNVBAYTAlVTMRMwEQYDVQQIEwpOZXcgSmVyc2V5MRQwEgYDVQQHEwtKZXJzZXkg
+# Q2l0eTEeMBwGA1UEChMVVGhlIFVTRVJUUlVTVCBOZXR3b3JrMS4wLAYDVQQDEyVV
+# U0VSVHJ1c3QgUlNBIENlcnRpZmljYXRpb24gQXV0aG9yaXR5MB4XDTIxMDMyMjAw
+# MDAwMFoXDTM4MDExODIzNTk1OVowVzELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
+# Y3RpZ28gTGltaXRlZDEuMCwGA1UEAxMlU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFt
+# cGluZyBSb290IFI0NjCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAIid
+# 2LlFZ50d3ei5JoGaVFTAfEkFm8xaFQ/ZlBBEtEFAgXcUmanU5HYsyAhTXiDQkiUv
+# pVdYqZ1uYoZEMgtHES1l1Cc6HaqZzEbOOp6YiTx63ywTon434aXVydmhx7Dx4IBr
+# Aou7hNGsKioIBPy5GMN7KmgYmuu4f92sKKjbxqohUSfjk1mJlAjthgF7Hjx4vvyV
+# DQGsd5KarLW5d73E3ThobSkob2SL48LpUR/O627pDchxll+bTSv1gASn/hp6IuHJ
+# orEu6EopoB1CNFp/+HpTXeNARXUmdRMKbnXWflq+/g36NJXB35ZvxQw6zid61qmr
+# lD/IbKJA6COw/8lFSPQwBP1ityZdwuCysCKZ9ZjczMqbUcLFyq6KdOpuzVDR3ZUw
+# xDKL1wCAxgL2Mpz7eZbrb/JWXiOcNzDpQsmwGQ6Stw8tTCqPumhLRPb7YkzM8/6N
+# nWH3T9ClmcGSF22LEyJYNWCHrQqYubNeKolzqUbCqhSqmr/UdUeb49zYHr7ALL8b
+# AJyPDmubNqMtuaobKASBqP84uhqcRY/pjnYd+V5/dcu9ieERjiRKKsxCG1t6tG9o
+# j7liwPddXEcYGOUiWLm742st50jGwTzxbMpepmOP1mLnJskvZaN5e45NuzAHteOR
+# lsSuDt5t4BBRCJL+5EZnnw0ezntk9R8QJyAkL6/bAgMBAAGjggEWMIIBEjAfBgNV
+# HSMEGDAWgBRTeb9aqitKz1SA4dibwJ3ysgNmyzAdBgNVHQ4EFgQU9ndq3T/9ARP/
+# FqFsggIv0Ao9FCUwDgYDVR0PAQH/BAQDAgGGMA8GA1UdEwEB/wQFMAMBAf8wEwYD
+# VR0lBAwwCgYIKwYBBQUHAwgwEQYDVR0gBAowCDAGBgRVHSAAMFAGA1UdHwRJMEcw
+# RaBDoEGGP2h0dHA6Ly9jcmwudXNlcnRydXN0LmNvbS9VU0VSVHJ1c3RSU0FDZXJ0
+# aWZpY2F0aW9uQXV0aG9yaXR5LmNybDA1BggrBgEFBQcBAQQpMCcwJQYIKwYBBQUH
+# MAGGGWh0dHA6Ly9vY3NwLnVzZXJ0cnVzdC5jb20wDQYJKoZIhvcNAQEMBQADggIB
+# AA6+ZUHtaES45aHF1BGH5Lc7JYzrftrIF5Ht2PFDxKKFOct/awAEWgHQMVHol9ZL
+# Syd/pYMbaC0IZ+XBW9xhdkkmUV/KbUOiL7g98M/yzRyqUOZ1/IY7Ay0YbMniIibJ
+# rPcgFp73WDnRDKtVutShPSZQZAdtFwXnuiWl8eFARK3PmLqEm9UsVX+55DbVIz33
+# Mbhba0HUTEYv3yJ1fwKGxPBsP/MgTECimh7eXomvMm0/GPxX2uhwCcs/YLxDnBdV
+# VlxvDjHjO1cuwbOpkiJGHmLXXVNbsdXUC2xBrq9fLrfe8IBsA4hopwsCj8hTuwKX
+# JlSTrZcPRVSccP5i9U28gZ7OMzoJGlxZ5384OKm0r568Mo9TYrqzKeKZgFo0fj2/
+# 0iHbj55hc20jfxvK3mQi+H7xpbzxZOFGm/yVQkpo+ffv5gdhp+hv1GDsvJOtJinJ
+# mgGbBFZIThbqI+MHvAmMmkfb3fTxmSkop2mSJL1Y2x/955S29Gu0gSJIkc3z30vU
+# /iXrMpWx2tS7UVfVP+5tKuzGtgkP7d/doqDrLF1u6Ci3TpjAZdeLLlRQZm867eVe
+# XED58LXd1Dk6UvaAhvmWYXoiLz4JA5gPBcz7J311uahxCweNxE+xxxR3kT0WKzAS
+# o5G/PyDez6NHdIUKBeE3jDPs2ACc6CkJ1Sji4PKWVT0/MIIGpzCCBI+gAwIBAgIR
+# AJCsCHIg/cWnxGtcxw33PQYwDQYJKoZIhvcNAQEMBQAwVzELMAkGA1UEBhMCR0Ix
+# GDAWBgNVBAoTD1NlY3RpZ28gTGltaXRlZDEuMCwGA1UEAxMlU2VjdGlnbyBQdWJs
+# aWMgVGltZSBTdGFtcGluZyBSb290IFI0NjAeFw0yNjAzMjUwMDAwMDBaFw00MTAz
+# MjQyMzU5NTlaMFUxCzAJBgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0
+# ZWQxLDAqBgNVBAMTI1NlY3RpZ28gUHVibGljIFRpbWUgU3RhbXBpbmcgQ0EgUjQx
+# MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAruRKogGtghxi+WYtW5oD
+# zPDVF8GGSfgbUKh6bONxi0wvrI1S8qbAYfvLr/ky5ILVRg//70pgNKq8xC3/WEQo
+# djEwAP2hmkGShoNAUQps4kd6Wwp74Fo7RlwQ1Mp949ytpWQDvCsYBbZccDmBAJC/
+# ggqiuL/c805fGcMw6TzIgyBWuUx5PGp9YnheSNPXFzaz0MPtREdZYk4WhtM+hazq
+# asMWVpj0WUAcNhN9vO/FAdWy9Gafdb7lmYLDKTTYjwqAY9P9RfixPPjUaJH6mnBS
+# NBdrX7a0Qdlux0ApS0fc48RW1m+W3tq3HiHzch1FHyhiLzCNjc6MUpcV5xalBvPO
+# w/FtQo/AxaJOvPCSsVrx0f/WkMpEm3fvVbrY9+oo9rIKv9ducE6VGfwIAtKYedG0
+# bO4Ba1MmlxPcErDqjLwggvrBJu73fwXpkhtE0hzV0psgm2vhQs3pHll9N00SHBdy
+# 2qndEcNuDh+46XouM2hoXCO533YQQOHPEUnMTWOo3hyxx5kjDE5PVqp+x+HS4VAT
+# +WBMG4GzeLr9YvZbU5x5YvLdcR1dErV/QRYK55rp019fZFF2NR+TkSW0WcmQ3b5t
+# aGcrXg49EpzKM6/mEpnSJXg1E13X6GO29rWs/LNvkGzsS8XGoRCGBls6ruofeebS
+# sHADR3GeIE5gIU927bjokLECAwEAAaOCAW4wggFqMB8GA1UdIwQYMBaAFPZ3at0/
+# /QET/xahbIICL9AKPRQlMB0GA1UdDgQWBBQ6dKUMZ8ZCUML9tfzHuyk0gvR6uTAO
+# BgNVHQ8BAf8EBAMCAYYwEgYDVR0TAQH/BAgwBgEB/wIBADATBgNVHSUEDDAKBggr
+# BgEFBQcDCDAjBgNVHSAEHDAaMAgGBmeBDAEEAjAOBgwrBgEEAbIxAQIBAwgwTAYD
+# VR0fBEUwQzBBoD+gPYY7aHR0cDovL2NybC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVi
+# bGljVGltZVN0YW1waW5nUm9vdFI0Ni5jcmwwfAYIKwYBBQUHAQEEcDBuMEcGCCsG
+# AQUFBzAChjtodHRwOi8vY3J0LnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNUaW1l
+# U3RhbXBpbmdSb290UjQ2LnA3YzAjBggrBgEFBQcwAYYXaHR0cDovL29jc3Auc2Vj
+# dGlnby5jb20wDQYJKoZIhvcNAQEMBQADggIBADLeUkdm8Z4DZvjfKHOhqu+hsdXN
+# t+X5F+48PB6PTAJCRgA3qxxO3YbAV7baps4K/+2WWoWUspBkT4T2NXK49NvJAfCs
+# ztHSgtqkAQMLX4KjCypJF/+m2Ktrk993g+gcgKdv1yg9C3JmYdJCnnL0ga+pZ/Wo
+# 1+rtXZ8dnwO8RCstTN6gYX0ElFi7Y7NpxbdBC1S6bc05V/SA9HC/ojj33W6Gdwnp
+# U/iVylSkdkoHtHeGIhQLT2ZH0qPM9Wdce8v2fZsDCJQQJ8rll7OGLDbsXa2CLf0M
+# RN9TwzifQ3rEuAXOx/TkzkZRFfwL34hf1XqSmaYq2tTMy2LgsPrqC2Z/6ZKb3fgr
+# zU0vphB4wSTWulitY/KlxbvoyKvrBvUCCx4sgeqf8aR65CbvM5MN/d/lahfXipU2
+# NlY0cXcnGS61XpmeGKd8It92/lufApZR9x6o5qMJWe0jq4JsfGMGDpIKx7FzkB8g
+# aejuBUW/CJ9Phc40+xJRonvVewn4S9yJVRWeM47irGbR9YlN3xruM/yZzhk+rAm9
+# AW06nv7ob6RQkAXR+cTxiAPy620FF41NrViYB4UyKpzfx7x8jh4ubTOMz954YIdq
+# yeiqqtsbBwXjWLP0dfMUPA3iIPnPdBKGnodGJTdSlPAMmKJdyvTPqmOXs/LMnf+2
+# Za0Z6FXsIB9z9aXLMIIG4jCCBMqgAwIBAgIRAOdO8lWwUE/626bf9/yLoxUwDQYJ
+# KoZIhvcNAQEMBQAwVTELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1NlY3RpZ28gTGlt
+# aXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFtcGluZyBDQSBS
+# NDEwHhcNMjYwMzI1MDAwMDAwWhcNMzcwNjI0MjM1OTU5WjByMQswCQYDVQQGEwJH
+# QjEXMBUGA1UECBMOR3JlYXRlciBMb25kb24xGDAWBgNVBAoTD1NlY3RpZ28gTGlt
+# aXRlZDEwMC4GA1UEAxMnU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFtcGluZyBTaWdu
+# ZXIgUjM3MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAsv/DbUvcUNlF
+# LQURd9m4+1St5+JudFKo5P803Iks4mFeNB9SymodP6BJJWBuNhOFQj9w77AVAeg5
+# qQpA2dIwp2QTyBHr2h9eWSTkMBVj9mV6+WI5SaW+vDZW7PhJTbysd9v9WB3Xt6ql
+# Ei8m47pcTy8+k/OfhziKiuzNQXqfC7KcoRD/6up8OZBsU0qxr7n5nh/iRfAp1QXF
+# TBQONBZSGIdHAyVRYYX033VoC8v71rizEKCpH97Pxbwcn9eq9K7W8h5v4npsMUoq
+# CS/c8mQwylDQGx15dHYV6NlcVFdjXD11l7qCrIy/unH5OlZtgx58QJRXRbGgQyBd
+# STpEpwuj3i5Qc52Z9m7hd7yCGCXKujf83hUQpOPx1w8+84EbEUTHVAfq4cpORaGW
+# gY8NJy6txmd3wpS1MeXrOaVAMczTgzAZ+yZBWIqdgQBgTxEeXldEToZOrRkxvn1I
+# jIlfr4I4NWJz+Rb52FshLVnkA/wdoad789Eb7XZDNKd4oMmnc636TgauaaVZP2LL
+# oU0JD/fYr53hwBn4uXu5ZsSfpnqAT60S7szJm/Na882xEoyRzLJ+UVbXOlHLO63D
+# KkAtdz1CDuwWxgRE1drnwplepT06dz+1yTr5p1AkUz21bzE6cT/8/kjh4OPzggYY
+# qrOBQPfuKEL5ZJPcN9jRgEpYvRlq5ucCAwEAAaOCAY4wggGKMB8GA1UdIwQYMBaA
+# FDp0pQxnxkJQwv21/Me7KTSC9Hq5MB0GA1UdDgQWBBRhEOl6Eq9RxIXU8s+kdA9Q
+# zSCv+DAOBgNVHQ8BAf8EBAMCBsAwDAYDVR0TAQH/BAIwADAWBgNVHSUBAf8EDDAK
+# BggrBgEFBQcDCDBKBgNVHSAEQzBBMAgGBmeBDAEEAjA1BgwrBgEEAbIxAQIBAwgw
+# JTAjBggrBgEFBQcCARYXaHR0cHM6Ly9zZWN0aWdvLmNvbS9DUFMwSgYDVR0fBEMw
+# QTA/oD2gO4Y5aHR0cDovL2NybC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVibGljVGlt
+# ZVN0YW1waW5nQ0FSNDEuY3JsMHoGCCsGAQUFBwEBBG4wbDBFBggrBgEFBQcwAoY5
+# aHR0cDovL2NydC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVibGljVGltZVN0YW1waW5n
+# Q0FSNDEuY3J0MCMGCCsGAQUFBzABhhdodHRwOi8vb2NzcC5zZWN0aWdvLmNvbTAN
+# BgkqhkiG9w0BAQwFAAOCAgEAA+o9jdGszfoZepOmygef1OlbkjrPd2QW9z3M8vVb
+# QSCruPeO2eRsC9GhZ4CMZfhkrixayYD67gQkbyiRCbJu5L/i0NQjlQhBvbWfiEba
+# +KHFKGud5YHRWhDZUtDeMIJGZG0BD7/sftZUo2Ifk+CXi/ZlM50+xK3OkqeXVi5G
+# ubDD/5txmYuqCT3T3LAilmoB+5th9sQxiMhyQuT3R/aYb4vypoZJLYklUzTalXle
+# W1nV9s4UROlE389CHDKAi/fepRSMnV8TghODDQxwzNGrOJZ04k/yhzHHDupfHPU5
+# 1FYJqXIvWq9SAAWdlNV1JGIxhkp/TAtxBwz/Vd/VbgVb2d9/wRFfxFkka39O0+4x
+# aZSl/oEK/1DqjxjJRO2Se9lGlJDScu21Zd23Cys3aYyB8y5H/+DFWtVe8PMKgr+V
+# uIDp0Rk5bneVDAEW0TPAT8Ufwl2F6DJiDg/KZk5NmsYES+CxvF7bnISEnQh0ZrWn
+# AJixquV0mElUx01wA5TuPIgyodxzNq/fC0hen9LBtdnfFfSZ+wt8A1Injsbio+DH
+# Vq1voYiVNpBfO7+nh9NB4AhRXNldPgr3zgjJ+47s0uNYy2iDXAZSlkP3ym/7gy31
+# jlu989SNpRWO14/LUNV2LSuXkRI1iLTPI6ZdXG0DnPPG7UftF0tk5m6BP9eNfr2t
+# j1sxggW7MIIFtwIBATBiME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNv
+# bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
+# EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
+# DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgBV1HQ8Iuqfcc
+# xjwrjZJ73zaXbB3R/Qs0NrR7QOXhk+MwDQYJKoZIhvcNAQEBBQAEggGAfi1dKVI3
+# X0J8tLd9ywqW4o3BxxX1sAKVCPgE33Cz2THlLf0ZttMYh0vM6rRcsGIyZ57QMIP3
+# 0q3e/7bKwjv0h3wpodJGlAMTsrzLvGzlNuB29afMtZtXFWkkSo3yQ8W+9PZs2sqN
+# zVLHr6t3sBNn/xhTrNlZh0QjeTq2FnqdTyTX20/wP3tAfNvTgtpCxszIjao80MI4
+# GogFjYkDc9SfneO4oWY0OdJJ4bNGMjQcC5SInNql/5lIbAXIhU2mHCPgMueVvd9q
+# U3HZABJSiPjOIY+G4JkhsfJ4nYwkOWv1qCFMGEIyNxym2CLfNvo3Wbz5F+CgYW3s
+# AF5ImXYRV+bBM5buZNrj8AWlJEpEn2Ju1hPVTKpqku1iFeiE9jbf9vyBwTIVEI7v
+# 6s8mOI1nry+2F2Hh8f2gan+7s4LuzqzObMoTuDALnc8yWmTJP7THQfSg5j+1lLVk
+# TNIrEExqVyAvgZTdNGZVAGFArzXZNfHaHYD23V8oz+/gBb+QgvvOeKXToYIDIzCC
+# Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
+# BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
+# ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
+# AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
+# MjYxMTE5MDkxNDU0WjA/BgkqhkiG9w0BCQQxMgQwm5px4VmgS0f9zykusXaXGF+K
+# /x2tDQxN3lVWewIhAWZiiuhdVorN6x/5G1Sh7TIrMA0GCSqGSIb3DQEBAQUABIIC
+# AEbxHqGrBWgES85xzlOUs7m1yF968tU6Zve6SJ6pS9CbpNKePALCxaGBOW7aRCWX
+# sv9r2nJcPnuFfazTllywacYyA5czGXR8rWP9HahMTY3yMg5vvvz4WKPB5uIqEf/h
+# 4Ct/CoEijTQycK1u5v1EbxRQNfOHFG0j8vM+MM0bdD1L4lt3sZtRwtxKJG8TF6lX
+# ovsx2VhbRAFPqDkvFHNVOqlVKSST562ojaXEW1DugtDy9qYJSmtWxdiyaDN0bImE
+# 4vzD8AcmOgJMeYjSrK2nwRIbQHowwbkQ80dLGRKYKOMfr5fQZia3cR/7SY12hSpy
+# wUdwv+TcLRYMpCtIiUPT3agzqOQTI1wovT5TK34IeE5WtVNhq4V1Gp4QQKS5GJY7
+# HrgSv0Ve8odNRlN/c2vtEXls739AExQEPLpke166rsQURMt6mPrTbQSdsPtjagzl
+# d7Zm///V+Ho3MgucpPKNyoIFfyk9pQx4p+GAdkdUVwaeZi1ZjD4o8oHS+dwZ/Z+C
+# 9lptwSAuYhc+rpjGsWSqZYzc576fPPvMLxRhnHkNOVoZEJcqGzStLG0utgyQ2VG1
+# FSsV1t+qzelCuLXH/P6ihW5jz+GnrzRxus5pRslkAP3BHb49HgDayo26jshZvQQR
+# idPYKH2cF37OB52gAIu9J1iVJlgqEhHLX6T4C7Zvmv/8
 # SIG # End signature block

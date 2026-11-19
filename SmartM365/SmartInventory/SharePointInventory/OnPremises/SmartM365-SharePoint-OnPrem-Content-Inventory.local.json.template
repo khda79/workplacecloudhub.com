@@ -1,4 +1,5 @@
 {
+  "ReportMailCadence": { "Mode": "SelectedDays", "Days": ["Monday"] },
   "EnableSharePointUploadDataAll": "__USE_GLOBAL__",
   "EnableSharePointUploadDataLast": "__USE_GLOBAL__",
   "EnableSharePointUploadDataPowerBI": "__USE_GLOBAL__",

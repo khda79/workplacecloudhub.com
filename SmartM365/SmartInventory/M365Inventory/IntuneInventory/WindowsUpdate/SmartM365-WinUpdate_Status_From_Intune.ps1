@@ -41,7 +41,7 @@ PARAMETERS
 VERSION
   1.58
 .VERSION
-1.60
+1.61
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Minimum application permissions: DeviceManagementConfiguration.Read.All, DeviceManagementManagedDevices.Read.All
@@ -69,6 +69,8 @@ while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $sma
 }
 if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
 . (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+. (Join-Path $smartM365LifecycleRoot 'SmartInventory/Common/SmartM365.ReportRenderers.ps1')
+. (Join-Path $smartM365LifecycleRoot 'SmartInventory/Common/SmartM365.ReportInputs.ps1')
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
 try {
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
@@ -106,7 +108,7 @@ if ([string]::IsNullOrWhiteSpace($CsvTenantKey)) { throw 'The effective tenant c
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.60"
+$ScriptVersion = "1.61"
 
 function Get-WinUpdateSourceReceiptUploadPaths {
     param([AllowNull()][AllowEmptyString()][string]$ReceiptPath)
@@ -315,7 +317,7 @@ function Import-SmartM365CorePreflight {
     while ($searchRoot) {
         $modulePath = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
         if (Test-Path -LiteralPath $modulePath) {
-            Import-Module -Name $modulePath -MinimumVersion '1.0.121' -Prefix Core -ErrorAction Stop
+            Import-Module -Name $modulePath -MinimumVersion '1.0.130' -Prefix Core -ErrorAction Stop
             return
         }
 
@@ -528,10 +530,11 @@ function Send-SummaryEmail {
 
     try {
         Import-SmartM365CorePreflight
-        $mailParams = @{ To = $summaryTo; Subject = $Subject; BodyHtml = $HtmlBody }
+        $mailParams = @{ To = $summaryTo; Subject = $Subject; BodyHtml = $HtmlBody; ReportCadenceKey = 'Intune.WindowsUpdate' }
         if (-not [string]::IsNullOrWhiteSpace($From)) { $mailParams['From'] = $From }
         if (-not [string]::IsNullOrWhiteSpace($Cc)) { $mailParams['Cc'] = $Cc }
         Send-CoreSmartM365Mail @mailParams
+        if ((Get-Variable SmartM365LastMailDelivery -Scope Global -ValueOnly -ErrorAction SilentlyContinue) -in @('Skipped','Busy')) { return $false }
         Write-Log "Summary email sent." "INFO" "MAIL"
         return $true
     }
@@ -966,41 +969,9 @@ function Write-ArchiveCopyAndPrune {
 # ==========================================================
 # HTML helpers
 # ==========================================================
-function Html-Encode {
-    param([Parameter(Mandatory=$false)][object]$Value)
-    if ($null -eq $Value) { return "" }
-    $s = [string]$Value
-    $s = $s.Replace("&","&amp;").Replace("<","&lt;").Replace(">","&gt;").Replace('"',"&quot;").Replace("'","&#39;")
-    return $s
-}
 
-function Convert-ObjectsToHtmlTable {
-    param(
-        [Parameter(Mandatory=$true)][AllowNull()][AllowEmptyCollection()][object[]]$Rows,
-        [Parameter(Mandatory=$true)][string[]]$Columns,
-        [Parameter(Mandatory=$true)][string]$Title
-    )
 
-    if ($null -eq $Rows) { $Rows = @() }
-    if (-not $Rows -or $Rows.Count -eq 0) {
-        return "<h3 style='margin:16px 0 8px 0;'>$(Html-Encode $Title)</h3><div style='font-family:Segoe UI,Arial;font-size:12px;color:#666;'>No data.</div>"
-    }
 
-    $th  = ($Columns | ForEach-Object { "<th style='padding:6px;border:1px solid #ddd;background:#f5f5f5;text-align:left;'>$(Html-Encode $_)</th>" }) -join ""
-    $trs = ($Rows | ForEach-Object {
-        $row = $_
-        $tds = ($Columns | ForEach-Object { "<td style='padding:6px;border:1px solid #ddd;'>$(Html-Encode $row.$_)</td>" }) -join ""
-        "<tr>$tds</tr>"
-    }) -join "`n"
-
-    return @"
-<h3 style="margin:16px 0 8px 0;">$(Html-Encode $Title)</h3>
-<table style="border-collapse:collapse;font-family:Segoe UI,Arial;font-size:12px;">
-<tr>$th</tr>
-$trs
-</table>
-"@
-}
 
 # ==========================================================
 # Normalization + Readiness lookup
@@ -1620,27 +1591,7 @@ function Get-WinUpdateEnabledWindowsCombinedSummary {
     }
 }
 
-function Get-WinUpdateCombinedVersionDistribution {
-    param([Parameter(Mandatory)][object]$CombinedSummary)
 
-    $windows11 = [int]$CombinedSummary.Windows11
-    $windows10 = [int]$CombinedSummary.Windows10
-    $unknown = [int]$CombinedSummary.UnknownOrOther
-    $total = [int]$CombinedSummary.Total
-    if ($total -le 0 -or $windows11 -lt 0 -or $windows10 -lt 0 -or $unknown -lt 0 -or
-        ($windows11 + $windows10 + $unknown) -ne $total) {
-        throw 'Combined Windows version distribution does not reconcile.'
-    }
-    [pscustomobject]@{
-        Windows11 = $windows11
-        Windows10 = $windows10
-        UnknownOrOther = $unknown
-        Total = $total
-        Windows11Pct = [math]::Round(100.0 * $windows11 / $total, 2)
-        Windows10Pct = [math]::Round(100.0 * $windows10 / $total, 2)
-        UnknownOrOtherPct = [math]::Round(100.0 * $unknown / $total, 2)
-    }
-}
 
 function Get-WinUpdateProgressPhase {
     param([Parameter(Mandatory)][object]$Row)
@@ -2567,202 +2518,38 @@ try {
         Write-Log "Fleet OS coverage unavailable: no supported Windows version was detected in a policy name." "WARN" "KPI"
     }
 
+    $durationSeconds = [int](New-TimeSpan -Start $scriptStart -End (Get-Date)).TotalSeconds
+    $policyCount = $policies.Count
+    $actionLimit = [math]::Max(1,$RiskTopN)
+    $actionRows = @($deviceSummaryRows | Where-Object OperationalState -eq 'ActionRequired' | Sort-Object ActionPriority,PolicyName,DeviceName | Select-Object -First $actionLimit `
+        ActionPriority,DeviceName,PolicyName,AggregateState,CurrentDeviceUpdateStatus,LatestAlertMessage,UpgradeEligibilityLabel,ActionCode,ActionOwner,ActionDescription)
+    $summaryMatched = @($deviceSummaryRows | Where-Object ReadinessMatch -eq 'Matched').Count
+    $summaryNotMatched = @($deviceSummaryRows | Where-Object ReadinessMatch -eq 'NotMatched').Count
+    $summaryEntraOsVersion = @($deviceSummaryRows | Where-Object OSVersionSource -eq 'Entra').Count
+    $summaryUnavailableOsVersion = @($deviceSummaryRows | Where-Object OSVersionSource -eq 'Unavailable').Count
+    $summaryReadinessPct = if (($summaryMatched+$summaryNotMatched) -gt 0) { [math]::Round(100.0*$summaryMatched/($summaryMatched+$summaryNotMatched),2) } else { 0 }
+    $mailInputs = @{
+        actionRequiredCount=$actionRequiredCount; adSourceText=$adSourceText; adWithoutIntuneSummary=$adWithoutIntuneSummary; allPolicySummary=$allPolicySummary
+        combinedFleetSummary=$combinedFleetSummary; completedCount=$completedCount; completionPct=$completionPct; computedRowCount=$computedRowCount
+        count=$count; coverageAvailable=$coverageAvailable; CsvLastFinal=$CsvLastFinal; durationSeconds=$durationSeconds
+        EnableReadinessEnrichment=$EnableReadinessEnrichment; fleetDevices=$fleetDevices; fleetKnownOsCoveragePct=$fleetKnownOsCoveragePct; fleetOsBelowTarget=$fleetOsBelowTarget
+        fleetOsCoveragePct=$fleetOsCoveragePct; fleetOsCovered=$fleetOsCovered; fleetOsVersionUnknown=$fleetOsVersionUnknown; fleetPolicyCompletionPct=$fleetPolicyCompletionPct
+        fleetPolicyName=$fleetPolicyName; fleetTargetLabel=$fleetTargetLabel; fleetTargetShortLabel=$fleetTargetShortLabel; inProgressCount=$inProgressCount
+        installingCount=$installingCount; intuneFleetSummary=$intuneFleetSummary; intuneSourceText=$intuneSourceText; offeringCount=$offeringCount
+        OrgDomain=$OrgDomain; otherInProgressCount=$otherInProgressCount; pendingCount=$pendingCount; policyCount=$policyCount
+        primaryCoveragePolicy=$primaryCoveragePolicy; priority0Count=$priority0Count; readinessMode=$readinessMode; reportHealth=$reportHealth
+        reportStatus=$reportStatus; RunId=$RunId; spUploadUrl=$spUploadUrl; statusAgeCoveragePct=$statusAgeCoveragePct
+        statusAgePopulatedRows=$statusAgePopulatedRows; statusAgeSourceColumn=$statusAgeSourceColumn; totalUniqueDevices=$totalUniqueDevices; unknownCount=$unknownCount
+        actionRows=$actionRows; actionLimit=$actionLimit; summaryMatched=$summaryMatched; summaryNotMatched=$summaryNotMatched
+        summaryEntraOsVersion=$summaryEntraOsVersion; summaryUnavailableOsVersion=$summaryUnavailableOsVersion; summaryReadinessPct=$summaryReadinessPct
+    }
+    if (-not $DryRun) {
+        Save-SmartM365ReportInputs -Producer 'SmartM365-WinUpdate_Status_From_Intune' -LatestFolder $LatestCsvFolderPath -TenantKey $global:SmartM365TenantKey -Files $CsvName -InputData $mailInputs
+    }
     $should = Should-SendSummaryEmail -CurrentState $summaryState -Mode $SummaryEmailMode -StatePath $SummaryStatePath
     if ($should) {
-        $duration = New-TimeSpan -Start $scriptStart -End (Get-Date)
-        # Rows are already canonical per policy/device, so a second device deduplication is unnecessary here.
-        $policySummary = $allPolicySummary
-        $policyStrips = foreach ($policy in $policySummary) {
-            $policyStatusColor = switch ($policy.Status) { 'CRITICAL' {'#b91c1c'} 'WARNING' {'#b45309'} default {'#15803d'} }
-            $policyStatusBackground = switch ($policy.Status) { 'CRITICAL' {'#fee2e2'} 'WARNING' {'#fef3c7'} default {'#dcfce7'} }
-            $encodedPolicyName = Html-Encode $policy.PolicyName
-            $encodedPolicyId = Html-Encode $policy.PolicyId
-            if ($null -ne $policy.TargetBuild) {
-                $encodedTargetLabel = Html-Encode $policy.TargetLabel
-                $policyTargetHtml = "OS target: $encodedTargetLabel (build $($policy.TargetBuild)+)"
-                $policyOsCoveredText = [string]$policy.OsCovered
-                $policyOsBelowText = [string]$policy.OsBelowTarget
-                $policyOsUnknownText = [string]$policy.OsVersionUnknown
-                $policyOsCoverageText = "$($policy.OsCoveragePct)%"
-            } else {
-                $policyTargetHtml = 'OS target: not detected from policy name'
-                $policyOsCoveredText = 'N/A'
-                $policyOsBelowText = 'N/A'
-                $policyOsUnknownText = 'N/A'
-                $policyOsCoverageText = 'N/A'
-            }
-            @"
-<table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 14px 0;border:1px solid #dbe4ee;background:#ffffff;">
-<tr><td colspan="7" style="padding:12px 14px;border-bottom:1px solid #dbe4ee;background:#f8fafc;">
-<span style="display:inline-block;margin-right:8px;padding:4px 9px;border-radius:999px;background:$policyStatusBackground;color:$policyStatusColor;font-size:11px;font-weight:700;">$($policy.Status)</span>
-<strong style="font-size:14px;color:#0f172a;">$encodedPolicyName</strong>
-<div style="margin-top:4px;font-size:11px;color:#64748b;">Policy ID: $encodedPolicyId | $policyTargetHtml</div>
-</td></tr>
-<tr>
-<td style="width:14.28%;padding:11px 9px;border-right:1px solid #e2e8f0;"><div style="font-size:10px;color:#64748b;">DEVICES</div><div style="font-size:20px;font-weight:700;color:#334155;">$($policy.Devices)</div></td>
-<td style="width:14.28%;padding:11px 9px;border-right:1px solid #e2e8f0;background:#dcfce7;"><div style="font-size:10px;color:#166534;">OS COVERED</div><div style="font-size:20px;font-weight:700;color:#334155;">$policyOsCoveredText</div></td>
-<td style="width:14.28%;padding:11px 9px;border-right:1px solid #e2e8f0;background:#fef3c7;"><div style="font-size:10px;color:#92400e;">OS BELOW TARGET</div><div style="font-size:20px;font-weight:700;color:#334155;">$policyOsBelowText</div></td>
-<td style="width:14.28%;padding:11px 9px;border-right:1px solid #e2e8f0;background:#fffbeb;"><div style="font-size:10px;color:#92400e;">OS UNKNOWN</div><div style="font-size:20px;font-weight:700;color:#334155;">$policyOsUnknownText</div></td>
-<td style="width:14.28%;padding:11px 9px;border-right:1px solid #e2e8f0;background:#f0fdf4;"><div style="font-size:10px;color:#166534;">OS COVERAGE</div><div style="font-size:20px;font-weight:700;color:#334155;">$policyOsCoverageText</div></td>
-<td style="width:14.28%;padding:11px 9px;border-right:1px solid #e2e8f0;"><div style="font-size:10px;color:#64748b;">INTUNE COMPLETED</div><div style="font-size:20px;font-weight:700;color:#334155;">$($policy.Completed)</div></td>
-<td style="width:14.28%;padding:11px 9px;"><div style="font-size:10px;color:#64748b;">INTUNE COMPLETION</div><div style="font-size:20px;font-weight:700;color:#334155;">$($policy.PolicyCompletionPct)%</div></td>
-</tr>
-<tr>
-<td style="padding:9px;background:#eff6ff;border-top:1px solid #e2e8f0;"><div style="font-size:10px;color:#1d4ed8;">OFFERING</div><div style="font-size:17px;font-weight:700;">$($policy.Offering)</div></td>
-<td style="padding:9px;background:#eff6ff;border-top:1px solid #e2e8f0;"><div style="font-size:10px;color:#1d4ed8;">INSTALLING</div><div style="font-size:17px;font-weight:700;">$($policy.Installing)</div></td>
-<td style="padding:9px;background:#eff6ff;border-top:1px solid #e2e8f0;"><div style="font-size:10px;color:#1d4ed8;">PENDING</div><div style="font-size:17px;font-weight:700;">$($policy.Pending)</div></td>
-<td style="padding:9px;background:#eff6ff;border-top:1px solid #e2e8f0;"><div style="font-size:10px;color:#1d4ed8;">OTHER IN PROGRESS</div><div style="font-size:17px;font-weight:700;">$($policy.OtherInProgress)</div></td>
-<td style="padding:9px;background:#eff6ff;border-top:1px solid #e2e8f0;"><div style="font-size:10px;color:#1d4ed8;">IN PROGRESS TOTAL</div><div style="font-size:17px;font-weight:700;">$($policy.InProgress)</div></td>
-<td style="padding:9px;background:#fef2f2;border-top:1px solid #e2e8f0;"><div style="font-size:10px;color:#b91c1c;">ACTION REQUIRED</div><div style="font-size:17px;font-weight:700;">$($policy.ActionRequired)</div></td>
-<td style="padding:9px;background:#fffbeb;border-top:1px solid #e2e8f0;"><div style="font-size:10px;color:#92400e;">UNKNOWN</div><div style="font-size:17px;font-weight:700;">$($policy.Unknown)</div></td>
-</tr></table>
-"@
-        }
-        $policyStripsHtml = $policyStrips -join "`n"
-
-        $actionLimit = [math]::Max(1,$RiskTopN)
-        $actionRows = @($deviceSummaryRows | Where-Object OperationalState -eq 'ActionRequired' | Sort-Object ActionPriority,PolicyName,DeviceName | Select-Object -First $actionLimit `
-            ActionPriority,DeviceName,PolicyName,AggregateState,CurrentDeviceUpdateStatus,LatestAlertMessage,UpgradeEligibilityLabel,ActionCode,ActionOwner,ActionDescription)
-        $actionTable = Convert-ObjectsToHtmlTable -Rows $actionRows -Columns @('ActionPriority','DeviceName','PolicyName','AggregateState','CurrentDeviceUpdateStatus','LatestAlertMessage','UpgradeEligibilityLabel','ActionCode','ActionOwner','ActionDescription') -Title ("Top {0} devices requiring action" -f $actionLimit)
-
-        $summaryMatched = @($deviceSummaryRows | Where-Object ReadinessMatch -eq 'Matched').Count
-        $summaryNotMatched = @($deviceSummaryRows | Where-Object ReadinessMatch -eq 'NotMatched').Count
-        $summaryEntraOsVersion = @($deviceSummaryRows | Where-Object OSVersionSource -eq 'Entra').Count
-        $summaryUnavailableOsVersion = @($deviceSummaryRows | Where-Object OSVersionSource -eq 'Unavailable').Count
-        $summaryReadinessPct = if (($summaryMatched+$summaryNotMatched) -gt 0) { [math]::Round(100.0*$summaryMatched/($summaryMatched+$summaryNotMatched),2) } else { 0 }
-        $readinessRows = @(
-            [pscustomobject]@{ Metric='Enrichment enabled'; Value=$EnableReadinessEnrichment }
-            [pscustomobject]@{ Metric='Mode'; Value=$readinessMode }
-            [pscustomobject]@{ Metric='Matched devices'; Value=$summaryMatched }
-            [pscustomobject]@{ Metric='Unmatched devices'; Value=$summaryNotMatched }
-            [pscustomobject]@{ Metric='Match percentage'; Value="$summaryReadinessPct%" }
-            [pscustomobject]@{ Metric='OS version from Entra fallback'; Value=$summaryEntraOsVersion }
-            [pscustomobject]@{ Metric='OS version unavailable after fallback'; Value=$summaryUnavailableOsVersion }
-            [pscustomobject]@{ Metric='Last-status date source'; Value=$statusAgeSourceColumn }
-            [pscustomobject]@{ Metric='Rows with DaysSinceLastStatus'; Value="$statusAgePopulatedRows/$computedRowCount" }
-            [pscustomobject]@{ Metric='DaysSinceLastStatus coverage'; Value="$statusAgeCoveragePct%" }
-        )
-        $readinessTable = Convert-ObjectsToHtmlTable -Rows $readinessRows -Columns @('Metric','Value') -Title 'Readiness data quality'
-
-        $statusColor = switch ($reportStatus) { 'CRITICAL' {'#b91c1c'} 'WARNING' {'#b45309'} default {'#15803d'} }
-        $statusBackground = switch ($reportStatus) { 'CRITICAL' {'#fee2e2'} 'WARNING' {'#fef3c7'} default {'#dcfce7'} }
-        $severityCoverageText = if ($coverageAvailable) { "$fleetKnownOsCoveragePct%" } else { 'N/A' }
-        $severityUnknownText = if ($coverageAvailable) { "$($reportHealth.OsVersionUnknownRatePct)%" } else { 'N/A' }
-        $severityInputsHtml = "<p style='margin:0 0 18px 0;font-size:12px;color:#64748b;'>Severity inputs: actions $($reportHealth.ActionRequiredRatePct)% | P0 blockers $priority0Count/$($reportHealth.Priority0Threshold) critical threshold | known-OS coverage $severityCoverageText | OS unknown $severityUnknownText.</p>"
-        if ($coverageAvailable) {
-            $subject = "SMART365 - [$reportStatus] WinUpdate Feature Update - $fleetOsCovered/$fleetDevices devices on $fleetTargetShortLabel+ - $actionRequiredCount action(s)"
-            $fleetCoverageSection = @"
-<h2 style="margin:0 0 6px 0;font-size:20px;color:#0f172a;">Fleet OS coverage - $(Html-Encode $fleetTargetLabel)+</h2>
-<p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Reference policy: $(Html-Encode $fleetPolicyName) | Minimum build: $($primaryCoveragePolicy.TargetBuild) | OS coverage uses the current OSVersion, independently of the Intune policy workflow state.</p>
-<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px;"><tr>
-<td style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;"><div style="font-size:11px;color:#64748b;">TARGETED DEVICES</div><div style="font-size:24px;font-weight:700;">$fleetDevices</div></td>
-<td style="padding:14px;background:#dcfce7;border:1px solid #bbf7d0;"><div style="font-size:11px;color:#166534;">OS COVERED</div><div style="font-size:24px;font-weight:700;">$fleetOsCovered</div></td>
-<td style="padding:14px;background:#fef3c7;border:1px solid #fde68a;"><div style="font-size:11px;color:#92400e;">BELOW TARGET</div><div style="font-size:24px;font-weight:700;">$fleetOsBelowTarget</div></td>
-<td style="padding:14px;background:#fffbeb;border:1px solid #fde68a;"><div style="font-size:11px;color:#92400e;">OS UNKNOWN</div><div style="font-size:24px;font-weight:700;">$fleetOsVersionUnknown</div></td>
-<td style="padding:14px;background:#dcfce7;border:1px solid #bbf7d0;"><div style="font-size:11px;color:#166534;">OS COVERAGE</div><div style="font-size:24px;font-weight:700;">$fleetOsCoveragePct%</div></td>
-<td style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;"><div style="font-size:11px;color:#64748b;">INTUNE COMPLETION</div><div style="font-size:24px;font-weight:700;">$fleetPolicyCompletionPct%</div></td>
-</tr></table>
-<p style="margin:6px 0 22px 0;font-size:12px;color:#64748b;">Coverage among devices with a known OS version: $fleetKnownOsCoveragePct%. Intune policy completion remains visible as a secondary workflow metric.</p>
-"@
-        } else {
-            $subject = "SMART365 - [$reportStatus] WinUpdate Feature Update - All policies - OS coverage unavailable - $actionRequiredCount action(s)"
-            $fleetCoverageSection = "<h2 style='margin:0 0 6px 0;font-size:20px;color:#0f172a;'>Fleet OS coverage unavailable</h2><p style='margin:0 0 22px 0;font-size:12px;color:#64748b;'>No supported Windows version was detected in a policy name. Policy workflow metrics remain available below.</p>"
-        }
-        if ($combinedFleetSummary) {
-            $distribution = Get-WinUpdateCombinedVersionDistribution -CombinedSummary $combinedFleetSummary
-            $invariantCulture = [Globalization.CultureInfo]::InvariantCulture
-            $windows11Width = [string]::Format($invariantCulture,'{0:0.##}',$distribution.Windows11Pct)
-            $windows10Width = [string]::Format($invariantCulture,'{0:0.##}',$distribution.Windows10Pct)
-            $unknownOrOtherWidth = [string]::Format($invariantCulture,'{0:0.##}',$distribution.UnknownOrOtherPct)
-            $windowsVersionDistributionSection = @"
-<h2 style="margin:0 0 6px 0;font-size:20px;color:#0f172a;">Windows version distribution - enabled Windows devices</h2>
-<p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Intune inventory and AD Windows computers without an exact Intune ID match | Enabled in Entra or AD | OS family from each source.</p>
-<table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 10px 0;"><tr>
-<td width="$windows11Width%" style="width:$windows11Width%;height:22px;background:#2563eb;font-size:1px;line-height:22px;">&nbsp;</td>
-<td width="$windows10Width%" style="width:$windows10Width%;height:22px;background:#f59e0b;font-size:1px;line-height:22px;">&nbsp;</td>
-<td width="$unknownOrOtherWidth%" style="width:$unknownOrOtherWidth%;height:22px;background:#94a3b8;font-size:1px;line-height:22px;">&nbsp;</td>
-</tr></table>
-<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px;"><tr>
-<td style="width:33.33%;padding:12px;background:#eff6ff;border:1px solid #bfdbfe;"><div style="font-size:11px;color:#1d4ed8;">WINDOWS 11</div><div style="font-size:22px;font-weight:700;color:#0f172a;">$($distribution.Windows11)</div><div style="font-size:12px;color:#475569;">$($distribution.Windows11Pct)%</div></td>
-<td style="width:33.33%;padding:12px;background:#fffbeb;border:1px solid #fde68a;"><div style="font-size:11px;color:#b45309;">WINDOWS 10</div><div style="font-size:22px;font-weight:700;color:#0f172a;">$($distribution.Windows10)</div><div style="font-size:12px;color:#475569;">$($distribution.Windows10Pct)%</div></td>
-<td style="width:33.33%;padding:12px;background:#f8fafc;border:1px solid #cbd5e1;"><div style="font-size:11px;color:#64748b;">OS VERSION UNKNOWN</div><div style="font-size:22px;font-weight:700;color:#0f172a;">$($distribution.UnknownOrOther)</div><div style="font-size:12px;color:#475569;">$($distribution.UnknownOrOtherPct)%</div></td>
-</tr></table>
-<p style="margin:6px 0 22px 0;font-size:12px;color:#64748b;">Combined exact-ID scope: $($intuneFleetSummary.Total.Total) Intune + $($adWithoutIntuneSummary.All.Total) unmatched AD = $($distribution.Total). Fleet OS coverage below uses the reference policy.</p>
-"@
-        } else {
-            $windowsVersionDistributionSection = "<h2 style='margin:0 0 6px 0;font-size:20px;color:#0f172a;'>Windows version distribution unavailable</h2><p style='margin:0 0 22px 0;font-size:12px;color:#64748b;'>The enabled Intune and unmatched AD sources could not be reconciled. No combined OS counts are inferred.</p>"
-        }
-        if ($intuneFleetSummary -and $adWithoutIntuneSummary -and $combinedFleetSummary) {
-            $combinedCountryRowsHtml = foreach ($countryRow in @($combinedFleetSummary.Known) + @($combinedFleetSummary.Unknown)) {
-                $countryName = if ($countryRow.Country) { Html-Encode $countryRow.Country } else { 'Country unknown' }
-                $rowBackground = if ($countryRow.Country) { '#ffffff' } else { '#f8fafc' }
-                "<tr style='background:$rowBackground;'><td style='padding:7px 8px;border-bottom:1px solid #e2e8f0;'>$countryName</td><td style='padding:7px 8px;text-align:right;border-bottom:1px solid #e2e8f0;'>$($countryRow.Windows11)</td><td style='padding:7px 8px;text-align:right;border-bottom:1px solid #e2e8f0;'>$($countryRow.Windows10)</td><td style='padding:7px 8px;text-align:right;border-bottom:1px solid #e2e8f0;'>$($countryRow.UnknownOrOther)</td><td style='padding:7px 8px;text-align:right;border-bottom:1px solid #e2e8f0;font-weight:600;'>$($countryRow.Total)</td><td style='padding:7px 8px;text-align:right;border-bottom:1px solid #e2e8f0;'>$($countryRow.Intune)</td><td style='padding:7px 8px;text-align:right;border-bottom:1px solid #e2e8f0;'>$($countryRow.AdWithoutIntune)</td><td style='padding:7px 8px;text-align:right;border-bottom:1px solid #e2e8f0;'>$($countryRow.ReferencePolicy)</td><td style='padding:7px 8px;text-align:right;border-bottom:1px solid #e2e8f0;'>$($countryRow.OtherPolicyOnly)</td><td style='padding:7px 8px;text-align:right;border-bottom:1px solid #e2e8f0;'>$($countryRow.NeitherPolicy)</td></tr>"
-            }
-            $combinedCountryRowsHtml = $combinedCountryRowsHtml -join [Environment]::NewLine
-            $intuneCountryResolved = $intuneFleetSummary.Total.Total - $intuneFleetSummary.Unknown.Total
-            $adCountryResolved = $adWithoutIntuneSummary.All.Total - $adWithoutIntuneSummary.Unknown.Total
-            $referencePolicyLabel = if ($coverageAvailable) { Html-Encode $fleetPolicyName } else { 'Unavailable' }
-            $combinedRowHtml = "<tr style='background:#dbeafe;font-weight:700;'><td style='padding:9px;'>COMBINED EXACT-ID SCOPE</td><td style='padding:9px;text-align:right;'>$($combinedFleetSummary.Windows11)</td><td style='padding:9px;text-align:right;'>$($combinedFleetSummary.Windows10)</td><td style='padding:9px;text-align:right;'>$($combinedFleetSummary.UnknownOrOther)</td><td style='padding:9px;text-align:right;'>$($combinedFleetSummary.Total)</td><td style='padding:9px;text-align:right;'>$($intuneFleetSummary.Total.Total)</td><td style='padding:9px;text-align:right;'>$($adWithoutIntuneSummary.All.Total)</td><td style='padding:9px;text-align:right;'>$($intuneFleetSummary.Total.ReferencePolicy)</td><td style='padding:9px;text-align:right;'>$($intuneFleetSummary.Total.OtherPolicyOnly)</td><td style='padding:9px;text-align:right;'>$($intuneFleetSummary.Total.NeitherPolicy)</td></tr>"
-            $referenceReconciliationHtml = if ($coverageAvailable) {
-                "<p style='margin:0 0 8px 0;font-size:12px;color:#64748b;'>Reference-policy report to combined scope: $fleetDevices - $($intuneFleetSummary.ExcludedReferencePolicy) excluded by activation - $($intuneFleetSummary.ReportOnlyReferenceIds) absent from the Intune snapshot + $($intuneFleetSummary.Total.OtherPolicyOnly) other-policy-only + $($intuneFleetSummary.Total.NeitherPolicy) neither-policy + $($adWithoutIntuneSummary.All.Total) unmatched AD = $($combinedFleetSummary.Total).</p>"
-            } else { '' }
-            $intuneFleetSection = @"
-<h2 style="margin:0 0 6px 0;font-size:20px;color:#0f172a;">Enabled Windows devices by country - Intune and unmatched AD</h2>
-<p style="margin:0 0 10px 0;font-size:12px;color:#64748b;">Included when Entra AccountEnabled or AD Enabled is true. Reference Feature Update policy: $referencePolicyLabel | Intune country comes from the primary user's Entra CountryOrRegion; unmatched AD country is inferred from the first two letters of the computer name using the selected tenant's private mapping. These are different country definitions, not verified physical locations.</p>
-<table role="presentation" style="width:100%;border-collapse:collapse;font-size:11px;color:#0f172a;margin:0 0 10px 0;">
-<tr style="background:#e2e8f0;"><th style="padding:8px;text-align:left;">COUNTRY</th><th style="padding:8px;text-align:right;">WINDOWS 11</th><th style="padding:8px;text-align:right;">WINDOWS 10</th><th style="padding:8px;text-align:right;">OS VERSION UNKNOWN</th><th style="padding:8px;text-align:right;">TOTAL</th><th style="padding:8px;text-align:right;">INTUNE</th><th style="padding:8px;text-align:right;">AD WITHOUT INTUNE ID MATCH</th><th style="padding:8px;text-align:right;">INTUNE REFERENCE POLICY</th><th style="padding:8px;text-align:right;">INTUNE OTHER FEATURE UPDATE POLICY ONLY</th><th style="padding:8px;text-align:right;">INTUNE NEITHER POLICY</th></tr>
-$combinedCountryRowsHtml
-$combinedRowHtml
-</table>
-<p style="margin:0 0 8px 0;font-size:12px;color:#64748b;">Intune enabled: $($intuneFleetSummary.Total.Total) of $($intuneFleetSummary.AllIntuneWindows) Windows devices; excluded: $($intuneFleetSummary.ExcludedDisabledBoth) disabled in both directories, $($intuneFleetSummary.ExcludedUnqualified) without positive enabled evidence. Country resolved: $intuneCountryResolved/$($intuneFleetSummary.Total.Total). Intune source file times (local): $(Html-Encode $intuneSourceText).</p>
-<p style="margin:0 0 8px 0;font-size:12px;color:#64748b;">AD enabled without exact Intune ID match: $($adWithoutIntuneSummary.All.Total) of $($adWithoutIntuneSummary.UnmatchedTotal); of these, $($adWithoutIntuneSummary.EnabledActive45.Total) were active in the last 45 days. Country prefix resolved: $adCountryResolved/$($adWithoutIntuneSummary.All.Total); unmapped names are in Country unknown. Excluded: $($adWithoutIntuneSummary.ExcludedDisabledBoth) disabled in both directories, $($adWithoutIntuneSummary.ExcludedUnqualified) without positive enabled evidence. Ambiguous Intune IDs excluded: $($adWithoutIntuneSummary.AmbiguousIntuneIds). Source file times (local): $(Html-Encode $adSourceText).</p>
-$referenceReconciliationHtml
-<p style="margin:0 0 22px 0;font-size:12px;color:#64748b;">The combined total adds distinct source IDs after the exact AD ObjectGUID to Intune Azure AD Device ID check; identity differences can still make one physical PC appear twice. Policy columns apply only to the Intune count. Neither policy means absent from exported Feature Update policies, not confirmed outside Windows Autopatch. Fleet OS coverage below retains its reference-policy scope and report OSVersion source.</p>
-"@
-        }
-        else {
-            $intuneFleetSection = "<h2 style='margin:0 0 6px 0;font-size:20px;color:#0f172a;'>Enabled Windows devices - Intune countries and unmatched AD</h2><p style='margin:0 0 22px 0;font-size:12px;color:#64748b;'>Combined Intune/AD breakdown unavailable: a source is missing, stale, invalid, or could not be reconciled. No combined total is inferred.</p>"
-        }
-        $fileLinkHtml = if (-not [string]::IsNullOrWhiteSpace($spUploadUrl)) {
-            $encodedUrl = Html-Encode $spUploadUrl
-            $encodedName = Html-Encode ([IO.Path]::GetFileName($CsvLastFinal))
-            "<div style='margin-top:18px;padding:14px;border:1px solid #dbe4ee;background:#f8fafc;'><h3 style='margin:0 0 8px;'>Export</h3><a href='$encodedUrl' style='color:#075985;text-decoration:underline;'>$encodedName</a></div>"
-        } else { '' }
-
-        $html = @"
-<div style="font-family:Segoe UI,Arial;color:#1f2937;">
-<p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Tenant: $(Html-Encode $OrgDomain) | Policies: $($policies.Count) | Source rows: $count | Duration: $([int]$duration.TotalSeconds) seconds | RunId: $(Html-Encode $RunId)</p>
-<div style="display:inline-block;margin-bottom:18px;padding:6px 12px;border-radius:999px;background:$statusBackground;color:$statusColor;font-weight:700;">$reportStatus</div>
-$severityInputsHtml
-$windowsVersionDistributionSection
-$intuneFleetSection
-$fleetCoverageSection
-<h2 style="margin:24px 0 6px 0;font-size:18px;color:#0f172a;">Operational policy state - all policies</h2>
-<p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Each device is counted once across all policies for operational follow-up. The most severe policy state is retained here only for actions and workflow monitoring; it is not used as the fleet OS coverage KPI.</p>
-<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px;"><tr>
-<td style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;"><div style="font-size:11px;color:#64748b;">UNIQUE DEVICES</div><div style="font-size:24px;font-weight:700;">$totalUniqueDevices</div></td>
-<td style="padding:14px;background:#f0fdf4;border:1px solid #bbf7d0;"><div style="font-size:11px;color:#166534;">POLICY COMPLETED</div><div style="font-size:24px;font-weight:700;">$completedCount</div></td>
-<td style="padding:14px;background:#dbeafe;border:1px solid #bfdbfe;"><div style="font-size:11px;color:#1d4ed8;">IN PROGRESS</div><div style="font-size:24px;font-weight:700;">$inProgressCount</div></td>
-<td style="padding:14px;background:#fee2e2;border:1px solid #fecaca;"><div style="font-size:11px;color:#b91c1c;">ACTION REQUIRED</div><div style="font-size:24px;font-weight:700;">$actionRequiredCount</div></td>
-<td style="padding:14px;background:#fef3c7;border:1px solid #fde68a;"><div style="font-size:11px;color:#92400e;">UNKNOWN</div><div style="font-size:24px;font-weight:700;">$unknownCount</div></td>
-<td style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;"><div style="font-size:11px;color:#64748b;">POLICY COMPLETION</div><div style="font-size:24px;font-weight:700;">$completionPct%</div></td>
-</tr></table>
-<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px;margin-top:2px;"><tr>
-<td style="padding:11px;background:#eff6ff;border:1px solid #bfdbfe;"><div style="font-size:10px;color:#1d4ed8;">OFFERING</div><div style="font-size:19px;font-weight:700;">$offeringCount</div></td>
-<td style="padding:11px;background:#eff6ff;border:1px solid #bfdbfe;"><div style="font-size:10px;color:#1d4ed8;">INSTALLING</div><div style="font-size:19px;font-weight:700;">$installingCount</div></td>
-<td style="padding:11px;background:#eff6ff;border:1px solid #bfdbfe;"><div style="font-size:10px;color:#1d4ed8;">PENDING</div><div style="font-size:19px;font-weight:700;">$pendingCount</div></td>
-<td style="padding:11px;background:#eff6ff;border:1px solid #bfdbfe;"><div style="font-size:10px;color:#1d4ed8;">OTHER IN PROGRESS</div><div style="font-size:19px;font-weight:700;">$otherInProgressCount</div></td>
-</tr></table>
-<h2 style="margin:24px 0 6px 0;font-size:18px;color:#0f172a;">Feature Update policies</h2>
-<p style="margin:0 0 14px 0;font-size:12px;color:#64748b;">Each device is counted once within each policy. A device targeted by several policies appears in every relevant policy strip, so policy totals are not additive and may exceed the global unique-device total.</p>
-$policyStripsHtml
-$actionTable
-$readinessTable
-$fileLinkHtml
-</div>
-"@
-
-        if (Send-SummaryEmail -Subject $subject -HtmlBody $html) {
+        $reportMail = New-SmartM365WindowsUpdateMailReport @mailInputs
+        if (Send-SummaryEmail -Subject $reportMail.Subject -HtmlBody $reportMail.BodyHtml) {
             Save-SummaryState -State $summaryState -StatePath $SummaryStatePath
         }
     }
@@ -2852,10 +2639,10 @@ finally {
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 
 # SIG # Begin signature block
-# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCxgXNQ2pT9Gd2c
-# vhH7zagDr7BH7IekGFVlh2edqLQCqaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCGR8ZpUdx2gco6
+# Q8IXSF13IqlRJ4ygoz+MRYsSXsk/5aCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2880,19 +2667,143 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
-# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
-# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
-# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
-# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBWI17aoS/XvRAC/8XzzLqq
-# Wf7Px1ObfYo74r5et1XS4DANBgkqhkiG9w0BAQEFAASCAYBurb5u7gCGIiJgeNhn
-# RwuYr7wFNU2K1xl/SW8r2sa79w8FAGUKrX9xI++3al3doTsJsfJkqd1LWvt+SDgT
-# zFneqa9tjpnRHTR99nAmwV3/cYN+slMMWeJQN1sOhQvBhEf4OqsYuonhUMOFaBGq
-# 2q3kAaGji7XK3TmMRN7ii33EGypxTyE+aKGruaZW4DaNgt39CgSyHiT5TWI+gwiY
-# 2RlUwcaHnSNKALE/o40c0PrKhVwo10TIBjlF2eJi+4zK0lhzZZi3mKQQ7YW7aoNU
-# uAcdvJipm/vMfgECzQISJvF1PPihMtnS/BkAu0VlboxJJJ7A+jmYg4VS63M8yY2q
-# fiBYa7RHSDugyFaXtqhYmDZgmIIj5OfmFQK0UM+LoJdD7w3hQmZjgv7mzMhhwL7l
-# LOqE7GUCO3Qhw/3RvHI+UdObJL6CEs3X+31MJEqKzhU+qY7WIt3hQ074bLRt5X9m
-# +6dRbxKmGTwmn1avu/pXfo2bqCq3TJ57Q+vjlw7rFKMomac=
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBoIw
+# ggRqoAMCAQICEDbCsL18Gzrno7PdNsvJdWgwDQYJKoZIhvcNAQEMBQAwgYgxCzAJ
+# BgNVBAYTAlVTMRMwEQYDVQQIEwpOZXcgSmVyc2V5MRQwEgYDVQQHEwtKZXJzZXkg
+# Q2l0eTEeMBwGA1UEChMVVGhlIFVTRVJUUlVTVCBOZXR3b3JrMS4wLAYDVQQDEyVV
+# U0VSVHJ1c3QgUlNBIENlcnRpZmljYXRpb24gQXV0aG9yaXR5MB4XDTIxMDMyMjAw
+# MDAwMFoXDTM4MDExODIzNTk1OVowVzELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
+# Y3RpZ28gTGltaXRlZDEuMCwGA1UEAxMlU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFt
+# cGluZyBSb290IFI0NjCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAIid
+# 2LlFZ50d3ei5JoGaVFTAfEkFm8xaFQ/ZlBBEtEFAgXcUmanU5HYsyAhTXiDQkiUv
+# pVdYqZ1uYoZEMgtHES1l1Cc6HaqZzEbOOp6YiTx63ywTon434aXVydmhx7Dx4IBr
+# Aou7hNGsKioIBPy5GMN7KmgYmuu4f92sKKjbxqohUSfjk1mJlAjthgF7Hjx4vvyV
+# DQGsd5KarLW5d73E3ThobSkob2SL48LpUR/O627pDchxll+bTSv1gASn/hp6IuHJ
+# orEu6EopoB1CNFp/+HpTXeNARXUmdRMKbnXWflq+/g36NJXB35ZvxQw6zid61qmr
+# lD/IbKJA6COw/8lFSPQwBP1ityZdwuCysCKZ9ZjczMqbUcLFyq6KdOpuzVDR3ZUw
+# xDKL1wCAxgL2Mpz7eZbrb/JWXiOcNzDpQsmwGQ6Stw8tTCqPumhLRPb7YkzM8/6N
+# nWH3T9ClmcGSF22LEyJYNWCHrQqYubNeKolzqUbCqhSqmr/UdUeb49zYHr7ALL8b
+# AJyPDmubNqMtuaobKASBqP84uhqcRY/pjnYd+V5/dcu9ieERjiRKKsxCG1t6tG9o
+# j7liwPddXEcYGOUiWLm742st50jGwTzxbMpepmOP1mLnJskvZaN5e45NuzAHteOR
+# lsSuDt5t4BBRCJL+5EZnnw0ezntk9R8QJyAkL6/bAgMBAAGjggEWMIIBEjAfBgNV
+# HSMEGDAWgBRTeb9aqitKz1SA4dibwJ3ysgNmyzAdBgNVHQ4EFgQU9ndq3T/9ARP/
+# FqFsggIv0Ao9FCUwDgYDVR0PAQH/BAQDAgGGMA8GA1UdEwEB/wQFMAMBAf8wEwYD
+# VR0lBAwwCgYIKwYBBQUHAwgwEQYDVR0gBAowCDAGBgRVHSAAMFAGA1UdHwRJMEcw
+# RaBDoEGGP2h0dHA6Ly9jcmwudXNlcnRydXN0LmNvbS9VU0VSVHJ1c3RSU0FDZXJ0
+# aWZpY2F0aW9uQXV0aG9yaXR5LmNybDA1BggrBgEFBQcBAQQpMCcwJQYIKwYBBQUH
+# MAGGGWh0dHA6Ly9vY3NwLnVzZXJ0cnVzdC5jb20wDQYJKoZIhvcNAQEMBQADggIB
+# AA6+ZUHtaES45aHF1BGH5Lc7JYzrftrIF5Ht2PFDxKKFOct/awAEWgHQMVHol9ZL
+# Syd/pYMbaC0IZ+XBW9xhdkkmUV/KbUOiL7g98M/yzRyqUOZ1/IY7Ay0YbMniIibJ
+# rPcgFp73WDnRDKtVutShPSZQZAdtFwXnuiWl8eFARK3PmLqEm9UsVX+55DbVIz33
+# Mbhba0HUTEYv3yJ1fwKGxPBsP/MgTECimh7eXomvMm0/GPxX2uhwCcs/YLxDnBdV
+# VlxvDjHjO1cuwbOpkiJGHmLXXVNbsdXUC2xBrq9fLrfe8IBsA4hopwsCj8hTuwKX
+# JlSTrZcPRVSccP5i9U28gZ7OMzoJGlxZ5384OKm0r568Mo9TYrqzKeKZgFo0fj2/
+# 0iHbj55hc20jfxvK3mQi+H7xpbzxZOFGm/yVQkpo+ffv5gdhp+hv1GDsvJOtJinJ
+# mgGbBFZIThbqI+MHvAmMmkfb3fTxmSkop2mSJL1Y2x/955S29Gu0gSJIkc3z30vU
+# /iXrMpWx2tS7UVfVP+5tKuzGtgkP7d/doqDrLF1u6Ci3TpjAZdeLLlRQZm867eVe
+# XED58LXd1Dk6UvaAhvmWYXoiLz4JA5gPBcz7J311uahxCweNxE+xxxR3kT0WKzAS
+# o5G/PyDez6NHdIUKBeE3jDPs2ACc6CkJ1Sji4PKWVT0/MIIGpzCCBI+gAwIBAgIR
+# AJCsCHIg/cWnxGtcxw33PQYwDQYJKoZIhvcNAQEMBQAwVzELMAkGA1UEBhMCR0Ix
+# GDAWBgNVBAoTD1NlY3RpZ28gTGltaXRlZDEuMCwGA1UEAxMlU2VjdGlnbyBQdWJs
+# aWMgVGltZSBTdGFtcGluZyBSb290IFI0NjAeFw0yNjAzMjUwMDAwMDBaFw00MTAz
+# MjQyMzU5NTlaMFUxCzAJBgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0
+# ZWQxLDAqBgNVBAMTI1NlY3RpZ28gUHVibGljIFRpbWUgU3RhbXBpbmcgQ0EgUjQx
+# MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAruRKogGtghxi+WYtW5oD
+# zPDVF8GGSfgbUKh6bONxi0wvrI1S8qbAYfvLr/ky5ILVRg//70pgNKq8xC3/WEQo
+# djEwAP2hmkGShoNAUQps4kd6Wwp74Fo7RlwQ1Mp949ytpWQDvCsYBbZccDmBAJC/
+# ggqiuL/c805fGcMw6TzIgyBWuUx5PGp9YnheSNPXFzaz0MPtREdZYk4WhtM+hazq
+# asMWVpj0WUAcNhN9vO/FAdWy9Gafdb7lmYLDKTTYjwqAY9P9RfixPPjUaJH6mnBS
+# NBdrX7a0Qdlux0ApS0fc48RW1m+W3tq3HiHzch1FHyhiLzCNjc6MUpcV5xalBvPO
+# w/FtQo/AxaJOvPCSsVrx0f/WkMpEm3fvVbrY9+oo9rIKv9ducE6VGfwIAtKYedG0
+# bO4Ba1MmlxPcErDqjLwggvrBJu73fwXpkhtE0hzV0psgm2vhQs3pHll9N00SHBdy
+# 2qndEcNuDh+46XouM2hoXCO533YQQOHPEUnMTWOo3hyxx5kjDE5PVqp+x+HS4VAT
+# +WBMG4GzeLr9YvZbU5x5YvLdcR1dErV/QRYK55rp019fZFF2NR+TkSW0WcmQ3b5t
+# aGcrXg49EpzKM6/mEpnSJXg1E13X6GO29rWs/LNvkGzsS8XGoRCGBls6ruofeebS
+# sHADR3GeIE5gIU927bjokLECAwEAAaOCAW4wggFqMB8GA1UdIwQYMBaAFPZ3at0/
+# /QET/xahbIICL9AKPRQlMB0GA1UdDgQWBBQ6dKUMZ8ZCUML9tfzHuyk0gvR6uTAO
+# BgNVHQ8BAf8EBAMCAYYwEgYDVR0TAQH/BAgwBgEB/wIBADATBgNVHSUEDDAKBggr
+# BgEFBQcDCDAjBgNVHSAEHDAaMAgGBmeBDAEEAjAOBgwrBgEEAbIxAQIBAwgwTAYD
+# VR0fBEUwQzBBoD+gPYY7aHR0cDovL2NybC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVi
+# bGljVGltZVN0YW1waW5nUm9vdFI0Ni5jcmwwfAYIKwYBBQUHAQEEcDBuMEcGCCsG
+# AQUFBzAChjtodHRwOi8vY3J0LnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNUaW1l
+# U3RhbXBpbmdSb290UjQ2LnA3YzAjBggrBgEFBQcwAYYXaHR0cDovL29jc3Auc2Vj
+# dGlnby5jb20wDQYJKoZIhvcNAQEMBQADggIBADLeUkdm8Z4DZvjfKHOhqu+hsdXN
+# t+X5F+48PB6PTAJCRgA3qxxO3YbAV7baps4K/+2WWoWUspBkT4T2NXK49NvJAfCs
+# ztHSgtqkAQMLX4KjCypJF/+m2Ktrk993g+gcgKdv1yg9C3JmYdJCnnL0ga+pZ/Wo
+# 1+rtXZ8dnwO8RCstTN6gYX0ElFi7Y7NpxbdBC1S6bc05V/SA9HC/ojj33W6Gdwnp
+# U/iVylSkdkoHtHeGIhQLT2ZH0qPM9Wdce8v2fZsDCJQQJ8rll7OGLDbsXa2CLf0M
+# RN9TwzifQ3rEuAXOx/TkzkZRFfwL34hf1XqSmaYq2tTMy2LgsPrqC2Z/6ZKb3fgr
+# zU0vphB4wSTWulitY/KlxbvoyKvrBvUCCx4sgeqf8aR65CbvM5MN/d/lahfXipU2
+# NlY0cXcnGS61XpmeGKd8It92/lufApZR9x6o5qMJWe0jq4JsfGMGDpIKx7FzkB8g
+# aejuBUW/CJ9Phc40+xJRonvVewn4S9yJVRWeM47irGbR9YlN3xruM/yZzhk+rAm9
+# AW06nv7ob6RQkAXR+cTxiAPy620FF41NrViYB4UyKpzfx7x8jh4ubTOMz954YIdq
+# yeiqqtsbBwXjWLP0dfMUPA3iIPnPdBKGnodGJTdSlPAMmKJdyvTPqmOXs/LMnf+2
+# Za0Z6FXsIB9z9aXLMIIG4jCCBMqgAwIBAgIRAOdO8lWwUE/626bf9/yLoxUwDQYJ
+# KoZIhvcNAQEMBQAwVTELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1NlY3RpZ28gTGlt
+# aXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFtcGluZyBDQSBS
+# NDEwHhcNMjYwMzI1MDAwMDAwWhcNMzcwNjI0MjM1OTU5WjByMQswCQYDVQQGEwJH
+# QjEXMBUGA1UECBMOR3JlYXRlciBMb25kb24xGDAWBgNVBAoTD1NlY3RpZ28gTGlt
+# aXRlZDEwMC4GA1UEAxMnU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFtcGluZyBTaWdu
+# ZXIgUjM3MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAsv/DbUvcUNlF
+# LQURd9m4+1St5+JudFKo5P803Iks4mFeNB9SymodP6BJJWBuNhOFQj9w77AVAeg5
+# qQpA2dIwp2QTyBHr2h9eWSTkMBVj9mV6+WI5SaW+vDZW7PhJTbysd9v9WB3Xt6ql
+# Ei8m47pcTy8+k/OfhziKiuzNQXqfC7KcoRD/6up8OZBsU0qxr7n5nh/iRfAp1QXF
+# TBQONBZSGIdHAyVRYYX033VoC8v71rizEKCpH97Pxbwcn9eq9K7W8h5v4npsMUoq
+# CS/c8mQwylDQGx15dHYV6NlcVFdjXD11l7qCrIy/unH5OlZtgx58QJRXRbGgQyBd
+# STpEpwuj3i5Qc52Z9m7hd7yCGCXKujf83hUQpOPx1w8+84EbEUTHVAfq4cpORaGW
+# gY8NJy6txmd3wpS1MeXrOaVAMczTgzAZ+yZBWIqdgQBgTxEeXldEToZOrRkxvn1I
+# jIlfr4I4NWJz+Rb52FshLVnkA/wdoad789Eb7XZDNKd4oMmnc636TgauaaVZP2LL
+# oU0JD/fYr53hwBn4uXu5ZsSfpnqAT60S7szJm/Na882xEoyRzLJ+UVbXOlHLO63D
+# KkAtdz1CDuwWxgRE1drnwplepT06dz+1yTr5p1AkUz21bzE6cT/8/kjh4OPzggYY
+# qrOBQPfuKEL5ZJPcN9jRgEpYvRlq5ucCAwEAAaOCAY4wggGKMB8GA1UdIwQYMBaA
+# FDp0pQxnxkJQwv21/Me7KTSC9Hq5MB0GA1UdDgQWBBRhEOl6Eq9RxIXU8s+kdA9Q
+# zSCv+DAOBgNVHQ8BAf8EBAMCBsAwDAYDVR0TAQH/BAIwADAWBgNVHSUBAf8EDDAK
+# BggrBgEFBQcDCDBKBgNVHSAEQzBBMAgGBmeBDAEEAjA1BgwrBgEEAbIxAQIBAwgw
+# JTAjBggrBgEFBQcCARYXaHR0cHM6Ly9zZWN0aWdvLmNvbS9DUFMwSgYDVR0fBEMw
+# QTA/oD2gO4Y5aHR0cDovL2NybC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVibGljVGlt
+# ZVN0YW1waW5nQ0FSNDEuY3JsMHoGCCsGAQUFBwEBBG4wbDBFBggrBgEFBQcwAoY5
+# aHR0cDovL2NydC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVibGljVGltZVN0YW1waW5n
+# Q0FSNDEuY3J0MCMGCCsGAQUFBzABhhdodHRwOi8vb2NzcC5zZWN0aWdvLmNvbTAN
+# BgkqhkiG9w0BAQwFAAOCAgEAA+o9jdGszfoZepOmygef1OlbkjrPd2QW9z3M8vVb
+# QSCruPeO2eRsC9GhZ4CMZfhkrixayYD67gQkbyiRCbJu5L/i0NQjlQhBvbWfiEba
+# +KHFKGud5YHRWhDZUtDeMIJGZG0BD7/sftZUo2Ifk+CXi/ZlM50+xK3OkqeXVi5G
+# ubDD/5txmYuqCT3T3LAilmoB+5th9sQxiMhyQuT3R/aYb4vypoZJLYklUzTalXle
+# W1nV9s4UROlE389CHDKAi/fepRSMnV8TghODDQxwzNGrOJZ04k/yhzHHDupfHPU5
+# 1FYJqXIvWq9SAAWdlNV1JGIxhkp/TAtxBwz/Vd/VbgVb2d9/wRFfxFkka39O0+4x
+# aZSl/oEK/1DqjxjJRO2Se9lGlJDScu21Zd23Cys3aYyB8y5H/+DFWtVe8PMKgr+V
+# uIDp0Rk5bneVDAEW0TPAT8Ufwl2F6DJiDg/KZk5NmsYES+CxvF7bnISEnQh0ZrWn
+# AJixquV0mElUx01wA5TuPIgyodxzNq/fC0hen9LBtdnfFfSZ+wt8A1Injsbio+DH
+# Vq1voYiVNpBfO7+nh9NB4AhRXNldPgr3zgjJ+47s0uNYy2iDXAZSlkP3ym/7gy31
+# jlu989SNpRWO14/LUNV2LSuXkRI1iLTPI6ZdXG0DnPPG7UftF0tk5m6BP9eNfr2t
+# j1sxggW7MIIFtwIBATBiME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNv
+# bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
+# EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
+# DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgZeWsp0DbRQQP
+# FEtvqlq3TfISbnsRfWm5bhXOYOGwnvgwDQYJKoZIhvcNAQEBBQAEggGAMVh40LDK
+# c1y9jaVGqqlxDHYDhBaP1T97VFMgEVGppirW98lDkTkzPCHp1mSlU3Iv6cQp1Nad
+# 0zn4J5+gQtwe1dMR/Rnykbz3b3SlsqS0q6wVir9WMAu16AMRsaI5IQhgm061LZ60
+# UNBtQCWP8JxyWaYTenrMC6AidPxwSF9Qc44P1y0i808jhQBsE1oT008lNz7190Vg
+# hVGB9ZyWu6cexXk4fPR6EFll0jGYnt6nZcJwWuaGtxHUrjyvLazGUmONVr7paWSF
+# sxXTPSbM56uYOdckj28gmDTjrkKXKagw6GfQi06TiTZcrVvTZx4iFibQWPS8lEn/
+# Ald+WEp8ChJ1JA8m4YDUM2BUnoh2woUPP2dy8IFlvf7bMzryeXT21Vk7hXYP3GN4
+# otHzFkyGwmchPksCN37QvwPSBfI2AB1R2Sh7WkzsOt9l2YJfRMuV06njT6jz/NMJ
+# H1HpCcpLRfuMGCEqJy+lty6+SPjPYnkhgCGHh+B2kPSk3i2S8QDfQpQ2oYIDIzCC
+# Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
+# BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
+# ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
+# AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
+# MjYxMTE5MDkxNDU3WjA/BgkqhkiG9w0BCQQxMgQwuSM+eLnEWX31qnmtRfgBF+4U
+# j945KyGTfBWWb/LXSPu3IFxJtMJMgm9kIxWJF5shMA0GCSqGSIb3DQEBAQUABIIC
+# AErjmj79X0fcFD6gjXBkThFRfuFLCzHle8nrb8eeDv4qjdEx76umuyNsS4ERYiL1
+# RtaUKIGmKYdVYk5dZDw13738tpvqzXdo64dak2DEW4h1CMSR3Stb10Awj709bstb
+# mQuZ8DpHwL/LoF9k5Ufo60zhw9HtymbDGg3bEhddjF+SH8UTvf4/vXzN7bqei1Jh
+# xrRW7Kx+d57jT2NLuxtpiUfBfsTd+uVkVj/WUMLv5wE81+QnXqI1zvd5qXTWsSG4
+# S10glWIV1XZbgIaMsOvCVn21RkldsYBOd1Z+UQG1LUnx811kjCdlphhC8Hyog+Y7
+# kVZ813pyxs9TUyXEOgpCXjGL0EphpiSERAv3ITAC6sYjiNlBl4BAtjiZgTGnpipJ
+# KlwOXfHIv1uj4IfFRlrHlzhGRY6i6ExqvD5k0eVK72QUVtWKOKohTShGCiLXV2BS
+# FUAy1RJJXpkae6oIgQa6ypXRwQaXYlPsCcOUFt3C7keczUBYgMcz71VNO3eqRabo
+# B74yS4/K2giXnzVEXsjscyFAKNKwDeqoyxGt6UFxDBOSac3b21Zy74bCyePIZFcP
+# Ise5PUoxoRBV/2Y8hCl27V2y3JcJefIkxmA6fy0kBI2DhqCBwgooM4TMFgZzXJij
+# qlmqmWwAhKrC7zoRdwCzaQWeGaJ7aZ1Mq0QDOHEw2Qbn
 # SIG # End signature block

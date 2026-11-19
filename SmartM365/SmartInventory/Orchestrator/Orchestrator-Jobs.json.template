@@ -674,7 +674,7 @@
         ],
         "MissedRunPolicy": "RunOnce",
         "DaysOfWeek": [
-          "Sunday"
+          "Monday"
         ]
       },
       "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Exchange-Hybrid-FreeBusy-Inventory.cmd",
