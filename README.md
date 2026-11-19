@@ -41,7 +41,7 @@ Each packaged tool has a product page on the website that presents its purpose, 
 | Smart Inventory Orchestrator | [Product page](https://workplacecloudhub.com/tools/smart-inventory-orchestrator/) | `SmartM365/SmartInventory/Orchestrator/` |
 | Smart Workplace Intelligence | [Product page](https://workplacecloudhub.com/tools/smart-workplace-intelligence/) | `SmartWorkplaceIntelligence/` |
 | SmartFinOps Workplace | [Product page](https://workplacecloudhub.com/tools/smartfinops-workplace/) | `SmartFinOps/` |
-| Smart ThinClient Shell | [Product page](https://workplacecloudhub.com/tools/smart-thinclient/) | `SmartThinClient/` |
+| Smart ThinClient | [Product page](https://workplacecloudhub.com/tools/smart-thinclient/) | `SmartThinClient/` |
 
 ## Getting Started
 
