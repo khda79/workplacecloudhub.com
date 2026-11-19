@@ -1,5 +1,5 @@
 """Build a local, source-only release candidate from an explicit Git file list."""
-__version__ = "1.0.9"
+__version__ = "1.0.10"
 import argparse
 import hashlib
 import json
@@ -13,6 +13,8 @@ PROJECT = Path(__file__).resolve().parents[1]
 REPO = PROJECT.parents[1]
 PREFIX = 'SmartM365/SharePointMigration/'
 VERSION = '1.0.80'
+# Standard release-note footer link (see Release/README.md).
+PRODUCT_PAGE = 'https://workplacecloudhub.com/tools/smart-sharepoint-migration-toolkit/'
 ROOT_FILES = ['LICENSE', 'NOTICE', 'Install-WorkplaceCloudHub-CodeSigningCertificate.cmd',
               'Install-WorkplaceCloudHub-CodeSigningCertificate.ps1',
               'Certificates/workplacecloudhub.com-CodeSigning-D70ECB7B00377EBFB76B304C08DFC6620584E114.cer']
@@ -57,6 +59,8 @@ def main():
     required_notes = PREFIX + f'RELEASE-NOTES-{VERSION}.md'
     if required_notes not in files:
         raise SystemExit(f'Release notes must be committed: {required_notes}')
+    if PRODUCT_PAGE not in (REPO / required_notes).read_text(encoding='utf-8'):
+        raise SystemExit(f'Release notes must end with the standard website footer ({PRODUCT_PAGE}): {required_notes}')
     if subprocess.check_output(
             ['git', '-C', str(REPO), 'status', '--porcelain', '--untracked-files=all', '--', PREFIX, *ROOT_FILES], text=True).strip():
         raise SystemExit('Release inputs must be clean and committed before packaging.')

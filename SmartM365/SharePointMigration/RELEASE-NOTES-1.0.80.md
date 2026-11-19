@@ -43,3 +43,7 @@ PowerShell 7.4 or later are required for the dashboard; SharePoint Server
 collection requires Windows PowerShell 5.1 on an appropriate farm host.
 Python runtimes and third-party modules are not bundled. See README for the
 prerequisites, scope and limitations.
+
+---
+
+Product page: [Smart SharePoint Migration Toolkit](https://workplacecloudhub.com/tools/smart-sharepoint-migration-toolkit/) | More tools: [workplacecloudhub.com/tools](https://workplacecloudhub.com/tools/)
