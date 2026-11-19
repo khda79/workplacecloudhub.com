@@ -324,6 +324,7 @@ desktop.ini
 
 # Local fictional GUI captures, demo reports and email previews.
 /SmartM365/**/DemoAssets/
+/SmartThinClient/DemoAssets/
 
 # Python bytecode caches created by test and helper runs anywhere in the repository.
 __pycache__/
