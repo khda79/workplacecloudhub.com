@@ -1,4 +1,4 @@
-# Smart ThinClient Shell
+# Smart ThinClient
 
 Product page: [Smart ThinClient](https://workplacecloudhub.com/tools/smart-thinclient/)
 
