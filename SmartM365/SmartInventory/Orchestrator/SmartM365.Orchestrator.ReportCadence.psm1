@@ -1,5 +1,5 @@
 # Script report cadence editor for the Orchestrator GUI.
-# Version: 1.2.0
+# Version: 1.3.0
 Set-StrictMode -Version 2.0
 Import-Module (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.ConfigView.psm1') -ErrorAction Stop
 
@@ -19,7 +19,7 @@ function Get-ReportCadenceDefinitions {
         $template = $templateText | ConvertFrom-Json
         $property = $template.PSObject.Properties['ReportMailCadence']
         if (-not $property) { continue }
-        [pscustomobject]@{ Script=[IO.Path]::GetFileNameWithoutExtension($scriptPath); Path=$path; TemplatePath=$templatePath; Default=$property.Value }
+        [pscustomobject]@{ Script=[IO.Path]::GetFileNameWithoutExtension($scriptPath); ScriptPath=$scriptPath.Replace([char]92,[char]47); Path=$path; TemplatePath=$templatePath; Default=$property.Value }
     }
 }
 
@@ -135,6 +135,16 @@ function Set-SmartM365OrchestratorReportCadence {
     }
 }
 
+function Get-SmartM365OrchestratorReportMailProducers {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$InventoryRoot)
+    $producers = @{}
+    foreach ($definition in Get-ReportCadenceDefinitions $InventoryRoot) {
+        $producers[$definition.ScriptPath] = $definition.Script
+    }
+    return $producers
+}
+
 function Get-SmartM365OrchestratorMailOnlySource {
     param([string]$InventoryRoot,[string]$Producer)
     $matches = @(Get-ReportCadenceDefinitions $InventoryRoot | Where-Object Script -EQ $Producer)
@@ -146,13 +156,13 @@ function Get-SmartM365OrchestratorMailOnlySource {
     return [pscustomobject]@{Config=$file.Document;ScriptPath=$scriptPath}
 }
 
-Export-ModuleMember -Function Get-SmartM365OrchestratorReportCadence, Set-SmartM365OrchestratorReportCadence, Get-SmartM365OrchestratorMailOnlySource
+Export-ModuleMember -Function Get-SmartM365OrchestratorReportCadence, Set-SmartM365OrchestratorReportCadence, Get-SmartM365OrchestratorMailOnlySource, Get-SmartM365OrchestratorReportMailProducers
 
 # SIG # Begin signature block
 # MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCT9zfQlRxbB0/u
-# 211JN81T3Y5nIcGajTkOrIJQntfPNqCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDRHixL9w0pdmv4
+# ohJlYiJhtXj0v0Ruae7BlNHK7cYvcaCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -289,31 +299,31 @@ Export-ModuleMember -Function Get-SmartM365OrchestratorReportCadence, Set-SmartM
 # bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
 # EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
 # DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
-# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgCChOMVAuwu3C
-# /JJQEytZhx+7+hdar0vbz52iW5V+FDswDQYJKoZIhvcNAQEBBQAEggGAFfJG8eFT
-# YLVLxMspLzLLjz66gCndyGTpzvQkS8rGL8vrA15FmdGbApckb81eGUICVK8H0U/X
-# goz3lf9YZQga3BTWQtZP/MBKU8CgeA0alWzZ6BWRGFgOhY8h0ZX7rs/geYsqYCo7
-# I1XltKXU7RFCRrtklEA3BpC/xM7ENo8DutJWKwnqATsUik+L7Hlm8mc/Cg00ejEJ
-# XEA5KzTQbpDcTHEv5dlPGIgWpE7arOTiHiTb1c72h0L3XPt2K5f0h/sMrt3yeWLu
-# 7+xfjHB3IuunzjP2duByf/vNNPJRED8MlpEZgFOXfgtpBACeiDM+BlR/OAv0YwIO
-# wTIlomuEy3bTL/+eRKt3UgKvkNW2o6WqMU6pAVD9Q9vGDyG1RzeV60cPVDl+pKwR
-# ghXIZIZNwPqqhtbnQHx2/onm3JtAtXfZK7DeLC4xI8AcUyS9m116aG25TBRZhYf5
-# N0HuWO1UQ9YUNV/16UsrYwpWjzzLQPnVrq5MnuSQlmIb+0T5vhklIHz8oYIDIzCC
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgoDWQj4HAn6G+
+# 8gQnn5n1opk/LF/zsiS7+vDmGw32058wDQYJKoZIhvcNAQEBBQAEggGART7TA6Qh
+# yTshYGYu+H5tadveZ35D8YFP1y9SxBz1Ap2F1WtlSdBbVoCe0kM1eMbulnregy58
+# lunPMs41lzUNMWlMB3zKIS6139zNQ4t46Drlb0xVDIiQBwwHv73i0iQoTfmhPVga
+# CQ9qZluUiyTeyJVmbvS2xRIIZxO4XysXE0AJvqFfyLPN+ECr3hpJUPG7cg9QSFGT
+# ovfqGTc5Ksz/dzTDcFGT5hbTKBuLGR9xgfSCOIHjUswu/pV4nllCWT6/WpcBZ5iR
+# RQFSXbXnGOFlkB6f0NpGzheBXeAJcIffOVt3p963j0gznZQl9QE0x4hqB4rLbgXN
+# /jegL8j56gwrXQhBmvF41/aM2o06rWYpYpEKAzXka8Ivh+zXuU4jc4W4AzqB7Th4
+# 5ntghPygKaTU4JwigwQv2ruoNtT06H7sc2EC1mCNmKeOzmV+3Kvg3t+IZIMKJQUo
+# oEvkCImzFm0hrPHpyegxePfEGcL+Ecqkp+GTUsMr5dDKqasDjy3+bHSroYIDIzCC
 # Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
 # BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
 # ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
 # AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
-# MjYxMTE5MDgzNTI5WjA/BgkqhkiG9w0BCQQxMgQwBSZjinANjvzYrI/HWaEa45rR
-# jLi2MsOBE5sURqUiiv0ULUQkfV/LW1y8dYnuwsnTMA0GCSqGSIb3DQEBAQUABIIC
-# ABmw1Pyv3Hs/zEtUl3uccsRsbRT/0qRqnasqTRk6LJPG+j/bQRFB+yvvS3T7JQDz
-# pBHe7ARMIz66wUwnX3t39e7S65vlYmvk9cCJdV73EZUvquG0ExbkndDRBzpZZdK7
-# 0bhPxHXU10fZqOm05offnSncaR3lPdVsdqkjxQiKb5bWKPjPDW7uplUZAwY61ueO
-# zBVfuDT7hoehF/gbUInEIe8cojQc1JEU6Ot5QSLOxDRZbX9R16meqelUpUzxa2Ao
-# fwgHlWbyWJ5KPDExRV5Lf92LmmPgMeteh2cr4ZLyt/gVPEYkGCaz8Z0hH9n6UJL+
-# pvFJeSVMYNu2HQcV0yfodUsKJ+KPJbmOwIlMDfulHKCBlQGjD6pBcP11eue3Y6II
-# Lb6gSK7yO2GdRJV8VJvYpODe5o9PaBKCXtg7zf61ImnnW2u6uEgJQlAB76vAduft
-# 3QelEuTh4u5Z4UaZKB/kcajVE0HwGJP+p4Mp5Q185mhOVapniEc3aXk9WK4gTi2j
-# 9woNvMnRA7soEescvUGR9/WSF3abM6/Ib8UfB97Q0TBJSDsARMz7WgThonCrIOo+
-# eqd5O4vrGiuJCfTsuvzslSXSW5O23Y3ndYa1dyJbYU6Leq1+0arOQ2MFIRV2uBeJ
-# CitTphg7N3zd2MkFA4xOqIIez3y1yBq6QB1slBPXjkQq
+# MjYxMTE5MDk0MzAxWjA/BgkqhkiG9w0BCQQxMgQwmUcGkvcw7PrkqeNntd/zblW/
+# nL6ZBgM0t8UrXaASJKf8B8+5m2it9LRZn/99NBBMMA0GCSqGSIb3DQEBAQUABIIC
+# AITWinzj2fnloTJ8B4iAptFIxFbbYPR6yIotW1hbrWn0OSYw4bkuhoyURxIyXVAa
+# InDPB5DLTzi381oPUSlVrrikVq4DbceZ6KjKcaBgQPEPMHG4r5hCX1uTLLrMW2wK
+# N3lctyFNKcEItc1kVBohtFGWAHWq7YpvS9d/BrVXEYigAGFFLTBpN6/3uusK+TIl
+# 5aJ1FCVJ4UYRx0suCH2kg259IDsTj71Mf40Mm2mJa7Z4DiTgKDNvfgo/ThVmAVf4
+# 8OBwqIqXub900gukqqAh5AjoC+BmSIfBhNGBYiF/3H6DGj4CIoe0fjbG2JNuiz0v
+# 3snT8wKomyhMkJuGCcdPqK5X9Rjnk5fxfv1zV9c4tljQCROuHTMBvGYVPUH5T3yT
+# Li/7NsLBwc72DYmR1SS5IbOmqhwWxXmaDdpJrWz4dTjwWdZFI3xsvAn9vxm6dZmz
+# ZPtsGKVy0efJA8XwkZKYqoFFRN9FRZDbTvdD2D7chevp6P8o+dgBt+K5qDaROatN
+# oyGXf5S6DGEXkBmnMhb5x3GrAjiqqY8/sOstPClFR4q5b9fyDG/9nYQOGx1i/VOu
+# 1iyIvIkFQdNOLmyYKI21HZ9RMSB2sTmfyTsM74EgG91lnI7WCsy9E9eKmYxLbxZB
+# OZBcuwQjGREZlgw7H336w6N6KcKZeX/RKrrhtskLfiH8
 # SIG # End signature block

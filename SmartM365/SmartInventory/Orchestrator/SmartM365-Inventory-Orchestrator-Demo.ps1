@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.4.19
+1.4.20
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
@@ -26,6 +26,27 @@ function Get-OrchestratorDemoNextRun {
         }
     }
     return 'No occurrence'
+}
+
+function Get-OrchestratorDemoReportCadence {
+    foreach ($entry in @(
+        @{Script='SmartM365-ActiveDirectory-HealthCheck'; Days=@('Monday')},
+        @{Script='SmartM365-ActiveDirectory-Inventory'; Days=@('Monday')},
+        @{Script='SmartM365-Exchange-Hybrid-FreeBusy-Inventory'; Days=@('Monday')},
+        @{Script='SmartM365-Exchange-Local-Mailboxes-Inventory'; Days=@('Monday')},
+        @{Script='SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory'; Days=@('Monday')},
+        @{Script='SmartM365-EXO-QuarantineMessages-Report'; Days=@('Monday','Tuesday','Wednesday','Thursday','Friday')},
+        @{Script='SmartM365-Inventory-Orchestrator'; Days=@()},
+        @{Script='SmartM365-Licences-Inventory'; Days=@('Monday')},
+        @{Script='SmartM365-SharePoint-OnPrem-Content-Inventory'; Days=@('Monday')},
+        @{Script='SmartM365-SPO-Inventory'; Days=@('Monday')},
+        @{Script='SmartM365-Teams-Inventory'; Days=@('Monday')},
+        @{Script='SmartM365-WinUpdate_Status_From_Intune'; Days=@('Monday')},
+        @{Script='SmartM365-WorkplaceEvidence-Prepare'; Days=@('Monday','Tuesday','Wednesday','Thursday','Friday')}
+    )) {
+        [pscustomobject]@{ Script=$entry.Script; Mode=$(if ($entry.Days.Count) {'SelectedDays'} else {'Daily'})
+            Days=$entry.Days; Weekdays=($entry.Days -join ', '); Source='Demo fixture'; Status='Demo settings are saved for this session only.'; CanEdit=$true }
+    }
 }
 
 function New-OrchestratorDemoData {
@@ -51,18 +72,29 @@ function New-OrchestratorDemoData {
     if(-not (Test-Path -LiteralPath $catalogPath -PathType Leaf)){throw 'The demo requires the shipped Orchestrator-Jobs.json.template. Copy it with the GUI.'}
     $catalog=Get-Content -LiteralPath $catalogPath -Raw | ConvertFrom-Json
     if(-not $catalog.Jobs -or @($catalog.Jobs.Name | Sort-Object -Unique).Count -ne $catalog.Jobs.Count){throw 'The demo job catalog is empty or contains duplicate names.'}
+    $reportScripts = @(Get-OrchestratorDemoReportCadence | Select-Object -ExpandProperty Script)
+    $script:ReportMailProducersByPath = @{}
+    foreach ($source in $catalog.Jobs) {
+        $producer = [IO.Path]::GetFileNameWithoutExtension($source.ScriptPath)
+        if ($producer -in $reportScripts) { $script:ReportMailProducersByPath[$source.ScriptPath.Replace([char]92,[char]47)] = $producer }
+    }
     $jobs = @(
         for ($i=0; $i -lt $catalog.Jobs.Count; $i++) {
             $source=$catalog.Jobs[$i]
             $scheduleDays=@(Get-OrchestratorGuiPropertyValue $source.Schedule 'DaysOfWeek' @())
             $owner = $servers[$i % 3].Server
             $row=[pscustomobject]@{
+                ReportMailProducer=Get-GuiJobReportMailProducer -Job $source
                 Name=[string]$source.Name; Version=('1.{0}.{1}' -f (1 + $i % 6), (($i * 7) % 40)); Arguments=[string]$source.Arguments
                 Enabled=[bool]$source.Enabled; Frequency=[string]$source.Schedule.Type; Times=(@($source.Schedule.Times) -join ', ')
                 Days=$(if($source.Schedule.Type -eq 'Weekly'){$scheduleDays -join ', '}else{'Every day'})
                 ScheduleDays=$scheduleDays
                 MissedRunPolicy=[string]$source.Schedule.MissedRunPolicy
                 Assignment=[string]$source.AssignmentMode; Server=$owner; NextRun=''
+                Runtime=[string](Get-OrchestratorGuiPropertyValue $source 'PowerShellEdition' 'PowerShell7')
+                Mode=[string](Get-OrchestratorGuiPropertyValue (Get-OrchestratorGuiPropertyValue $source 'Execution' $null) 'Mode' 'Direct')
+                ModeSource='Demo catalog'; DraftMode=''
+                CacheName=[string](Get-OrchestratorGuiPropertyValue (Get-OrchestratorGuiPropertyValue $source 'Execution' $null) 'CacheName' '')
                 Group=[string]$source.Group; Health=$(if($source.Enabled){'Healthy'}else{'Disabled'})
                 LastStatus='Success'; LastSuccess='2026-10-18 08:20'
                 SuccessAgeHours=1.2; ExpectedMaxAgeHours=$(if($source.Schedule.Type -eq 'Weekly'){168}else{24})
@@ -343,6 +375,7 @@ function Update-OrchestratorDemoViews {
     $c.ServersGrid.ItemsSource=@($d.Servers | Select-Object -Property * -ExcludeProperty State | Select-Object -Property *, @{Name='State';Expression={$_.Mode}})
     $c.OperationsServersGrid.ItemsSource=@($d.Servers)
     $c.PlanningGrid.ItemsSource=@($d.Jobs)
+    $c.LaunchJobsGrid.ItemsSource=@($d.Jobs)
     $c.OperationsRunningGrid.ItemsSource=@($d.Running)
     $c.OperationsPendingGrid.ItemsSource=@($d.Pending)
     $c.OperationsIncidentsGrid.ItemsSource=@($d.Incidents)
@@ -549,6 +582,7 @@ function Invoke-OrchestratorDemo {
         Update-OrchestratorDemoViews
         Write-OrchestratorDemoActivity ('Sample scene loaded: '+$s.Data.Scenario)
     })
+    $c.OnPremModeText.Text='LocalCache'
     $c.SharedPathText.Text='Contoso | DEMO - Sample data | All actions are simulated'
     $c.ConnectionText.Text='Offline demo'; $c.LastRefreshText.Text='2026-10-18 09:30 (frozen)'
     $c.FooterText.Text='DEMO - Sample data. Exports use a separate temporary demo folder.'
@@ -604,23 +638,10 @@ function Invoke-OrchestratorDemo {
     $c.ConfigFilterBox.Add_TextChanged({Update-OrchestratorDemoConfiguration})
     $c.ConfigShowSensitiveButton.Add_Click({$script:OrchestratorDemo.ConfigurationShow=-not $script:OrchestratorDemo.ConfigurationShow;Update-OrchestratorDemoConfiguration})
     $c.ConfigRefreshButton.Add_Click({Update-OrchestratorDemoConfiguration;Write-OrchestratorDemoActivity 'Sample configuration refreshed. No configuration file was read.'})
-    $sampleCadence = foreach ($entry in @(
-        @{Script='SmartM365-ActiveDirectory-HealthCheck'; Days=@('Monday')},
-        @{Script='SmartM365-ActiveDirectory-Inventory'; Days=@('Monday')},
-        @{Script='SmartM365-Exchange-Hybrid-FreeBusy-Inventory'; Days=@('Monday')},
-        @{Script='SmartM365-Exchange-Local-Mailboxes-Inventory'; Days=@('Monday')},
-        @{Script='SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory'; Days=@('Monday')},
-        @{Script='SmartM365-EXO-QuarantineMessages-Report'; Days=@('Monday','Tuesday','Wednesday','Thursday','Friday')},
-        @{Script='SmartM365-Inventory-Orchestrator'; Days=@()},
-        @{Script='SmartM365-Licences-Inventory'; Days=@('Monday')},
-        @{Script='SmartM365-SharePoint-OnPrem-Content-Inventory'; Days=@('Monday')},
-        @{Script='SmartM365-SPO-Inventory'; Days=@('Monday')},
-        @{Script='SmartM365-Teams-Inventory'; Days=@('Monday')},
-        @{Script='SmartM365-WinUpdate_Status_From_Intune'; Days=@('Monday')},
-        @{Script='SmartM365-WorkplaceEvidence-Prepare'; Days=@('Monday','Tuesday','Wednesday','Thursday','Friday')}
-    )) {
-        [pscustomobject]@{ Script=$entry.Script; Mode=$(if ($entry.Days.Count) {'SelectedDays'} else {'Daily'})
-            Days=$entry.Days; Weekdays=($entry.Days -join ', '); Source='Demo fixture'; Status='Demo settings are saved for this session only.'; CanEdit=$true }
+    $sampleCadence = @(Get-OrchestratorDemoReportCadence)
+    Connect-OrchestratorJobReportReplay -Controls $c -Replay {
+        param($producer,$audience)
+        Write-OrchestratorDemoActivity "Report rebuilt from sample exports and send simulated for $producer ($audience)."
     }
     Connect-OrchestratorReportCadenceEditor -Controls $c -ReadRows { $sampleCadence }.GetNewClosure() -SaveRow {
         param($row,$mode,$days)
@@ -663,8 +684,8 @@ function Invoke-OrchestratorDemo {
 # SIG # Begin signature block
 # MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCw+9hD9y5h9HpY
-# mzKdfSvafSNlnHB4aEiaUtVHi2ZiaKCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBWvZiou3cRh7zS
+# NgxvxvtSKSdVLVnT1bz7Ybb45+11tKCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -801,31 +822,31 @@ function Invoke-OrchestratorDemo {
 # bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
 # EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
 # DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
-# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgspJ20QM2aL4g
-# xkjQuHRVvZq1W2o1qOPEsy0olYdPv9MwDQYJKoZIhvcNAQEBBQAEggGAfxfn1Dbp
-# tsXwHxPIl0wO4lxCQ0WlbpGAeUBjZ4fHu//kYFjUY3LKyQCzsVXaUf/isNlmXByT
-# BAZ3Usb9lE7h+dnHK6/9K+vCKFWMvjl6aYIQ5MxmjOFmV/X270Oab7uE6C0IV9Pu
-# zY4/qLI2eiAXJIwzOLmE80EKkt4zNC7XeksL2mAUZLbrZozUv67JGkIKSQ/hlo9r
-# YGDEHFgp4khIJW2uwrlVQ5L1bEjhUBAI0qeq/BE9U4XgvmcRYKPR1KbKXy3qHsF7
-# ZvH8R1HDsjOEqaduDlakCt6y+Z4T7sL2bZUCxiHu8LzLWe+uSOvOCNbwxhkn58MQ
-# Ejc0he0DHCcIw3DGvhruOObvEEDXnTR8xSdj0ezcYji14cJDHXhyn5uRcJHwFjp2
-# O0vt7JJcMoKsEHg/YJ09T2Ef5a2F6tNu2eHTX92GZX0u7HJLov7Aj+aMLixwOWKE
-# itsKcVBezBLbpHjhGKG9Ijnu2y4DRraylnarDv9IDf2Y7KdlLAlSZbkToYIDIzCC
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgTk81GL7C/CSD
+# qHjqz2ruhsNq5fWTos4y5UE2MI2qgkcwDQYJKoZIhvcNAQEBBQAEggGAckV8VqXR
+# drypis6IN18owOmjpZ2kb/AvS4DnbZ/KTdoSIvHV/5gOih3GL1zXTAvJibfU104t
+# j7CwFMh0EPuRT5VO2jn+PS4dnjVQzkv2VchEbQB0BsumS33SU9a9VWKm16V8JpRZ
+# mg20IvS75TMBwgokJ8VzGglNHDSgl9O8PfvFtfeyDJwxaO+QmiyuR2pWvRc+L10V
+# bCKEBWZKXbASuwZmok9YluOYGKkZ39I2NMrXXTxIEf15/xumWPneNcH9cYaZEtbJ
+# LfKz00v1gnmQBpxphVUUhU/vU/YO+O41rvHtmg1jJDW+SNeI/H0d69JPN9EVGdD3
+# TE/nHO3wYKRiLxQ8nW6gWO5nBEipTroGlopWAjktXOTbOVtZu5zB9oPfLzpWB1ak
+# bIkXHPhUjHlZ7OUz4uQVU7qMZPMeedKP1P3E9kaQa0c8U26qcS+HJHV1g2jzms9L
+# 2jZF4O3tlNqk9jDa3jO7mKMuA9B9xnRgUiRqErAJ0OWd8i0zYP7DcgR7oYIDIzCC
 # Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
 # BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
 # ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
 # AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
-# MjYxMTE5MDgzNTE0WjA/BgkqhkiG9w0BCQQxMgQwfYpQAQNADFJyImRht457Wzd0
-# BhpFKKxk5kmdaV2igb9YfRh4JMK8+7iejfwZbb06MA0GCSqGSIb3DQEBAQUABIIC
-# AIjQ9ZdyMalFKBPjpJIxWG/BoT2ClbHOz8E362I3QaSZZ9FMApEpTCuWEOT0/+C3
-# xe3dI5EOxs+e+ywZxhtk33vRZLz+4SZ9D/GMvDGQI5twqvq8h38aVY8mk1j8jy3M
-# I26tCSIuiS32TyNxKrIwcucNyy20V4zdtfcXliJ5Ej4FFM4PNoW5bKKm2eZ3UwMP
-# ce5LY4MQaT5SZ2BPA/B6Nl7qNBzDxRjUiFePJF2MHJprR9SVUijpEt08N0zBKHPn
-# hA15pFqTALrOyDvwqn4aQNgRh6d3+4eYfru8+1A+EvumW/zPCb4vKrL9WpyTAHMn
-# B/ZlweQh7cEkq7/arhEK4hb4wNzgBt8AgEIn282PlGFdf3wCKG5PAHMpssJoE2M2
-# XxsM6cYT+cMDKntjjp/K95xxW5G23gH2mHV3CiQ/4kEtUtGjiharRSKS7OnG6976
-# +sHs0zzIsYKmfxtLW0ygVRSbKKMM9g66nRHhFSgDQpcPG2fLcf93vwDTqjm0MyKV
-# 8gBX4QkkFzfx5NpZ9cizdqcGVvQS0zZa8vShh6HZA2N/ZhkDe1RK0EIzD8A7f2po
-# avi6HzsiqikMn1Ly10z4co7S7UquURx8SbJu3E32rmMook+tnmRm9Bq1Q7uS9oVf
-# BR4TXq88bQX75wokS6ghZy2A/gBR8wKs7RNMJ8lXkal2
+# MjYxMTE5MDk0MjU4WjA/BgkqhkiG9w0BCQQxMgQwMvzZTShOS1t4WruL64OCiMNd
+# L+uvH8rVnJCW8jHB9C/z8bav5LjItUfiVLBMbAjRMA0GCSqGSIb3DQEBAQUABIIC
+# ADC4P1H288T330bC9VKyUCjmcEqIUdtDSz01+moCq74m+Gwz/pnL/Qt4EduzQ8H6
+# 0G2jlkcRwyCqXupRSwK6kFTAeEuOWGMODt4kY4nY4R5bOnFTaEcMLD8lve9a64DO
+# FYF/8i6p9Ll4OMFX5esVsE5L7zTH6m0W7iOxOyYd1HiQeKU3gIASM65BcPS2R9Qm
+# 4GOLG7FW92Wb2UQSCYeKY4bl/Zz1zeHL9bpS9Zpl2p2UPrvyVdEhAMW19S3hgnhr
+# tgyiPvERH6g8Usd/wISjginDaUWo3hNPTOhAMWqacHlwpsj4cs3nM8nHrBRO4L7/
+# ZOlqGbhi92efa5semXILZh3NPgUR97cySzYjhTf/jCnAiiGgabJMQTnYG9RtLx3E
+# l/bGZ+dGYkQzpwMrGz2MaKZGluyBIwQekkpec9FPF/bCflP6bSyOqNAmcVpMUXcp
+# X1RCSPFSCPfp0w1vyox62ZgUtA7hrQTaDyjXG9HCtZ5j6qBBM+mqnE15TAjwQytJ
+# xhrKtrw0ZCnl4pDfYTT7T8jFT/72mRqmhXF6vh8wCBzX9k98H0LZa3dQKLkHEnQg
+# oOjLBI1k5L8ge7rN/RMGXBCl60JIvMxPL62VuzcTgweyO2q95TAriXCoT0PxoXau
+# Us/da2dcqY3KAnEPFWxdfED2VFdKqeqfu04SgldmUL5B
 # SIG # End signature block

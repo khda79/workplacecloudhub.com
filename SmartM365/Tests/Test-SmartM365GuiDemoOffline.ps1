@@ -130,6 +130,31 @@ try {
         Assert-Demo ($s.Data.Jobs.Count -eq $expectedJobs -and $s.Data.Servers.Count -eq 4 -and @($s.Data.Servers | Where-Object Mode -eq 'Inactive').Count -eq 1) 'Sample model incomplete.'
         Assert-Demo (@(Compare-Object @($catalog.Jobs.Name|Sort-Object) @($s.Data.Jobs.Name|Sort-Object)).Count -eq 0) 'Planning does not match the complete shipped catalog.'
         Assert-Demo ($c.PlanningGrid.Items.Count -eq $expectedJobs) 'Planning grid omitted catalog jobs.'
+        Assert-Demo ($c.LaunchJobsGrid.Items.Count -eq $expectedJobs) 'Operations Jobs grid omitted catalog jobs.'
+        Assert-Demo (@($s.Data.Jobs | Where-Object ReportMailProducer).Count -eq 12) 'The job grids did not expose the supported report producers.'
+        $adReportJob = $s.Data.Jobs | Where-Object Name -EQ 'AD-Inventory'
+        $unsupportedJob = $s.Data.Jobs | Where-Object Name -EQ 'AD-Adaxes-Inventory'
+        Assert-Demo ($adReportJob.ReportMailProducer -eq 'SmartM365-ActiveDirectory-Inventory') 'The AD job alias did not resolve to its report producer.'
+        Assert-Demo (-not (Get-GuiJobReportMailProducer -Job ([pscustomobject]@{ScriptPath='Other/SmartM365-ActiveDirectory-Inventory.ps1'}))) 'An unknown path with a known base name was accepted.'
+        foreach ($pair in @(
+            @($c.PlanningGrid,$c.PlanningReportReplayButton),
+            @($c.LaunchJobsGrid,$c.OperationsReportReplayButton)
+        )) {
+            $grid,$button = $pair
+            $grid.SelectedItem = $null
+            Assert-Demo (-not $button.IsEnabled) 'Send mail only is enabled without a selection.'
+            $grid.SelectedItem = $unsupportedJob
+            Assert-Demo (-not $button.IsEnabled) 'Send mail only is enabled for a job without a report.'
+            $grid.SelectedItem = $adReportJob
+            Assert-Demo $button.IsEnabled 'Send mail only is disabled for a report job.'
+            Assert-Demo (($button.ContextMenu.Items.Header -join '|') -eq 'Smart365Administrators only|Configured recipients') 'A recipient choice is missing.'
+            foreach ($item in $button.ContextMenu.Items) {
+                $item.RaiseEvent([System.Windows.RoutedEventArgs]::new([System.Windows.Controls.MenuItem]::ClickEvent))
+                Assert-Demo ($c.StatusText.Text -like "*send simulated for SmartM365-ActiveDirectory-Inventory ($($item.Tag))*") 'The action sent the wrong producer or audience to the demo renderer.'
+            }
+        }
+        Assert-Demo (-not (Test-Path -LiteralPath $s.OutputRoot)) 'A simulated send wrote runtime files.'
+
         Assert-Demo (@($s.Data.Jobs|Where-Object {-not $_.Enabled}).Count -eq @($catalog.Jobs|Where-Object {-not $_.Enabled}).Count) 'Disabled catalog jobs are missing.'
         Assert-Demo (@($s.Data.Jobs|Where-Object Name -EQ 'M365-Usage-Inventory')[0].Arguments -eq '-Reports All') 'Catalog arguments were lost.'
         foreach($sourceJob in $catalog.Jobs){
@@ -160,6 +185,11 @@ try {
                 Assert-Demo ($c.MainTabs.SelectedItem.Header -eq $view) "Cannot navigate to $view"
             }
             Export-DemoPreview $s.Window ('orchestrator-'+($view -replace ' ','-').ToLowerInvariant())
+            if ($view -eq 'Operations') {
+                $c.OperationsJobsTab.IsSelected = $true
+                Export-DemoPreview $s.Window 'orchestrator-operations-jobs'
+                $c.OperationsTabs.SelectedIndex = 0
+            }
         }
         Assert-Demo (@($c.DashboardTilesList.ItemsSource).Count -eq 9 -and @($c.DashboardGrid.ItemsSource).Count -eq 4 -and @($c.DashboardTimelineCanvas.Tag.Items).Count -gt 0) 'Dashboard tiles, servers or timeline missing.'
         Assert-Demo ($c.DashboardBannerText.Text -like '*DEMO*' -and @($c.DashboardActionsGrid.ItemsSource).Count -eq @($s.Dashboard.Actions).Count) 'Dashboard banner or items to review missing.'
@@ -303,12 +333,11 @@ try {
     exit 1
 }
 
-
 # SIG # Begin signature block
 # MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAh/fg4QZ/sLzwm
-# 5X5PmGZmHqjLfS99olCnnVEnZ1l8faCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCPITnGQOYSwBlT
+# ZZHG41Gs/1VKbjxhEED/VqkSQyW4IKCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -445,31 +474,31 @@ try {
 # bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
 # EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
 # DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
-# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgC/tCn1CF3Zum
-# bgCSk1/fwEu9WX2Rqq3p4UYjJca3gS0wDQYJKoZIhvcNAQEBBQAEggGAKqfw819O
-# anjEooyoScXNQzoct3k4fIYgaOpTqlg/74A+npu3sbrAsFjQhZ4djXSaEWGGGve4
-# l0OPHnJkIQrxlo3JRprekETcUR89mhk5UcSBgPIQn3Pxkmj8B3EV+W/A8I3MqUsF
-# Kb6dg8S5rUNrSdHeF2cnow0Ldfpc75CnHBbzZ5JCtuOiVgofARqZTyMNEe7yZUDH
-# dj2v5sWj4E+Z0ggaNBlLk11RCUfDGizrXa9txunhSQQ8+HZ8/jvGvOi/YsonHyOL
-# k0fdeGPzbTrqfx10xxfFlb0c87U7egY9R+unBmObvMoCQtM8/MVw4TEbASRECHQu
-# k1Dd/36BR1CkPiEm2oLp+uYH9GkB9s0r0NquzCbP8m5yBsVoc3YdZR13vzYyic2U
-# pCtf16lPfuwSE+AaPfj/1cTdxQDqE44VWgyATozgJeBBDqR6Pfxq+0B9lItaTg9G
-# qWLQq8wAVjiCr0A/uMjq3RsMYnFwV+szJP/RBF26vXh2ZSEY4DiIWJ9FoYIDIzCC
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgpDOYv6lDsxHl
+# MJ2uAFN7FrKExBree5KqQl0kJ0OCWpIwDQYJKoZIhvcNAQEBBQAEggGAT4W2nnoe
+# g5dqPyU0Ymxe0b8CieXKjf3S7sIO+HS6EIrAZS/3B50UMwKuWMFf1l0nBokFZyCz
+# s+Dbnxs4hmREbK1Hcog+y5JptLbUSSew+3Aj+YT+QFE2Rna4upptvlK49Z0bD/eQ
+# 3/DaVCB++/8HDW3jlLeR/4JdnyKutX4h19sJLwjVie8rGQeGFKIiNKxN9YIa6Vdp
+# SBXdMpxOFfNylHTkV/nnt12hZXPWe8l7dO6Pws27NcZ7QUkbyP7nV2aQPnIB1sqz
+# ZydjLOAABMk+htgrYaAb+E4cct7QqK6AGijUYxCMx6+cV6A40Vx410GOsMOAMCBt
+# ERFEGVvg74+w4LttoR9gPg6Wk3zTQdMhz28YCcLosu+NESy/el2B66zcY7HESuYy
+# LaRURukvHayqaoG7kyr+ePnt8Y73p6RIRh/99SvyGrSSwgM/bxoJUsqpcUMWF0LB
+# ewhoc7SWcxHWQgfQb3/LmFrCHAApy/tQVZ6KbACHLV3KaBLPQ9mMtbAGoYIDIzCC
 # Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
 # BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
 # ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
 # AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
-# MjYxMTE5MDgxODMwWjA/BgkqhkiG9w0BCQQxMgQwcvjyH2N0Gb6dj1uKlXhXXhBz
-# ZYXcLzxTmY0xuwQT1IpEP8r3TDK/ES9TShLWjc+8MA0GCSqGSIb3DQEBAQUABIIC
-# ACz9wcodY9AxK5KfMWog0whO8NNIsEJtzXtSTW+o6PUfHMof6d8pXKaDXeadWP3I
-# ZdPNKZwrDJsZT+M90AG2PoQaoeb7apA+vapf4cKazsBRefWXQ4+ZWWsDwb7yXBS8
-# 31qUxxQ0AaB6HzsocCghX1xbOdI/CP9jknvuagQjCGvFViOaj9lmMo1VW72BE+4f
-# 3YWLlVBsWBsDf6g7rBDkSv23Zb2sQjy8dvmLVKqrxnmt0EOZQKX3bOIf2xua0UH1
-# ql6Tg1Tzu7KypLmf9fC7Qc8RCPqs5Lyvndf/xOvkxJVDu8lTHFid356Z+6OsEvwd
-# cP+TydleVOqsExWaH0OiCUCbipFaWLuhHTSS5grIouUyBoDQzUSwp+xSiWOktP1h
-# Zlqr1KddozJj9VyKyold1Srs3YTb0WazEVnaQQoXXik+a4mZsn+GnOSALnft86FN
-# 5i96Udpkgf1Y0hpNF1+WYGJf8NjeJLKt6ZstjdAlCNyrnOur3OzIq4+BYFoXvAaf
-# HUrwLcPhCbDLmA/atTxkeVUuxNsDDhThp2Yy+bags8M6UNeS6ApF/0bxpj17GkKx
-# 8ccq3S1bN8w5qqoN7MbXq7MR/4DyZEuL4HdkxbKxlptfJ7j/ObTcQd5d40MfJBCV
-# /g1MdVRLx1Drrlmt+0PmWhNrDv9aet5nvp17H3a9YYjJ
+# MjYxMTE5MDk0MzA0WjA/BgkqhkiG9w0BCQQxMgQwj+iGKuK2BoOmBCsn5pSZPf1M
+# WxhQsqj6HSEvqxAQLaobpeJjT9lZvPzoywErtJe8MA0GCSqGSIb3DQEBAQUABIIC
+# AEMn1MYAsD/L4vYuxmU1HugS52wNZLBvv5THMjvOaq9RHNeSg4cQ/fZNp1hE89ZF
+# wzDYtUTetYsxDaIzsXSHE5zc6Mf7bU9KlGWcPxOrBAzfk+qpuutUn34/PDg0uWhh
+# x+SoZhoFZDYtZVeanKS1Yuz0pQ2WdjxSBxkaYCfauEdkABM7mmGFwNiwflyEsDKI
+# /kDyzArEqrcm9oryiUn/iszZoF9ZR6jmhYL3FKVzOBFv6RLuW/J9gQrddjZSmCWR
+# VZm8bFA/nVOEGi1rsbKu9CHbFC6Mf6/MSAAOZ3t+T/9flH/WJ9CrP8EMyieQjUy9
+# ZEabyoskmZY8TF9R2Z91kgE3ByECiZMGfVnEy/qtlZo/iw8ycFLdClX85A5MCpqJ
+# lVdTRAsUjKBqo2fnb8CIabHBLtE0AN/kDj///9VyymkaMZlmAYsGBCMtnSHUhXgC
+# Du4xU3dZh/QB25Ddc5NpBeqOf9ICxupv3UMLHC7J+r4pdv9sd8MjOF1vRTWJ0XCL
+# Yeiaziv6p13A/thQ2n876Jqi8kOBAgsPEqIc1+q8cs73omc7ygvsaF/o97D/8geR
+# NghulCk2c1wG2Zm19PzzIBUUQwFxmKK/mXLFCNrvy29Q+zRkyVYdA3jVyGwHaFs6
+# BzEPH39QWN1GbEuul0P4+TES6o9ea3bsNkcewLsnvpHK
 # SIG # End signature block
