@@ -47,7 +47,7 @@
     Resolves options, rules and component integrity, writes nothing on targets and exits.
 
 .VERSION
-    1.0.9
+    1.0.10
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -73,7 +73,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:LauncherVersion = '1.0.9'
+$script:LauncherVersion = '1.0.10'
 
 if ($UnexpectedArguments -and $UnexpectedArguments.Count -gt 0) {
     throw ("Unexpected argument(s): {0}. Pass options with -Option @{{ Name = Value }} and PsExec with -PsExecPath." -f ($UnexpectedArguments -join ' '))
@@ -532,11 +532,11 @@ try {
 
         $dns = if ($computers.Count -gt 0) { Test-SemtDnsSample -ComputerNames $computers -DomainSuffix (Opt 'AdDomain') -SampleSize (Opt 'DnsPreflightSampleSize') } else { $null }
         if ($dns -and $dns.AllFailed -and (Opt 'DnsPreflightBlocksCycle')) {
-            Write-Host ("*** DNS preflight: all {0} sampled computer(s) failed DNS resolution. Check VPN and DNS on this technician computer. The cycle stops before PsExec. ***" -f $dns.Tested) -ForegroundColor Red
-            foreach ($computer in $computers) { [void]$cycleRows.Add((New-EngineResult -Computer $computer -CycleNumber $cycle -Status 'DNS_PREFLIGHT_ALL_SAMPLES_FAILED' -NextAction 'CHECK_VPN_DNS_BEFORE_WAVE' -Detail ('DNS preflight failed for every sampled computer: {0}' -f ((@($dns.Samples) | ForEach-Object { '{0}->{1}' -f $_.Computer,$_.ConnectionTarget }) -join '; ')))) }
+            Write-Host ("*** DNS preflight: all {0} tested computer(s) out of {1} failed DNS resolution. Check VPN and DNS on this technician computer. The cycle stops before remote execution. ***" -f $dns.Tested,$dns.Total) -ForegroundColor Red
+            foreach ($computer in $computers) { [void]$cycleRows.Add((New-EngineResult -Computer $computer -CycleNumber $cycle -Status 'DNS_PREFLIGHT_ALL_SAMPLES_FAILED' -NextAction 'CHECK_VPN_DNS_BEFORE_WAVE' -Detail ('DNS preflight failed for all {0} tested computers out of {1}: {2}' -f $dns.Tested,$dns.Total,((@($dns.Samples) | ForEach-Object { '{0}->{1}' -f $_.Computer,$_.ConnectionTarget }) -join '; ')))) }
             $computers = @()
         }
-        elseif ($dns -and $dns.AllFailed) { Write-Host ("WARNING: DNS preflight failed for all {0} sample(s); continuing because DnsPreflightBlocksCycle is disabled." -f $dns.Tested) -ForegroundColor Yellow }
+        elseif ($dns -and $dns.AllFailed) { Write-Host ("WARNING: DNS preflight failed for all {0} tested computer(s) out of {1}; continuing because DnsPreflightBlocksCycle is disabled." -f $dns.Tested,$dns.Total) -ForegroundColor Yellow }
 
         $running = New-Object System.Collections.ArrayList
         $forced = @{}

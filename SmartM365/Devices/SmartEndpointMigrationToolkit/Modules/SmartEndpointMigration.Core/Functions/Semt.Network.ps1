@@ -8,7 +8,7 @@
     quoting of the remote PowerShell command line.
 
 .VERSION
-    1.0.0
+    1.0.1
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -58,15 +58,23 @@ function Test-SemtDnsSample {
     )
 
     $names = @($ComputerNames | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    $sample = if ($names.Count -le $SampleSize) { @($names) } else { @($names | Get-Random -Count $SampleSize) }
-    $results = @($sample | ForEach-Object { Resolve-SemtConnectionTarget -ComputerName $_ -DomainSuffix $DomainSuffix })
+    $limit = [Math]::Min($names.Count, 50)
+    $sample = if ($limit -eq 0) { @() } elseif ($names.Count -le $limit) { @($names | Get-Random -Count $names.Count) } else { @($names | Get-Random -Count $limit) }
+    $results = New-Object System.Collections.ArrayList
+    foreach ($name in $sample) {
+        $result = Resolve-SemtConnectionTarget -ComputerName $name -DomainSuffix $DomainSuffix
+        [void]$results.Add($result)
+        # Complete the initial sample; expand only when every initial lookup failed.
+        if ($results.Count -ge $SampleSize -and @($results | Where-Object { $_.Resolved }).Count -gt 0) { break }
+    }
     $failed = @($results | Where-Object { -not $_.Resolved }).Count
     return [pscustomobject]@{
         Tested = $results.Count
+        Total = $names.Count
         Resolved = $results.Count - $failed
         Failed = $failed
         AllFailed = ($results.Count -gt 0 -and $failed -eq $results.Count)
-        Samples = $results
+        Samples = @($results.ToArray())
     }
 }
 

@@ -137,8 +137,9 @@ Each cycle:
 2. refreshes inventories when the Run needs them and the shared cache is not usable;
 3. runs the Campaign pre-cycle hook (Hybrid Join never skips a device on a name-only Intune match;
    Windows 11: devices already on Windows 11 in AD/Intune are skipped);
-4. resolves DNS for every computer (a DNS failure blocks the cycle when
-   `DnsPreflightBlocksCycle` is on);
+4. tests a random DNS sample; if all initial lookups fail, tests more names until one resolves
+   or up to 50 names (or the Wave size) have failed. If all tested names fail and
+   `DnsPreflightBlocksCycle` is on, the cycle stops before remote execution;
 5. applies the run guard (back-off per computer and failure category);
 6. starts one worker per computer under the per-Wave and shared caps;
 7. classifies results, archives completed computers, runs the post-cycle hook, writes CSV/HTML;
