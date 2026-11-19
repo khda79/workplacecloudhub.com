@@ -1,5 +1,7 @@
 # Smart ThinClient Shell
 
+Product page: [Smart ThinClient Shell](https://workplacecloudhub.com/tools/smart-thinclient/)
+
 Local Windows endpoint tooling for Citrix, Azure Virtual Desktop (AVD), and web workspaces. Download the portable [Smart ThinClient 1.1.4 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/smart-thinclient-v1.1.4), or use the [source folder](https://github.com/khda79/workplacecloudhub.com/tree/main/SmartThinClient). The release includes the pinned WebView2 SDK DLLs and their license; the Evergreen Runtime remains a prerequisite. No MSI installer, PowerShell Gallery module, Intune package or automatic updater is provided.
 
 ## Prerequisites and validation limits

@@ -32,5 +32,6 @@ Product page: [<Tool name>](https://workplacecloudhub.com/tools/<tool-slug>/) | 
 | `exchange-migration-readiness-v` | `smart-exchange-migration-readiness` |
 | `smartworkplaceintelligence-v` | `smart-workplace-intelligence` |
 | `smartfinops-workplace-v` | `smartfinops-workplace` |
+| `smart-thinclient-v` | `smart-thinclient` |
 
 Retired projects do not get a product page link.
