@@ -62,7 +62,7 @@ table 'Mailbox Migration Inventory'
 		displayFolder: Report refinement
 		lineageTag: c26eebf9-6e71-445e-8306-618d214d5da5
 
-	/// Provisional on-premises mailbox count with observed database, excluding uniquely matched retained exceptions. Unmatched or ambiguous exceptions require review; this is not a finalized migration decision.
+	/// Provisional on-premises mailbox count with an observed database. Excludes Discovery mailboxes and retained exceptions. Unmatched or ambiguous exceptions require review.
 	measure 'To migrate to EXO provisional' =
 			VAR _active=ISFILTERED('Mailbox License Selection'[License Product])
 			VAR _products=VALUES('Mailbox License Selection'[License Product])
@@ -87,7 +87,7 @@ table 'Mailbox Migration Inventory'
 		displayFolder: Migration planning
 		lineageTag: 98fddba8-fe0a-429c-b242-424f6e1cd3cc
 
-	/// All provisional Exchange Online (EXO) migration candidate types other than UserMailbox and SharedMailbox, including rooms and discovery mailboxes. Same qualification and retention rules as the total.
+	/// Provisional Exchange Online migration candidates other than UserMailbox and SharedMailbox. Uses the same eligibility rules as the total, including the Discovery mailbox exclusion.
 	measure 'Other mailboxes to migrate to EXO' = CALCULATE([To migrate to EXO provisional], KEEPFILTERS(NOT ('Mailbox Migration Inventory'[Mailbox Type] IN {"UserMailbox", "SharedMailbox"})))
 		formatString: #,0
 		displayFolder: Migration planning
@@ -555,8 +555,8 @@ table 'Mailbox Migration Inventory'
 		dataType: string
 		lineageTag: 28238848-36d9-4054-a776-eb4653d6104e
 
-	/// A Yes register decision for the exact address or a confirmed same-tenant, same-batch identity excludes the local mailbox from EXO migration. Identity conflicts remain visible in the exception register.
-	column 'Report EXO Candidate' = ```
+	/// A Yes register decision for the exact address or a confirmed same-tenant, same-batch identity excludes the local mailbox from EXO migration. Identity conflicts remain visible in the exception register. Discovery mailboxes are excluded from the candidate cohort by the observed mailbox type.
+	column 'Report EXO Candidate' =
 			VAR _batch = TRIM('Mailbox Migration Inventory'[Loaded Batch ID])
 			VAR _key = 'Mailbox Migration Inventory'[Report Linked Mailbox Key]
 			VAR _tenant = LOOKUPVALUE('Mailbox Exploration Inventory'[TenantKey], 'Mailbox Exploration Inventory'[Mailbox Key], _key, 'Mailbox Exploration Inventory'[Loaded Batch ID], _batch, BLANK())
@@ -589,10 +589,8 @@ table 'Mailbox Migration Inventory'
 			    _retained, "DONTMIGRATE",
 			    _accepted, "DONTMIGRATE",
 			    _review, "Review",
+			    LOWER(TRIM('Mailbox Migration Inventory'[Mailbox Type])) = "discoverymailbox", "Excluded - Discovery mailbox",
 			    "Candidate")
-
-
-			```
 		dataType: string
 		lineageTag: 670fb80d-e784-4e38-b3d0-01a951caaf99
 
@@ -686,4 +684,3 @@ table 'Mailbox Migration Inventory'
 				)
 				in
 				    Readers[Finish](BusinessRows)
-

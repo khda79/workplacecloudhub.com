@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "b60ba3d2e774452d8e20",
   "position": {
-    "x": 776,
+    "x": 864,
     "y": 128,
     "z": 24001,
     "height": 104,
-    "width": 1112,
+    "width": 1024,
     "tabOrder": 16001
   },
   "visual": {
@@ -23,61 +23,13 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Enabled corporate PC · Windows 10 Autopatch Policy Observed"
+                  "Property": "Enabled corporate PC · Hardware Incompatible Windows 10 Combined"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Windows 10 Autopatch Policy Observed",
-              "nativeQueryRef": "Autopatch anchor observed",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Hardware Incompatible Windows 10 Combined",
+              "nativeQueryRef": "Hardware incompatible",
               "active": false,
-              "displayName": "Autopatch anchor observed"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Enabled corporate PC · Windows 10 remaining active <30D"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Windows 10 remaining active <30D",
-              "nativeQueryRef": "Windows 10 remaining · active <30D",
-              "active": false,
-              "displayName": "Windows 10 remaining · active <30D"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Enabled corporate PC · Remaining Managed Windows 10"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Remaining Managed Windows 10",
-              "nativeQueryRef": "Intune-managed Windows 10",
-              "active": false,
-              "displayName": "Intune-managed Windows 10"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Enabled corporate PC · Windows 10 Legacy Build Review"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Windows 10 Legacy Build Review",
-              "nativeQueryRef": "Windows 10 Legacy Build Review",
-              "active": true,
-              "displayName": "Legacy build · update-path review"
+              "displayName": "Hardware incompatible"
             },
             {
               "field": {
@@ -110,11 +62,7 @@
               "nativeQueryRef": "Eligibility conflicting",
               "active": false,
               "displayName": "Eligibility conflicting"
-            }
-          ]
-        },
-        "Tooltips": {
-          "projections": [
+            },
             {
               "field": {
                 "Measure": {
@@ -123,12 +71,29 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Windows 10 active · batch reference UTC"
+                  "Property": "Enabled corporate PC · Windows 10 Legacy Build Review"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Windows 10 active · batch reference UTC",
-              "nativeQueryRef": "Batch reference UTC",
-              "displayName": "Batch reference UTC"
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Windows 10 Legacy Build Review",
+              "nativeQueryRef": "Windows 10 Legacy Build Review",
+              "active": true,
+              "displayName": "Legacy build · update-path review"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Enabled corporate PC · Windows 10 Autopatch Policy Observed"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Windows 10 Autopatch Policy Observed",
+              "nativeQueryRef": "Autopatch anchor observed",
+              "active": false,
+              "displayName": "Autopatch anchor observed"
             }
           ]
         }
@@ -329,7 +294,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "6L"
+                  "Value": "5L"
                 }
               }
             },
@@ -614,19 +579,6 @@
               "expr": {
                 "Literal": {
                   "Value": "8D"
-                }
-              }
-            }
-          }
-        }
-      ],
-      "visualTooltip": [
-        {
-          "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
                 }
               }
             }

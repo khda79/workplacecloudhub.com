@@ -6,7 +6,7 @@
     "y": 128,
     "z": 24000,
     "height": 104,
-    "width": 504,
+    "width": 824,
     "tabOrder": 16000
   },
   "visual": {
@@ -38,12 +38,12 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Enabled corporate PC · Migration AD Windows 10 Without Intune Match"
+                  "Property": "Enabled corporate PC · Windows 10 remaining active <30D"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Migration AD Windows 10 Without Intune Match",
-              "nativeQueryRef": "AD only - no Intune match",
-              "displayName": "AD only - no Intune match"
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Windows 10 remaining active <30D",
+              "nativeQueryRef": "Windows 10 remaining · active <30D",
+              "displayName": "Windows 10 remaining · active <30D"
             },
             {
               "field": {
@@ -53,12 +53,46 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Enabled corporate PC · Hardware Incompatible Windows 10 Combined"
+                  "Property": "Enabled corporate PC · Remaining Managed Windows 10"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Hardware Incompatible Windows 10 Combined",
-              "nativeQueryRef": "Hardware incompatible",
-              "displayName": "Hardware incompatible"
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Remaining Managed Windows 10",
+              "nativeQueryRef": "Intune-managed Windows 10",
+              "displayName": "Intune-managed Windows 10"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Enabled corporate PC · Migration AD Windows 10 Without Intune Match"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Migration AD Windows 10 Without Intune Match",
+              "nativeQueryRef": "AD only - no Intune match",
+              "displayName": "AD only - no Intune match"
+            }
+          ]
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Windows 10 active · batch reference UTC"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Windows 10 active · batch reference UTC",
+              "nativeQueryRef": "Batch reference UTC",
+              "displayName": "Batch reference UTC"
             }
           ]
         }
@@ -259,7 +293,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "3L"
+                  "Value": "4L"
                 }
               }
             },
@@ -544,6 +578,32 @@
               "expr": {
                 "Literal": {
                   "Value": "8D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualTooltip": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeaderTooltip": [
+        {
+          "properties": {
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Corporate: observed AD domain, otherwise Intune ownership. Unknown is not Disabled. Activity <30D uses qualified AD or Entra sign-in, not Intune sync.'"
                 }
               }
             }

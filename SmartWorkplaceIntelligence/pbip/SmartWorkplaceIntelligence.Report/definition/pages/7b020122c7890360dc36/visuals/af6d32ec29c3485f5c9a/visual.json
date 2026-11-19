@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "af6d32ec29c3485f5c9a",
   "position": {
-    "x": 504,
-    "y": 379.5,
+    "x": 432,
+    "y": 331,
     "z": 6000,
-    "height": 74.9,
-    "width": 1384,
+    "height": 60,
+    "width": 1456,
     "tabOrder": 677
   },
   "visual": {
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Intune domains require a unique AD record matched by Intune ID; AD-only domains come from AD. Country is an independent primary-user attribute, not physical location. AD-only does not prove current device activity or non-enrollment.",
+                    "value": "Current Windows 10 devices by attributed AD domain. Includes Intune and AD-only inventory. Use AD Domain Match Status to review attribution and the device list below for follow-up.",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "12pt",

@@ -30392,6 +30392,16 @@ cultureInfo en-US
 			            },
 			            "Weight": 0.9
 			          }
+			        },
+			        {
+			          "Primary user": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
 			        }
 			      ]
 			    },
@@ -139343,7 +139353,7 @@ cultureInfo en-US
 			          }
 			        },
 			        {
-			          "Observed Windows 10": {
+			          "Windows 10 total": {
 			            "State": "Suggested",
 			            "Source": {
 			              "Type": "External",
@@ -139446,7 +139456,7 @@ cultureInfo en-US
 			      "State": "Generated",
 			      "Terms": [
 			        {
-			          "Windows 10 pre-22H2": {
+			          "Legacy build · update-path review": {
 			            "State": "Suggested",
 			            "Source": {
 			              "Type": "External",
@@ -139456,7 +139466,7 @@ cultureInfo en-US
 			          }
 			        },
 			        {
-			          "Legacy build · update-path review": {
+			          "Windows 10 pre-22H2": {
 			            "State": "Suggested",
 			            "Source": {
 			              "Type": "External",
@@ -142389,6 +142399,153 @@ cultureInfo en-US
 			      "Terms": [
 			        {
 			          "Source": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "windows_migration_evidence.migration_hardware_incompatible": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Windows Migration Evidence",
+			          "ConceptualProperty": "Migration Hardware incompatible"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Hardware incompatible": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "windows_migration_evidence.migration_eligibility_unknown": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Windows Migration Evidence",
+			          "ConceptualProperty": "Migration Eligibility unknown"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Eligibility unknown": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "windows_migration_evidence.migration_other_windows_10": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Windows Migration Evidence",
+			          "ConceptualProperty": "Migration Other Windows 10"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Other Windows 10": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "windows_migration_evidence.migration_hardware_incompatible_": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Windows Migration Evidence",
+			          "ConceptualProperty": "Migration Hardware incompatible %"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Hardware incompatible (%)": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "windows_migration_evidence.migration_eligibility_unknown_": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Windows Migration Evidence",
+			          "ConceptualProperty": "Migration Eligibility unknown %"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Eligibility unknown (%)": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "windows_migration_evidence.migration_other_windows_10_": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Windows Migration Evidence",
+			          "ConceptualProperty": "Migration Other Windows 10 %"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Other Windows 10 (%)": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "windows_migration_evidence.readiness_case": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Windows Migration Evidence",
+			          "ConceptualProperty": "Readiness Case"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Readiness case": {
 			            "State": "Suggested",
 			            "Source": {
 			              "Type": "External",

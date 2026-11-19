@@ -1,19 +1,19 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
-  "name": "a527dc25a87f48a7bb73",
+  "name": "a6189a710fbc0e78fa13",
   "position": {
     "x": 32,
-    "y": 320,
-    "z": 0,
-    "height": 397.51126516464473,
-    "width": 720,
-    "tabOrder": 672
+    "y": 760,
+    "z": 62260,
+    "height": 80,
+    "width": 280,
+    "tabOrder": 62260
   },
   "visual": {
-    "visualType": "barChart",
+    "visualType": "slicer",
     "query": {
       "queryState": {
-        "Category": {
+        "Values": {
           "projections": [
             {
               "field": {
@@ -23,82 +23,33 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "AD Domain"
+                  "Property": "Disk Review"
                 }
               },
-              "queryRef": "Windows Migration Evidence.AD Domain",
-              "nativeQueryRef": "AD domain",
-              "active": true
-            }
-          ]
-        },
-        "Y": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Enabled corporate PC · Remaining Observed Windows 10"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Remaining Observed Windows 10",
-              "nativeQueryRef": "Observed Windows 10",
-              "displayName": "Observed Windows 10"
+              "queryRef": "Windows Migration Evidence.Disk Review",
+              "nativeQueryRef": "Disk review",
+              "active": true,
+              "displayName": "Disk review"
             }
           ]
         }
-      },
-      "sortDefinition": {
-        "sort": [
-          {
-            "field": {
-              "Measure": {
-                "Expression": {
-                  "SourceRef": {
-                    "Entity": "Windows Migration Evidence"
-                  }
-                },
-                "Property": "Enabled corporate PC · Remaining Observed Windows 10"
-              }
-            },
-            "direction": "Descending"
-          }
-        ]
       }
     },
     "objects": {
-      "categoryAxis": [
+      "data": [
         {
           "properties": {
-            "show": {
+            "mode": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "showAxisTitle": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
+                  "Value": "'Dropdown'"
                 }
               }
             }
           }
         }
       ],
-      "valueAxis": [
+      "header": [
         {
           "properties": {
             "show": {
@@ -108,47 +59,26 @@
                 }
               }
             },
-            "showAxisTitle": {
+            "text": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "'Disk review'"
                 }
               }
             },
-            "start": {
-              "expr": {
-                "Literal": {
-                  "Value": "0D"
-                }
-              }
-            },
-            "labelDisplayUnits": {
-              "expr": {
-                "Literal": {
-                  "Value": "1D"
-                }
-              }
-            },
-            "fontSize": {
+            "textSize": {
               "expr": {
                 "Literal": {
                   "Value": "11D"
                 }
               }
             },
-            "gridlineShow": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "gridlineColor": {
+            "fontColor": {
               "solid": {
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#E7EEF5'"
+                      "Value": "'#183153'"
                     }
                   }
                 }
@@ -157,64 +87,13 @@
           }
         }
       ],
-      "labels": [
+      "general": [
         {
           "properties": {
-            "show": {
+            "selfFilterEnabled": {
               "expr": {
                 "Literal": {
                   "Value": "true"
-                }
-              }
-            },
-            "labelDisplayUnits": {
-              "expr": {
-                "Literal": {
-                  "Value": "1D"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            }
-          }
-        }
-      ],
-      "legend": [
-        {
-          "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            }
-          }
-        }
-      ],
-      "dataPoint": [
-        {
-          "properties": {
-            "defaultColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#0078D4'"
-                    }
-                  }
                 }
               }
             }
@@ -229,14 +108,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             },
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows 10 by attributed AD domain - current union'"
+                  "Value": "''"
                 }
               }
             },
@@ -383,15 +262,14 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows 10 by AD domain · primary-user proxy'"
+                  "Value": "'Filter by Disk review'"
                 }
               }
             }
           }
         }
       ]
-    },
-    "drillFilterOtherVisuals": true
+    }
   },
-  "parentGroupName": "e263927d6c2945189518"
+  "parentGroupName": "c694d12f1f166a4a80f3"
 }

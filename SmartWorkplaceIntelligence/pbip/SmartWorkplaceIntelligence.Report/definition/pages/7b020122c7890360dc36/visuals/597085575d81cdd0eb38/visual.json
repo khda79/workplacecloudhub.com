@@ -3,10 +3,10 @@
   "name": "597085575d81cdd0eb38",
   "position": {
     "x": 32,
-    "y": 430.34410480349345,
+    "y": 416,
     "z": 1000,
-    "height": 267.01135371179043,
-    "width": 720,
+    "height": 292,
+    "width": 852,
     "tabOrder": 880
   },
   "visual": {
@@ -43,12 +43,106 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
+                  "Property": "Migration Hardware incompatible"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Migration Hardware incompatible",
+              "nativeQueryRef": "Hardware incompatible",
+              "displayName": "Hardware incompatible"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Migration Eligibility unknown"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Migration Eligibility unknown",
+              "nativeQueryRef": "Eligibility unknown",
+              "displayName": "Eligibility unknown"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Migration Other Windows 10"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Migration Other Windows 10",
+              "nativeQueryRef": "Other Windows 10",
+              "displayName": "Other Windows 10"
+            }
+          ]
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
                   "Property": "Enabled corporate PC · Remaining Observed Windows 10"
                 }
               },
               "queryRef": "Windows Migration Evidence.Enabled corporate PC · Remaining Observed Windows 10",
-              "nativeQueryRef": "Observed Windows 10",
-              "displayName": "Observed Windows 10"
+              "nativeQueryRef": "Windows 10 total",
+              "displayName": "Windows 10 total"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Migration Hardware incompatible %"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Migration Hardware incompatible %",
+              "nativeQueryRef": "Hardware incompatible (%)",
+              "displayName": "Hardware incompatible (%)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Migration Eligibility unknown %"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Migration Eligibility unknown %",
+              "nativeQueryRef": "Eligibility unknown (%)",
+              "displayName": "Eligibility unknown (%)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Migration Other Windows 10 %"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Migration Other Windows 10 %",
+              "nativeQueryRef": "Other Windows 10 (%)",
+              "displayName": "Other Windows 10 (%)"
             }
           ]
         }
@@ -164,21 +258,7 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "labelDisplayUnits": {
-              "expr": {
-                "Literal": {
-                  "Value": "1D"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
+                  "Value": "false"
                 }
               }
             }
@@ -191,14 +271,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
                 }
               }
             },
-            "fontSize": {
+            "position": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "'Top'"
                 }
               }
             }
@@ -208,12 +288,75 @@
       "dataPoint": [
         {
           "properties": {
-            "defaultColor": {
+            "fill": {
               "solid": {
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#0078D4'"
+                      "Value": "'#AC2C27'"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Windows Migration Evidence.Migration Hardware incompatible"
+          }
+        },
+        {
+          "properties": {
+            "fill": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#BF7700'"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Windows Migration Evidence.Migration Eligibility unknown"
+          }
+        },
+        {
+          "properties": {
+            "fill": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#0078C9'"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Windows Migration Evidence.Migration Other Windows 10"
+          }
+        }
+      ],
+      "totals": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
                     }
                   }
                 }
@@ -237,7 +380,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows 10 by AD domain - Intune + AD-only'"
+                  "Value": "'Windows 10 by attributed AD domain - current union'"
                 }
               }
             },

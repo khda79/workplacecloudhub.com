@@ -844,6 +844,42 @@ table 'Windows Migration Evidence'
 		displayFolder: Migration planning
 		lineageTag: 4523c89b-b565-4ed7-b8be-f2dcde9a8d32
 
+	/// Hardware incompatible within the current enabled corporate Windows 10 migration scope.
+	measure 'Migration Hardware incompatible' = CALCULATE([Enabled corporate PC · Remaining Observed Windows 10], KEEPFILTERS('Windows Migration Evidence'[Migration Readiness Segment] = "Hardware incompatible"))
+		formatString: #,0
+		displayFolder: Migration chart composition
+		lineageTag: aa4ed680-a014-4cb2-8088-3b50f5f94a1c
+
+	/// Share of the current Windows 10 migration scope in the hardware incompatible segment.
+	measure 'Migration Hardware incompatible %' = DIVIDE([Migration Hardware incompatible], [Enabled corporate PC · Remaining Observed Windows 10])
+		formatString: 0.0%
+		displayFolder: Migration chart composition
+		lineageTag: f3fac484-5959-4df7-bbea-d01c18d52e22
+
+	/// Eligibility unknown within the current enabled corporate Windows 10 migration scope.
+	measure 'Migration Eligibility unknown' = CALCULATE([Enabled corporate PC · Remaining Observed Windows 10], KEEPFILTERS('Windows Migration Evidence'[Migration Readiness Segment] = "Eligibility unknown"))
+		formatString: #,0
+		displayFolder: Migration chart composition
+		lineageTag: 9564b088-3887-4ba7-99af-5a9773d4d92d
+
+	/// Share of the current Windows 10 migration scope in the eligibility unknown segment.
+	measure 'Migration Eligibility unknown %' = DIVIDE([Migration Eligibility unknown], [Enabled corporate PC · Remaining Observed Windows 10])
+		formatString: 0.0%
+		displayFolder: Migration chart composition
+		lineageTag: 719eec92-f9bb-47a2-8855-391ff9e42b78
+
+	/// Other Windows 10 within the current enabled corporate Windows 10 migration scope.
+	measure 'Migration Other Windows 10' = CALCULATE([Enabled corporate PC · Remaining Observed Windows 10], KEEPFILTERS('Windows Migration Evidence'[Migration Readiness Segment] = "Other Windows 10"))
+		formatString: #,0
+		displayFolder: Migration chart composition
+		lineageTag: e624dce9-5504-4544-8c0e-fa7b444ce96b
+
+	/// Share of the current Windows 10 migration scope in the other windows 10 segment.
+	measure 'Migration Other Windows 10 %' = DIVIDE([Migration Other Windows 10], [Enabled corporate PC · Remaining Observed Windows 10])
+		formatString: 0.0%
+		displayFolder: Migration chart composition
+		lineageTag: d17e72e9-e446-473e-a667-4698c647e229
+
 	/// Device Source ID from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
 	column 'Device Source ID'
 		dataType: string
@@ -1200,6 +1236,47 @@ table 'Windows Migration Evidence'
 		displayFolder: Report identity context
 		lineageTag: 7497f670-aabb-4a01-98b5-2e2b635b8b0f
 
+	/// Mutually exclusive chart category for each current Windows 10 migration device. Qualified historical script evidence is used only for previously unassessed eligibility.
+	column 'Migration Readiness Segment' =
+			VAR _eligibility = 'Windows Migration Evidence'[Upgrade Eligibility]
+			VAR _unassessed = _eligibility IN { "Not assessed", "Unknown", "Undetermined" }
+			VAR _device = 'Windows Migration Evidence'[Device Source ID]
+			VAR _batch = 'Windows Migration Evidence'[Loaded Batch ID]
+			VAR _historyAvailable = NOT ISEMPTY(
+			    FILTER(ALL('Data Trust Evidence'),
+			        'Data Trust Evidence'[Source Name] = "Historical Windows 11 hardware readiness"
+			            && 'Data Trust Evidence'[Evidence Status] = "Historical evidence only")
+			)
+			VAR _scriptRows =
+			    FILTER(ALL('Historical Windows Readiness'),
+			        NOT ISBLANK(_device)
+			            && 'Historical Windows Readiness'[Candidate Device Source ID] = _device
+			            && 'Historical Windows Readiness'[Loaded Batch ID] = _batch
+			            && 'Historical Windows Readiness'[Observation Status] = "Observed"
+			            && 'Historical Windows Readiness'[Historical Result] IN { "CAPABLE", "NOT CAPABLE" })
+			VAR _script =
+			    IF(_unassessed && _historyAvailable && COUNTROWS(_scriptRows) = 1,
+			        MAXX(_scriptRows, 'Historical Windows Readiness'[Historical Result]))
+			RETURN
+			    SWITCH(TRUE(),
+			        _eligibility = "Not capable" || _script = "NOT CAPABLE", "Hardware incompatible",
+			        _unassessed && ISBLANK(_script), "Eligibility unknown",
+			        "Other Windows 10")
+		dataType: string
+		isHidden
+		lineageTag: 1ea3b424-fa2a-41ac-9cfc-20988e591f36
+		summarizeBy: none
+
+	/// Readiness follow-up queue. Enabled AD-only inventory without a qualified current Intune match, or Intune devices with unresolved upgrade eligibility.
+	column 'Readiness Case' =
+			SWITCH(TRUE(),
+			    'Windows Migration Evidence'[Inventory Source] = "AD only", "AD only",
+			    'Windows Migration Evidence'[Inventory Source] = "Intune"
+			        && 'Windows Migration Evidence'[Migration Readiness Segment] = "Eligibility unknown", "Intune - eligibility unknown")
+		dataType: string
+		lineageTag: 35904b53-87ad-4220-baea-8c4df540340c
+		summarizeBy: none
+
 	/// Rebuilt from tenant-qualified local source snapshots by the prepared evidence pipeline. Versioned batch reader; missing/incomplete outputs fail, never fall back to frozen recovery JSON. No live collection; AD absence is not proof of non-enrollment.
 	partition 'Windows Migration Evidence' = m
 		mode: import
@@ -1235,4 +1312,3 @@ table 'Windows Migration Evidence'
 				    Readers[Finish](BusinessRows)
 
 	annotation PBI_ResultType = Exception
-

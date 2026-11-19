@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "fafbb0f5d73f0c2e0bf5",
   "position": {
-    "x": 32,
-    "y": 432,
+    "x": 336,
+    "y": 384,
     "z": 0,
-    "height": 568,
-    "width": 1856,
+    "height": 616,
+    "width": 1552,
     "tabOrder": 672
   },
   "visual": {
@@ -28,8 +28,24 @@
               },
               "queryRef": "Windows Migration Evidence.Device Name",
               "nativeQueryRef": "Device Name",
-              "displayName": "Device Name",
-              "active": true
+              "active": true,
+              "displayName": "Device Name"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Readiness Case"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Readiness Case",
+              "nativeQueryRef": "Readiness case",
+              "active": true,
+              "displayName": "Readiness case"
             },
             {
               "field": {
@@ -108,8 +124,8 @@
               },
               "queryRef": "Windows Migration Evidence.AD Domain",
               "nativeQueryRef": "AD Domain",
-              "displayName": "AD Domain",
-              "active": true
+              "active": true,
+              "displayName": "AD Domain"
             },
             {
               "field": {
@@ -124,8 +140,8 @@
               },
               "queryRef": "Windows Migration Evidence.OS Version",
               "nativeQueryRef": "OS Version",
-              "displayName": "OS Version",
-              "active": true
+              "active": true,
+              "displayName": "OS Version"
             },
             {
               "field": {
@@ -140,8 +156,8 @@
               },
               "queryRef": "Windows Migration Evidence.Intune State",
               "nativeQueryRef": "Intune State",
-              "displayName": "Intune State",
-              "active": true
+              "active": true,
+              "displayName": "Intune State"
             },
             {
               "field": {
@@ -156,8 +172,8 @@
               },
               "queryRef": "Windows Migration Evidence.Upgrade Eligibility",
               "nativeQueryRef": "Upgrade Eligibility",
-              "displayName": "Upgrade Eligibility",
-              "active": true
+              "active": true,
+              "displayName": "Upgrade Eligibility"
             },
             {
               "field": {
@@ -172,8 +188,8 @@
               },
               "queryRef": "Windows Migration Evidence.Inventory Observation Date",
               "nativeQueryRef": "Inventory Observation Date",
-              "displayName": "Inventory Observation Date",
-              "active": true
+              "active": true,
+              "displayName": "Inventory Observation Date"
             },
             {
               "field": {
@@ -188,8 +204,8 @@
               },
               "queryRef": "Windows Migration Evidence.Next Action",
               "nativeQueryRef": "Next Action",
-              "displayName": "Next Action",
-              "active": true
+              "active": true,
+              "displayName": "Next Action"
             },
             {
               "field": {
@@ -220,8 +236,8 @@
               },
               "queryRef": "Windows Migration Evidence.Device Source ID",
               "nativeQueryRef": "Device Source ID",
-              "displayName": "Device Source ID",
-              "active": true
+              "active": true,
+              "displayName": "Device Source ID"
             }
           ]
         }
@@ -364,9 +380,6 @@
       ],
       "columnFormatting": [
         {
-          "selector": {
-            "metadata": "Windows Migration Evidence.Device Name"
-          },
           "properties": {
             "alignment": {
               "expr": {
@@ -396,12 +409,47 @@
                 }
               }
             }
+          },
+          "selector": {
+            "metadata": "Windows Migration Evidence.Device Name"
           }
         },
         {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Primary User (report)"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -431,12 +479,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Primary User SAM (report)"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -466,12 +514,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Last Console User (report)"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -501,12 +549,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Last Console Logon UTC (report)"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -536,12 +584,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.AD Domain"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -571,12 +619,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.OS Version"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -606,12 +654,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Intune State"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -641,12 +689,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Upgrade Eligibility"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -676,12 +724,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Inventory Observation Date"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -711,12 +759,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Next Action"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -746,47 +794,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Console Logon Qualification (report)"
-          },
-          "properties": {
-            "alignment": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Center'"
-                }
-              }
-            },
-            "styleHeader": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleValues": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleTotal": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            }
           }
         },
         {
-          "selector": {
-            "metadata": "Windows Migration Evidence.Device Source ID"
-          },
           "properties": {
             "alignment": {
               "expr": {
@@ -816,6 +829,9 @@
                 }
               }
             }
+          },
+          "selector": {
+            "metadata": "Windows Migration Evidence.Device Source ID"
           }
         }
       ],
@@ -835,7 +851,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD-only Windows 10 - no qualified match in current local Intune inventory'"
+                  "Value": "'Windows 10 readiness follow-up - AD-only and Intune eligibility unknown'"
                 }
               }
             },
@@ -989,7 +1005,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD Windows 10 records without Intune ID · observed, not a qualified unmanaged-device total'"
+                  "Value": "'Windows 10 follow-up inventory for AD-only devices and Intune devices with unknown eligibility'"
                 }
               }
             }
@@ -1016,7 +1032,7 @@
   "filterConfig": {
     "filters": [
       {
-        "name": "e35f0ca2857cfa4a4d7d",
+        "name": "a6189a710fbc0e78fa03",
         "field": {
           "Column": {
             "Expression": {
@@ -1024,7 +1040,7 @@
                 "Entity": "Windows Migration Evidence"
               }
             },
-            "Property": "Inventory Source"
+            "Property": "Readiness Case"
           }
         },
         "type": "Categorical",
@@ -1049,7 +1065,7 @@
                             "Source": "s"
                           }
                         },
-                        "Property": "Inventory Source"
+                        "Property": "Readiness Case"
                       }
                     }
                   ],
@@ -1058,6 +1074,13 @@
                       {
                         "Literal": {
                           "Value": "'AD only'"
+                        }
+                      }
+                    ],
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'Intune - eligibility unknown'"
                         }
                       }
                     ]

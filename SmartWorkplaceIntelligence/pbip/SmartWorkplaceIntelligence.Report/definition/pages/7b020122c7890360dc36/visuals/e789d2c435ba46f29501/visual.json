@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "e789d2c435ba46f29501",
   "position": {
-    "x": 536,
-    "y": 128,
-    "z": 110000,
+    "x": 1360,
+    "y": 320,
+    "z": 2000,
     "height": 104,
-    "width": 240,
-    "tabOrder": 110000
+    "width": 528,
+    "tabOrder": 1500
   },
   "visual": {
     "visualType": "cardVisual",
@@ -63,7 +63,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "16D"
+                  "Value": "22D"
                 }
               }
             },
@@ -111,7 +111,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             },
@@ -387,7 +387,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Détail par source'"
+                  "Value": "'Hardware incompatible by source'"
                 }
               }
             },
@@ -486,20 +486,8 @@
             }
           }
         }
-      ],
-      "visualHeaderTooltip": [
-        {
-          "properties": {
-            "text": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Corporate: observed AD domain, otherwise Intune ownership. Unknown is not Disabled. Activity <30D uses qualified AD or Entra sign-in, not Intune sync.'"
-                }
-              }
-            }
-          }
-        }
       ]
     }
-  }
+  },
+  "parentGroupName": "d85268b5dc12f6005c09"
 }
