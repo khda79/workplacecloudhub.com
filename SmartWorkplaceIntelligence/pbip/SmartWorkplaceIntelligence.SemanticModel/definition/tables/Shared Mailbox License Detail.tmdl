@@ -60,10 +60,13 @@ table 'Shared Mailbox License Detail'
 				    Manifest = Readers[GetPreparedBatchManifest](),
 				    Q = Readers[GetLicenseReportQualification](),
 				    Detail = Record.FieldOrDefault(Manifest, "SharedMailboxLicenseDetail", []),
-				    Qualified = Record.FieldOrDefault(Detail, "State", "") = "Qualified" and Q[State] = "Qualified" and Text.From(Record.FieldOrDefault(Detail, "SnapshotId", "")) = Text.From(Q[SnapshotId]),
-				    Rows = if Qualified then Record.FieldOrDefault(Detail, "Rows", {}) else {},
+				    DetailState = Record.FieldOrDefault(Detail, "State", ""),
+				    Qualified = List.Contains({"Qualified", "Partial"}, DetailState) and Q[State] = "Qualified" and Text.From(Record.FieldOrDefault(Detail, "SnapshotId", "")) = Text.From(Q[SnapshotId]),
+				    Status = if Qualified and DetailState = "Partial" then {[DisplayName="PARTIAL - " & Text.From(Record.FieldOrDefault(Detail, "UnknownCount", 0)) & " case(s) to review", Review="Reconciliation: " & Text.From(Record.FieldOrDefault(Detail, "Reconciliation", "Unknown")) & "; review required"]} else {},
+				    Rows = if Qualified then Status & Record.FieldOrDefault(Detail, "Rows", {}) else {},
 				    Source = Table.FromRecords(Rows, type table [UserId=nullable text, DisplayName=nullable text, PrimarySmtpAddress=nullable text, License=nullable text, MailboxSizeGB=nullable text, ArchiveStatus=nullable text, LitigationHoldEnabled=nullable text, RetentionHoldEnabled=nullable text, Review=nullable text], MissingField.UseNull),
-				    Renamed = Table.RenameColumns(Source, {{"DisplayName", "Display Name"}, {"PrimarySmtpAddress", "Email"}, {"MailboxSizeGB", "Size GB"}, {"ArchiveStatus", "Archive"}, {"LitigationHoldEnabled", "Litigation hold"}, {"RetentionHoldEnabled", "Retention hold"}}),
+				    Marked = if Qualified and DetailState = "Partial" then Table.TransformColumns(Source, {{"Review", each "PARTIAL | " & (if _ = null then "Review required" else _), type text}}) else Source,
+				    Renamed = Table.RenameColumns(Marked, {{"DisplayName", "Display Name"}, {"PrimarySmtpAddress", "Email"}, {"MailboxSizeGB", "Size GB"}, {"ArchiveStatus", "Archive"}, {"LitigationHoldEnabled", "Litigation hold"}, {"RetentionHoldEnabled", "Retention hold"}}),
 				    Typed = Table.TransformColumns(Renamed, {{"Size GB", each try Number.FromText(_, "en-US") otherwise null, type nullable number}}),
 				    Result = Readers[Finish](Typed)
 				in Result

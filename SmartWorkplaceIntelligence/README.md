@@ -318,10 +318,13 @@ previous batch's computed results.
 
 `SharedMailboxLicenseDetail` contains tenant-wide shared mailbox rows for the
 selected F1, F3, E3 and E5 suites. Prepare reconstructs these rows only when
-the qualified report and its snapshot integrity proof are present, both source
-files have the exact snapshot hashes, and the detail reconciles with the
-published counts. Otherwise the detail is unavailable and existing aggregates
-remain usable. The batch manifest therefore contains mailbox names, addresses,
+the qualified report and its snapshot integrity proof are present and both
+source files have the exact snapshot hashes. Unknown mailbox data and ambiguous
+identities are marked for review, excluded from recommendations, and counted
+as unknown. The detail is `Partial` when there are unknowns or when its counts
+do not reconcile with the snapshot; its reconciliation status is shown alongside
+the rows. Unavailable or unqualified sources still produce no detail. The batch
+manifest therefore contains mailbox names, addresses,
 license and hold observations; it must be protected like the prepared account
 and mailbox evidence. Recommendations are for manual review only.
 

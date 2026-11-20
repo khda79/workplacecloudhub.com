@@ -1,4 +1,4 @@
-"""Version 0.1.0: reconcile shared mailbox detail with a license snapshot.
+"""Version 0.2.0: reconcile shared mailbox detail with a license snapshot.
 
 The input files are accepted only when their exact digests match the snapshot.
 The result is review evidence, never an instruction to change an assignment.
@@ -72,14 +72,28 @@ def evaluate(snapshot, tenant, license_rows, mailbox_rows):
         user = normalized(row.get('ExternalDirectoryObjectId'))
         if user not in users:
             continue
-        if user in mailboxes:
-            raise ValueError('Duplicate mailbox identity')
-        mailboxes[user] = row
+        mailboxes.setdefault(user, []).append(row)
     details = []
-    counts = {p: {'SharedLicensed': 0, 'SharedUnder50': 0, 'SharedEligible': 0, 'SharedE3Plan2Review': 0} for p in products.values()}
+    counts = {p: {'SharedLicensed': 0, 'SharedUnder50': 0, 'SharedEligible': 0, 'SharedE3Plan2Review': 0, 'SharedUnknown': 0} for p in products.values()}
     for user, product in sorted(assignments):
-        row = mailboxes.get(user)
-        if not row or row.get('NativeIdentityStatus', '').strip().lower() != 'observed' or row.get('RecipientTypeDetails', '').strip().lower() != 'sharedmailbox':
+        matches = mailboxes.get(user, [])
+        if not matches:
+            continue
+        c = counts[product]
+        row = matches[0]
+        identity_uncertain = (len(matches) != 1 or normalized(row.get('NativeIdentityStatus')) != 'observed'
+                              or not normalized(row.get('RecipientTypeDetails')))
+        if identity_uncertain:
+            c['SharedUnknown'] += 1
+            names = {r.get('DisplayName', '').strip() for r in matches}
+            addresses = {r.get('PrimarySmtpAddress', '').strip() for r in matches}
+            details.append({'UserId': user, 'DisplayName': next(iter(names)) if len(names) == 1 else '',
+                            'PrimarySmtpAddress': next(iter(addresses)) if len(addresses) == 1 else '',
+                            'License': product, 'MailboxSizeGB': None, 'ArchiveStatus': '',
+                            'LitigationHoldEnabled': '', 'RetentionHoldEnabled': '',
+                            'Review': 'Identity ambiguous - review'})
+            continue
+        if normalized(row.get('RecipientTypeDetails')) != 'sharedmailbox':
             continue
         size = size_gb(row.get('TotalItemSizeGB'))
         archive = normalized(row.get('ArchiveStatus'))
@@ -88,23 +102,30 @@ def evaluate(snapshot, tenant, license_rows, mailbox_rows):
         valid = size is not None and archive in ('none', 'disabled', 'false', 'active', 'enabled', 'true') and litigation in ('true', 'false') and retention in ('true', 'false')
         eligible = valid and size < 50 and archive in ('none', 'disabled', 'false') and litigation == 'false' and retention == 'false'
         plan2 = product == 'Microsoft 365 E3' and size is not None and Decimal(50) < size < Decimal(100)
-        c = counts[product]
         c['SharedLicensed'] += 1
         c['SharedUnder50'] += int(size is not None and size < 50)
         c['SharedEligible'] += int(eligible)
         c['SharedE3Plan2Review'] += int(plan2)
-        details.append({'UserId': user, 'DisplayName': row.get('DisplayName', ''), 'PrimarySmtpAddress': row.get('PrimarySmtpAddress', ''), 'License': product, 'MailboxSizeGB': str(size) if size is not None else None, 'ArchiveStatus': row.get('ArchiveStatus', ''), 'LitigationHoldEnabled': row.get('LitigationHoldEnabled', ''), 'RetentionHoldEnabled': row.get('RetentionHoldEnabled', ''), 'Review': 'E3 to Plan 2' if plan2 else 'Removal candidate' if eligible else 'Review required'})
+        c['SharedUnknown'] += int(not valid)
+        review = ('Review required - size unavailable' if size is None else
+                  'Review required - mailbox evidence incomplete' if not valid else
+                  'E3 to Plan 2' if plan2 else 'Removal candidate' if eligible else 'Review required')
+        details.append({'UserId': user, 'DisplayName': row.get('DisplayName', ''), 'PrimarySmtpAddress': row.get('PrimarySmtpAddress', ''), 'License': product, 'MailboxSizeGB': str(size) if size is not None else None, 'ArchiveStatus': row.get('ArchiveStatus', ''), 'LitigationHoldEnabled': row.get('LitigationHoldEnabled', ''), 'RetentionHoldEnabled': row.get('RetentionHoldEnabled', ''), 'Review': review})
+    mismatches = []
     for product, actual in counts.items():
         matches = [x for x in snapshot.get('Products', []) if x.get('Product') == product]
         if len(matches) != 1:
             raise ValueError('Missing or duplicate snapshot product')
         expected = matches[0].get('Counts', {})
-        if matches[0].get('UsageAvailable') is not True or expected.get('SharedUnknown') != 0:
-            raise ValueError('Snapshot mailbox evidence is incomplete: ' + product)
+        if matches[0].get('UsageAvailable') is not True:
+            raise ValueError('Snapshot mailbox evidence is unavailable: ' + product)
         for metric, value in actual.items():
             if expected.get(metric) != value:
-                raise ValueError('Snapshot does not reconcile: ' + product + ' ' + metric)
-    return details
+                mismatches.append(product + ': ' + metric)
+    unknown = sum(c['SharedUnknown'] for c in counts.values())
+    state = 'Partial' if unknown or mismatches else 'Qualified'
+    return {'State': state, 'UnknownCount': unknown, 'Reconciliation': 'Mismatch' if mismatches else 'Matched',
+            'Mismatches': mismatches, 'Rows': details}
 
 
 def from_files(snapshot_path, license_path, mailbox_path, tenant):
