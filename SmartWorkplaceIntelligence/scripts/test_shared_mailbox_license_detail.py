@@ -1,6 +1,7 @@
 """Qualification tests for shared mailbox license detail."""
 import csv
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -86,6 +87,33 @@ class SharedMailboxDetailsTests(unittest.TestCase):
                 stream.write('\n')
             with self.assertRaisesRegex(ValueError, 'does not match'):
                 from_files(snapshot, licenses, mailboxes, 'test')
+
+    def test_powershell_accepts_json_integer_and_rejects_invalid_qualification(self):
+        module = Path(__file__).with_name('PreparedEvidencePipeline.psm1')
+        script = r'''
+param($ModulePath)
+Import-Module $ModulePath -Force
+$module = Get-Module PreparedEvidencePipeline
+$samples = @(
+    '{"State":"Partial","UnknownCount":2,"Reconciliation":"Matched","Rows":[]}',
+    '{"State":"Qualified","UnknownCount":0,"Reconciliation":"Matched","Rows":[]}',
+    '{"State":"Partial","UnknownCount":-1,"Reconciliation":"Matched","Rows":[]}',
+    '{"State":"Partial","UnknownCount":1.5,"Reconciliation":"Matched","Rows":[]}',
+    '{"State":"Qualified","UnknownCount":2,"Reconciliation":"Matched","Rows":[]}',
+    '{"State":"Qualified","UnknownCount":0,"Reconciliation":"Mismatch","Rows":[]}'
+)
+$results = foreach ($sample in $samples) {
+    $detail = ConvertFrom-Json -InputObject $sample
+    & $module { param($value) Test-PreparedSharedMailboxLicenseDetail -Detail $value } $detail
+}
+ConvertTo-Json -InputObject @($results) -Compress
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'check.ps1'
+            path.write_text(script, encoding='utf-8')
+            run = subprocess.run(['pwsh', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(path), str(module)],
+                                 capture_output=True, text=True, check=True)
+        self.assertEqual(json.loads(run.stdout), [True, True, False, False, False, False])
 
 
 if __name__ == '__main__':

@@ -1,5 +1,5 @@
 # Offline, single-tenant preparation and versioned local publication. No tenant APIs.
-# Version: 1.2.14
+# Version: 1.2.15
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:ProductRoot = Split-Path -Parent $PSScriptRoot
@@ -527,6 +527,17 @@ function Test-PreparedSourceTenants {
     [pscustomobject]@{CsvFiles=$files;Rows=$rows;LegacyArchivedSummaries=$legacyArchived}
 }
 
+function Test-PreparedSharedMailboxLicenseDetail {
+    param([Parameter(Mandatory)]$Detail)
+    if ($Detail.State -notin @('Qualified','Partial') -or $Detail.Reconciliation -notin @('Matched','Mismatch') -or
+        $Detail.Rows -isnot [array] -or ($Detail.UnknownCount -isnot [int] -and $Detail.UnknownCount -isnot [long]) -or
+        $Detail.UnknownCount -lt 0 -or
+        ($Detail.State -eq 'Qualified' -and ($Detail.UnknownCount -ne 0 -or $Detail.Reconciliation -ne 'Matched'))) {
+        return $false
+    }
+    return $true
+}
+
 function Publish-PreparedEvidenceBatch {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$StagingRoot,
@@ -801,9 +812,7 @@ function Publish-PreparedEvidenceBatch {
                 if ($LASTEXITCODE -ne 0 -or $detailOutput.Count -ne 1) { throw ('Shared mailbox detail qualification failed (exit code {0}): {1}' -f $LASTEXITCODE,(Get-PreparedProcessFailureDetail $detailOutput)) }
                 if ((Get-FileHash -LiteralPath $snapshot -Algorithm SHA256).Hash -cne $snapshotHash) { throw 'Shared mailbox detail qualification failed: license snapshot changed while reading.' }
                 $detail=ConvertFrom-Json -InputObject ([string]$detailOutput[0]) -ErrorAction Stop
-                if ($detail.State -notin @('Qualified','Partial') -or $detail.Reconciliation -notin @('Matched','Mismatch') -or
-                    $detail.Rows -isnot [array] -or $detail.UnknownCount -isnot [int] -or $detail.UnknownCount -lt 0 -or
-                    ($detail.State -eq 'Qualified' -and ($detail.UnknownCount -ne 0 -or $detail.Reconciliation -ne 'Matched'))) {
+                if (-not (Test-PreparedSharedMailboxLicenseDetail -Detail $detail)) {
                     throw 'Shared mailbox detail has an invalid qualification.'
                 }
                 $manifest.SharedMailboxLicenseDetail=@{State=$detail.State;SnapshotId=$licenseQualification.SnapshotId;Rows=$detail.Rows;
@@ -1081,8 +1090,8 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCx6ptZ3UBLiO16
-# aVv26xejHSHE5ea6Z6DwZY0u6km7S6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBTzjssVOrxzRZk
+# tightMgQfQA6ut+u1WI7N1sm4SWYFKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1215,31 +1224,31 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPsIHTghmTxy1+SJJq7F8uZsIA5FQOuI9dPBgItK82tdMA0GCSqG
-# SIb3DQEBAQUABIIBgJm2OZJA/WLzc0UxVJWFNQnwRqUNOb9HzLw+Pt/mgc3ETgh7
-# z/VV/AlSrkiYfo/dBS1/ymdGWJgmqgWsoaRpt3iPjXoL+oXWSaKDCIb+qzU3rJNS
-# C1NxAe4jzuCXYrnzezO8crTMniQ0SJgFFGIcheJAQWiK/HgeEmk45o85oZdHgR4p
-# 34hRS52dlSEKfgLNEJD/t5ChV2ftMAdQFZpFxR8BnumWhgVdg0DU/jeHXpqylPko
-# vp9LpYcWduFr8cc8Wj+bn3cdoj/kb8JoWHb4x0lw3GyYIEmc/L9K4IclUu+I9cH5
-# 2fggdEcWmARcHZwwZkshU9EgtT+BA8ZBOgU0Na2xOxriADNvcr3/uxFttRTI0bta
-# 3xNc8qfcmc/+510Kwf06wQRVJtDbi4vJD262Dc8sRlxoAzNO3pmHgPyzSsqLTkKm
-# 0Ngw7AyL8Jf34V4xZIssAC10LSEtMHwlSXSeEf05Em5NUM1nPwuWhlm6kZsaD4YL
-# Cj4NkwjL00O9jaus9KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBWRMXRGgQt7HTyG6pAUnWSq6r71ClTcM9z6RvizxKNxMA0GCSqG
+# SIb3DQEBAQUABIIBgHzkYhT3vPR022fS9Nv4Enclsch2SYrTKbw4c7tRHOlkSM7/
+# qmDnE6zEhNop8ikcZ4dp/Kfmu0qbaDc1pZjPkpdvuF3Fk2RiAMg4HxibvnXqqThb
+# aPr4EQU8H3essM3gMgmDduwKlcyHFHubtDWa3508kyuUVDzsSnAjZ5qHGPcPNzTF
+# b57Fe6Zb6PySq72hiNvQr6/LYbR9/lZ3qDcmwBanj0eL4SO5TI+Ca2jKtKyxwk5l
+# EQ2ZoSBw/9mE4JHPFMMtj1yP8eAfg31BXpG5qv8e/j7HC2S3iFBU0AGgKb57btZu
+# vO+iqJHb8LDNZjPDh6PgFjfSPbLpPGF/EpHjOfhxmWL6txhS7Wa+G7BuAmInzSiw
+# z2OlnDV2nWZOh3q+4R//qOT0pDg3BvPlof3muulWKFrCiipKTrmR48hJ73VQGkBJ
+# pKAebat6xDu/HbWADmp4dxcCgmOw5OKrvmCJLUyaSsXRKi8onK3CMT91W36qg1vP
+# N3o8ScbO+foWnQe+l6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMjAxMDI5
-# NTNaMC8GCSqGSIb3DQEJBDEiBCAonbf9huBdBdUImehzmK4iaknyKrGeKpU35Rdq
-# S2wY3jANBgkqhkiG9w0BAQEFAASCAgBeZynnCRJw3n0+DUsGveXc9p/hlV3Bxcqv
-# CZ8EfrI0zzHlwwnnjAXHElMfyAgDosV+1ppKdFak2IwGeMJKY58UzU2JlXXj5KWN
-# giQ8XvmJmtaNtD9tnaZvyyW5YPqng01qRzbRNz0B+XxD5NCpo6Ohv5uqgQccYO2P
-# VY1dnNM6JtFoB8h75ZN54KPSh6726j6wfEKp+NqqQ86ZlXpXl1XoIbnE33Rwnr3x
-# R76958tXo3haDWS3GzX+bcmXLFWCi689hhQrtrwJMqhVtVqt0vt8yKVf8s4fjQ9o
-# Vt4uWUcKpo3ofD1YWo90TGio2CEbBAADfU4PZJrhlPqEOOsmcf1i+A8UabBGfvXn
-# NquF4F5DkaAGOWAvkKAidl4rS3w1MuHvHTO/0qmoXzZ9BNKzvhP8XzehMSvoRQcA
-# 6NomF0IEanFiWorPQknvzaqDebZJn9UQtkKBpOTx+roTgBDGCSodW4qJ5Gxi7pRX
-# ad7KWxpGClgKSG+MHMAxlrskEFqTckdiP6lA+T69hyYxPmYPdvh5LgicOgye5kUO
-# QPqFrNszKTi1RK3DX54h/5Mv9VNKBdfdM+w9RYWkQoxG1mvakhzKijGwaqGI31VA
-# /yDfNaF1x4KyMPOTysmCCljbg3bqWgqUfTLJnmNsFBVYF5lKeYpclKzoswPzOJx1
-# Vw60FDHI7g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMjAxMjMx
+# MDJaMC8GCSqGSIb3DQEJBDEiBCARX5AIV7/hv7GxUimGjRBBDpbERFJYb6Yksj2p
+# v/WPQDANBgkqhkiG9w0BAQEFAASCAgAgvk2HGR5ttpnl+htJxRiEc7n93k/cSXPz
+# MbT7u4uv9kFqBsjqko+xTrZk5FlkWgHmzm4MKtv//twifnBt5QfV/YvkjJZ7ZJfh
+# 9h8+e3UNPOvZuJTB5/pD0Nux570lbbD/RONhi+rdredxvPCD57ahdPKA2UrtvX5f
+# E6Xf95h0ptoMUZgC3Nzegg7JPRLh8c4UG5md4Z/kVkWKLkhXT89xY/ZwojPSRQGm
+# 7JIT6MWxgtDmLH4Xw1FnMvryUYAmPR1SDTVWYl/j+3VRZ/6szGqo0bxbp54GBTTy
+# Gv4nf3LLJWq2mc6nZN6nU/5jNiwv9bjNgLXfHobNX/5eVy3xyIcgrKSipI9zewFq
+# aAwvFKSvB5gp8G/ApYqy+BKfs5BPb6oHH0cYZ7A5HOsW432JTCo8zN0BwyrQStV6
+# vNt48opaGoaYrVBFKpMf4USynQGGOKH7/N+vqTaagE0/smru8MJI9IOuYi2xHFti
+# 9ZFHtS+gA9NKigiDzfopjQq8o8uYDRu0SCbwMUfoWO08qx7p5NP8ckHCFMDI2g1r
+# dSoPhFqN0toQ2tKiqeW9YHqRN7Qv6wH02vRf0vHbCHhe8btiRbjKQvsOiXdfeSzW
+# UwhD24JDs2oI7OvILWrryST9zZt3f3mGDm6VASBEvuhyCGzj7Kn5C9IgsdATPRyt
+# KgB71F4d1g==
 # SIG # End signature block
