@@ -1,0 +1,117 @@
+/// Direct reported Exchange mailbox delegations, collapsed by tenant, batch, qualified account and mailbox. Ambiguous or unresolved identities are excluded.
+table 'User 360 Mailbox Permissions'
+	lineageTag: dc186fd9-df8d-43f2-87e8-c2b7ff5bd576
+
+	column 'Tenant Key'
+		isHidden
+		lineageTag: 81ce2314-4eec-4edb-98a1-699c1f350401
+		isNameInferred
+		sourceColumn: [Tenant Key]
+
+	column 'Batch ID'
+		isHidden
+		lineageTag: 8bef63c1-9879-480e-995d-77756a28a777
+		isNameInferred
+		sourceColumn: [Batch ID]
+
+	column 'Account Key'
+		isHidden
+		lineageTag: e35f6d11-50e1-4ae5-b348-577340146539
+		isNameInferred
+		sourceColumn: [Account Key]
+
+	column 'Mailbox Key'
+		isHidden
+		lineageTag: 5919d73f-21bd-4a6a-a0a2-ba7163f5d1bd
+		isNameInferred
+		sourceColumn: [Mailbox Key]
+
+	column Mailbox
+		lineageTag: 1eedf3e8-be4d-42a4-8051-88db3fac9070
+		isNameInferred
+		sourceColumn: [Mailbox]
+
+	column Hosting
+		lineageTag: 6edfdc90-5846-4326-9d2b-48621e3590c4
+		isNameInferred
+		sourceColumn: [Hosting]
+
+	column Permissions
+		lineageTag: 0d936be6-2e3c-4ed3-806b-ced115e6d3ba
+		isNameInferred
+		sourceColumn: [Permissions]
+
+	partition 'User 360 Mailbox Permissions' = calculated
+		mode: import
+		source =
+				VAR _Resolved =
+				    ADDCOLUMNS (
+				        'Mailbox Delegation Detail',
+				        "__account",
+				            VAR _Token = 'Mailbox Delegation Detail'[Delegate key]
+				            VAR _Tenant = 'Mailbox Delegation Detail'[TenantKey]
+				            VAR _Batch = 'Mailbox Delegation Detail'[Loaded Batch ID]
+				            VAR _IsGuid = LEN ( _Token ) = 36 && MID ( _Token, 9, 1 ) = "-"
+				            VAR _IsDn = LEFT ( _Token, 3 ) IN { "cn=", "ou=" }
+				            VAR _IsSid = LEFT ( _Token, 4 ) = "s-1-"
+				            VAR _IsUpn = NOT _IsDn && CONTAINSSTRING ( _Token, "@" )
+
+				            VAR _AdGuid =
+				                SWITCH ( TRUE (),
+				                    _IsSid, LOOKUPVALUE ( 'AD User Evidence'[ObjectGUID], 'AD User Evidence'[ObjectSID], _Token, 'AD User Evidence'[TenantKey], _Tenant, 'AD User Evidence'[Loaded Batch ID], _Batch, BLANK () ),
+				                    _IsDn, LOOKUPVALUE ( 'AD User Evidence'[ObjectGUID], 'AD User Evidence'[DistinguishedName], _Token, 'AD User Evidence'[TenantKey], _Tenant, 'AD User Evidence'[Loaded Batch ID], _Batch, BLANK () ),
+				                    _IsGuid, LOOKUPVALUE ( 'AD User Evidence'[ObjectGUID], 'AD User Evidence'[ObjectGUID], _Token, 'AD User Evidence'[TenantKey], _Tenant, 'AD User Evidence'[Loaded Batch ID], _Batch, BLANK () ),
+				                    _IsUpn, LOOKUPVALUE ( 'AD User Evidence'[ObjectGUID], 'AD User Evidence'[UserPrincipalName], _Token, 'AD User Evidence'[TenantKey], _Tenant, 'AD User Evidence'[Loaded Batch ID], _Batch, BLANK () )
+				                )
+				            VAR _NativeKey =
+				                IF ( _IsGuid, LOOKUPVALUE ( 'Native User Evidence'[TenantUserKey], 'Native User Evidence'[SourceUserId], _Token, 'Native User Evidence'[TenantKey], _Tenant, 'Native User Evidence'[Loaded Batch ID], _Batch, BLANK () ) )
+				            VAR _NativeAccount =
+				                IF ( NOT ISBLANK ( _NativeKey ), LOOKUPVALUE ( 'Account Explorer Inventory'[Account Key], 'Account Explorer Inventory'[Native User Key], _NativeKey, 'Account Explorer Inventory'[TenantKey], _Tenant, 'Account Explorer Inventory'[Loaded Batch ID], _Batch, BLANK () ) )
+				            VAR _UpnAccount =
+				                IF ( _IsUpn, LOOKUPVALUE ( 'Account Explorer Inventory'[Account Key], 'Account Explorer Inventory'[User Principal Name], _Token, 'Account Explorer Inventory'[TenantKey], _Tenant, 'Account Explorer Inventory'[Loaded Batch ID], _Batch, BLANK () ) )
+				            VAR _AdAccount =
+				                IF ( NOT ISBLANK ( _AdGuid ),
+				                    VAR _Key = "ad:" & _AdGuid
+				                    RETURN LOOKUPVALUE ( 'Account Explorer Inventory'[Account Key], 'Account Explorer Inventory'[Account Key], _Key, 'Account Explorer Inventory'[TenantKey], _Tenant, 'Account Explorer Inventory'[Loaded Batch ID], _Batch, BLANK () )
+				                )
+				            VAR _OtherAccount = COALESCE ( _NativeAccount, _UpnAccount )
+				            RETURN
+				                IF (
+				                    ( ISBLANK ( _AdGuid ) || NOT ISBLANK ( _AdAccount ) )
+				                    && ( ISBLANK ( _AdAccount ) || ISBLANK ( _OtherAccount ) || _AdAccount = _OtherAccount ),
+				                    COALESCE ( _AdAccount, _OtherAccount )
+				                )
+				    )
+				VAR _Grants =
+				    SELECTCOLUMNS (
+				        FILTER ( _Resolved, NOT ISBLANK ( [__account] ) ),
+				        "Tenant Key", 'Mailbox Delegation Detail'[TenantKey],
+				        "Batch ID", 'Mailbox Delegation Detail'[Loaded Batch ID],
+				        "Account Key", [__account],
+				        "Mailbox Key", 'Mailbox Delegation Detail'[Mailbox Key],
+				        "__full", IF ( 'Mailbox Delegation Detail'[FullAccess] = "Yes", 1, 0 ),
+				        "__send", IF ( 'Mailbox Delegation Detail'[SendAs] = "Yes", 1, 0 ),
+				        "__behalf", IF ( 'Mailbox Delegation Detail'[GrantSendOnBehalfTo] = "Yes", 1, 0 )
+				    )
+				VAR _Collapsed =
+				    GROUPBY (
+				        _Grants, [Tenant Key], [Batch ID], [Account Key], [Mailbox Key],
+				        "__fullAccess", MAXX ( CURRENTGROUP (), [__full] ),
+				        "__sendAs", MAXX ( CURRENTGROUP (), [__send] ),
+				        "__sendOnBehalf", MAXX ( CURRENTGROUP (), [__behalf] )
+				    )
+				VAR _WithMailbox =
+				    ADDCOLUMNS (
+				        _Collapsed,
+				        "Mailbox", LOOKUPVALUE ( 'Mailbox Exploration Inventory'[Primary SMTP Address], 'Mailbox Exploration Inventory'[Mailbox Key], [Mailbox Key], 'Mailbox Exploration Inventory'[TenantKey], [Tenant Key], 'Mailbox Exploration Inventory'[Loaded Batch ID], [Batch ID], BLANK () ),
+				        "Hosting", LOOKUPVALUE ( 'Mailbox Exploration Inventory'[Hosting Location], 'Mailbox Exploration Inventory'[Mailbox Key], [Mailbox Key], 'Mailbox Exploration Inventory'[TenantKey], [Tenant Key], 'Mailbox Exploration Inventory'[Loaded Batch ID], [Batch ID], BLANK () )
+				    )
+				RETURN
+				    SELECTCOLUMNS (
+				        FILTER ( _WithMailbox, NOT ISBLANK ( [Mailbox] ) && NOT ISBLANK ( [Hosting] ) ),
+				        "Tenant Key", [Tenant Key], "Batch ID", [Batch ID], "Account Key", [Account Key], "Mailbox Key", [Mailbox Key],
+				        "Mailbox", [Mailbox], "Hosting", [Hosting],
+				        "Permissions",
+				            VAR _Labels = FILTER ( { IF ( [__fullAccess] = 1, "Full Access" ), IF ( [__sendAs] = 1, "Send As" ), IF ( [__sendOnBehalf] = 1, "Send on Behalf" ) }, NOT ISBLANK ( [Value] ) )
+				            RETURN CONCATENATEX ( _Labels, [Value], ", ", [Value], ASC )
+				    )

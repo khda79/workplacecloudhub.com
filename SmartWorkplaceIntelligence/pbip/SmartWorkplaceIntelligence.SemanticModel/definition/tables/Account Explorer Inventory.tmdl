@@ -451,24 +451,41 @@ table 'Account Explorer Inventory'
 		dataCategory: ImageUrl
 
 	measure 'User 360 Panel Microsoft 365 activity' =
-			VAR _Has=NOT ISBLANK([User 360 Account key])
-			VAR _Raw0=IF(_Has,(FORMAT([User 360 M365 last activity],"yyyy-MM-dd","en-US")))
-			VAR _V0=IF(NOT _Has,"—",IF(LEN(TRIM(_Raw0))=0,"Not observed",_Raw0))
-			VAR _Style0=SWITCH(TRUE(),_V0="—","fill='#64748B'",_V0="Not observed" || LEFT(_V0,7)="Unknown","fill='#596676' font-style='italic'",_V0="Disabled" || _V0="Multiple linked mailboxes","fill='#9A2434'",_V0="Enabled","fill='#126147'","fill='#14253E'")
-			VAR _Raw1=IF(_Has,([User 360 M365 last workload]))
-			VAR _V1=IF(NOT _Has,"—",IF(LEN(TRIM(_Raw1))=0,"Not observed",_Raw1))
-			VAR _Style1=SWITCH(TRUE(),_V1="—","fill='#64748B'",_V1="Not observed" || LEFT(_V1,7)="Unknown","fill='#596676' font-style='italic'",_V1="Disabled" || _V1="Multiple linked mailboxes","fill='#9A2434'",_V1="Enabled","fill='#126147'","fill='#14253E'")
-			VAR _Raw2=IF(_Has,(SELECTEDVALUE('Account Explorer Inventory'[Teams Usage State (30D)])))
-			VAR _V2=IF(NOT _Has,"—",IF(LEN(TRIM(_Raw2))=0,"Not observed",_Raw2))
-			VAR _Style2=SWITCH(TRUE(),_V2="—","fill='#64748B'",_V2="Not observed" || LEFT(_V2,7)="Unknown","fill='#596676' font-style='italic'",_V2="Disabled" || _V2="Multiple linked mailboxes","fill='#9A2434'",_V2="Enabled","fill='#126147'","fill='#14253E'")
-			VAR _Raw3=IF(_Has,(SELECTEDVALUE('Account Explorer Inventory'[Exchange Usage State (30D)])))
-			VAR _V3=IF(NOT _Has,"—",IF(LEN(TRIM(_Raw3))=0,"Not observed",_Raw3))
-			VAR _Style3=SWITCH(TRUE(),_V3="—","fill='#64748B'",_V3="Not observed" || LEFT(_V3,7)="Unknown","fill='#596676' font-style='italic'",_V3="Disabled" || _V3="Multiple linked mailboxes","fill='#9A2434'",_V3="Enabled","fill='#126147'","fill='#14253E'")
-			VAR _Svg="<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 908 240' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='906' height='238' rx='12' fill='#FFFFFF' stroke='#D7E1EC' stroke-width='2'/><text x='20' y='39' font-size='23' fill='#14253E' font-weight='600'>Microsoft 365 activity</text>" & "<line x1='20' y1='59' x2='888' y2='59' stroke='#DEE6EE'/><text x='20' y='85' font-size='17' fill='#526276'>Last M365 activity</text><text x='445' y='85' font-size='17' " & _Style0 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(_V0)>51,LEFT(_V0,50)&"…",_V0),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" &
-			"<line x1='20' y1='102' x2='888' y2='102' stroke='#DEE6EE'/><text x='20' y='128' font-size='17' fill='#526276'>Last activity workload</text><text x='445' y='128' font-size='17' " & _Style1 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(_V1)>51,LEFT(_V1,50)&"…",_V1),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" &
-			"<line x1='20' y1='145' x2='888' y2='145' stroke='#DEE6EE'/><text x='20' y='171' font-size='17' fill='#526276'>Teams (30D)</text><text x='445' y='171' font-size='17' " & _Style2 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(_V2)>51,LEFT(_V2,50)&"…",_V2),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" &
-			"<line x1='20' y1='188' x2='888' y2='188' stroke='#DEE6EE'/><text x='20' y='214' font-size='17' fill='#526276'>Exchange (30D)</text><text x='445' y='214' font-size='17' " & _Style3 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(_V3)>51,LEFT(_V3,50)&"…",_V3),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "</svg>"
-			RETURN "data:image/svg+xml;utf8," & SUBSTITUTE(SUBSTITUTE(_Svg,"%","%25"),"#","%23")
+			VAR _Has = NOT ISBLANK ( [User 360 Account key] )
+			VAR _Raw0 = IF ( _Has, FORMAT ( [User 360 M365 last activity], "dd MMM yyyy", "en-US" ) )
+			VAR _Val0 = IF ( NOT _Has, "—", IF ( LEN ( TRIM ( _Raw0 ) ) = 0, "Not observed", _Raw0 ) )
+			VAR _Text0 = IF ( LEN ( _Val0 ) > 54, LEFT ( _Val0, 53 ) & "…", _Val0 )
+			VAR _Style0 = SWITCH ( _Val0, "Not observed", "fill='#596676' font-style='italic'", "—", "fill='#64748B'", "Enabled", "fill='#126147'", "fill='#14253E'" )
+			VAR _Raw1 = IF ( _Has, [User 360 M365 last workload] )
+			VAR _Val1 = IF ( NOT _Has, "—", IF ( LEN ( TRIM ( _Raw1 ) ) = 0, "Not observed", _Raw1 ) )
+			VAR _Text1 = IF ( LEN ( _Val1 ) > 54, LEFT ( _Val1, 53 ) & "…", _Val1 )
+			VAR _Style1 = SWITCH ( _Val1, "Not observed", "fill='#596676' font-style='italic'", "—", "fill='#64748B'", "Enabled", "fill='#126147'", "fill='#14253E'" )
+			VAR _Raw2 = IF ( _Has, FORMAT ( [User 360 M365 report date], "dd MMM yyyy", "en-US" ) )
+			VAR _Val2 = IF ( NOT _Has, "—", IF ( LEN ( TRIM ( _Raw2 ) ) = 0, "Not observed", _Raw2 ) )
+			VAR _Text2 = IF ( LEN ( _Val2 ) > 54, LEFT ( _Val2, 53 ) & "…", _Val2 )
+			VAR _Style2 = SWITCH ( _Val2, "Not observed", "fill='#596676' font-style='italic'", "—", "fill='#64748B'", "Enabled", "fill='#126147'", "fill='#14253E'" )
+			VAR _Raw3 = IF ( _Has, IF ( NOT ISBLANK ( [User 360 M365 collected at] ), FORMAT ( [User 360 M365 collected at], "dd MMM yyyy HH:mm", "en-US" ) & " UTC" ) )
+			VAR _Val3 = IF ( NOT _Has, "—", IF ( LEN ( TRIM ( _Raw3 ) ) = 0, "Not observed", _Raw3 ) )
+			VAR _Text3 = IF ( LEN ( _Val3 ) > 54, LEFT ( _Val3, 53 ) & "…", _Val3 )
+			VAR _Style3 = SWITCH ( _Val3, "Not observed", "fill='#596676' font-style='italic'", "—", "fill='#64748B'", "Enabled", "fill='#126147'", "fill='#14253E'" )
+			VAR _Raw4 = IF ( _Has, SELECTEDVALUE ( 'Account Explorer Inventory'[Teams Usage State (30D)] ) )
+			VAR _Val4 = IF ( NOT _Has, "—", IF ( LEN ( TRIM ( _Raw4 ) ) = 0, "Not observed", _Raw4 ) )
+			VAR _Text4 = IF ( LEN ( _Val4 ) > 54, LEFT ( _Val4, 53 ) & "…", _Val4 )
+			VAR _Style4 = SWITCH ( _Val4, "Not observed", "fill='#596676' font-style='italic'", "—", "fill='#64748B'", "Enabled", "fill='#126147'", "fill='#14253E'" )
+			VAR _Raw5 = IF ( _Has, SELECTEDVALUE ( 'Account Explorer Inventory'[Exchange Usage State (30D)] ) )
+			VAR _Val5 = IF ( NOT _Has, "—", IF ( LEN ( TRIM ( _Raw5 ) ) = 0, "Not observed", _Raw5 ) )
+			VAR _Text5 = IF ( LEN ( _Val5 ) > 54, LEFT ( _Val5, 53 ) & "…", _Val5 )
+			VAR _Style5 = SWITCH ( _Val5, "Not observed", "fill='#596676' font-style='italic'", "—", "fill='#64748B'", "Enabled", "fill='#126147'", "fill='#14253E'" )
+			VAR _Svg =
+			    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 908 326' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='906' height='324' rx='12' fill='#FFFFFF' stroke='#D7E1EC' stroke-width='2'/><text x='20' y='39' font-size='23' fill='#14253E' font-weight='600'>Microsoft 365 activity</text>"
+			    & "<line x1='20' y1='59' x2='888' y2='59' stroke='#DEE6EE'/><text x='20' y='85' font-size='17' fill='#526276'>Last observed activity</text><text x='445' y='85' font-size='17' " & _Style0 & ">" & SUBSTITUTE ( SUBSTITUTE ( SUBSTITUTE ( _Text0, "&", "&amp;" ), "<", "&lt;" ), ">", "&gt;" ) & "</text>"
+			    & "<line x1='20' y1='102' x2='888' y2='102' stroke='#DEE6EE'/><text x='20' y='128' font-size='17' fill='#526276'>Last activity workload</text><text x='445' y='128' font-size='17' " & _Style1 & ">" & SUBSTITUTE ( SUBSTITUTE ( SUBSTITUTE ( _Text1, "&", "&amp;" ), "<", "&lt;" ), ">", "&gt;" ) & "</text>"
+			    & "<line x1='20' y1='145' x2='888' y2='145' stroke='#DEE6EE'/><text x='20' y='171' font-size='17' fill='#526276'>M365 report date</text><text x='445' y='171' font-size='17' " & _Style2 & ">" & SUBSTITUTE ( SUBSTITUTE ( SUBSTITUTE ( _Text2, "&", "&amp;" ), "<", "&lt;" ), ">", "&gt;" ) & "</text>"
+			    & "<line x1='20' y1='188' x2='888' y2='188' stroke='#DEE6EE'/><text x='20' y='214' font-size='17' fill='#526276'>Collected on</text><text x='445' y='214' font-size='17' " & _Style3 & ">" & SUBSTITUTE ( SUBSTITUTE ( SUBSTITUTE ( _Text3, "&", "&amp;" ), "<", "&lt;" ), ">", "&gt;" ) & "</text>"
+			    & "<line x1='20' y1='231' x2='888' y2='231' stroke='#DEE6EE'/><text x='20' y='257' font-size='17' fill='#526276'>Teams (30D)</text><text x='445' y='257' font-size='17' " & _Style4 & ">" & SUBSTITUTE ( SUBSTITUTE ( SUBSTITUTE ( _Text4, "&", "&amp;" ), "<", "&lt;" ), ">", "&gt;" ) & "</text>"
+			    & "<line x1='20' y1='274' x2='888' y2='274' stroke='#DEE6EE'/><text x='20' y='300' font-size='17' fill='#526276'>Exchange (30D)</text><text x='445' y='300' font-size='17' " & _Style5 & ">" & SUBSTITUTE ( SUBSTITUTE ( SUBSTITUTE ( _Text5, "&", "&amp;" ), "<", "&lt;" ), ">", "&gt;" ) & "</text>"
+			    & "</svg>"
+			RETURN "data:image/svg+xml;utf8," & SUBSTITUTE ( SUBSTITUTE ( _Svg, "%", "%25" ), "#", "%23" )
 		displayFolder: User 360 · Presentation
 		lineageTag: 7c98c2fa-dd5f-4cb2-849f-19bbe48aa728
 		dataCategory: ImageUrl
@@ -493,24 +510,42 @@ table 'Account Explorer Inventory'
 		dataCategory: ImageUrl
 
 	measure 'User 360 Panel Mailbox' =
-			VAR _Has=NOT ISBLANK([User 360 Account key])
-			VAR _Raw0=IF(_Has,([User 360 Mailbox hosting]))
-			VAR _V0=IF(NOT _Has,"—",IF(LEN(TRIM(_Raw0))=0,"Not observed",_Raw0))
-			VAR _Style0=SWITCH(TRUE(),_V0="—","fill='#64748B'",_V0="Not observed" || LEFT(_V0,7)="Unknown","fill='#596676' font-style='italic'",_V0="Disabled" || _V0="Multiple linked mailboxes","fill='#9A2434'",_V0="Enabled","fill='#126147'","fill='#14253E'")
-			VAR _Raw1=IF(_Has,(SWITCH([User 360 Mailbox recipient type],"UserMailbox","User mailbox","SharedMailbox","Shared mailbox","RoomMailbox","Room mailbox","EquipmentMailbox","Equipment mailbox",[User 360 Mailbox recipient type])))
-			VAR _V1=IF(NOT _Has,"—",IF(LEN(TRIM(_Raw1))=0,"Not observed",_Raw1))
-			VAR _Style1=SWITCH(TRUE(),_V1="—","fill='#64748B'",_V1="Not observed" || LEFT(_V1,7)="Unknown","fill='#596676' font-style='italic'",_V1="Disabled" || _V1="Multiple linked mailboxes","fill='#9A2434'",_V1="Enabled","fill='#126147'","fill='#14253E'")
-			VAR _Raw2=IF(_Has,([User 360 Mailbox primary SMTP]))
-			VAR _V2=IF(NOT _Has,"—",IF(LEN(TRIM(_Raw2))=0,"Not observed",_Raw2))
-			VAR _Style2=SWITCH(TRUE(),_V2="—","fill='#64748B'",_V2="Not observed" || LEFT(_V2,7)="Unknown","fill='#596676' font-style='italic'",_V2="Disabled" || _V2="Multiple linked mailboxes","fill='#9A2434'",_V2="Enabled","fill='#126147'","fill='#14253E'")
-			VAR _Raw3=IF(_Has,(FORMAT([User 360 Mailbox Size GB],"0.0","en-US")))
-			VAR _V3=IF(NOT _Has,"—",IF(LEN(TRIM(_Raw3))=0,"Not observed",_Raw3))
-			VAR _Style3=SWITCH(TRUE(),_V3="—","fill='#64748B'",_V3="Not observed" || LEFT(_V3,7)="Unknown","fill='#596676' font-style='italic'",_V3="Disabled" || _V3="Multiple linked mailboxes","fill='#9A2434'",_V3="Enabled","fill='#126147'","fill='#14253E'")
-			VAR _Svg="<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 908 284' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='906' height='282' rx='12' fill='#FFFFFF' stroke='#D7E1EC' stroke-width='2'/><text x='20' y='39' font-size='23' fill='#14253E' font-weight='600'>Mailbox</text>" & "<line x1='20' y1='59' x2='888' y2='59' stroke='#DEE6EE'/><text x='20' y='85' font-size='17' fill='#526276'>Hosting</text><text x='445' y='85' font-size='17' " & _Style0 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(_V0)>51,LEFT(_V0,50)&"…",_V0),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" &
-			"<line x1='20' y1='102' x2='888' y2='102' stroke='#DEE6EE'/><text x='20' y='128' font-size='17' fill='#526276'>Recipient type</text><text x='445' y='128' font-size='17' " & _Style1 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(_V1)>51,LEFT(_V1,50)&"…",_V1),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" &
-			"<line x1='20' y1='145' x2='888' y2='145' stroke='#DEE6EE'/><text x='20' y='171' font-size='17' fill='#526276'>Primary SMTP</text><text x='445' y='171' font-size='17' " & _Style2 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(_V2)>51,LEFT(_V2,50)&"…",_V2),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" &
-			"<line x1='20' y1='188' x2='888' y2='188' stroke='#DEE6EE'/><text x='20' y='214' font-size='17' fill='#526276'>Mailbox Size GB</text><text x='445' y='214' font-size='17' " & _Style3 & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(_V3)>51,LEFT(_V3,50)&"…",_V3),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "</svg>"
-			RETURN "data:image/svg+xml;utf8," & SUBSTITUTE(SUBSTITUTE(_Svg,"%","%25"),"#","%23")
+			VAR _Has = NOT ISBLANK ( [User 360 Account key] )
+			VAR _Raw0 = IF ( _Has, [User 360 Mailbox hosting] )
+			VAR _Val0 = IF ( NOT _Has, "—", IF ( LEN ( TRIM ( _Raw0 ) ) = 0, "Not observed", _Raw0 ) )
+			VAR _Text0 = IF ( LEN ( _Val0 ) > 54, LEFT ( _Val0, 53 ) & "…", _Val0 )
+			VAR _Style0 = SWITCH ( _Val0, "Not observed", "fill='#596676' font-style='italic'", "—", "fill='#64748B'", "Enabled", "fill='#126147'", "fill='#14253E'" )
+			VAR _Raw1 = IF ( _Has, SWITCH ( [User 360 Mailbox recipient type], "UserMailbox", "User mailbox", "SharedMailbox", "Shared mailbox", "RoomMailbox", "Room mailbox", "EquipmentMailbox", "Equipment mailbox", [User 360 Mailbox recipient type] ) )
+			VAR _Val1 = IF ( NOT _Has, "—", IF ( LEN ( TRIM ( _Raw1 ) ) = 0, "Not observed", _Raw1 ) )
+			VAR _Text1 = IF ( LEN ( _Val1 ) > 54, LEFT ( _Val1, 53 ) & "…", _Val1 )
+			VAR _Style1 = SWITCH ( _Val1, "Not observed", "fill='#596676' font-style='italic'", "—", "fill='#64748B'", "Enabled", "fill='#126147'", "fill='#14253E'" )
+			VAR _Raw2 = IF ( _Has, [User 360 Mailbox primary SMTP] )
+			VAR _Val2 = IF ( NOT _Has, "—", IF ( LEN ( TRIM ( _Raw2 ) ) = 0, "Not observed", _Raw2 ) )
+			VAR _Text2 = IF ( LEN ( _Val2 ) > 54, LEFT ( _Val2, 53 ) & "…", _Val2 )
+			VAR _Style2 = SWITCH ( _Val2, "Not observed", "fill='#596676' font-style='italic'", "—", "fill='#64748B'", "Enabled", "fill='#126147'", "fill='#14253E'" )
+			VAR _Raw3 = IF ( _Has, FORMAT ( [User 360 Mailbox Size GB], "0.0", "en-US" ) )
+			VAR _Val3 = IF ( NOT _Has, "—", IF ( LEN ( TRIM ( _Raw3 ) ) = 0, "Not observed", _Raw3 ) )
+			VAR _Text3 = IF ( LEN ( _Val3 ) > 54, LEFT ( _Val3, 53 ) & "…", _Val3 )
+			VAR _Style3 = SWITCH ( _Val3, "Not observed", "fill='#596676' font-style='italic'", "—", "fill='#64748B'", "Enabled", "fill='#126147'", "fill='#14253E'" )
+			VAR _Archive = [User 360 Archive display]
+			VAR _Raw4 = PATHITEM ( _Archive, 1 )
+			VAR _Val4 = IF ( NOT _Has, "—", IF ( LEN ( TRIM ( _Raw4 ) ) = 0, "Not observed", _Raw4 ) )
+			VAR _Text4 = IF ( LEN ( _Val4 ) > 54, LEFT ( _Val4, 53 ) & "…", _Val4 )
+			VAR _Style4 = SWITCH ( _Val4, "Not observed", "fill='#596676' font-style='italic'", "—", "fill='#64748B'", "Enabled", "fill='#126147'", "fill='#14253E'" )
+			VAR _Raw5 = PATHITEM ( _Archive, 2 )
+			VAR _Val5 = IF ( NOT _Has, "—", IF ( LEN ( TRIM ( _Raw5 ) ) = 0, "Not observed", _Raw5 ) )
+			VAR _Text5 = IF ( LEN ( _Val5 ) > 54, LEFT ( _Val5, 53 ) & "…", _Val5 )
+			VAR _Style5 = SWITCH ( _Val5, "Not observed", "fill='#596676' font-style='italic'", "—", "fill='#64748B'", "Enabled", "fill='#126147'", "fill='#14253E'" )
+			VAR _Svg =
+			    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 908 336' font-family='Segoe UI, sans-serif'><rect x='1' y='1' width='906' height='334' rx='12' fill='#FFFFFF' stroke='#D7E1EC' stroke-width='2'/><text x='20' y='39' font-size='23' fill='#14253E' font-weight='600'>Mailbox</text>"
+			    & "<line x1='20' y1='59' x2='888' y2='59' stroke='#DEE6EE'/><text x='20' y='85' font-size='17' fill='#526276'>Hosting</text><text x='445' y='85' font-size='17' " & _Style0 & ">" & SUBSTITUTE ( SUBSTITUTE ( SUBSTITUTE ( _Text0, "&", "&amp;" ), "<", "&lt;" ), ">", "&gt;" ) & "</text>"
+			    & "<line x1='20' y1='102' x2='888' y2='102' stroke='#DEE6EE'/><text x='20' y='128' font-size='17' fill='#526276'>Recipient type</text><text x='445' y='128' font-size='17' " & _Style1 & ">" & SUBSTITUTE ( SUBSTITUTE ( SUBSTITUTE ( _Text1, "&", "&amp;" ), "<", "&lt;" ), ">", "&gt;" ) & "</text>"
+			    & "<line x1='20' y1='145' x2='888' y2='145' stroke='#DEE6EE'/><text x='20' y='171' font-size='17' fill='#526276'>Primary SMTP</text><text x='445' y='171' font-size='17' " & _Style2 & ">" & SUBSTITUTE ( SUBSTITUTE ( SUBSTITUTE ( _Text2, "&", "&amp;" ), "<", "&lt;" ), ">", "&gt;" ) & "</text>"
+			    & "<line x1='20' y1='188' x2='888' y2='188' stroke='#DEE6EE'/><text x='20' y='214' font-size='17' fill='#526276'>Mailbox Size GB</text><text x='445' y='214' font-size='17' " & _Style3 & ">" & SUBSTITUTE ( SUBSTITUTE ( SUBSTITUTE ( _Text3, "&", "&amp;" ), "<", "&lt;" ), ">", "&gt;" ) & "</text>"
+			    & "<line x1='20' y1='231' x2='888' y2='231' stroke='#DEE6EE'/><text x='20' y='257' font-size='17' fill='#526276'>Archive status</text><text x='445' y='257' font-size='17' " & _Style4 & ">" & SUBSTITUTE ( SUBSTITUTE ( SUBSTITUTE ( _Text4, "&", "&amp;" ), "<", "&lt;" ), ">", "&gt;" ) & "</text>"
+			    & "<line x1='20' y1='274' x2='888' y2='274' stroke='#DEE6EE'/><text x='20' y='300' font-size='17' fill='#526276'>Archive Size GB</text><text x='445' y='300' font-size='17' " & _Style5 & ">" & SUBSTITUTE ( SUBSTITUTE ( SUBSTITUTE ( _Text5, "&", "&amp;" ), "<", "&lt;" ), ">", "&gt;" ) & "</text>"
+			    & "</svg>"
+			RETURN "data:image/svg+xml;utf8," & SUBSTITUTE ( SUBSTITUTE ( _Svg, "%", "%25" ), "#", "%23" )
 		displayFolder: User 360 · Presentation
 		lineageTag: 4640ea87-6042-4176-a92e-2e90550041c3
 		dataCategory: ImageUrl
@@ -543,12 +578,14 @@ table 'Account Explorer Inventory'
 			VAR _Bg2=SWITCH(TRUE(),_V2="—","#FFFFFF",_V2="Disabled","#FCE4E7",_V2 IN {"Enabled","Active ≤30 days"},"#E0F3E9",_V2 IN {"Unknown","Last activity >30 days"},"#FDF0D6",_V2="Not observed","#EBEFF3","#E7EFFB")
 			VAR _Fg2=SWITCH(_Bg2,"#FFFFFF","#64748B","#FCE4E7","#9A2434","#E0F3E9","#126147","#FDF0D6","#74440B","#EBEFF3","#596676","#2E4E82")
 			VAR _V3=IF(_Has,COALESCE([User 360 Activity headline],"Not observed"),"—")
+			VAR _ReportDate = [User 360 M365 report date]
+			VAR _DateLabel = IF ( _Has, "M365 report date · " & IF ( ISBLANK ( _ReportDate ), "Not observed", FORMAT ( _ReportDate, "dd MMM yyyy", "en-US" ) ) )
 			VAR _Bg3=SWITCH(TRUE(),_V3="—","#FFFFFF",_V3="Disabled","#FCE4E7",_V3 IN {"Enabled","Active ≤30 days"},"#E0F3E9",_V3 IN {"Unknown","Last activity >30 days"},"#FDF0D6",_V3="Not observed","#EBEFF3","#E7EFFB")
 			VAR _Fg3=SWITCH(_Bg3,"#FFFFFF","#64748B","#FCE4E7","#9A2434","#E0F3E9","#126147","#FDF0D6","#74440B","#EBEFF3","#596676","#2E4E82")
 			VAR _Svg="<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1840 77' font-family='Segoe UI, sans-serif'>" & "<rect x='1' y='1' width='449' height='75' rx='11' fill='" & _Bg0 & "' stroke='" & IF(_Has,_Bg0,"#D7E1EC") & "'/><text x='17' y='28' font-size='15' fill='#526276'>AD account</text><text x='17' y='56' font-size='21' font-weight='600' fill='" & _Fg0 & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(_V0)>41,LEFT(_V0,40)&"…",_V0),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" &
 			"<rect x='464' y='1' width='449' height='75' rx='11' fill='" & _Bg1 & "' stroke='" & IF(_Has,_Bg1,"#D7E1EC") & "'/><text x='480' y='28' font-size='15' fill='#526276'>Entra account</text><text x='480' y='56' font-size='21' font-weight='600' fill='" & _Fg1 & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(_V1)>41,LEFT(_V1,40)&"…",_V1),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" &
 			"<rect x='927' y='1' width='449' height='75' rx='11' fill='" & _Bg2 & "' stroke='" & IF(_Has,_Bg2,"#D7E1EC") & "'/><text x='943' y='28' font-size='15' fill='#526276'>Microsoft 365 license</text><text x='943' y='56' font-size='21' font-weight='600' fill='" & _Fg2 & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(_V2)>41,LEFT(_V2,40)&"…",_V2),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" &
-			"<rect x='1390' y='1' width='449' height='75' rx='11' fill='" & _Bg3 & "' stroke='" & IF(_Has,_Bg3,"#D7E1EC") & "'/><text x='1406' y='28' font-size='15' fill='#526276'>M365 activity</text><text x='1406' y='56' font-size='21' font-weight='600' fill='" & _Fg3 & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(_V3)>41,LEFT(_V3,40)&"…",_V3),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & "</svg>"
+			"<rect x='1390' y='1' width='449' height='75' rx='11' fill='" & _Bg3 & "' stroke='" & IF(_Has,_Bg3,"#D7E1EC") & "'/><text x='1406' y='22' font-size='15' fill='#526276'>M365 activity</text><text x='1406' y='46' font-size='21' font-weight='600' fill='" & _Fg3 & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(_V3)>41,LEFT(_V3,40)&"…",_V3),"&","&amp;"),"<","&lt;"),">","&gt;") & "</text>" & IF ( _Has, "<text x='1406' y='66' font-size='13' fill='#526276'>" & _DateLabel & "</text>", "" ) & "</svg>"
 			RETURN "data:image/svg+xml;utf8," & SUBSTITUTE(SUBSTITUTE(_Svg,"%","%25"),"#","%23")
 		displayFolder: User 360 · Presentation
 		lineageTag: 0335f713-103c-4389-a1d4-79e3331b5a04
@@ -565,6 +602,296 @@ table 'Account Explorer Inventory'
 		displayFolder: User 360 · Presentation
 		lineageTag: 42c79c63-de0a-4b45-a3e4-7b07178c453c
 		dataCategory: ImageUrl
+
+	/// Microsoft 365 usage report refresh date, for the exact qualified user and dataset batch.
+	measure 'User 360 M365 report date' =
+			VAR _User = [User 360 Native key]
+			VAR _Tenant = SELECTEDVALUE ( 'Account Explorer Inventory'[TenantKey] )
+			VAR _Batch = SELECTEDVALUE ( 'Account Explorer Inventory'[Loaded Batch ID] )
+			RETURN IF ( NOT ISBLANK ( _User ),
+			    CALCULATE (
+			        SELECTEDVALUE ( 'Native Workload Activity'[ReportRefreshDate] ),
+			        TREATAS ( { _Tenant }, 'Native Workload Activity'[TenantKey] ),
+			        TREATAS ( { _Batch }, 'Native Workload Activity'[Loaded Batch ID] ),
+			        TREATAS ( { _User }, 'Native Workload Activity'[TenantUserKey] ),
+			        'Native Workload Activity'[MatchStatus] = "Resolved UPN"
+			    )
+			)
+		formatString: yyyy-MM-dd
+		isHidden
+		displayFolder: User 360
+		lineageTag: c4348ab4-5490-4627-b14a-c942b7921296
+
+	/// Source export collection timestamp in UTC.
+	measure 'User 360 M365 collected at' =
+			VAR _User = [User 360 Native key]
+			VAR _Tenant = SELECTEDVALUE ( 'Account Explorer Inventory'[TenantKey] )
+			VAR _Batch = SELECTEDVALUE ( 'Account Explorer Inventory'[Loaded Batch ID] )
+			RETURN IF ( NOT ISBLANK ( _User ),
+			    CALCULATE (
+			        SELECTEDVALUE ( 'Native Workload Activity'[SourceCollectedDateTime] ),
+			        TREATAS ( { _Tenant }, 'Native Workload Activity'[TenantKey] ),
+			        TREATAS ( { _Batch }, 'Native Workload Activity'[Loaded Batch ID] ),
+			        TREATAS ( { _User }, 'Native Workload Activity'[TenantUserKey] ),
+			        'Native Workload Activity'[MatchStatus] = "Resolved UPN"
+			    )
+			)
+		formatString: yyyy-MM-dd HH:mm
+		isHidden
+		displayFolder: User 360
+		lineageTag: 1dbbec09-e0ce-4ba8-95bf-b44845b7cada
+
+	measure 'User 360 Mailbox permission row' =
+			VAR _Account = [User 360 Account key]
+			VAR _Tenant = SELECTEDVALUE ( 'Account Explorer Inventory'[TenantKey] )
+			VAR _Batch = SELECTEDVALUE ( 'Account Explorer Inventory'[Loaded Batch ID] )
+			VAR _OwnMailbox = [User 360 delegation mailbox key]
+			RETURN IF ( NOT ISBLANK ( _Account ),
+			    CALCULATE (
+			        SELECTEDVALUE ( 'User 360 Mailbox Permissions'[Permissions] ),
+			        KEEPFILTERS ( TREATAS ( { _Account }, 'User 360 Mailbox Permissions'[Account Key] ) ),
+			        KEEPFILTERS ( 'User 360 Mailbox Permissions'[Mailbox Key] <> _OwnMailbox ),
+			        KEEPFILTERS ( TREATAS ( { _Tenant }, 'User 360 Mailbox Permissions'[Tenant Key] ) ),
+			        KEEPFILTERS ( TREATAS ( { _Batch }, 'User 360 Mailbox Permissions'[Batch ID] ) )
+			    )
+			)
+		isHidden
+		displayFolder: User 360
+		lineageTag: 6762c407-e65c-4118-bdd6-f4d2c8b5f182
+
+	measure 'User 360 Team role' =
+			VAR _User = [User 360 Native key]
+			VAR _Tenant = SELECTEDVALUE ( 'Account Explorer Inventory'[TenantKey] )
+			VAR _Batch = SELECTEDVALUE ( 'Account Explorer Inventory'[Loaded Batch ID] )
+			VAR _Teams = VALUES ( 'Native Team'[TenantTeamKey] )
+			RETURN IF ( NOT ISBLANK ( _User ),
+			    VAR _Roles =
+			        CALCULATETABLE ( VALUES ( 'Native Team Membership'[Role] ),
+			            TREATAS ( { _Tenant }, 'Native Team Membership'[TenantKey] ),
+			        TREATAS ( { _Batch }, 'Native Team Membership'[Loaded Batch ID] ),
+			            TREATAS ( { _User }, 'Native Team Membership'[TenantUserKey] ),
+			            KEEPFILTERS ( TREATAS ( _Teams, 'Native Team Membership'[TenantTeamKey] ) )
+			        )
+			    RETURN IF ( NOT ISEMPTY ( _Roles ), CONCATENATEX ( _Roles, 'Native Team Membership'[Role], ", ", 'Native Team Membership'[Role], ASC ) )
+			)
+		isHidden
+		displayFolder: User 360
+		lineageTag: be827c17-93d8-49dc-8f03-48b1191504de
+
+	/// Observed site owner or collected Team-root association. Team membership is not evidence of effective SharePoint permissions.
+	measure 'User 360 SharePoint association' =
+			VAR _User = [User 360 Native key]
+			VAR _Tenant = SELECTEDVALUE ( 'Account Explorer Inventory'[TenantKey] )
+			VAR _Batch = SELECTEDVALUE ( 'Account Explorer Inventory'[Loaded Batch ID] )
+			VAR _Site =
+			    CALCULATE ( SELECTEDVALUE ( 'Native SharePoint Site'[SiteId] ),
+			        TREATAS ( { _Tenant }, 'Native SharePoint Site'[TenantKey] ),
+			        TREATAS ( { _Batch }, 'Native SharePoint Site'[Loaded Batch ID] ),
+			        'Native SharePoint Site'[IsDeleted] = FALSE ()
+			    )
+			VAR _Upn = SELECTEDVALUE ( 'Account Explorer Inventory'[User Principal Name] )
+			RETURN IF ( NOT ISBLANK ( _User ) && NOT ISBLANK ( _Site ) && ISINSCOPE ( 'Native SharePoint Site'[User 360 Site link] ),
+			    VAR _Owner =
+			        CALCULATE ( SELECTEDVALUE ( 'Native SharePoint Site'[OwnerPrincipalName] ),
+			            TREATAS ( { _Tenant }, 'Native SharePoint Site'[TenantKey] ),
+			        TREATAS ( { _Batch }, 'Native SharePoint Site'[Loaded Batch ID] ),
+			            'Native SharePoint Site'[IsDeleted] = FALSE ()
+			        )
+			    VAR _OwnerKey =
+			        IF ( NOT ISBLANK ( _Upn ) && _Owner = _Upn,
+			            LOOKUPVALUE ( 'Native User Evidence'[TenantUserKey],
+			                'Native User Evidence'[UserPrincipalName], _Upn,
+			                'Native User Evidence'[TenantKey], _Tenant,
+			                'Native User Evidence'[Loaded Batch ID], _Batch,
+			                BLANK ()
+			            )
+			        )
+			    VAR _TeamIds =
+			        CALCULATETABLE ( VALUES ( 'Native Team Membership'[TeamId] ),
+			            REMOVEFILTERS ( 'Native Team' ),
+			            TREATAS ( { _Tenant }, 'Native Team Membership'[TenantKey] ),
+			        TREATAS ( { _Batch }, 'Native Team Membership'[Loaded Batch ID] ),
+			            TREATAS ( { _User }, 'Native Team Membership'[TenantUserKey] ),
+			            'Native Team Membership'[TeamId] <> BLANK ()
+			        )
+			    VAR _Linked =
+			        CALCULATE ( COUNTROWS ( 'Teams Site Links' ),
+			            TREATAS ( { _Tenant }, 'Teams Site Links'[TenantKey] ),
+			        TREATAS ( { _Batch }, 'Teams Site Links'[Loaded Batch ID] ),
+			            TREATAS ( _TeamIds, 'Teams Site Links'[Team ID] ),
+			            TREATAS ( { _Site }, 'Teams Site Links'[Site ID] ),
+			            'Teams Site Links'[Link Type] = "Team root",
+			            'Teams Site Links'[Link Status] = "Collected"
+			        ) > 0
+			    VAR _Declared = _OwnerKey = _User
+			    RETURN SWITCH ( TRUE (),
+			        _Declared && _Linked, "Declared owner · Linked to a team",
+			        _Declared, "Declared owner",
+			        _Linked, "Linked to a team"
+			    )
+			)
+		isHidden
+		displayFolder: User 360
+		lineageTag: 5cc53b59-c38f-44b9-800a-394be32f0953
+
+	/// Formats the status and size for the one technically linked mailbox after resolving the mailbox once.
+	measure 'User 360 Archive display' =
+			VAR _Account = [User 360 Account key]
+			VAR _Native = [User 360 Native key]
+			VAR _AD = [User 360 AD key]
+			VAR _Tenant = SELECTEDVALUE ( 'Account Explorer Inventory'[TenantKey] )
+			VAR _Batch = SELECTEDVALUE ( 'Account Explorer Inventory'[Loaded Batch ID] )
+			RETURN IF ( NOT ISBLANK ( _Account ),
+			    VAR _Cloud =
+			        CALCULATETABLE (
+			            SUMMARIZE ( 'Native EXO Mailbox', 'Native EXO Mailbox'[TenantMailboxKey], 'Native EXO Mailbox'[ArchiveStatus] ),
+			            'Native EXO Mailbox'[TenantKey] = _Tenant,
+			            'Native EXO Mailbox'[Loaded Batch ID] = _Batch,
+			            'Native EXO Mailbox'[TenantUserKey] = _Native && NOT ISBLANK ( 'Native EXO Mailbox'[TenantUserKey] ),
+			            'Native EXO Mailbox'[LinkStatusLabel] = "Resolved",
+			            'Native EXO Mailbox'[TenantMailboxKey] <> BLANK ()
+			        )
+			    VAR _Local =
+			        CALCULATETABLE (
+			            SUMMARIZE ( 'Exchange Mailbox Reconciliation', 'Exchange Mailbox Reconciliation'[Mailbox GUID], 'Exchange Mailbox Reconciliation'[Object GUID] ),
+			            'Exchange Mailbox Reconciliation'[Loaded Batch ID] = _Batch,
+			            'Exchange Mailbox Reconciliation'[AD Account Key] = _AD && NOT ISBLANK ( 'Exchange Mailbox Reconciliation'[AD Account Key] ),
+			            'Exchange Mailbox Reconciliation'[Mailbox GUID] <> BLANK (),
+			            'Exchange Mailbox Reconciliation'[Report Has Database] = "Yes",
+			            'Exchange Mailbox Reconciliation'[Account Link] IN { "Unique AD GUID + native SID", "AD only; cloud unresolved" }
+			        )
+			    VAR _OneMailbox = COUNTROWS ( _Cloud ) + COUNTROWS ( _Local ) = 1
+			    VAR _IsCloud = NOT ISEMPTY ( _Cloud )
+			    VAR _Kind = IF ( _IsCloud, "native", "ad" )
+			    VAR _IdentityKey = LOWER ( TRIM ( IF ( _IsCloud, MAXX ( _Cloud, 'Native EXO Mailbox'[TenantMailboxKey] ), MAXX ( _Local, 'Exchange Mailbox Reconciliation'[Object GUID] ) ) ) )
+			    VAR _NormalizedTenant = LOWER ( TRIM ( _Tenant ) )
+			    VAR _Identity = LEN ( _NormalizedTenant ) & ":" & _NormalizedTenant & "|" & LEN ( _Kind ) & ":" & _Kind & "|" & LEN ( _IdentityKey ) & ":" & _IdentityKey
+			    VAR _Hosting = IF ( _IsCloud, "Exchange Online", "On-premises" )
+			    VAR _Evidence =
+			        CALCULATETABLE (
+			            'Mailbox Exploration Inventory',
+			            'Mailbox Exploration Inventory'[TenantKey] = _Tenant,
+			            'Mailbox Exploration Inventory'[Loaded Batch ID] = _Batch,
+			            'Mailbox Exploration Inventory'[Mailbox Identity] = _Identity,
+			            'Mailbox Exploration Inventory'[Hosting Location] = _Hosting
+			        )
+			    VAR _Size = IF ( COUNTROWS ( _Evidence ) = 1, MAXX ( _Evidence, 'Mailbox Exploration Inventory'[Archive Size GB] ) )
+			    VAR _State = MAXX ( _Cloud, 'Native EXO Mailbox'[ArchiveStatus] )
+			    VAR _PreparedEnabled = COUNTROWS ( _Evidence ) = 1 && MAXX ( _Evidence, 'Mailbox Exploration Inventory'[Archive State] ) = "Enabled"
+			    VAR _ObservedSize = IF ( NOT ISBLANK ( _Size ) && _Size >= 0 && ( _Size > 0 || _PreparedEnabled ), _Size )
+			    VAR _Status =
+			        SWITCH ( TRUE (),
+			            _State IN { "Active", "Enabled" } || NOT ISBLANK ( _ObservedSize ), "Enabled",
+			            _State IN { "None", "Disabled" }, "Disabled",
+			            "Not observed"
+			        )
+			    RETURN IF ( _OneMailbox, _Status & "|" & IF ( ISBLANK ( _ObservedSize ), "Not observed", FORMAT ( _ObservedSize, "0.0", "en-US" ) ) )
+			)
+		isHidden
+		displayFolder: User 360 · Presentation
+		lineageTag: f2118421-5e9c-4bb6-8df9-f39b24d094fe
+
+	/// Mailbox evidence key for the single technically linked mailbox in the current tenant and batch.
+	measure 'User 360 delegation mailbox key' =
+			VAR _Account = [User 360 Account key]
+			VAR _Native = [User 360 Native key]
+			VAR _AD = [User 360 AD key]
+			VAR _Tenant = SELECTEDVALUE ( 'Account Explorer Inventory'[TenantKey] )
+			VAR _Batch = SELECTEDVALUE ( 'Account Explorer Inventory'[Loaded Batch ID] )
+			RETURN IF ( NOT ISBLANK ( _Account ),
+			    VAR _Cloud =
+			        CALCULATETABLE (
+			            SUMMARIZE ( 'Native EXO Mailbox', 'Native EXO Mailbox'[TenantMailboxKey], 'Native EXO Mailbox'[ArchiveStatus] ),
+			            'Native EXO Mailbox'[TenantKey] = _Tenant,
+			            'Native EXO Mailbox'[Loaded Batch ID] = _Batch,
+			            'Native EXO Mailbox'[TenantUserKey] = _Native && NOT ISBLANK ( 'Native EXO Mailbox'[TenantUserKey] ),
+			            'Native EXO Mailbox'[LinkStatusLabel] = "Resolved",
+			            'Native EXO Mailbox'[TenantMailboxKey] <> BLANK ()
+			        )
+			    VAR _Local =
+			        CALCULATETABLE (
+			            SUMMARIZE ( 'Exchange Mailbox Reconciliation', 'Exchange Mailbox Reconciliation'[Mailbox GUID], 'Exchange Mailbox Reconciliation'[Object GUID] ),
+			            'Exchange Mailbox Reconciliation'[Loaded Batch ID] = _Batch,
+			            'Exchange Mailbox Reconciliation'[AD Account Key] = _AD && NOT ISBLANK ( 'Exchange Mailbox Reconciliation'[AD Account Key] ),
+			            'Exchange Mailbox Reconciliation'[Mailbox GUID] <> BLANK (),
+			            'Exchange Mailbox Reconciliation'[Report Has Database] = "Yes",
+			            'Exchange Mailbox Reconciliation'[Account Link] IN { "Unique AD GUID + native SID", "AD only; cloud unresolved" }
+			        )
+			    VAR _OneMailbox = COUNTROWS ( _Cloud ) + COUNTROWS ( _Local ) = 1
+			    VAR _IsCloud = NOT ISEMPTY ( _Cloud )
+			    VAR _Kind = IF ( _IsCloud, "native", "ad" )
+			    VAR _IdentityKey = LOWER ( TRIM ( IF ( _IsCloud, MAXX ( _Cloud, 'Native EXO Mailbox'[TenantMailboxKey] ), MAXX ( _Local, 'Exchange Mailbox Reconciliation'[Object GUID] ) ) ) )
+			    VAR _NormalizedTenant = LOWER ( TRIM ( _Tenant ) )
+			    VAR _Identity = LEN ( _NormalizedTenant ) & ":" & _NormalizedTenant & "|" & LEN ( _Kind ) & ":" & _Kind & "|" & LEN ( _IdentityKey ) & ":" & _IdentityKey
+			    VAR _Hosting = IF ( _IsCloud, "Exchange Online", "On-premises" )
+			    VAR _Evidence =
+			        CALCULATETABLE (
+			            'Mailbox Exploration Inventory',
+			            'Mailbox Exploration Inventory'[TenantKey] = _Tenant,
+			            'Mailbox Exploration Inventory'[Loaded Batch ID] = _Batch,
+			            'Mailbox Exploration Inventory'[Mailbox Identity] = _Identity,
+			            'Mailbox Exploration Inventory'[Hosting Location] = _Hosting
+			        )
+			    VAR _LocalGuid =
+			        IF ( NOT _IsCloud,
+			            LOWER ( SUBSTITUTE ( SUBSTITUTE ( TRIM ( MAXX ( _Local, 'Exchange Mailbox Reconciliation'[Mailbox GUID] ) ), "{", "" ), "}", "" ) )
+			        )
+			    VAR _GuidEvidence =
+			        CALCULATETABLE (
+			            VALUES ( 'Mailbox Exploration Inventory'[Mailbox Key] ),
+			            'Mailbox Exploration Inventory'[TenantKey] = _Tenant,
+			            'Mailbox Exploration Inventory'[Loaded Batch ID] = _Batch,
+			            'Mailbox Exploration Inventory'[Hosting Location] = _Hosting,
+			            NOT ISBLANK ( 'Mailbox Exploration Inventory'[Report Mailbox GUID] )
+			                && 'Mailbox Exploration Inventory'[Report Mailbox GUID] = _LocalGuid
+			        )
+			    VAR _Keys =
+			        DISTINCT ( UNION (
+			            SELECTCOLUMNS ( _Evidence, "Mailbox key", 'Mailbox Exploration Inventory'[Mailbox Key] ),
+			            SELECTCOLUMNS ( _GuidEvidence, "Mailbox key", 'Mailbox Exploration Inventory'[Mailbox Key] )
+			        ) )
+			    RETURN IF ( _OneMailbox && COUNTROWS ( _Keys ) = 1, MAXX ( _Keys, [Mailbox key] ) )
+			)
+		isHidden
+		displayFolder: User 360
+		lineageTag: ec84deb1-dc6c-4cb6-bfb1-46ba71bcf232
+
+	/// Direct rights reported by Exchange on the selected mailbox. Unresolved delegate tokens are shown as reported.
+	measure 'User 360 permission on this mailbox' =
+			VAR _Mailbox = [User 360 delegation mailbox key]
+			VAR _Tenant = SELECTEDVALUE ( 'Account Explorer Inventory'[TenantKey] )
+			VAR _Batch = SELECTEDVALUE ( 'Account Explorer Inventory'[Loaded Batch ID] )
+			RETURN IF ( NOT ISBLANK ( _Mailbox ) && ISINSCOPE ( 'Mailbox Delegation Detail'[Delegate (reported)] ),
+			    VAR _Rows =
+			        CALCULATETABLE ( 'Mailbox Delegation Detail',
+			            KEEPFILTERS ( 'Mailbox Delegation Detail'[Mailbox Key] = _Mailbox ),
+			            KEEPFILTERS ( 'Mailbox Delegation Detail'[TenantKey] = _Tenant ),
+			            KEEPFILTERS ( 'Mailbox Delegation Detail'[Loaded Batch ID] = _Batch )
+			        )
+			    RETURN IF ( NOT ISEMPTY ( _Rows ),
+			        VAR _Full = COUNTROWS ( FILTER ( _Rows, 'Mailbox Delegation Detail'[FullAccess] = "Yes" ) ) > 0
+			        VAR _Send = COUNTROWS ( FILTER ( _Rows, 'Mailbox Delegation Detail'[SendAs] = "Yes" ) ) > 0
+			        VAR _Behalf = COUNTROWS ( FILTER ( _Rows, 'Mailbox Delegation Detail'[GrantSendOnBehalfTo] = "Yes" ) ) > 0
+			        VAR _Labels = FILTER ( { IF ( _Full, "Full Access" ), IF ( _Send, "Send As" ), IF ( _Behalf, "Send on Behalf" ) }, NOT ISBLANK ( [Value] ) )
+			        VAR _NativeAD = COUNTROWS ( _Rows ) = 1 && MAXX ( _Rows, 'Mailbox Delegation Detail'[Delegate Qualification] ) = "Exact unique reported principal"
+			        VAR _Token = MAXX ( _Rows, 'Mailbox Delegation Detail'[Delegate key] )
+			        VAR _NativeEntra =
+			            IF ( NOT _NativeAD && COUNTROWS ( _Rows ) = 1 && CONTAINSSTRING ( _Token, "@" ) && LEFT ( _Token, 3 ) <> "cn=",
+			                CALCULATE ( COUNTROWS ( 'Native User Evidence' ),
+			                    'Native User Evidence'[TenantKey] = _Tenant,
+			                    'Native User Evidence'[Loaded Batch ID] = _Batch,
+			                    'Native User Evidence'[UserPrincipalName] = _Token
+			                ) = 1
+			            )
+			        RETURN IF ( NOT ISEMPTY ( _Labels ),
+			            CONCATENATEX ( _Labels, [Value], ", ", [Value], ASC )
+			                & IF ( NOT ( _NativeAD || _NativeEntra ), " · Delegate unresolved" )
+			        )
+			    )
+			)
+		isHidden
+		displayFolder: User 360
+		lineageTag: 91899f44-1e47-4202-b0d8-aa5c2be256bd
 
 	column 'User Source ID'
 		lineageTag: c67c6306-05ff-40e9-838e-fdffee00b306

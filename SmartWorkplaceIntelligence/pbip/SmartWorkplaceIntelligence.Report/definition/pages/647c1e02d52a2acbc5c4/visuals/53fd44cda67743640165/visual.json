@@ -5,7 +5,7 @@
     "x": 40,
     "y": 449,
     "z": 1000,
-    "height": 440,
+    "height": 336,
     "width": 908,
     "tabOrder": 1347040
   },
@@ -28,8 +28,8 @@
               },
               "queryRef": "Native Device Evidence.DeviceSelection",
               "nativeQueryRef": "DeviceSelection",
-              "displayName": "Device",
-              "active": true
+              "active": true,
+              "displayName": "Device"
             },
             {
               "field": {
@@ -44,8 +44,8 @@
               },
               "queryRef": "Account Explorer Inventory.User 360 Device link",
               "nativeQueryRef": "User 360 Device link",
-              "displayName": "Link type",
-              "active": true
+              "active": true,
+              "displayName": "Link type"
             }
           ]
         }
@@ -445,6 +445,5 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  },
-  "isHidden": true
+  }
 }

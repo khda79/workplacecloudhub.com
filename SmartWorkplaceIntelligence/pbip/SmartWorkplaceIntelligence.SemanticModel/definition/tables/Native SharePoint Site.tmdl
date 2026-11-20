@@ -170,6 +170,12 @@ table 'Native SharePoint Site'
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
 
+	column 'User 360 Site link' = 'Native SharePoint Site'[SiteUrl]
+		dataType: string
+		isHidden
+		lineageTag: 9081e17b-e155-43e2-b1dc-014a9f6a4f6d
+		dataCategory: WebUrl
+
 	partition 'Native SharePoint Site' = m
 		mode: import
 		source =
@@ -190,4 +196,3 @@ table 'Native SharePoint Site'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimSharePointSite.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantSiteKey", dataType="String"], [name="SiteId", dataType="String"], [name="SiteUrl", dataType="String"], [name="SiteName", dataType="String"], [name="OwnerPrincipalName", dataType="String"], [name="LastActivityDate", dataType="DateTime"], [name="ActivityState", dataType="String"], [name="StorageUsedBytes", dataType="Double"], [name="StorageAllocatedBytes", dataType="Double"], [name="RootWebTemplate", dataType="String"], [name="IsDeleted", dataType="Boolean"], [name="SourceCollectedDateTime", dataType="DateTime"]}))
 				in
 				    Readers[Finish](BusinessRows)
-

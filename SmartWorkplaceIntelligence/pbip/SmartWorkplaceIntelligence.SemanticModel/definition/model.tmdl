@@ -249,5 +249,6 @@ ref table 'Shared Mailbox License Evidence'
 ref table 'Shared Mailbox License Detail'
 ref table 'Mailbox Shared Conversion Evidence'
 ref table 'Device 360 Properties'
+ref table 'User 360 Mailbox Permissions'
 
 ref cultureInfo en-US

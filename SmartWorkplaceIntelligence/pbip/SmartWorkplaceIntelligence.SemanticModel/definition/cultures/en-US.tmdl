@@ -93812,6 +93812,16 @@ cultureInfo en-US
 			            "State": "Generated",
 			            "Weight": 0.99
 			          }
+			        },
+			        {
+			          "Site": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
 			        }
 			      ]
 			    },
@@ -142546,6 +142556,174 @@ cultureInfo en-US
 			      "Terms": [
 			        {
 			          "Readiness case": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "account_explorer_inventory.user_360_sharepoint_association": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Account Explorer Inventory",
+			          "ConceptualProperty": "User 360 SharePoint association"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Association": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "account_explorer_inventory.user_360_team_role": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Account Explorer Inventory",
+			          "ConceptualProperty": "User 360 Team role"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Role": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "account_explorer_inventory.user_360_mailbox_permission_row": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Account Explorer Inventory",
+			          "ConceptualProperty": "User 360 Mailbox permission row"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Permissions": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "native_sharepoint_site.user_360_site_link": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Native SharePoint Site",
+			          "ConceptualProperty": "User 360 Site link"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Link": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "native_team.user_360_team_label": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Native Team",
+			          "ConceptualProperty": "User 360 Team label"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Team": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_360_mailbox_permissions.mailbox": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User 360 Mailbox Permissions",
+			          "ConceptualProperty": "Mailbox"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Mailbox": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_360_mailbox_permissions.hosting": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User 360 Mailbox Permissions",
+			          "ConceptualProperty": "Hosting"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Hosting": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "account_explorer_inventory.user_360_permission_on_this_mailbox": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Account Explorer Inventory",
+			          "ConceptualProperty": "User 360 permission on this mailbox"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Permissions": {
 			            "State": "Suggested",
 			            "Source": {
 			              "Type": "External",

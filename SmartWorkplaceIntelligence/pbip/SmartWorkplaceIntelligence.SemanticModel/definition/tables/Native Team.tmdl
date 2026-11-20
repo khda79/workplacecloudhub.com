@@ -190,6 +190,22 @@ table 'Native Team'
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
 
+	column 'User 360 Team label' =
+			VAR _Tenant = 'Native Team'[TenantKey]
+			VAR _Batch = 'Native Team'[Loaded Batch ID]
+			VAR _Label = 'Native Team'[DisplayName]
+			VAR _Duplicate =
+			    CALCULATE ( COUNTROWS ( 'Native Team' ),
+			        REMOVEFILTERS ( 'Native Team' ),
+			        'Native Team'[TenantKey] = _Tenant,
+			        'Native Team'[Loaded Batch ID] = _Batch,
+			        'Native Team'[DisplayName] = _Label
+			    ) > 1
+			RETURN COALESCE ( _Label, "Unnamed team" ) & IF ( _Duplicate || ISBLANK ( _Label ), " · " & 'Native Team'[TeamId] )
+		dataType: string
+		isHidden
+		lineageTag: d186984f-a566-401d-8f0a-8bf389a862db
+
 	partition 'Native Team' = m
 		mode: import
 		source =
@@ -210,4 +226,3 @@ table 'Native Team'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimTeam.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantTeamKey", dataType="String"], [name="TeamId", dataType="String"], [name="DisplayName", dataType="String"], [name="Visibility", dataType="String"], [name="CreatedDateTime", dataType="DateTime"], [name="LastActivityDate", dataType="DateTime"], [name="ActivityState", dataType="String"], [name="OwnerCount", dataType="Int64"], [name="MemberCount", dataType="Int64"], [name="GuestCount", dataType="Int64"], [name="UnresolvedMemberCount", dataType="Int64"], [name="MembershipCoverageStatus", dataType="String"], [name="IsArchived", dataType="Boolean"], [name="SourceCollectedDateTime", dataType="DateTime"]}))
 				in
 				    Readers[Finish](BusinessRows)
-
