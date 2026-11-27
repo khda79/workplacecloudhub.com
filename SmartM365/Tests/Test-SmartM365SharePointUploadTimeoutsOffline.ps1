@@ -7,7 +7,7 @@ that stays silent ends with a clear error, and the per-file limit stops the uplo
 A SharePoint maintenance 403 (serviceReadOnly) is retried while other 403s are final, and a source
 receipt and its run state are not mirrored when a file they reference failed to upload in the run.
 .VERSION
-1.2.0
+1.3.0
 .NOTES
 The silent endpoint is a local TCP listener on the loopback address that accepts connections and never
 answers. Every other Graph and SharePoint call is replaced by recorders. No tenant, Graph, SharePoint,
@@ -65,7 +65,7 @@ New-Item -ItemType Directory -Path $dataAll | Out-Null
     function script:Invoke-WebRequest {
         [CmdletBinding()]
         param($Method, $Uri, $Body, $ContentType, $Headers, $TimeoutSec, [switch]$UseBasicParsing, [switch]$SkipHttpErrorCheck, $OutFile)
-        $call = [pscustomobject]@{ Kind = 'Web'; Method = $Method; Uri = [string]$Uri; TimeoutSec = $TimeoutSec; Index = $script:Calls.Count; Range = [string]$Headers['Content-Range'] }
+        $call = [pscustomobject]@{ Kind = 'Web'; Method = $Method; Uri = [string]$Uri; TimeoutSec = $TimeoutSec; Index = $script:Calls.Count; Range = [string]$Headers['Content-Range']; OutFile = $OutFile }
         $script:Calls.Add($call)
         & $script:Handler $call
     }
@@ -206,6 +206,40 @@ try {
         @($records | ForEach-Object { Test-SmartM365GraphTransientError -ErrorRecord $_ -StatusCode $null }) -join ','
     }
     Check ($classification -eq 'False,True,True,False') "Transient classification changed: $classification"
+
+    # Exercise the same download entry point as the prepared-batch read-back.
+    $readBackPath = Join-Path $temporary 'readback.csv'
+    $readBack = {
+        param($Path)
+        $script:SmartM365SharePointDriveIdCache = @{ 'contoso.test|/sites/synthetic|Documents' = 'drive-1' }
+        Invoke-SmartM365SharePointFileDownload -LocalFilePath $Path -SharePointRelativePath 'batches/synthetic/evidence.csv' -Force
+    }
+    Reset-Recording {
+        param($call)
+        switch ($call.Index) {
+            0 { throw [Net.Http.HttpRequestException]::new('Synthetic transport failure', [Net.Sockets.SocketException]::new(11004)) }
+            1 { throw 'The requested name is valid, but no data of the requested type was found.' }
+            2 { throw (New-SyntheticGraphFailure -Status 503 -Code 'serviceUnavailable') }
+        }
+        [IO.File]::WriteAllText($call.OutFile, 'verified payload')
+    }
+    Set-CachedToken
+    $item = & $core $readBack $readBackPath
+    $calls = @(Get-RecordedCall)
+    Check ($item -and [IO.File]::ReadAllText($item.FullName) -eq 'verified payload') 'Read-back did not recover after DNS and HTTP failures.'
+    Check ($calls.Count -eq 4 -and @($calls | Where-Object Method -ne 'GET').Count -eq 0 -and @($calls.Uri | Select-Object -Unique).Count -eq 1) 'Retries must only download the same file.'
+    Check ((@(Get-RecordedLog | Where-Object Level -eq 'SLEEP').Message -join ',') -eq '15,30,45') 'Read-back delays did not increase as expected.'
+    Check (@(Get-RecordedLog | Where-Object Message -match 'Status=DNS').Count -eq 2) 'Both DNS failures must be identifiable in the log.'
+
+    Reset-Recording { throw [Net.WebException]::new('Synthetic resolution failure', [Net.WebExceptionStatus]::NameResolutionFailure) }
+    Set-CachedToken
+    $item = & $core $readBack $readBackPath
+    Check ($null -eq $item -and @(Get-RecordedCall).Count -eq 4) 'Persistent DNS failure must stop after four attempts even if an old local file exists.'
+
+    Reset-Recording { throw (New-SyntheticGraphFailure -Status 403 -Code 'accessDenied') }
+    Set-CachedToken
+    $item = & $core $readBack $readBackPath
+    Check ($null -eq $item -and @(Get-RecordedCall).Count -eq 1) 'Access denied during read-back must fail immediately.'
 
     # 7. SharePoint maintenance: a 403 serviceReadOnly is retried and the upload completes; any other 403 is final.
     $readOnlyFile = New-SyntheticFile 'Synthetic_ReadOnly_20261028_002030.csv' 1024

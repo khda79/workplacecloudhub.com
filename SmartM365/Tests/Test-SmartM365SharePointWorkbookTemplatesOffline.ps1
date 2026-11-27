@@ -3,13 +3,13 @@
 .SYNOPSIS
 Exercises create-if-absent workbook provisioning with synthetic Graph adapters.
 .VERSION
-1.0.0
+1.1.0
 #>
 $ErrorActionPreference='Stop'
 $core=Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.Core.psm1'
 $tokens=$null;$errors=$null;$ast=[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $core),[ref]$tokens,[ref]$errors)
 if($errors.Count){throw ($errors.Message -join '; ')}
-foreach($name in @('Get-SmartM365SharePointWorkbookTemplateMap','Initialize-SmartM365SharePointWorkbookTemplates')) {
+foreach($name in @('Get-SmartM365SharePointWorkbookTemplateMap','Initialize-SmartM365SharePointWorkbookTemplates','Get-SmartM365NetworkCallTimeout','Get-SmartM365WebRequestTimeout')) {
     $definition=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
     if(-not $definition){throw "Missing function: $name"}
     . ([scriptblock]::Create($definition.Extent.Text))
@@ -18,6 +18,14 @@ $templateRoot=Join-Path $PSScriptRoot '../../SmartWorkplaceIntelligence/config'
 $script:present=@{};$script:created=@();$script:mode='normal';$script:pending=''
 function ConvertTo-GraphDrivePath {param($Path) $Path}
 function WriteLog {param($Message,$Level)}
+function Get-SmartM365NetworkSetting {
+    param($Name)
+    switch ($Name) {
+        'SharePointUploadTransferTimeoutSeconds' { return 85 }
+        'NetworkReadIdleTimeoutSeconds' { return 12 }
+        default { throw "Unexpected network setting: $Name" }
+    }
+}
 function Get-SmartM365GraphErrorStatusCode {param($ErrorRecord) $ErrorRecord.Exception.Data['StatusCode']}
 function Throw-Status {param([int]$Status) $e=[IO.IOException]::new("Synthetic HTTP $Status");$e.Data['StatusCode']=$Status;throw $e}
 function Invoke-SmartM365GraphRestWithRetry {
@@ -29,7 +37,9 @@ function Invoke-SmartM365GraphRestWithRetry {
     [pscustomobject]@{id='synthetic';file=[pscustomobject]@{mimeType='application/xlsx'}}
 }
 function Invoke-RestMethod {
-    param($Method,$Uri,$InFile,$Headers,$ContentType,$ErrorAction)
+    param($Method,$Uri,$InFile,$Headers,$ContentType,$ErrorAction,$TimeoutSec,$OperationTimeoutSeconds)
+    $script:uploadTimeout = $TimeoutSec
+    $script:idleTimeout = $OperationTimeoutSeconds
     if ($script:mode -eq 'race') {$script:present[$script:pending]=$true;Throw-Status 409}
     $script:created+= $script:pending;$script:present[$script:pending]=$true
     [pscustomobject]@{name=$script:pending;id='created'}
@@ -39,15 +49,26 @@ foreach($name in $map.Keys){$script:present[$name]=$true}
 Initialize-SmartM365SharePointWorkbookTemplates -DriveId 'synthetic' -TargetRoot 'test' -TemplateRoot $templateRoot
 if($script:created.Count -ne 0){throw 'Existing workbooks were overwritten.'}
 $missing='SmartWorkplaceIntelligence-MailboxMigrationExceptions.xlsx';$script:present.Remove($missing)
+$script:SmartM365NetworkDeadline = $null
 Initialize-SmartM365SharePointWorkbookTemplates -DriveId 'synthetic' -TargetRoot 'test' -TemplateRoot $templateRoot
 if($script:created.Count -ne 1 -or $script:created[0] -ne $missing){throw 'Missing workbook was not created exactly once.'}
+if($script:uploadTimeout -ne 85 -or $script:idleTimeout -ne 12){throw 'Workbook PUT did not receive the configured transfer and idle timeouts.'}
+$script:SmartM365NetworkDeadline = @{ExpiresAtUtc=[datetime]::UtcNow.AddSeconds(30); Label='synthetic workbook'; Minutes=1}
 $script:present.Remove($missing);$script:created=@();$script:mode='race'
 Initialize-SmartM365SharePointWorkbookTemplates -DriveId 'synthetic' -TargetRoot 'test' -TemplateRoot $templateRoot
 if($script:created.Count -ne 0 -or -not $script:present.ContainsKey($missing)){throw 'Concurrent creation was not preserved.'}
+if($script:uploadTimeout -lt 1 -or $script:uploadTimeout -gt 30){throw 'Workbook PUT exceeded the remaining file deadline.'}
+$script:SmartM365NetworkDeadline.ExpiresAtUtc = [datetime]::UtcNow.AddSeconds(-1)
+$script:present.Remove($missing); $script:mode='normal'; $script:uploadTimeout=$null
+$expired=$false
+try{Initialize-SmartM365SharePointWorkbookTemplates -DriveId 'synthetic' -TargetRoot 'test' -TemplateRoot $templateRoot}
+catch [OperationCanceledException] { $expired = $_.Exception.Data['SmartM365DeadlineExceeded'] }
+if(-not $expired -or $null -ne $script:uploadTimeout){throw 'Workbook PUT started after its deadline.'}
+$script:SmartM365NetworkDeadline = $null
 $script:mode='denied';$blocked=$false
 try{Initialize-SmartM365SharePointWorkbookTemplates -DriveId 'synthetic' -TargetRoot 'test' -TemplateRoot $templateRoot}catch{$blocked=$true}
 if(-not $blocked -or $script:created.Count -ne 0){throw 'A permission failure was treated as missing.'}
-'Workbook provisioning: existing, missing, concurrent and access-denied cases passed.'
+'Workbook provisioning: existing, missing, concurrent, access-denied and upload timeout checks passed.'
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

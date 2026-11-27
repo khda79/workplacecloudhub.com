@@ -12,7 +12,7 @@
 RootModule = 'SmartM365.Core.psm1'
 
 # Version number of this module.
-    ModuleVersion = '1.0.132'
+    ModuleVersion = '1.0.133'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()

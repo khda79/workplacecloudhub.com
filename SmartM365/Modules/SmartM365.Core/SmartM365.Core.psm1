@@ -12,7 +12,7 @@ Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumV
 . (Join-Path $PSScriptRoot 'SmartM365-SharePointUploadPolicy.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-TeamsPrivateConfig.ps1')
 # SmartM365.Core.psm1
-# Version: 1.0.129
+# Version: 1.0.133
 # Core utilities: logging, initialization, cleanup, CSV export, mail, remote scheduling, cloud connections.
 
 function Get-ModuleLocalConfig {
@@ -3058,6 +3058,19 @@ function Get-SmartM365GraphAccessToken {
     return [string]$response.access_token
 }
 
+function Test-SmartM365DownloadNameResolutionFailure {
+    param([System.Exception]$Exception)
+
+    for ($cause = $Exception; $null -ne $cause; $cause = $cause.InnerException) {
+        if ($cause -is [Net.Sockets.SocketException] -and $cause.SocketErrorCode -in 'HostNotFound','TryAgain','NoData') { return $true }
+        if ($cause -is [Net.WebException] -and $cause.Status -in 'NameResolutionFailure','ProxyNameResolutionFailure') { return $true }
+        if ($cause.PSObject.Properties['HttpRequestError'] -and $cause.HttpRequestError -eq 'NameResolutionError') { return $true }
+        # Some PowerShell wrappers retain only the resolver message.
+        if ($cause.Message -match 'The requested name is valid, but no data of the requested type was found|No such host is known|Temporary failure in name resolution') { return $true }
+    }
+    return $false
+}
+
 function Invoke-SmartM365GraphFileDownloadWithRetry {
     [CmdletBinding()]
     param(
@@ -3080,12 +3093,13 @@ function Invoke-SmartM365GraphFileDownloadWithRetry {
             return $true
         }
         catch {
-            $statusCode = $null
-            try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
-            $isTransient = Test-SmartM365GraphTransientError -ErrorRecord $_ -StatusCode $statusCode
+            $statusCode = Get-SmartM365GraphErrorStatusCode -ErrorRecord $_
+            if ($_.Exception.Data['SmartM365DeadlineExceeded']) { throw }
+            $dnsFailure = -not $statusCode -and (Test-SmartM365DownloadNameResolutionFailure -Exception $_.Exception)
+            $isTransient = $dnsFailure -or (Test-SmartM365GraphTransientError -ErrorRecord $_ -StatusCode $statusCode)
             if (-not $isTransient -or $attempt -ge $MaxAttempts) { throw }
             $delay = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds ($DefaultRetrySeconds * $attempt) -MaximumSeconds $MaximumRetrySeconds
-            $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
+            $statusText = if ($statusCode) { $statusCode } elseif ($dnsFailure) { 'DNS' } else { 'unknown' }
             WriteLog -Message ("{0} transient failure. Status={1}; attempt {2}/{3}; retrying in {4}s." -f $Operation, $statusText, $attempt, $MaxAttempts, $delay) -Level 'WARNING'
             Wait-SmartM365NetworkRetry -Seconds $delay -Operation $Operation
         }
@@ -5726,7 +5740,10 @@ function Initialize-SmartM365SharePointWorkbookTemplates {
         try {
             $session = Invoke-SmartM365GraphRestWithRetry -Method POST -Uri ($metadataUri + ':/createUploadSession') -Body $body -ContentType 'application/json' -Operation 'Create workbook template upload session'
             if (-not $session.uploadUrl) { throw 'Workbook template upload session did not return an upload URL.' }
-            $upload = Invoke-RestMethod -Method PUT -Uri $session.uploadUrl -InFile $template -Headers @{'Content-Range'=('bytes 0-{0}/{1}' -f ($length-1),$length)} -ContentType 'application/octet-stream' -ErrorAction Stop
+            $transferTimeout = Get-SmartM365NetworkSetting -Name 'SharePointUploadTransferTimeoutSeconds'
+            $timeoutSeconds = Get-SmartM365NetworkCallTimeout -TimeoutSeconds $transferTimeout -Operation 'Upload SharePoint workbook template'
+            $webTimeout = Get-SmartM365WebRequestTimeout -Command 'Invoke-RestMethod' -TimeoutSeconds $timeoutSeconds
+            $upload = Invoke-RestMethod -Method PUT -Uri $session.uploadUrl -InFile $template -Headers @{'Content-Range'=('bytes 0-{0}/{1}' -f ($length-1),$length)} -ContentType 'application/octet-stream' @webTimeout -ErrorAction Stop
             if ([string]$upload.name -cne $entry.Key -or -not $upload.id) { throw "Workbook template creation was not confirmed: $($entry.Key)" }
             WriteLog -Message "Created missing SharePoint workbook from the shipped generic template: $($entry.Key). Review its contents before production use." -Level 'WARNING'
         }
