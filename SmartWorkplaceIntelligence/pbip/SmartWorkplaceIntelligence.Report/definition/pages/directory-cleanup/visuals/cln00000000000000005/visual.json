@@ -112,6 +112,11 @@
             "id": "default"
           }
         }
+      ],
+      "general": [
+        {
+          "properties": {}
+        }
       ]
     },
     "visualContainerObjects": {

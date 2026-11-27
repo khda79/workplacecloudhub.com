@@ -106,17 +106,10 @@ table 'Native Device Application'
 		sourceColumn: TenantId
 
 	/// Native FactDeviceApplication attribute; source qualification is retained.
-	column TenantDeviceApplicationKey
-		dataType: string
-		isHidden
-		lineageTag: 34a69bf7-e86b-4a32-8991-f082b2799b56
-		summarizeBy: none
-		sourceColumn: TenantDeviceApplicationKey
-
-	/// Native FactDeviceApplication attribute; source qualification is retained.
 	column TenantApplicationKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 2226d6a7-38f7-412b-a027-6b6a38bd736c
 		summarizeBy: none
 		sourceColumn: TenantApplicationKey
@@ -124,6 +117,7 @@ table 'Native Device Application'
 	/// Native FactDeviceApplication attribute; source qualification is retained.
 	column ManagedDeviceId
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 566aea40-ebfc-4b7d-bcd4-c5cf21fd36ba
 		summarizeBy: none
 		sourceColumn: ManagedDeviceId
@@ -131,6 +125,7 @@ table 'Native Device Application'
 	/// Native FactDeviceApplication attribute; source qualification is retained.
 	column AppId
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 84393502-bfc9-461d-824e-4ca0f90488aa
 		summarizeBy: none
 		sourceColumn: AppId
@@ -159,6 +154,7 @@ table 'Native Device Application'
 	/// Exact lookup of the native managed-device ID within its tenant to the prepared bridge key. Unresolved weekly relations remain blank without a fabricated parent.
 	column 'Tenant Intune device key' = LOOKUPVALUE ( 'Native Managed Device Evidence'[TenantIntuneDeviceKey], 'Native Managed Device Evidence'[ManagedDeviceId], 'Native Device Application'[ManagedDeviceId], 'Native Managed Device Evidence'[TenantKey], 'Native Device Application'[TenantKey] )
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 0961eb28-6d22-4185-8c68-5cd5bbe040bb
 		summarizeBy: none
 
@@ -170,6 +166,14 @@ table 'Native Device Application'
 		lineageTag: 0d47d919-00c1-456d-bbc5-af466aa4f34a
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
+
+	column TenantDeviceApplicationKey
+		dataType: string
+		lineageTag: 39a875e7-e154-4589-85cd-fa240358077d
+		summarizeBy: none
+		sourceColumn: TenantDeviceApplicationKey
+
+		annotation SummarizationSetBy = Automatic
 
 	partition 'Native Device Application' = m
 		mode: import

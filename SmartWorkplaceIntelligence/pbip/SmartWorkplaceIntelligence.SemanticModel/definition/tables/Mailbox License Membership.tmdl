@@ -4,6 +4,7 @@ table 'Mailbox License Membership'
 
 	column 'Mailbox Key'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 1f8bf4be-0ed2-4284-baa0-30a7521889aa
 		summarizeBy: none
 		sourceColumn: Mailbox Key
@@ -180,4 +181,3 @@ table 'Mailbox License Membership'
 				in Output
 
 	annotation PBI_ResultType = Exception
-

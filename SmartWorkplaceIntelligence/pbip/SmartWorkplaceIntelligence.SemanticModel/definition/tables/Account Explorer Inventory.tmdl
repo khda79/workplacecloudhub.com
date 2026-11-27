@@ -894,16 +894,19 @@ table 'Account Explorer Inventory'
 		lineageTag: 91899f44-1e47-4202-b0d8-aa5c2be256bd
 
 	column 'User Source ID'
+		isAvailableInMdx: false
 		lineageTag: c67c6306-05ff-40e9-838e-fdffee00b306
 		isNameInferred
 		sourceColumn: [User Source ID]
 
 	column 'User Principal Name'
+		isAvailableInMdx: false
 		lineageTag: 7c9d0ff4-776b-428a-be37-4c8435bc4eea
 		isNameInferred
 		sourceColumn: [User Principal Name]
 
 	column 'Display Name'
+		isAvailableInMdx: false
 		lineageTag: d758eed6-6800-454d-973f-d1840b9ada70
 		isNameInferred
 		sourceColumn: [Display Name]
@@ -964,6 +967,7 @@ table 'Account Explorer Inventory'
 		sourceColumn: [Days Since Last Activity]
 
 	column 'Last Activity Date'
+		isAvailableInMdx: false
 		lineageTag: 6c741d34-61f6-414d-b5ca-9ba97fb499db
 		isNameInferred
 		sourceColumn: [Last Activity Date]
@@ -1024,6 +1028,7 @@ table 'Account Explorer Inventory'
 		sourceColumn: [Account Classification Rule Version]
 
 	column 'Job Title'
+		isAvailableInMdx: false
 		lineageTag: 056309f3-a9be-400a-8420-4b41e2ea027d
 		isNameInferred
 		sourceColumn: [Job Title]
@@ -1034,6 +1039,7 @@ table 'Account Explorer Inventory'
 		sourceColumn: [Job Title Evidence State]
 
 	column 'AD Last Activity Date'
+		isAvailableInMdx: false
 		lineageTag: 08cbc139-5f82-415b-b364-d35a057f53af
 		isNameInferred
 		sourceColumn: [AD Last Activity Date]
@@ -1144,6 +1150,7 @@ table 'Account Explorer Inventory'
 		sourceColumn: [Persona Classification Source]
 
 	column 'Console Last Activity UTC'
+		isAvailableInMdx: false
 		lineageTag: 763c45cf-e9ab-46d5-9ba8-8fc00ce41fd0
 		isNameInferred
 		sourceColumn: [Console Last Activity UTC]
@@ -1169,6 +1176,7 @@ table 'Account Explorer Inventory'
 		sourceColumn: [Loaded Batch ID]
 
 	column 'AD Created (source)'
+		isAvailableInMdx: false
 		lineageTag: 2c90d0ab-cdce-425a-84b7-1ca7e5627a0e
 		isNameInferred
 		sourceColumn: [AD Created (source)]
@@ -1179,11 +1187,13 @@ table 'Account Explorer Inventory'
 		sourceColumn: [AD Creation Qualification]
 
 	column 'AD Created UTC'
+		isAvailableInMdx: false
 		lineageTag: 27a59774-a5fd-4727-92a5-25aa2af5cb60
 		isNameInferred
 		sourceColumn: [AD Created UTC]
 
 	column 'AD Modified (source)'
+		isAvailableInMdx: false
 		lineageTag: c6b88f3f-c1b0-4b79-88f1-23a461cb1ee9
 		isNameInferred
 		sourceColumn: [AD Modified (source)]
@@ -1194,11 +1204,13 @@ table 'Account Explorer Inventory'
 		sourceColumn: [AD Modification Qualification]
 
 	column 'AD Modified UTC'
+		isAvailableInMdx: false
 		lineageTag: 66288bd2-20a9-4cd3-8473-f189dba9d706
 		isNameInferred
 		sourceColumn: [AD Modified UTC]
 
 	column 'Entra Created (source)'
+		isAvailableInMdx: false
 		lineageTag: 6d566c90-f811-4fc7-a410-464c80cdceb7
 		isNameInferred
 		sourceColumn: [Entra Created (source)]
@@ -1209,6 +1221,7 @@ table 'Account Explorer Inventory'
 		sourceColumn: [Entra Creation Qualification]
 
 	column 'Entra Created UTC'
+		isAvailableInMdx: false
 		lineageTag: 9ab6a74b-bb12-4ac6-81fc-2ac876f6903e
 		isNameInferred
 		sourceColumn: [Entra Created UTC]
@@ -1254,16 +1267,19 @@ table 'Account Explorer Inventory'
 		sourceColumn: [Country Name]
 
 	column 'Account Key'
+		isAvailableInMdx: false
 		lineageTag: 2168b90f-d8b4-41dd-b48c-b1fb59dadcc5
 		isNameInferred
 		sourceColumn: [Account Key]
 
 	column 'Native User Key'
+		isAvailableInMdx: false
 		lineageTag: 0c20d6e2-eca6-492e-9b32-c0ffd6fbdf5b
 		isNameInferred
 		sourceColumn: [Native User Key]
 
 	column 'SAM Account Name'
+		isAvailableInMdx: false
 		lineageTag: 717c4d77-1684-428e-aa86-caa34efe99c8
 		isNameInferred
 		sourceColumn: [SAM Account Name]
@@ -1306,10 +1322,12 @@ table 'Account Explorer Inventory'
 	column 'User 360 Label Base' = VAR _Name=TRIM('Account Explorer Inventory'[Display Name]) VAR _UPN=TRIM('Account Explorer Inventory'[User Principal Name]) RETURN IF(_Name=""||_Name=_UPN,IF(_UPN="","Unknown user",_UPN),_Name & IF(_UPN="",""," · "&_UPN))
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 67727f52-e700-4a80-b58d-2c1de1dd9666
 
 	column 'User 360 Selection' = VAR _Base='Account Explorer Inventory'[User 360 Label Base] VAR _Rows=CALCULATE(COUNTROWS('Account Explorer Inventory'),ALLEXCEPT('Account Explorer Inventory','Account Explorer Inventory'[User 360 Label Base])) RETURN _Base & IF(_Rows>1," · "&'Account Explorer Inventory'[TenantKey]&" · "&'Account Explorer Inventory'[Account Key]&IF(CALCULATE(COUNTROWS('Account Explorer Inventory'),ALLEXCEPT('Account Explorer Inventory','Account Explorer Inventory'[User 360 Label Base],'Account Explorer Inventory'[TenantKey],'Account Explorer Inventory'[Account Key]))>1," · "&'Account Explorer Inventory'[Loaded Batch ID],""),"")
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 5a342648-13b8-45bd-8d7a-f1ad6b8498bb
 
 	partition 'Account Explorer Inventory' = calculated

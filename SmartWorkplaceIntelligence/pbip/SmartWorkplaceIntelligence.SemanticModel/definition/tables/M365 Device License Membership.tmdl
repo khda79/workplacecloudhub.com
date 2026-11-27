@@ -6,6 +6,7 @@ table 'M365 Device License Membership'
 	column 'Device Source ID'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 5fa20bd9-19ae-4bba-891e-26fcac7184eb
 		summarizeBy: none
 		sourceColumn: [Device Source ID]
@@ -29,4 +30,3 @@ table 'M365 Device License Membership'
 				VAR _matched = SELECTCOLUMNS(FILTER(_joined, _sameBatch && [UID]<>""), "Device Source ID", [Device Source ID], "License Product", [License Product])
 				VAR _missing = EXCEPT(SELECTCOLUMNS(_devices,"Device Source ID",[Device Source ID]),SELECTCOLUMNS(_matched,"Device Source ID",[Device Source ID]))
 				RETURN DISTINCT(UNION(_matched,ADDCOLUMNS(_missing,"License Product","Unknown")))
-

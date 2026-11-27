@@ -146,6 +146,7 @@ table 'Mailbox Evidence'
 
 	column 'Mailbox Key'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 5e78b588-aea8-45c0-a90e-c7eb193f0059
 		summarizeBy: none
 		sourceColumn: Mailbox Key
@@ -154,6 +155,7 @@ table 'Mailbox Evidence'
 
 	column 'Primary SMTP Address'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 8dbd143e-2325-4449-a6f8-8f25cc2afe66
 		summarizeBy: none
 		sourceColumn: Primary SMTP Address
@@ -162,6 +164,7 @@ table 'Mailbox Evidence'
 
 	column 'Display Name'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: f14d2bb4-031d-4738-bab1-5a4e5b5cadc1
 		summarizeBy: none
 		sourceColumn: Display Name
@@ -359,4 +362,3 @@ table 'Mailbox Evidence'
 				    Readers[Finish](BusinessRows)
 
 	annotation PBI_ResultType = Exception
-

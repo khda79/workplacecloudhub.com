@@ -170,6 +170,7 @@ table 'Native User License'
 	column TenantUserKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 49021613-469d-40f4-8963-63a9eeee5c92
 		summarizeBy: none
 		sourceColumn: TenantUserKey
@@ -186,6 +187,7 @@ table 'Native User License'
 	column CmdbUserId
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: cba0d608-1d2a-45aa-8fb2-aa6a97fb9e0d
 		summarizeBy: none
 		sourceColumn: CmdbUserId
@@ -231,6 +233,7 @@ table 'Native User License'
 	column SourceUserId
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: b17b8e50-3152-4cb7-a2d3-0c56d4495f73
 		summarizeBy: none
 		sourceColumn: SourceUserId
@@ -273,4 +276,3 @@ table 'Native User License'
 				    Readers[Finish](BusinessRows)
 
 	annotation PBI_ResultType = Exception
-

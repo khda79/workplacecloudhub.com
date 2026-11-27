@@ -209,6 +209,7 @@ table 'Daily Mailbox Trends'
 
 	column 'Metric Value'
 		dataType: double
+		isAvailableInMdx: false
 		lineageTag: 56614bef-7900-4ec7-aac0-a1e004638850
 		summarizeBy: sum
 		sourceColumn: Metric Value
@@ -313,4 +314,3 @@ table 'Daily Mailbox Trends'
 				    Typed)
 				in
 				    Readers[Finish](BusinessRows)
-

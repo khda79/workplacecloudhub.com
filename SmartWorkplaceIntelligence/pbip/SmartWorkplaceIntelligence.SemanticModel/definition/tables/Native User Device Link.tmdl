@@ -118,6 +118,7 @@ table 'Native User Device Link'
 	column TenantRelationshipKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 3f711b51-e2a9-4d38-ba86-ccbf16029f59
 		summarizeBy: none
 		sourceColumn: TenantRelationshipKey
@@ -126,6 +127,7 @@ table 'Native User Device Link'
 	column TenantUserKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: db082fe6-9b44-4e0e-a935-9acd1ebc7edd
 		summarizeBy: none
 		sourceColumn: TenantUserKey
@@ -134,6 +136,7 @@ table 'Native User Device Link'
 	column TenantDeviceKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: d44244d7-09e0-4a33-aac3-fd0b7b6872d1
 		summarizeBy: none
 		sourceColumn: TenantDeviceKey
@@ -142,6 +145,7 @@ table 'Native User Device Link'
 	column CmdbRelationshipId
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: efd2e7fb-c16f-4b87-a7b4-c8aad0d54960
 		summarizeBy: none
 		sourceColumn: CmdbRelationshipId
@@ -150,6 +154,7 @@ table 'Native User Device Link'
 	column CmdbUserId
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: dc39c9be-3beb-49b6-a388-8c91c9a2e705
 		summarizeBy: none
 		sourceColumn: CmdbUserId
@@ -158,6 +163,7 @@ table 'Native User Device Link'
 	column CmdbDeviceId
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 46b80460-5696-4404-b9ab-5161d8b94635
 		summarizeBy: none
 		sourceColumn: CmdbDeviceId
@@ -186,6 +192,7 @@ table 'Native User Device Link'
 	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
 	column Account
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: c90877de-3183-4afd-a8a7-d62568866030
 		summarizeBy: none
 		sourceColumn: Account
@@ -193,6 +200,7 @@ table 'Native User Device Link'
 	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
 	column Device
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 082419ed-7fa3-4f47-851f-1f60d03a5f9b
 		summarizeBy: none
 		sourceColumn: Device
@@ -200,6 +208,7 @@ table 'Native User Device Link'
 	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
 	column DeviceSelection
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: cda757e8-bbb4-4ab1-8e2f-d2df85526362
 		summarizeBy: none
 		sourceColumn: DeviceSelection
@@ -247,4 +256,3 @@ table 'Native User Device Link'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactUserDeviceRelationship.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantRelationshipKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="CmdbRelationshipId", dataType="String"], [name="CmdbUserId", dataType="String"], [name="CmdbDeviceId", dataType="String"], [name="RelationshipType", dataType="String"], [name="ConfidenceScore", dataType="Double"], [name="SourceSystem", dataType="String"], [name="Account", dataType="String"], [name="Device", dataType="String"], [name="DeviceSelection", dataType="String"], [name="DeviceCompliance", dataType="String"], [name="DeviceSyncStatus", dataType="String"]}))
 				in
 				    Readers[Finish](BusinessRows)
-

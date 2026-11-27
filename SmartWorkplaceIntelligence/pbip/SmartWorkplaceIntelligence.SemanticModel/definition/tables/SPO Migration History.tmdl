@@ -426,6 +426,7 @@ table 'SPO Migration History'
 	column 'History Key'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 85135d3e-99f7-4bc9-bbe3-d624e1d54744
 		summarizeBy: none
 		sourceColumn: History Key
@@ -493,4 +494,3 @@ table 'SPO Migration History'
 				    Readers[Finish](BusinessRows)
 
 	annotation PBI_ResultType = Exception
-

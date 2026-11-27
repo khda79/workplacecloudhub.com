@@ -64,14 +64,6 @@ table 'Intune Configuration Device Evidence'
 		summarizeBy: none
 		sourceColumn: TenantKey
 
-	/// Prepared IntuneConfigurationDeviceEvidence.csv: EvidenceKey. Reported source scope only; not whole-tenant coverage or endpoint health.
-	column 'Evidence Key'
-		dataType: string
-		isHidden
-		lineageTag: 601b8603-8a0d-4231-a5c6-7eefcf8ec1c5
-		summarizeBy: none
-		sourceColumn: EvidenceKey
-
 	/// Prepared IntuneConfigurationDeviceEvidence.csv: ReceiptRunId. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Receipt Run ID'
 		dataType: string
@@ -108,6 +100,7 @@ table 'Intune Configuration Device Evidence'
 	column 'Source Record'
 		dataType: double
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: e87a2a04-1d5a-47eb-bbb4-775b141122f1
 		summarizeBy: sum
 		sourceColumn: SourceRecord
@@ -133,6 +126,7 @@ table 'Intune Configuration Device Evidence'
 	/// Prepared IntuneConfigurationDeviceEvidence.csv: IntuneDeviceId. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Intune Device ID'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 0f9c1a89-2cd0-4937-9488-cad6fcaabef0
 		summarizeBy: none
 		sourceColumn: IntuneDeviceId
@@ -140,6 +134,7 @@ table 'Intune Configuration Device Evidence'
 	/// Prepared IntuneConfigurationDeviceEvidence.csv: UPN. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'User Principal Name'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 3015eaac-2e3c-4013-bc0e-85b1feb7a7f6
 		summarizeBy: none
 		sourceColumn: UPN
@@ -154,6 +149,7 @@ table 'Intune Configuration Device Evidence'
 	/// Prepared IntuneConfigurationDeviceEvidence.csv: DeviceName. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Device Name'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 522961b5-9cf9-456f-8352-6a732f3cc250
 		summarizeBy: none
 		sourceColumn: DeviceName
@@ -189,6 +185,7 @@ table 'Intune Configuration Device Evidence'
 	/// Prepared IntuneConfigurationDeviceEvidence.csv: LastModifiedTimeUtc. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Last Modified Time Raw'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 13dc5a28-87ac-4f6d-b1e6-6f4183936577
 		summarizeBy: none
 		sourceColumn: LastModifiedTimeUtc
@@ -196,6 +193,7 @@ table 'Intune Configuration Device Evidence'
 	/// Prepared IntuneConfigurationDeviceEvidence.csv: SourceStatusUTC. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Source Status UTC'
 		dataType: dateTime
+		isAvailableInMdx: false
 		lineageTag: 4696ba6c-453e-4c8a-97ce-c476ac61e18d
 		summarizeBy: none
 		sourceColumn: SourceStatusUTC
@@ -240,6 +238,7 @@ table 'Intune Configuration Device Evidence'
 	column 'Device Key'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 94e0ec63-56cc-4cb1-9655-cf5ac2ac8dd8
 		summarizeBy: none
 		sourceColumn: Device Key
@@ -263,6 +262,7 @@ table 'Intune Configuration Device Evidence'
 			VAR _upn=COALESCE(BLANK(),IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
 			RETURN IF(ISBLANK(_upn)||TRIM(_upn)="","Not resolved",_upn)
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 36c73ae9-8406-484f-9f09-ff246462516c
 
@@ -277,6 +277,7 @@ table 'Intune Configuration Device Evidence'
 			VAR _sam=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User SAM],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
 			RETURN COALESCE(_sam,IF(NOT ISBLANK(_upn),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[UserPrincipalName],_upn,'Native User Evidence'[TenantKey],_t,'Native User Evidence'[Loaded Batch ID],_b,BLANK())),"Not resolved")
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 7052b424-8fae-4d0a-906b-e20e69cb38f9
 
@@ -290,6 +291,7 @@ table 'Intune Configuration Device Evidence'
 			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
 			RETURN IF(_status="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon User],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())),"Not observed")
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 68009404-7c4a-49ee-a026-38fb33c09653
 
@@ -303,6 +305,7 @@ table 'Intune Configuration Device Evidence'
 			RETURN IF(IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon UTC],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
 		dataType: dateTime
 		formatString: yyyy-MM-dd HH:mm
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 9dbb5fdf-b7ed-476d-9e01-885133b73a26
 
@@ -355,4 +358,4 @@ table 'Intune Configuration Device Evidence'
 				in
 				    WithDeviceKey)
 				in
-				    Readers[Finish](BusinessRows)
+				    Table.RemoveColumns(Readers[Finish](BusinessRows), {"EvidenceKey"})

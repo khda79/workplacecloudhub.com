@@ -743,3 +743,6 @@ relationship shared_conversion_domain
 	fromColumn: 'Mailbox Shared Conversion Evidence'.'AD Domain'
 	toColumn: 'Daily Domain'.Domain
 
+relationship EndpointProtection_DailyDomain
+	fromColumn: 'Endpoint Protection Evidence'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain

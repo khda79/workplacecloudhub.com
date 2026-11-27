@@ -72,6 +72,7 @@ table 'User Activity History Evidence'
 	column 'User Source ID'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 2be8cfa9-69fa-40d9-9c9c-6fb48329c4b0
 		summarizeBy: none
 		sourceColumn: User Source ID
@@ -142,6 +143,7 @@ table 'User Activity History Evidence'
 	column 'User Principal Name'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 602ef711-57cf-4cdd-8faa-fcc36f19df37
 		sourceColumn: User Principal Name
 
@@ -186,4 +188,3 @@ table 'User Activity History Evidence'
 				    Typed)
 				in
 				    Readers[Finish](BusinessRows)
-

@@ -10,18 +10,21 @@ table 'Mailbox Delegation Detail'
 
 	column 'Mailbox Key'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 809b66dc-89e3-44c7-9ec7-6f5fe639334f
 		summarizeBy: none
 		sourceColumn: Mailbox Key
 
 	column 'Delegate (reported)'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: da57899f-2167-4ff1-b1f2-2b0f4f4c7c6e
 		summarizeBy: none
 		sourceColumn: Delegate (reported)
 
 	column 'Delegate key'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 894126ce-e051-4973-97c4-849fa6aef646
 		summarizeBy: none
 		sourceColumn: Delegate key
@@ -52,12 +55,14 @@ table 'Mailbox Delegation Detail'
 
 	column 'Delegate UPN'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: d82ef82a-7ffc-40df-b871-b86459944924
 		summarizeBy: none
 		sourceColumn: Delegate UPN
 
 	column 'Delegate SAM'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: d103cd5c-0d62-4f35-8f14-e456af741962
 		summarizeBy: none
 		sourceColumn: Delegate SAM
@@ -247,4 +252,3 @@ table 'Mailbox Delegation Detail'
 				            #"Delegate Qualification"=if unique then "Exact unique reported principal" else if rawSam<>null then "Reported DOMAIN\\SAM; native identity unresolved" else "Reported principal; native identity unresolved"]),
 				    Output=Table.ExpandRecordColumn(Table.SelectColumns(Detail,Table.ColumnNames(Grouped)&{"Detail"}),"Detail",{"Delegate UPN","Delegate SAM","Delegate Qualification"})
 				in Output
-

@@ -122,6 +122,7 @@ table 'Backup Mailbox Evidence'
 	column 'Backup Entity Key'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: f127b6ab-84ce-4972-ab0e-6e84178cb4df
 		summarizeBy: none
 		sourceColumn: Backup Entity Key
@@ -130,6 +131,7 @@ table 'Backup Mailbox Evidence'
 
 	column 'Display Name'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 881dac99-fd48-4c6c-8456-ab1c0077b572
 		summarizeBy: none
 		sourceColumn: Display Name
@@ -138,6 +140,7 @@ table 'Backup Mailbox Evidence'
 
 	column 'Primary Address'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: f5ee3c76-374f-4d2f-8198-0b7606ba8125
 		summarizeBy: none
 		sourceColumn: Primary Address
@@ -362,4 +365,3 @@ table 'Backup Mailbox Evidence'
 				    Typed)
 				in
 				    Readers[Finish](BusinessRows)
-

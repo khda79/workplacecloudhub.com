@@ -54,20 +54,9 @@ table 'Mailbox Shared Conversion Evidence'
 		summarizeBy: none
 		sourceColumn: TenantKey
 
-	column 'Shared Conversion Key'
-		dataType: string
-		lineageTag: 0b5d36c9-b18e-52f8-988c-f1777aa7d6ef
-		summarizeBy: none
-		sourceColumn: Shared Conversion Key
-
-	column 'Mailbox GUID'
-		dataType: string
-		lineageTag: 5b8825a2-7617-5531-bf73-2688cf703542
-		summarizeBy: none
-		sourceColumn: Mailbox GUID
-
 	column 'Primary SMTP Address'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 513c8171-a259-5508-a983-4c78c11088f3
 		summarizeBy: none
 		sourceColumn: Primary SMTP Address
@@ -77,18 +66,6 @@ table 'Mailbox Shared Conversion Evidence'
 		lineageTag: 9468c13f-21cc-514b-ae00-6249aa039dc3
 		summarizeBy: none
 		sourceColumn: Recipient Type
-
-	column 'Owner Entra Object ID'
-		dataType: string
-		lineageTag: c9279ea1-1c27-5163-a5a7-935a76413c0e
-		summarizeBy: none
-		sourceColumn: Owner Entra Object ID
-
-	column 'Owner AD Object GUID'
-		dataType: string
-		lineageTag: a13dd0c7-4aaa-575e-a78f-3e3ebb8f724f
-		summarizeBy: none
-		sourceColumn: Owner AD Object GUID
 
 	column 'Owner Match Status'
 		dataType: string
@@ -218,6 +195,7 @@ table 'Mailbox Shared Conversion Evidence'
 
 	column 'Owner Last Sign-In'
 		dataType: dateTime
+		isAvailableInMdx: false
 		lineageTag: 79d15b0c-4c7b-52a4-9e80-036e6d5be9a3
 		summarizeBy: none
 		sourceColumn: Owner Last Sign-In
@@ -242,6 +220,7 @@ table 'Mailbox Shared Conversion Evidence'
 
 	column 'EXO Last Logon'
 		dataType: dateTime
+		isAvailableInMdx: false
 		lineageTag: 8606cc07-06ef-5f54-a89e-a1e80fc3ee57
 		summarizeBy: none
 		sourceColumn: EXO Last Logon
@@ -394,7 +373,6 @@ table 'Mailbox Shared Conversion Evidence'
 				 RenamedOwnerLicenses = Table.RenameColumns(WithoutOwnerLicenses, {{"__Owner Licenses", "Owner Licenses"}}),
 				 OwnerLicenses = Table.ReorderColumns(RenamedOwnerLicenses, Table.ColumnNames(CountryRenamed))
 				in
-				 Readers[Finish](OwnerLicenses)
+				 Table.RemoveColumns(Readers[Finish](OwnerLicenses), {"Shared Conversion Key", "Mailbox GUID", "Owner Entra Object ID", "Owner AD Object GUID"})
 
 	annotation PBI_ResultType = Exception
-

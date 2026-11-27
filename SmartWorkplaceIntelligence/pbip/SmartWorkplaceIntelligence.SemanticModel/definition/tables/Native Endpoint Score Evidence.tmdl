@@ -86,6 +86,7 @@ table 'Native Endpoint Score Evidence'
 	column TenantEndpointAnalyticsDeviceKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: e3754de8-c730-4f46-a104-318fe81435ee
 		summarizeBy: none
 		sourceColumn: TenantEndpointAnalyticsDeviceKey
@@ -93,6 +94,7 @@ table 'Native Endpoint Score Evidence'
 	/// Native FactEndpointAnalyticsDevice attribute; source qualification is retained.
 	column DeviceId
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: abeaeb2c-62bd-410a-9ffc-4dd06710c794
 		summarizeBy: none
 		sourceColumn: DeviceId
@@ -100,6 +102,7 @@ table 'Native Endpoint Score Evidence'
 	/// Native FactEndpointAnalyticsDevice attribute; source qualification is retained.
 	column DeviceName
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: e517636d-acb7-47c6-ac41-5dc86d74be49
 		summarizeBy: none
 		sourceColumn: DeviceName
@@ -123,6 +126,7 @@ table 'Native Endpoint Score Evidence'
 		dataType: double
 		isHidden
 		formatString: 0.0
+		isAvailableInMdx: false
 		lineageTag: 008dc0a7-b323-4266-b16c-e3da8735ce71
 		summarizeBy: none
 		sourceColumn: EndpointAnalyticsScore
@@ -131,6 +135,7 @@ table 'Native Endpoint Score Evidence'
 	column StartupPerformanceScore
 		dataType: double
 		formatString: 0.0
+		isAvailableInMdx: false
 		lineageTag: 6d2d7878-ffa0-47f6-b775-2825231d74e3
 		summarizeBy: none
 		sourceColumn: StartupPerformanceScore
@@ -187,6 +192,7 @@ table 'Native Endpoint Score Evidence'
 			VAR _upn=COALESCE(BLANK(),IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
 			RETURN IF(ISBLANK(_upn)||TRIM(_upn)="","Not resolved",_upn)
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 06efe73d-8b38-42db-83cd-7d3aaaab63b8
 
@@ -203,6 +209,7 @@ table 'Native Endpoint Score Evidence'
 			VAR _sam=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User SAM],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
 			RETURN COALESCE(_sam,IF(NOT ISBLANK(_upn),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[UserPrincipalName],_upn,'Native User Evidence'[TenantKey],_t,'Native User Evidence'[Loaded Batch ID],_b,BLANK())),"Not resolved")
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: ee4dc7ce-d630-496d-9f0c-84d6aed020b4
 
@@ -218,6 +225,7 @@ table 'Native Endpoint Score Evidence'
 			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
 			RETURN IF(_status="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon User],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())),"Not observed")
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 244ea3b0-e63d-470a-99ad-0f50b2cdb68d
 
@@ -233,6 +241,7 @@ table 'Native Endpoint Score Evidence'
 			RETURN IF(IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon UTC],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
 		dataType: dateTime
 		formatString: yyyy-MM-dd HH:mm
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 9efd8deb-f0b3-4d25-969d-77eff97d15d3
 
@@ -272,4 +281,3 @@ table 'Native Endpoint Score Evidence'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactEndpointAnalyticsDevice.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantEndpointAnalyticsDeviceKey", dataType="String"], [name="DeviceId", dataType="String"], [name="DeviceName", dataType="String"], [name="Manufacturer", dataType="String"], [name="Model", dataType="String"], [name="EndpointAnalyticsScore", dataType="Double"], [name="StartupPerformanceScore", dataType="Double"], [name="AppReliabilityScore", dataType="Double"], [name="WorkFromAnywhereScore", dataType="Double"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="SourceSystem", dataType="String"]}))
 				in
 				    Readers[Finish](BusinessRows)
-

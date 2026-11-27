@@ -36,24 +36,6 @@ table 'User Cleanup Evidence'
 		summarizeBy: none
 		sourceColumn: TenantKey
 
-	column 'User Cleanup Key'
-		dataType: string
-		lineageTag: 59308dec-f5e0-4e48-bb6f-3e785889dd96
-		summarizeBy: none
-		sourceColumn: User Cleanup Key
-
-	column 'AD Object GUID'
-		dataType: string
-		lineageTag: 85da82e4-f170-49b1-9d1f-df6e1aeb1b15
-		summarizeBy: none
-		sourceColumn: AD Object GUID
-
-	column 'Entra Object ID'
-		dataType: string
-		lineageTag: 34bac961-0734-4309-b7eb-670df73ddc0a
-		summarizeBy: none
-		sourceColumn: Entra Object ID
-
 	column 'AD Domain'
 		dataType: string
 		lineageTag: 9caab3a6-867d-4429-b908-04d7cfd818ad
@@ -62,18 +44,21 @@ table 'User Cleanup Evidence'
 
 	column SamAccountName
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 5297b2b5-09ca-4264-b9c3-a68b67cab0cf
 		summarizeBy: none
 		sourceColumn: SamAccountName
 
 	column 'User Principal Name'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: f7bf4ab9-dcdd-41dc-a1d6-1bd0743d3fb4
 		summarizeBy: none
 		sourceColumn: User Principal Name
 
 	column 'Display Name'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 92e3087c-2e34-4366-af07-ef8b483b606a
 		summarizeBy: none
 		sourceColumn: Display Name
@@ -83,18 +68,6 @@ table 'User Cleanup Evidence'
 		lineageTag: 0805add9-31da-442e-b465-8fef267eba93
 		summarizeBy: none
 		sourceColumn: Enabled
-
-	column 'When Created'
-		dataType: dateTime
-		lineageTag: 6a5b7a60-209f-47c9-9847-46c7bb40eafc
-		summarizeBy: none
-		sourceColumn: When Created
-
-	column 'Password Last Set'
-		dataType: dateTime
-		lineageTag: 04232388-699d-4679-ae56-08323a29db52
-		summarizeBy: none
-		sourceColumn: Password Last Set
 
 	column 'Password Never Expires'
 		dataType: string
@@ -204,23 +177,11 @@ table 'User Cleanup Evidence'
 		summarizeBy: none
 		sourceColumn: Hold State
 
-	column 'AD Last Logon'
-		dataType: dateTime
-		lineageTag: aa1a1327-575f-4965-b7c8-b842cbb75e9c
-		summarizeBy: none
-		sourceColumn: AD Last Logon
-
 	column 'AD Last Logon Quality'
 		dataType: string
 		lineageTag: cd2bef60-bf4f-4c1b-ad11-3f9361295afa
 		summarizeBy: none
 		sourceColumn: AD Last Logon Quality
-
-	column 'Entra Last Sign-In'
-		dataType: dateTime
-		lineageTag: 851f05dc-e5fd-4487-9505-8fbe3fd60fa8
-		summarizeBy: none
-		sourceColumn: Entra Last Sign-In
 
 	column 'Entra Last Sign-In Quality'
 		dataType: string
@@ -228,23 +189,11 @@ table 'User Cleanup Evidence'
 		summarizeBy: none
 		sourceColumn: Entra Last Sign-In Quality
 
-	column 'Entra Last Non-Interactive Sign-In'
-		dataType: dateTime
-		lineageTag: 85b7647b-fb87-4df5-8cc8-1c8791fa2eee
-		summarizeBy: none
-		sourceColumn: Entra Last Non-Interactive Sign-In
-
 	column 'Entra Last Non-Interactive Sign-In Quality'
 		dataType: string
 		lineageTag: 72804901-74c8-440e-bdd0-751942012e95
 		summarizeBy: none
 		sourceColumn: Entra Last Non-Interactive Sign-In Quality
-
-	column 'Entra Last Successful Sign-In'
-		dataType: dateTime
-		lineageTag: 54dd690a-6302-4097-b29e-1eefc052e751
-		summarizeBy: none
-		sourceColumn: Entra Last Successful Sign-In
 
 	column 'Entra Last Successful Sign-In Quality'
 		dataType: string
@@ -263,12 +212,6 @@ table 'User Cleanup Evidence'
 		lineageTag: 338478bc-4050-4c0b-9c1c-b7d04dd2b609
 		summarizeBy: none
 		sourceColumn: EXO Last User Action Quality
-
-	column 'EXO Last Logon'
-		dataType: dateTime
-		lineageTag: 7657be34-b580-42d3-b08c-3a74a86ace19
-		summarizeBy: none
-		sourceColumn: EXO Last Logon
 
 	column 'EXO Last Logon Quality'
 		dataType: string
@@ -312,12 +255,6 @@ table 'User Cleanup Evidence'
 		summarizeBy: none
 		sourceColumn: M365 Last Activity Quality
 
-	column 'Console Last Activity'
-		dataType: dateTime
-		lineageTag: bfbb5790-ac44-45ca-94a9-499511983612
-		summarizeBy: none
-		sourceColumn: Console Last Activity
-
 	column 'Console Last Activity Quality'
 		dataType: string
 		lineageTag: 01f18f1a-3689-469f-9d2a-682d7ba30e87
@@ -344,6 +281,7 @@ table 'User Cleanup Evidence'
 
 	column 'Last Activity Date'
 		dataType: dateTime
+		isAvailableInMdx: false
 		lineageTag: 52b73fb6-caed-4606-84e7-b0c2212e7090
 		summarizeBy: none
 		sourceColumn: Last Activity Date
@@ -506,14 +444,13 @@ table 'User Cleanup Evidence'
 				let
 				 Readers = CreatePreparedReaders(),
 				 Raw = Table.PromoteHeaders(Csv.Document(Readers[GetPreparedEvidenceFile]("UserCleanupEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv, ExtraValues=ExtraValues.Error]), [PromoteAllScalars=true]),
-				 Selected = Table.SelectColumns(Raw, {"TenantKey", "User Cleanup Key", "AD Object GUID", "Entra Object ID", "AD Domain", "SamAccountName", "User Principal Name", "Display Name", "Enabled", "When Created", "Password Last Set", "Password Never Expires", "Identity Match Status", "Identity Match Method", "Classification Match Status", "Country", "Country Basis", "Account Type", "Account Type Source", "Account Population", "Account Population Source", "Account Classification Rule Version", "User Type", "Workforce Persona", "Persona Basis", "Has Mailbox", "Hosting Location", "Litigation Hold", "Retention Hold", "In-Place Holds", "Hold State", "AD Last Logon", "AD Last Logon Quality", "Entra Last Sign-In", "Entra Last Sign-In Quality", "Entra Last Non-Interactive Sign-In", "Entra Last Non-Interactive Sign-In Quality", "Entra Last Successful Sign-In", "Entra Last Successful Sign-In Quality", "EXO Last User Action", "EXO Last User Action Quality", "EXO Last Logon", "EXO Last Logon Quality", "On-Prem Last Logon", "On-Prem Last Logon Quality", "Mailbox Usage Last Activity", "Mailbox Usage Last Activity Quality", "M365 Last Activity", "M365 Last Activity Quality", "Console Last Activity", "Console Last Activity Quality", "Entra Match Status", "M365 Report Match Status", "Mailbox Usage Match Status", "Last Activity Date", "Last Activity Source", "Days Since Last Activity", "Inactivity Bucket", "Bucket Sort", "Cleanup State", "State Sort", "Decision Reason", "Secondary Reasons", "Recommended Action", "AD Source Status", "AD Collected UTC", "Entra Source Status", "Entra Collected UTC", "EXO Source Status", "EXO Collected UTC", "On-Prem Source Status", "On-Prem Collected UTC", "M365 Activity Source Status", "M365 Activity Report Date", "Reference UTC", "Evidence Date", "Evidence Status"}),
+				 Selected = Table.SelectColumns(Raw, {"TenantKey", "User Cleanup Key", "AD Domain", "SamAccountName", "User Principal Name", "Display Name", "Enabled", "When Created", "Password Last Set", "Password Never Expires", "Identity Match Status", "Identity Match Method", "Classification Match Status", "Country", "Country Basis", "Account Type", "Account Type Source", "Account Population", "Account Population Source", "Account Classification Rule Version", "User Type", "Workforce Persona", "Persona Basis", "Has Mailbox", "Hosting Location", "Litigation Hold", "Retention Hold", "In-Place Holds", "Hold State", "AD Last Logon", "AD Last Logon Quality", "Entra Last Sign-In", "Entra Last Sign-In Quality", "Entra Last Non-Interactive Sign-In", "Entra Last Non-Interactive Sign-In Quality", "Entra Last Successful Sign-In", "Entra Last Successful Sign-In Quality", "EXO Last User Action", "EXO Last User Action Quality", "EXO Last Logon", "EXO Last Logon Quality", "On-Prem Last Logon", "On-Prem Last Logon Quality", "Mailbox Usage Last Activity", "Mailbox Usage Last Activity Quality", "M365 Last Activity", "M365 Last Activity Quality", "Console Last Activity", "Console Last Activity Quality", "Entra Match Status", "M365 Report Match Status", "Mailbox Usage Match Status", "Last Activity Date", "Last Activity Source", "Days Since Last Activity", "Inactivity Bucket", "Bucket Sort", "Cleanup State", "State Sort", "Decision Reason", "Secondary Reasons", "Recommended Action", "AD Source Status", "AD Collected UTC", "Entra Source Status", "Entra Collected UTC", "EXO Source Status", "EXO Collected UTC", "On-Prem Source Status", "On-Prem Collected UTC", "M365 Activity Source Status", "M365 Activity Report Date", "Reference UTC", "Evidence Date", "Evidence Status"}),
 				 Scoped = if List.AllTrue(List.Transform(Table.Column(Selected, "TenantKey"), each _ = PreparedExpectedTenantKey)) then Selected else error "Foreign or missing tenant",
 				 Nulls = Table.ReplaceValue(Scoped, "", null, Replacer.ReplaceValue, {"Days Since Last Activity", "Bucket Sort", "State Sort"}),
-				 Typed = Table.TransformColumnTypes(Nulls, {{"TenantKey", type text}, {"User Cleanup Key", type text}, {"AD Object GUID", type text}, {"Entra Object ID", type text}, {"AD Domain", type text}, {"SamAccountName", type text}, {"User Principal Name", type text}, {"Display Name", type text}, {"Enabled", type text}, {"When Created", type text}, {"Password Last Set", type text}, {"Password Never Expires", type text}, {"Identity Match Status", type text}, {"Identity Match Method", type text}, {"Classification Match Status", type text}, {"Country", type text}, {"Country Basis", type text}, {"Account Type", type text}, {"Account Type Source", type text}, {"Account Population", type text}, {"Account Population Source", type text}, {"Account Classification Rule Version", type text}, {"User Type", type text}, {"Workforce Persona", type text}, {"Persona Basis", type text}, {"Has Mailbox", type text}, {"Hosting Location", type text}, {"Litigation Hold", type text}, {"Retention Hold", type text}, {"In-Place Holds", type text}, {"Hold State", type text}, {"AD Last Logon", type text}, {"AD Last Logon Quality", type text}, {"Entra Last Sign-In", type text}, {"Entra Last Sign-In Quality", type text}, {"Entra Last Non-Interactive Sign-In", type text}, {"Entra Last Non-Interactive Sign-In Quality", type text}, {"Entra Last Successful Sign-In", type text}, {"Entra Last Successful Sign-In Quality", type text}, {"EXO Last User Action", type text}, {"EXO Last User Action Quality", type text}, {"EXO Last Logon", type text}, {"EXO Last Logon Quality", type text}, {"On-Prem Last Logon", type text}, {"On-Prem Last Logon Quality", type text}, {"Mailbox Usage Last Activity", type text}, {"Mailbox Usage Last Activity Quality", type text}, {"M365 Last Activity", type text}, {"M365 Last Activity Quality", type text}, {"Console Last Activity", type text}, {"Console Last Activity Quality", type text}, {"Entra Match Status", type text}, {"M365 Report Match Status", type text}, {"Mailbox Usage Match Status", type text}, {"Last Activity Date", type text}, {"Last Activity Source", type text}, {"Days Since Last Activity", Int64.Type}, {"Inactivity Bucket", type text}, {"Bucket Sort", Int64.Type}, {"Cleanup State", type text}, {"State Sort", Int64.Type}, {"Decision Reason", type text}, {"Secondary Reasons", type text}, {"Recommended Action", type text}, {"AD Source Status", type text}, {"AD Collected UTC", type text}, {"Entra Source Status", type text}, {"Entra Collected UTC", type text}, {"EXO Source Status", type text}, {"EXO Collected UTC", type text}, {"On-Prem Source Status", type text}, {"On-Prem Collected UTC", type text}, {"M365 Activity Source Status", type text}, {"M365 Activity Report Date", type text}, {"Reference UTC", type text}, {"Evidence Date", type text}, {"Evidence Status", type text}}, "en-US"),
+				 Typed = Table.TransformColumnTypes(Nulls, {{"TenantKey", type text}, {"User Cleanup Key", type text}, {"AD Domain", type text}, {"SamAccountName", type text}, {"User Principal Name", type text}, {"Display Name", type text}, {"Enabled", type text}, {"When Created", type text}, {"Password Last Set", type text}, {"Password Never Expires", type text}, {"Identity Match Status", type text}, {"Identity Match Method", type text}, {"Classification Match Status", type text}, {"Country", type text}, {"Country Basis", type text}, {"Account Type", type text}, {"Account Type Source", type text}, {"Account Population", type text}, {"Account Population Source", type text}, {"Account Classification Rule Version", type text}, {"User Type", type text}, {"Workforce Persona", type text}, {"Persona Basis", type text}, {"Has Mailbox", type text}, {"Hosting Location", type text}, {"Litigation Hold", type text}, {"Retention Hold", type text}, {"In-Place Holds", type text}, {"Hold State", type text}, {"AD Last Logon", type text}, {"AD Last Logon Quality", type text}, {"Entra Last Sign-In", type text}, {"Entra Last Sign-In Quality", type text}, {"Entra Last Non-Interactive Sign-In", type text}, {"Entra Last Non-Interactive Sign-In Quality", type text}, {"Entra Last Successful Sign-In", type text}, {"Entra Last Successful Sign-In Quality", type text}, {"EXO Last User Action", type text}, {"EXO Last User Action Quality", type text}, {"EXO Last Logon", type text}, {"EXO Last Logon Quality", type text}, {"On-Prem Last Logon", type text}, {"On-Prem Last Logon Quality", type text}, {"Mailbox Usage Last Activity", type text}, {"Mailbox Usage Last Activity Quality", type text}, {"M365 Last Activity", type text}, {"M365 Last Activity Quality", type text}, {"Console Last Activity", type text}, {"Console Last Activity Quality", type text}, {"Entra Match Status", type text}, {"M365 Report Match Status", type text}, {"Mailbox Usage Match Status", type text}, {"Last Activity Date", type text}, {"Last Activity Source", type text}, {"Days Since Last Activity", Int64.Type}, {"Inactivity Bucket", type text}, {"Bucket Sort", Int64.Type}, {"Cleanup State", type text}, {"State Sort", Int64.Type}, {"Decision Reason", type text}, {"Secondary Reasons", type text}, {"Recommended Action", type text}, {"AD Source Status", type text}, {"AD Collected UTC", type text}, {"Entra Source Status", type text}, {"Entra Collected UTC", type text}, {"EXO Source Status", type text}, {"EXO Collected UTC", type text}, {"On-Prem Source Status", type text}, {"On-Prem Collected UTC", type text}, {"M365 Activity Source Status", type text}, {"M365 Activity Report Date", type text}, {"Reference UTC", type text}, {"Evidence Date", type text}, {"Evidence Status", type text}}, "en-US"),
 				 Dates = Table.TransformColumns(Typed, {{"When Created", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Password Last Set", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"AD Last Logon", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Entra Last Sign-In", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Entra Last Non-Interactive Sign-In", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Entra Last Successful Sign-In", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"EXO Last User Action", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"EXO Last Logon", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"On-Prem Last Logon", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Mailbox Usage Last Activity", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"M365 Last Activity", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Console Last Activity", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Last Activity Date", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"AD Collected UTC", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Entra Collected UTC", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"EXO Collected UTC", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"On-Prem Collected UTC", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"M365 Activity Report Date", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Reference UTC", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Evidence Date", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}}),
 				 QualifiedCountry = Table.AddColumn(Dates, "__Qualified Country", each if [Country] = null or Text.Trim([Country]) = "" then "Unknown" else [Country], type text),
 				 CountryRemoved = Table.RemoveColumns(QualifiedCountry, {"Country"}),
 				 CountryRenamed = Table.RenameColumns(CountryRemoved, {{"__Qualified Country", "Country"}})
 				in
-				 Readers[Finish](CountryRenamed)
-
+				 Table.RemoveColumns(Readers[Finish](CountryRenamed), {"User Cleanup Key", "When Created", "Password Last Set", "AD Last Logon", "Entra Last Sign-In", "Entra Last Successful Sign-In", "EXO Last Logon", "Entra Last Non-Interactive Sign-In", "Console Last Activity"})

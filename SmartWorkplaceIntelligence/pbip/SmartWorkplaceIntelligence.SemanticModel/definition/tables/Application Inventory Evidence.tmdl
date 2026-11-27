@@ -88,18 +88,21 @@ table 'Application Inventory Evidence'
 	column 'Application Source ID'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 8646f263-0819-45a5-9a5d-33b81c4eba0c
 		summarizeBy: none
 		sourceColumn: Application Source ID
 
 	column 'Application Name'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 56c2d058-4bdb-4ace-bf1b-1e905de188ad
 		summarizeBy: none
 		sourceColumn: Application Name
 
 	column 'Application Version'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: b726abae-f2dc-4a4a-81af-dd273d06c9ef
 		summarizeBy: none
 		sourceColumn: Application Version
@@ -253,4 +256,3 @@ table 'Application Inventory Evidence'
 				    Typed)
 				in
 				    Readers[Finish](BusinessRows)
-

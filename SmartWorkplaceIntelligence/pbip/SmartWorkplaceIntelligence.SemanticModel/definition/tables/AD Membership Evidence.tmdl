@@ -45,17 +45,10 @@ table 'AD Membership Evidence'
 		sourceColumn: TenantId
 
 	/// Native ADMembership attribute; source qualification is retained.
-	column TenantADMembershipKey
-		dataType: string
-		isHidden
-		lineageTag: 9fc08fc8-3c26-40dc-84d9-5066dc56554b
-		summarizeBy: none
-		sourceColumn: TenantADMembershipKey
-
-	/// Native ADMembership attribute; source qualification is retained.
 	column TenantADGroupKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 73bed2d0-daef-4cf5-a2c1-d806eb8bc60e
 		summarizeBy: none
 		sourceColumn: TenantADGroupKey
@@ -64,6 +57,7 @@ table 'AD Membership Evidence'
 	column TenantGroupKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: c28e5a40-26e2-492a-92a5-be655e992874
 		summarizeBy: none
 		sourceColumn: TenantGroupKey
@@ -72,6 +66,7 @@ table 'AD Membership Evidence'
 	column TenantADObjectKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: c2ce86a1-b2ca-49f9-8e46-3372ebdee731
 		summarizeBy: none
 		sourceColumn: TenantADObjectKey
@@ -80,6 +75,7 @@ table 'AD Membership Evidence'
 	column TenantUserKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 39652628-b0a8-4e8f-9b3b-4f95ed1415d3
 		summarizeBy: none
 		sourceColumn: TenantUserKey
@@ -88,6 +84,7 @@ table 'AD Membership Evidence'
 	column TenantDeviceKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 26f7fc8f-2ec6-4744-b63d-cfd360c656be
 		summarizeBy: none
 		sourceColumn: TenantDeviceKey
@@ -95,6 +92,7 @@ table 'AD Membership Evidence'
 	/// Native ADMembership attribute; source qualification is retained.
 	column GroupObjectGUID
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: b54ec2f9-64cc-4afe-a32d-a7eb3ec0c5ba
 		summarizeBy: none
 		sourceColumn: GroupObjectGUID
@@ -102,6 +100,7 @@ table 'AD Membership Evidence'
 	/// Native ADMembership attribute; source qualification is retained.
 	column GroupSID
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 921db75c-8cdb-4b96-b2a5-71f87e8f30d5
 		summarizeBy: none
 		sourceColumn: GroupSID
@@ -109,6 +108,7 @@ table 'AD Membership Evidence'
 	/// Native ADMembership attribute; source qualification is retained.
 	column MemberDistinguishedName
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 45d5f10d-a75b-4fee-a5be-f24995549cfb
 		summarizeBy: none
 		sourceColumn: MemberDistinguishedName
@@ -116,6 +116,7 @@ table 'AD Membership Evidence'
 	/// Native ADMembership attribute; source qualification is retained.
 	column MemberObjectGUID
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 30c25c38-01fe-492b-9f23-9042e5eb8ac9
 		summarizeBy: none
 		sourceColumn: MemberObjectGUID
@@ -123,6 +124,7 @@ table 'AD Membership Evidence'
 	/// Native ADMembership attribute; source qualification is retained.
 	column MemberSID
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: eebee2bf-c79d-4c09-aa45-9b6997a8bcba
 		summarizeBy: none
 		sourceColumn: MemberSID
@@ -190,5 +192,4 @@ table 'AD Membership Evidence'
 				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("ADMembership.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantADMembershipKey", dataType="String"], [name="TenantADGroupKey", dataType="String"], [name="TenantGroupKey", dataType="String"], [name="TenantADObjectKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="GroupObjectGUID", dataType="String"], [name="GroupSID", dataType="String"], [name="MemberDistinguishedName", dataType="String"], [name="MemberObjectGUID", dataType="String"], [name="MemberSID", dataType="String"], [name="MemberObjectClass", dataType="String"], [name="MembershipKind", dataType="String"], [name="ResolutionStatus", dataType="String"], [name="CloudMatchStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]}))
 				in
-				    Readers[Finish](BusinessRows)
-
+				    Table.RemoveColumns(Readers[Finish](BusinessRows), {"TenantADMembershipKey"})

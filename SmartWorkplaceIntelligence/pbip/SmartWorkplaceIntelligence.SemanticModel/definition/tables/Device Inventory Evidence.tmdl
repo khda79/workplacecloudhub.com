@@ -1185,12 +1185,14 @@ table 'Device Inventory Evidence'
 	/// Current device display name reported by Intune.
 	column 'Device Name'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 89b45d53-c659-4f60-98e3-764835cae1a5
 		sourceColumn: Device Name
 
 	/// Primary user principal name reported for the device; private local evidence.
 	column 'Primary User UPN'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 0e9c063c-0b75-4d23-a2e5-4af2f7112625
 		sourceColumn: Primary User UPN
 
@@ -1313,6 +1315,7 @@ table 'Device Inventory Evidence'
 
 	column 'Enrollment DateTime'
 		dataType: dateTime
+		isAvailableInMdx: false
 		lineageTag: 171e3b39-163d-450e-b02a-2ca6f07465ab
 		summarizeBy: none
 		sourceColumn: Enrollment DateTime
@@ -1320,6 +1323,7 @@ table 'Device Inventory Evidence'
 	/// Most recent Intune synchronization timestamp.
 	column 'Last Sync DateTime'
 		dataType: dateTime
+		isAvailableInMdx: false
 		lineageTag: 182d580f-9153-43f5-8bee-1b60f74701d3
 		summarizeBy: none
 		sourceColumn: Last Sync DateTime
@@ -1327,6 +1331,7 @@ table 'Device Inventory Evidence'
 	/// Earliest available Intune enrollment, Entra registration, or AD creation timestamp.
 	column 'Observed Since'
 		dataType: dateTime
+		isAvailableInMdx: false
 		lineageTag: 3a48c039-5ee2-42c0-8a5d-5a1a22ee40cd
 		summarizeBy: none
 		sourceColumn: Observed Since
@@ -1577,6 +1582,7 @@ table 'Device Inventory Evidence'
 	column 'Device Tenant Key'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: fcbb6dfd-e9e6-4867-ab9c-6df96da1e3a4
 		summarizeBy: none
 		sourceColumn: Device Tenant Key
@@ -1605,6 +1611,7 @@ table 'Device Inventory Evidence'
 			RETURN
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, MAXX ( _adRows, 'AD Computer Evidence'[CreationRaw] ), BLANK () )
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Account lifecycle
 		lineageTag: b5c6795d-21d5-4a73-8acb-93a0b06785fc
 		summarizeBy: none
@@ -1645,6 +1652,7 @@ table 'Device Inventory Evidence'
 		dataType: dateTime
 		isHidden
 		formatString: yyyy-MM-dd HH:mm:ss
+		isAvailableInMdx: false
 		displayFolder: Account lifecycle
 		lineageTag: 96a5d8bc-be45-4d4d-b432-9afe33652251
 		summarizeBy: none
@@ -1863,6 +1871,7 @@ table 'Device Inventory Evidence'
 			VAR _upn=COALESCE('Device Inventory Evidence'[Primary User UPN],IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
 			RETURN IF(ISBLANK(_upn)||TRIM(_upn)="","Not resolved",_upn)
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 70fe4fd5-8c31-40b6-aed9-91335941670d
 
@@ -1877,6 +1886,7 @@ table 'Device Inventory Evidence'
 			VAR _sam=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User SAM],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
 			RETURN COALESCE(_sam,IF(NOT ISBLANK(_upn),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[UserPrincipalName],_upn,'Native User Evidence'[TenantKey],_t,'Native User Evidence'[Loaded Batch ID],_b,BLANK())),"Not resolved")
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 8307459f-9bbe-4504-a497-11b31efa530b
 
@@ -1890,6 +1900,7 @@ table 'Device Inventory Evidence'
 			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
 			RETURN IF(_status="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon User],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())),"Not observed")
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 49a8f3c7-3614-4a05-8ed4-d9567ad19bba
 
@@ -1903,6 +1914,7 @@ table 'Device Inventory Evidence'
 			RETURN IF(IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon UTC],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
 		dataType: dateTime
 		formatString: yyyy-MM-dd HH:mm
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: e08f620f-5ee0-4c46-b2a2-0db7ee59dfb6
 
@@ -1955,4 +1967,3 @@ table 'Device Inventory Evidence'
 				    Readers[Finish](BusinessRows)
 
 	annotation PBI_ResultType = Exception
-

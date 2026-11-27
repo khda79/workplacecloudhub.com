@@ -128,6 +128,7 @@ table 'Native License Assignment'
 	column TenantAssignmentPathKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 282206d4-7535-44cf-9a3f-02cff6e7b404
 		summarizeBy: none
 		sourceColumn: TenantAssignmentPathKey
@@ -136,6 +137,7 @@ table 'Native License Assignment'
 	column TenantUserKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 7baf0db6-a8f5-4cbd-bd26-c31c7d07ae72
 		summarizeBy: none
 		sourceColumn: TenantUserKey
@@ -159,6 +161,7 @@ table 'Native License Assignment'
 	/// Native LicenseAssignmentPath attribute; source qualification is retained.
 	column SourceUserId
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: fad98c18-2767-419a-9ff7-a06babb95cb7
 		summarizeBy: none
 		sourceColumn: SourceUserId
@@ -181,6 +184,7 @@ table 'Native License Assignment'
 	/// Native LicenseAssignmentPath attribute; source qualification is retained.
 	column Account
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: bdf394bb-fbcf-4b7a-966c-0db5cc197724
 		summarizeBy: none
 		sourceColumn: Account
@@ -237,6 +241,7 @@ table 'Native License Assignment'
 	/// Native LicenseAssignmentPath attribute; source qualification is retained.
 	column AssignmentUpdatedRaw
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 247245f6-eeca-4134-8ea6-1880ee0d659b
 		summarizeBy: none
 		sourceColumn: AssignmentUpdatedRaw
@@ -245,6 +250,7 @@ table 'Native License Assignment'
 	column AssignmentUpdatedUtcDateTime
 		dataType: dateTime
 		formatString: yyyy-MM-dd HH:mm:ss
+		isAvailableInMdx: false
 		lineageTag: 9fee086c-949f-44a6-9f19-3f07c9566323
 		summarizeBy: none
 		sourceColumn: AssignmentUpdatedUtcDateTime
@@ -314,4 +320,3 @@ table 'Native License Assignment'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("LicenseAssignmentPath.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantAssignmentPathKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="TenantGroupKey", dataType="String"], [name="TenantSkuKey", dataType="String"], [name="SourceUserId", dataType="String"], [name="AssignedByGroupId", dataType="String"], [name="SkuId", dataType="String"], [name="Account", dataType="String"], [name="Product", dataType="String"], [name="AssignmentRoute", dataType="String"], [name="GroupName", dataType="String"], [name="AssignmentState", dataType="String"], [name="AssignmentError", dataType="String"], [name="ErrorStatus", dataType="String"], [name="DisabledPlanIds", dataType="String"], [name="AssignmentUpdatedRaw", dataType="String"], [name="AssignmentUpdatedUtcDateTime", dataType="DateTime"], [name="AssignmentUpdatedStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="GroupLinkStatus", dataType="String"], [name="UserLinkStatus", dataType="String"], [name="SkuLinkStatus", dataType="String"]}))
 				in
 				    Readers[Finish](BusinessRows)
-

@@ -87,6 +87,7 @@ table 'Native Discovered Application'
 	column TenantApplicationKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 8d86608f-d4d8-430f-8a7d-2bd72ac8a1ef
 		summarizeBy: none
 		sourceColumn: TenantApplicationKey
@@ -94,6 +95,7 @@ table 'Native Discovered Application'
 	/// Native DimDetectedApplication attribute; source qualification is retained.
 	column AppId
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 355e18ba-2539-4eef-8cce-943e153c664a
 		summarizeBy: none
 		sourceColumn: AppId
@@ -101,6 +103,7 @@ table 'Native Discovered Application'
 	/// Native DimDetectedApplication attribute; source qualification is retained.
 	column DisplayName
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 1b6bea74-dd8c-4bc0-8cfc-6b83a462599a
 		summarizeBy: none
 		sourceColumn: DisplayName
@@ -108,6 +111,7 @@ table 'Native Discovered Application'
 	/// Native DimDetectedApplication attribute; source qualification is retained.
 	column Version
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: d410a607-a9ee-4ba3-8121-ba2567ca8022
 		summarizeBy: none
 		sourceColumn: Version
@@ -144,6 +148,7 @@ table 'Native Discovered Application'
 	column SourceApplicationKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 6e941a18-be5d-4f65-b3d2-b68d84b762db
 		summarizeBy: none
 		sourceColumn: SourceApplicationKey
@@ -187,6 +192,7 @@ table 'Native Discovered Application'
 	column 'Application product key'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: a1ca7662-e921-4eca-a8b7-428f620b73ff
 		summarizeBy: none
 		sourceColumn: Application product key
@@ -194,6 +200,7 @@ table 'Native Discovered Application'
 	/// Readable product label grouped by the authoritative normalized product key; similar labels never merge different products.
 	column 'Application product' = LOWER ( TRIM ( COALESCE ( 'Native Discovered Application'[DisplayName], "Unknown application" ) ) ) & " · " & LOWER ( TRIM ( COALESCE ( 'Native Discovered Application'[Publisher], "Unknown publisher" ) ) ) & " · " & LOWER ( TRIM ( COALESCE ( 'Native Discovered Application'[Platform], "Unknown platform" ) ) )
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 1f135a10-b4b2-4a04-ab08-88f879bcb3bc
 		summarizeBy: none
 
@@ -240,4 +247,3 @@ table 'Native Discovered Application'
 				    WithProductKey)
 				in
 				    Readers[Finish](BusinessRows)
-

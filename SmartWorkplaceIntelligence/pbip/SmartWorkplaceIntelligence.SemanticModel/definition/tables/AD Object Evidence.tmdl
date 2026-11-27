@@ -44,6 +44,7 @@ table 'AD Object Evidence'
 	column TenantADObjectKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 8c45d056-c380-4bc7-a7e1-dcbbf169a1da
 		summarizeBy: none
 		sourceColumn: TenantADObjectKey
@@ -51,6 +52,7 @@ table 'AD Object Evidence'
 	/// Native ADDirectoryObject attribute; source qualification is retained.
 	column ObjectGUID
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 0431308e-e87a-47c8-bb6a-e62044e4a683
 		summarizeBy: none
 		sourceColumn: ObjectGUID
@@ -58,6 +60,7 @@ table 'AD Object Evidence'
 	/// Native ADDirectoryObject attribute; source qualification is retained.
 	column ObjectSID
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 63c2984e-4bff-4d11-a761-3d3d8e0687c8
 		summarizeBy: none
 		sourceColumn: ObjectSID
@@ -72,6 +75,7 @@ table 'AD Object Evidence'
 	/// Native ADDirectoryObject attribute; source qualification is retained.
 	column DistinguishedName
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 5a6ab42e-f0d9-4ff9-bb7e-3f3c017fe348
 		summarizeBy: none
 		sourceColumn: DistinguishedName
@@ -126,4 +130,3 @@ table 'AD Object Evidence'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("ADDirectoryObject.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantADObjectKey", dataType="String"], [name="ObjectGUID", dataType="String"], [name="ObjectSID", dataType="String"], [name="DomainName", dataType="String"], [name="DistinguishedName", dataType="String"], [name="ObjectClass", dataType="String"], [name="PrimaryGroupID", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]}))
 				in
 				    Readers[Finish](BusinessRows)
-

@@ -56,6 +56,7 @@ table 'Native Group Evidence'
 	column TenantGroupKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: be5412d3-f1b8-4922-a25d-d137d163290e
 		summarizeBy: none
 		sourceColumn: TenantGroupKey
@@ -64,6 +65,7 @@ table 'Native Group Evidence'
 	column CmdbGroupId
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: c23dc1da-50f5-410c-a4a9-e5d7e39c4578
 		summarizeBy: none
 		sourceColumn: CmdbGroupId
@@ -71,6 +73,7 @@ table 'Native Group Evidence'
 	/// Native DimGroup attribute; source qualification is retained.
 	column DisplayName
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 5d8da629-8661-42cb-bb42-8358f84647b6
 		summarizeBy: none
 		sourceColumn: DisplayName
@@ -99,6 +102,7 @@ table 'Native Group Evidence'
 	/// Native DimGroup attribute; source qualification is retained.
 	column GroupSelection
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 4a674395-3739-43fc-bdaf-04051bd9d48e
 		summarizeBy: none
 		sourceColumn: GroupSelection
@@ -106,6 +110,7 @@ table 'Native Group Evidence'
 	/// Native DimGroup attribute; source qualification is retained.
 	column SourceGroupId
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 6640ef3a-f267-4469-9546-5b78aa781b49
 		summarizeBy: none
 		sourceColumn: SourceGroupId
@@ -175,4 +180,3 @@ table 'Native Group Evidence'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimGroup.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantGroupKey", dataType="String"], [name="CmdbGroupId", dataType="String"], [name="DisplayName", dataType="String"], [name="MailEnabled", dataType="Boolean"], [name="SecurityEnabled", dataType="Boolean"], [name="GroupTypes", dataType="String"], [name="GroupSelection", dataType="String"], [name="SourceGroupId", dataType="String"], [name="MemberStatus", dataType="String"], [name="OwnerStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="ObservedPathCount", dataType="Int64"], [name="ObservedPathStatus", dataType="String"]}))
 				in
 				    Readers[Finish](BusinessRows)
-

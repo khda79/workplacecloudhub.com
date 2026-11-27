@@ -48,6 +48,7 @@ table 'Native Compliance Evidence'
 	column TenantDeviceKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: a78514f8-e321-49fb-91de-d36d0fcae7b6
 		summarizeBy: none
 		sourceColumn: TenantDeviceKey
@@ -56,6 +57,7 @@ table 'Native Compliance Evidence'
 	column CmdbDeviceId
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 26e358c9-71d8-48f7-8de8-2ae145836e70
 		summarizeBy: none
 		sourceColumn: CmdbDeviceId
@@ -71,6 +73,7 @@ table 'Native Compliance Evidence'
 	column LastSyncDateTime
 		dataType: dateTime
 		formatString: yyyy-MM-dd HH:mm:ss
+		isAvailableInMdx: false
 		lineageTag: ecee828b-de11-43ba-af46-381d4e7df60b
 		summarizeBy: none
 		sourceColumn: LastSyncDateTime
@@ -111,4 +114,3 @@ table 'Native Compliance Evidence'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactDeviceCompliance.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="CmdbDeviceId", dataType="String"], [name="ComplianceState", dataType="String"], [name="LastSyncDateTime", dataType="DateTime"], [name="SourceSystem", dataType="String"]}))
 				in
 				    Readers[Finish](BusinessRows)
-

@@ -62,6 +62,7 @@ table 'AD Computer Evidence'
 	column TenantADComputerKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 5bed56af-c1c0-4500-8f5d-c90d7ef11fb6
 		summarizeBy: none
 		sourceColumn: TenantADComputerKey
@@ -69,6 +70,7 @@ table 'AD Computer Evidence'
 	/// Native ADComputerSource attribute; source qualification is retained.
 	column ObjectGUID
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: feec9019-ee1e-4593-9690-156a9ace118a
 		summarizeBy: none
 		sourceColumn: ObjectGUID
@@ -76,6 +78,7 @@ table 'AD Computer Evidence'
 	/// Native ADComputerSource attribute; source qualification is retained.
 	column ObjectSID
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 286d0621-5277-4279-835c-1f936ab51dc5
 		summarizeBy: none
 		sourceColumn: ObjectSID
@@ -90,6 +93,7 @@ table 'AD Computer Evidence'
 	/// Native ADComputerSource attribute; source qualification is retained.
 	column DistinguishedName
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 88d557a1-1cdd-4ed3-8a31-5e0440267df3
 		summarizeBy: none
 		sourceColumn: DistinguishedName
@@ -97,6 +101,7 @@ table 'AD Computer Evidence'
 	/// Native ADComputerSource attribute; source qualification is retained.
 	column Name
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: f3ba2754-4b07-4d31-b8ea-c5c94984fa2b
 		summarizeBy: none
 		sourceColumn: Name
@@ -104,6 +109,7 @@ table 'AD Computer Evidence'
 	/// Native ADComputerSource attribute; source qualification is retained.
 	column DNSHostName
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: fd3a7914-a9a2-4f12-8489-36df3511a8a5
 		summarizeBy: none
 		sourceColumn: DNSHostName
@@ -133,6 +139,7 @@ table 'AD Computer Evidence'
 	column TenantDeviceKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 2aa75964-4107-45b1-a942-9db4ad676151
 		summarizeBy: none
 		sourceColumn: TenantDeviceKey
@@ -147,6 +154,7 @@ table 'AD Computer Evidence'
 	/// Native ADComputerSource attribute; source qualification is retained.
 	column LastLogonTimestampRaw
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: c0239fa9-57dc-48ad-8f2b-17c1eaec1400
 		summarizeBy: none
 		sourceColumn: LastLogonTimestampRaw
@@ -154,6 +162,7 @@ table 'AD Computer Evidence'
 	/// Native ADComputerSource attribute; source qualification is retained.
 	column LastLogonUtcDateTime
 		dataType: dateTime
+		isAvailableInMdx: false
 		lineageTag: 578849fa-d34b-4258-8fe0-eae9e0731527
 		summarizeBy: none
 		sourceColumn: LastLogonUtcDateTime
@@ -168,6 +177,7 @@ table 'AD Computer Evidence'
 	/// Native ADComputerSource attribute; source qualification is retained.
 	column CreationRaw
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 45d2ac30-c54d-48ad-a3f7-cd0989d565c2
 		summarizeBy: none
 		sourceColumn: CreationRaw
@@ -175,6 +185,7 @@ table 'AD Computer Evidence'
 	/// Native ADComputerSource attribute; source qualification is retained.
 	column CreationUtcDateTime
 		dataType: dateTime
+		isAvailableInMdx: false
 		lineageTag: c8935212-3c13-431c-8710-789702535c8d
 		summarizeBy: none
 		sourceColumn: CreationUtcDateTime
@@ -205,6 +216,7 @@ table 'AD Computer Evidence'
 	/// Explicit source observation. Missing historical fields remain unknown.
 	column ModificationRaw
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: a7751e3d-e480-49b7-821b-2d5a0121e181
 		summarizeBy: none
 		sourceColumn: ModificationRaw
@@ -213,6 +225,7 @@ table 'AD Computer Evidence'
 	column ModificationUtcDateTime
 		dataType: dateTime
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: f096206b-af9b-46c6-885f-22045bd92aef
 		summarizeBy: none
 		sourceColumn: ModificationUtcDateTime
@@ -267,4 +280,3 @@ table 'AD Computer Evidence'
 				    Readers[Finish](BusinessRows)
 
 	annotation PBI_ResultType = Exception
-

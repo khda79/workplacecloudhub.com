@@ -68,6 +68,7 @@ table 'Native User Service Plan'
 	column TenantUserKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 0617d522-25fa-44b9-ac02-9a0d8614a9d2
 		summarizeBy: none
 		sourceColumn: TenantUserKey
@@ -92,6 +93,7 @@ table 'Native User Service Plan'
 	column CmdbUserId
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 91a34b4f-d0bd-4a63-8846-e6e2f5d2a895
 		summarizeBy: none
 		sourceColumn: CmdbUserId
@@ -143,6 +145,7 @@ table 'Native User Service Plan'
 	column SourceUserId
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: bd473c7d-06b6-441b-9228-cd055d757f51
 		summarizeBy: none
 		sourceColumn: SourceUserId
@@ -183,4 +186,3 @@ table 'Native User Service Plan'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactUserServicePlan.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantUserKey", dataType="String"], [name="TenantSkuKey", dataType="String"], [name="TenantServicePlanKey", dataType="String"], [name="CmdbUserId", dataType="String"], [name="SkuId", dataType="String"], [name="ServicePlanId", dataType="String"], [name="ServicePlanName", dataType="String"], [name="IsEnabled", dataType="String"], [name="AssignmentState", dataType="String"], [name="SourceSystem", dataType="String"], [name="SourceUserId", dataType="String"], [name="UserLinkStatus", dataType="String"]}))
 				in
 				    Readers[Finish](BusinessRows)
-

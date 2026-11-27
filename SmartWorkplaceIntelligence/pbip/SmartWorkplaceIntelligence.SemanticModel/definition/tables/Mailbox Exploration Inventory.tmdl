@@ -31,18 +31,21 @@ table 'Mailbox Exploration Inventory'
 
 	column 'Mailbox Key'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 8e986681-5c15-45a6-af08-4fa98665d0bf
 		summarizeBy: none
 		sourceColumn: Mailbox Key
 
 	column 'Primary SMTP Address'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: f9bbcf49-bc44-4a5b-b6ef-c3b939718d09
 		summarizeBy: none
 		sourceColumn: Primary SMTP Address
 
 	column 'Display Name'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 93fdfa3e-fc19-48fc-8f18-d20b394c59cc
 		summarizeBy: none
 		sourceColumn: Display Name
@@ -177,18 +180,21 @@ table 'Mailbox Exploration Inventory'
 	column 'Mailbox Identity'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 2fa53df4-1a98-431e-9b5b-e4516a15d5c8
 		summarizeBy: none
 		sourceColumn: Mailbox Identity
 
 	column 'User Principal Name'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: f1149622-bc07-43b0-9769-dd3570d4eae2
 		summarizeBy: none
 		sourceColumn: User Principal Name
 
 	column 'SAM Account Name'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: e6ce7ca6-0165-42a4-a573-6065ceb5a80e
 		summarizeBy: none
 		sourceColumn: SAM Account Name
@@ -337,6 +343,7 @@ table 'Mailbox Exploration Inventory'
 	/// Searchable source label combining name, UPN and SMTP; never used as an identity join.
 	column 'Mailbox Search' = COALESCE('Mailbox Exploration Inventory'[Display Name],"") & " | " & COALESCE('Mailbox Exploration Inventory'[User Principal Name],"") & " | " & COALESCE('Mailbox Exploration Inventory'[Primary SMTP Address],"")
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: b2d156da-95a2-4046-860d-9fe81daf8234
 		summarizeBy: none
 
@@ -537,4 +544,3 @@ table 'Mailbox Exploration Inventory'
 	annotation PBI_NavigationStepName = Navigation
 
 	annotation PBI_ResultType = Table
-

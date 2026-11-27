@@ -16,6 +16,7 @@ table 'User 360 Mailbox Permissions'
 
 	column 'Account Key'
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: e35f6d11-50e1-4ae5-b348-577340146539
 		isNameInferred
 		sourceColumn: [Account Key]

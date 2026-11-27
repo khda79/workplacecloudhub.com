@@ -215,6 +215,7 @@ table 'Native Hardware Evidence'
 	column TenantDeviceKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 8365c755-9d67-4a96-b2a6-0ffc037d872d
 		summarizeBy: none
 		sourceColumn: TenantDeviceKey
@@ -222,6 +223,7 @@ table 'Native Hardware Evidence'
 	/// Native DeviceHardware attribute; source qualification is retained.
 	column ManagedDeviceId
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 0b1a5d6b-0902-45b7-aeb5-6a3dbb6c53bd
 		summarizeBy: none
 		sourceColumn: ManagedDeviceId
@@ -229,6 +231,7 @@ table 'Native Hardware Evidence'
 	/// Native DeviceHardware attribute; source qualification is retained.
 	column SerialNumber
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 8a54a660-f36e-400a-9bd3-33f8a184f995
 		summarizeBy: none
 		sourceColumn: SerialNumber
@@ -334,4 +337,3 @@ table 'Native Hardware Evidence'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DeviceHardware.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="ManagedDeviceId", dataType="String"], [name="SerialNumber", dataType="String"], [name="Manufacturer", dataType="String"], [name="Model", dataType="String"], [name="Storage", dataType="String"], [name="PhysicalMemoryGiB", dataType="Double"], [name="StorageStatus", dataType="String"], [name="MemoryStatus", dataType="String"], [name="HardwareCollectedDateTime", dataType="DateTime"], [name="InventoryCollectedDateTime", dataType="DateTime"], [name="CollectionCoverage", dataType="String"], [name="CollectionMode", dataType="String"]}))
 				in
 				    Readers[Finish](BusinessRows)
-

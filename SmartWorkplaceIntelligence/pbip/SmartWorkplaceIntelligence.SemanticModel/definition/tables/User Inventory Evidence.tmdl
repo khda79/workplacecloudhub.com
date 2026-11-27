@@ -4,7 +4,7 @@ table 'User Inventory Evidence'
 
 	/// Original enabled-workforce population retained. Intersects the new global-account and full-license selections through native source IDs.
 	measure 'Enabled Workforce Accounts' =
-			
+
 			VAR _countries=VALUES('Country Selection'[Country])
 			VAR _domains=VALUES('Daily Domain'[Domain])
 			VAR _cf=ISFILTERED('Country Selection')
@@ -389,18 +389,21 @@ table 'User Inventory Evidence'
 		dataType: string
 		isHidden
 		isKey
+		isAvailableInMdx: false
 		lineageTag: 89e4863d-0135-4e4d-8a6f-f0448375b1ec
 		summarizeBy: none
 		sourceColumn: User Source ID
 
 	column 'User Principal Name'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 0ef2b5e1-5849-494f-9a3c-d9503148bcfd
 		summarizeBy: none
 		sourceColumn: User Principal Name
 
 	column 'Display Name'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 0e85fa37-945a-47e4-9ca5-cc822e9c30a5
 		summarizeBy: none
 		sourceColumn: Display Name
@@ -750,6 +753,7 @@ table 'User Inventory Evidence'
 	column 'Console Last Activity UTC'
 		dataType: dateTime
 		formatString: yyyy-MM-dd HH:mm:ss
+		isAvailableInMdx: false
 		displayFolder: Activity\Console evidence
 		lineageTag: 541b21e5-20ec-458c-9f61-8e7eadbdbb4c
 		summarizeBy: none
@@ -801,6 +805,7 @@ table 'User Inventory Evidence'
 			RETURN
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, MAXX ( _adRows, 'AD User Evidence'[CreationRaw] ), BLANK () )
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Account lifecycle
 		lineageTag: d7cc2bc4-478f-4790-b922-5872f21fa9fa
 		summarizeBy: none
@@ -835,6 +840,7 @@ table 'User Inventory Evidence'
 		dataType: dateTime
 		isHidden
 		formatString: yyyy-MM-dd HH:mm:ss
+		isAvailableInMdx: false
 		displayFolder: Account lifecycle
 		lineageTag: 47cf6065-28d4-4d28-b259-8fbbcbb39538
 		summarizeBy: none
@@ -851,6 +857,7 @@ table 'User Inventory Evidence'
 			RETURN
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, MAXX ( _adRows, 'AD User Evidence'[ModificationRaw] ), BLANK () )
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Account lifecycle
 		lineageTag: 4da0051e-6e92-4e8e-bfb7-e6f8485e5d97
 		summarizeBy: none
@@ -885,6 +892,7 @@ table 'User Inventory Evidence'
 		dataType: dateTime
 		isHidden
 		formatString: yyyy-MM-dd HH:mm:ss
+		isAvailableInMdx: false
 		displayFolder: Account lifecycle
 		lineageTag: 9415f341-d27e-4ea2-90a0-63b56bc640b0
 		summarizeBy: none
@@ -899,6 +907,7 @@ table 'User Inventory Evidence'
 			RETURN
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1, MAXX ( _nativeRows, 'Native User Evidence'[CreationRaw] ), BLANK () )
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Account lifecycle
 		lineageTag: b47be449-d020-4ae7-99e6-52f9448eb66d
 		summarizeBy: none
@@ -929,6 +938,7 @@ table 'User Inventory Evidence'
 		dataType: dateTime
 		isHidden
 		formatString: yyyy-MM-dd HH:mm:ss
+		isAvailableInMdx: false
 		displayFolder: Account lifecycle
 		lineageTag: 4b3556b7-0475-4078-92e6-402f474f7410
 		summarizeBy: none
@@ -1061,4 +1071,3 @@ table 'User Inventory Evidence'
 				    Table.AddColumn(Readers[Finish](BusinessRows), "TenantKey", each PreparedExpectedTenantKey, type text)
 
 	annotation PBI_ResultType = Exception
-

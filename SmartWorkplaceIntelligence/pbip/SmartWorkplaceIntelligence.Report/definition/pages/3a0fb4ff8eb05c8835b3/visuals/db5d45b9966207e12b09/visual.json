@@ -107,20 +107,6 @@
                       "Entity": "AD Membership Evidence"
                     }
                   },
-                  "Property": "TenantADMembershipKey"
-                }
-              },
-              "queryRef": "AD Membership Evidence.TenantADMembershipKey",
-              "nativeQueryRef": "TenantADMembershipKey"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "AD Membership Evidence"
-                    }
-                  },
                   "Property": "TenantADGroupKey"
                 }
               },
@@ -894,41 +880,6 @@
           },
           "selector": {
             "metadata": "AD Membership Evidence.TenantADGroupKey"
-          }
-        },
-        {
-          "properties": {
-            "alignment": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Center'"
-                }
-              }
-            },
-            "styleHeader": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleValues": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleTotal": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            }
-          },
-          "selector": {
-            "metadata": "AD Membership Evidence.TenantADMembershipKey"
           }
         },
         {

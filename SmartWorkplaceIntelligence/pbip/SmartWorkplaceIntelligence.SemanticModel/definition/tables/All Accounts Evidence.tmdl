@@ -24,6 +24,7 @@ table 'All Accounts Evidence'
 	column 'Account Key'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: d7083fd4-2977-47c6-9ca6-028b68d35d59
 		summarizeBy: none
 		sourceColumn: Account Key
@@ -144,4 +145,3 @@ table 'All Accounts Evidence'
 				    NormalizedUtc)
 				in
 				    Readers[Finish](BusinessRows)
-

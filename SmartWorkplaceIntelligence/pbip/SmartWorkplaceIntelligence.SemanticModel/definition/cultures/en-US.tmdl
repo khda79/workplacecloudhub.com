@@ -67526,43 +67526,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "device_system_evidence.azure_AD_device_ID": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Device System Evidence",
-			          "ConceptualProperty": "Azure AD Device ID"
-			        }
-			      },
-			      "State": "Generated",
-			      "Visibility": {
-			        "Value": "Hidden"
-			      },
-			      "Terms": [
-			        {
-			          "azure AD device ID": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "AD device": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "azure AD device": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "AD device ID": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ]
-			    },
 			    "device_system_evidence.country_basis": {
 			      "Definition": {
 			        "Binding": {
@@ -68806,37 +68769,6 @@ cultureInfo en-US
 			        },
 			        {
 			          "key": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ]
-			    },
-			    "endpoint_protection_evidence.endpoint_protection_key": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Endpoint Protection Evidence",
-			          "ConceptualProperty": "Endpoint Protection Key"
-			        }
-			      },
-			      "State": "Generated",
-			      "Visibility": {
-			        "Value": "Hidden"
-			      },
-			      "Terms": [
-			        {
-			          "endpoint protection key": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "key": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "protection key": {
 			            "State": "Generated",
 			            "Weight": 0.97
 			          }
@@ -71523,22 +71455,6 @@ cultureInfo en-US
 			      "Terms": [
 			        {
 			          "install state": {
-			            "State": "Generated"
-			          }
-			        }
-			      ]
-			    },
-			    "intune_managed_app_deployment_evidence.last_modified_time_raw": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Intune Managed App Deployment Evidence",
-			          "ConceptualProperty": "Last Modified Time Raw"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "last modified time raw": {
 			            "State": "Generated"
 			          }
 			        }
@@ -80831,50 +80747,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "AD_membership_evidence.tenant_AD_membership_key": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "AD Membership Evidence",
-			          "ConceptualProperty": "TenantADMembershipKey"
-			        }
-			      },
-			      "State": "Generated",
-			      "Visibility": {
-			        "Value": "Hidden"
-			      },
-			      "Terms": [
-			        {
-			          "tenant AD membership key": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "TenantADMembershipKey": {
-			            "Type": "Noun",
-			            "State": "Generated",
-			            "Weight": 0.99
-			          }
-			        },
-			        {
-			          "key": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "membership key": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "AD membership key": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ]
-			    },
 			    "AD_membership_evidence.tenant_AD_group_key": {
 			      "Definition": {
 			        "Binding": {
@@ -81525,44 +81397,6 @@ cultureInfo en-US
 			        },
 			        {
 			          "tenant": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ]
-			    },
-			    "entra_membership_evidence.tenant_membership_key": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Entra Membership Evidence",
-			          "ConceptualProperty": "TenantMembershipKey"
-			        }
-			      },
-			      "State": "Generated",
-			      "Visibility": {
-			        "Value": "Hidden"
-			      },
-			      "Terms": [
-			        {
-			          "tenant membership key": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "TenantMembershipKey": {
-			            "Type": "Noun",
-			            "State": "Generated",
-			            "Weight": 0.99
-			          }
-			        },
-			        {
-			          "key": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "membership key": {
 			            "State": "Generated",
 			            "Weight": 0.97
 			          }
@@ -89359,50 +89193,6 @@ cultureInfo en-US
 			        },
 			        {
 			          "tenant": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ]
-			    },
-			    "native_device_application.tenant_device_application_key": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Native Device Application",
-			          "ConceptualProperty": "TenantDeviceApplicationKey"
-			        }
-			      },
-			      "State": "Generated",
-			      "Visibility": {
-			        "Value": "Hidden"
-			      },
-			      "Terms": [
-			        {
-			          "tenant device application key": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "TenantDeviceApplicationKey": {
-			            "Type": "Noun",
-			            "State": "Generated",
-			            "Weight": 0.99
-			          }
-			        },
-			        {
-			          "key": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "application key": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "device application key": {
 			            "State": "Generated",
 			            "Weight": 0.97
 			          }
@@ -128666,43 +128456,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "device_readiness_gap_evidence.azure_AD_device_ID": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Device Readiness Gap Evidence",
-			          "ConceptualProperty": "Azure AD Device ID"
-			        }
-			      },
-			      "State": "Generated",
-			      "Visibility": {
-			        "Value": "Hidden"
-			      },
-			      "Terms": [
-			        {
-			          "azure AD device ID": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "AD device": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "azure AD device": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "AD device ID": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ]
-			    },
 			    "device_readiness_gap_evidence.entra_registration_pending": {
 			      "Definition": {
 			        "Binding": {
@@ -133565,72 +133318,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "user_cleanup_evidence.user_cleanup_key": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "User Cleanup Evidence",
-			          "ConceptualProperty": "User Cleanup Key"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "user cleanup key": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "key": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "cleanup key": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ]
-			    },
-			    "user_cleanup_evidence.AD_object_GUID": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "User Cleanup Evidence",
-			          "ConceptualProperty": "AD Object GUID"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "AD object GUID": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "GUID": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ]
-			    },
-			    "user_cleanup_evidence.entra_object_ID": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "User Cleanup Evidence",
-			          "ConceptualProperty": "Entra Object ID"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "entra object ID": {
-			            "State": "Generated"
-			          }
-			        }
-			      ]
-			    },
 			    "user_cleanup_evidence.AD_domain": {
 			      "Definition": {
 			        "Binding": {
@@ -133750,64 +133437,6 @@ cultureInfo en-US
 			          }
 			        }
 			      ]
-			    },
-			    "user_cleanup_evidence.when_created": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "User Cleanup Evidence",
-			          "ConceptualProperty": "When Created"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "when created": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "date": {
-			            "State": "Generated",
-			            "Weight": 0.7
-			          }
-			        }
-			      ],
-			      "SemanticType": "Time"
-			    },
-			    "user_cleanup_evidence.password_last_set": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "User Cleanup Evidence",
-			          "ConceptualProperty": "Password Last Set"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "password last set": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "date": {
-			            "State": "Generated",
-			            "Weight": 0.7
-			          }
-			        },
-			        {
-			          "set": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "last set": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ],
-			      "SemanticType": "Time"
 			    },
 			    "user_cleanup_evidence.password_never_expires": {
 			      "Definition": {
@@ -134183,41 +133812,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "user_cleanup_evidence.AD_last_logon": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "User Cleanup Evidence",
-			          "ConceptualProperty": "AD Last Logon"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "AD last logon": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "date": {
-			            "State": "Generated",
-			            "Weight": 0.7
-			          }
-			        },
-			        {
-			          "logon": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "last logon": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ],
-			      "SemanticType": "Time"
-			    },
 			    "user_cleanup_evidence.AD_last_logon_quality": {
 			      "Definition": {
 			        "Binding": {
@@ -134252,35 +133846,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "user_cleanup_evidence.entra_last_signin": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "User Cleanup Evidence",
-			          "ConceptualProperty": "Entra Last Sign-In"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "entra last sign-in": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "date": {
-			            "State": "Generated",
-			            "Weight": 0.7
-			          }
-			        },
-			        {
-			          "entra last sign in": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ],
-			      "SemanticType": "Time"
-			    },
 			    "user_cleanup_evidence.entra_last_signin_quality": {
 			      "Definition": {
 			        "Binding": {
@@ -134303,35 +133868,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "user_cleanup_evidence.entra_last_noninteractive_signin": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "User Cleanup Evidence",
-			          "ConceptualProperty": "Entra Last Non-Interactive Sign-In"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "entra last non-interactive sign-in": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "date": {
-			            "State": "Generated",
-			            "Weight": 0.7
-			          }
-			        },
-			        {
-			          "entra last non interactive sign in": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ],
-			      "SemanticType": "Time"
-			    },
 			    "user_cleanup_evidence.entra_last_noninteractive_signin_quality": {
 			      "Definition": {
 			        "Binding": {
@@ -134353,35 +133889,6 @@ cultureInfo en-US
 			          }
 			        }
 			      ]
-			    },
-			    "user_cleanup_evidence.entra_last_successful_signin": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "User Cleanup Evidence",
-			          "ConceptualProperty": "Entra Last Successful Sign-In"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "entra last successful sign-in": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "date": {
-			            "State": "Generated",
-			            "Weight": 0.7
-			          }
-			        },
-			        {
-			          "entra last successful sign in": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ],
-			      "SemanticType": "Time"
 			    },
 			    "user_cleanup_evidence.entra_last_successful_signin_quality": {
 			      "Definition": {
@@ -134485,41 +133992,6 @@ cultureInfo en-US
 			          }
 			        }
 			      ]
-			    },
-			    "user_cleanup_evidence.EXO_last_logon": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "User Cleanup Evidence",
-			          "ConceptualProperty": "EXO Last Logon"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "EXO last logon": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "date": {
-			            "State": "Generated",
-			            "Weight": 0.7
-			          }
-			        },
-			        {
-			          "logon": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "last logon": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ],
-			      "SemanticType": "Time"
 			    },
 			    "user_cleanup_evidence.EXO_last_logon_quality": {
 			      "Definition": {
@@ -134765,41 +134237,6 @@ cultureInfo en-US
 			          }
 			        }
 			      ]
-			    },
-			    "user_cleanup_evidence.console_last_activity": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "User Cleanup Evidence",
-			          "ConceptualProperty": "Console Last Activity"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "console last activity": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "date": {
-			            "State": "Generated",
-			            "Weight": 0.7
-			          }
-			        },
-			        {
-			          "activity": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "last activity": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ],
-			      "SemanticType": "Time"
 			    },
 			    "user_cleanup_evidence.console_last_activity_quality": {
 			      "Definition": {
@@ -135498,88 +134935,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "computer_cleanup_evidence.computer_cleanup_key": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Computer Cleanup Evidence",
-			          "ConceptualProperty": "Computer Cleanup Key"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "computer cleanup key": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "key": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "cleanup key": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ]
-			    },
-			    "computer_cleanup_evidence.AD_object_GUID": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Computer Cleanup Evidence",
-			          "ConceptualProperty": "AD Object GUID"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "AD object GUID": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "GUID": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ]
-			    },
-			    "computer_cleanup_evidence.entra_device_ID": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Computer Cleanup Evidence",
-			          "ConceptualProperty": "Entra Device ID"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "entra device ID": {
-			            "State": "Generated"
-			          }
-			        }
-			      ]
-			    },
-			    "computer_cleanup_evidence.intune_device_ID": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Computer Cleanup Evidence",
-			          "ConceptualProperty": "Intune Device ID"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "intune device ID": {
-			            "State": "Generated"
-			          }
-			        }
-			      ]
-			    },
 			    "computer_cleanup_evidence.AD_domain": {
 			      "Definition": {
 			        "Binding": {
@@ -135702,64 +135057,6 @@ cultureInfo en-US
 			          }
 			        }
 			      ]
-			    },
-			    "computer_cleanup_evidence.when_created": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Computer Cleanup Evidence",
-			          "ConceptualProperty": "When Created"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "when created": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "date": {
-			            "State": "Generated",
-			            "Weight": 0.7
-			          }
-			        }
-			      ],
-			      "SemanticType": "Time"
-			    },
-			    "computer_cleanup_evidence.password_last_set": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Computer Cleanup Evidence",
-			          "ConceptualProperty": "Password Last Set"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "password last set": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "date": {
-			            "State": "Generated",
-			            "Weight": 0.7
-			          }
-			        },
-			        {
-			          "set": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "last set": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ],
-			      "SemanticType": "Time"
 			    },
 			    "computer_cleanup_evidence.country": {
 			      "Definition": {
@@ -135894,41 +135191,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "computer_cleanup_evidence.AD_last_logon": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Computer Cleanup Evidence",
-			          "ConceptualProperty": "AD Last Logon"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "AD last logon": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "date": {
-			            "State": "Generated",
-			            "Weight": 0.7
-			          }
-			        },
-			        {
-			          "logon": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "last logon": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ],
-			      "SemanticType": "Time"
-			    },
 			    "computer_cleanup_evidence.AD_last_logon_quality": {
 			      "Definition": {
 			        "Binding": {
@@ -135963,35 +135225,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "computer_cleanup_evidence.entra_last_signin": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Computer Cleanup Evidence",
-			          "ConceptualProperty": "Entra Last Sign-In"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "entra last sign-in": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "date": {
-			            "State": "Generated",
-			            "Weight": 0.7
-			          }
-			        },
-			        {
-			          "entra last sign in": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ],
-			      "SemanticType": "Time"
-			    },
 			    "computer_cleanup_evidence.entra_last_signin_quality": {
 			      "Definition": {
 			        "Binding": {
@@ -136013,29 +135246,6 @@ cultureInfo en-US
 			          }
 			        }
 			      ]
-			    },
-			    "computer_cleanup_evidence.intune_last_sync": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Computer Cleanup Evidence",
-			          "ConceptualProperty": "Intune Last Sync"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "intune last sync": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "date": {
-			            "State": "Generated",
-			            "Weight": 0.7
-			          }
-			        }
-			      ],
-			      "SemanticType": "Time"
 			    },
 			    "computer_cleanup_evidence.intune_last_sync_quality": {
 			      "Definition": {
@@ -136500,34 +135710,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "mailbox_cleanup_evidence.mailbox_cleanup_key": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Mailbox Cleanup Evidence",
-			          "ConceptualProperty": "Mailbox Cleanup Key"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "mailbox cleanup key": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "key": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "cleanup key": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ]
-			    },
 			    "mailbox_cleanup_evidence.mailbox_identity_basis": {
 			      "Definition": {
 			        "Binding": {
@@ -136550,28 +135732,6 @@ cultureInfo en-US
 			        },
 			        {
 			          "identity basis": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ]
-			    },
-			    "mailbox_cleanup_evidence.mailbox_GUID": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Mailbox Cleanup Evidence",
-			          "ConceptualProperty": "Mailbox GUID"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "mailbox GUID": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "GUID": {
 			            "State": "Generated",
 			            "Weight": 0.97
 			          }
@@ -136661,67 +135821,6 @@ cultureInfo en-US
 			      "Terms": [
 			        {
 			          "scope state": {
-			            "State": "Generated"
-			          }
-			        }
-			      ]
-			    },
-			    "mailbox_cleanup_evidence.when_mailbox_created": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Mailbox Cleanup Evidence",
-			          "ConceptualProperty": "When Mailbox Created"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "when mailbox created": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "date": {
-			            "State": "Generated",
-			            "Weight": 0.7
-			          }
-			        }
-			      ],
-			      "SemanticType": "Time"
-			    },
-			    "mailbox_cleanup_evidence.owner_AD_object_GUID": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Mailbox Cleanup Evidence",
-			          "ConceptualProperty": "Owner AD Object GUID"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "owner AD object GUID": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "GUID": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ]
-			    },
-			    "mailbox_cleanup_evidence.owner_entra_object_ID": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Mailbox Cleanup Evidence",
-			          "ConceptualProperty": "Owner Entra Object ID"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "owner entra object ID": {
 			            "State": "Generated"
 			          }
 			        }
@@ -137169,41 +136268,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "mailbox_cleanup_evidence.EXO_last_logon": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Mailbox Cleanup Evidence",
-			          "ConceptualProperty": "EXO Last Logon"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "EXO last logon": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "date": {
-			            "State": "Generated",
-			            "Weight": 0.7
-			          }
-			        },
-			        {
-			          "logon": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "last logon": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ],
-			      "SemanticType": "Time"
-			    },
 			    "mailbox_cleanup_evidence.EXO_last_logon_quality": {
 			      "Definition": {
 			        "Binding": {
@@ -137380,41 +136444,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "mailbox_cleanup_evidence.owner_AD_last_logon": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Mailbox Cleanup Evidence",
-			          "ConceptualProperty": "Owner AD Last Logon"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "owner AD last logon": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "date": {
-			            "State": "Generated",
-			            "Weight": 0.7
-			          }
-			        },
-			        {
-			          "logon": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "last logon": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ],
-			      "SemanticType": "Time"
-			    },
 			    "mailbox_cleanup_evidence.owner_AD_last_logon_quality": {
 			      "Definition": {
 			        "Binding": {
@@ -137448,35 +136477,6 @@ cultureInfo en-US
 			          }
 			        }
 			      ]
-			    },
-			    "mailbox_cleanup_evidence.owner_entra_last_signin": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Mailbox Cleanup Evidence",
-			          "ConceptualProperty": "Owner Entra Last Sign-In"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "owner entra last sign-in": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "date": {
-			            "State": "Generated",
-			            "Weight": 0.7
-			          }
-			        },
-			        {
-			          "owner entra last sign in": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ],
-			      "SemanticType": "Time"
 			    },
 			    "mailbox_cleanup_evidence.owner_entra_last_signin_quality": {
 			      "Definition": {
@@ -137568,41 +136568,6 @@ cultureInfo en-US
 			          }
 			        }
 			      ]
-			    },
-			    "mailbox_cleanup_evidence.owner_console_last_activity": {
-			      "Definition": {
-			        "Binding": {
-			          "ConceptualEntity": "Mailbox Cleanup Evidence",
-			          "ConceptualProperty": "Owner Console Last Activity"
-			        }
-			      },
-			      "State": "Generated",
-			      "Terms": [
-			        {
-			          "owner console last activity": {
-			            "State": "Generated"
-			          }
-			        },
-			        {
-			          "date": {
-			            "State": "Generated",
-			            "Weight": 0.7
-			          }
-			        },
-			        {
-			          "activity": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        },
-			        {
-			          "last activity": {
-			            "State": "Generated",
-			            "Weight": 0.97
-			          }
-			        }
-			      ],
-			      "SemanticType": "Time"
 			    },
 			    "mailbox_cleanup_evidence.owner_console_last_activity_quality": {
 			      "Definition": {
@@ -155807,48 +154772,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "user_cleanup_evidence_is_created_on_when_created": {
-			      "Binding": {
-			        "ConceptualEntity": "User Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "user_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence"
-			          }
-			        },
-			        "user_cleanup_evidence.when_created": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence.when_created"
-			          }
-			        }
-			      },
-			      "SemanticSlots": {
-			        "When": {
-			          "Role": "user_cleanup_evidence.when_created"
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Verb": {
-			            "Verbs": [
-			              {
-			                "create": {
-			                  "State": "Generated"
-			                }
-			              }
-			            ],
-			            "Object": {
-			              "Role": "user_cleanup_evidence"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.9,
-			          "ID": "user_cleanup_evidences_are_created_on_when_created"
-			        }
-			      ]
-			    },
 			    "user_cleanup_evidence_is_collected_on_AD_collected_UTC": {
 			      "Binding": {
 			        "ConceptualEntity": "User Cleanup Evidence"
@@ -156059,48 +154982,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "computer_cleanup_evidence_is_created_on_when_created": {
-			      "Binding": {
-			        "ConceptualEntity": "Computer Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "computer_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "computer_cleanup_evidence"
-			          }
-			        },
-			        "computer_cleanup_evidence.when_created": {
-			          "Target": {
-			            "Entity": "computer_cleanup_evidence.when_created"
-			          }
-			        }
-			      },
-			      "SemanticSlots": {
-			        "When": {
-			          "Role": "computer_cleanup_evidence.when_created"
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Verb": {
-			            "Verbs": [
-			              {
-			                "create": {
-			                  "State": "Generated"
-			                }
-			              }
-			            ],
-			            "Object": {
-			              "Role": "computer_cleanup_evidence"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.9,
-			          "ID": "computer_cleanup_evidences_are_created_on_when_created"
-			        }
-			      ]
-			    },
 			    "computer_cleanup_evidence_is_collected_on_AD_collected_UTC": {
 			      "Binding": {
 			        "ConceptualEntity": "Computer Cleanup Evidence"
@@ -156266,48 +155147,6 @@ cultureInfo en-US
 			          "State": "Generated",
 			          "Weight": 0.9,
 			          "ID": "computer_cleanup_evidences_are_evidenced_on_evidence_dates"
-			        }
-			      ]
-			    },
-			    "mailbox_cleanup_evidence_is_created_on_when_mailbox_created": {
-			      "Binding": {
-			        "ConceptualEntity": "Mailbox Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "mailbox_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "mailbox_cleanup_evidence"
-			          }
-			        },
-			        "mailbox_cleanup_evidence.when_mailbox_created": {
-			          "Target": {
-			            "Entity": "mailbox_cleanup_evidence.when_mailbox_created"
-			          }
-			        }
-			      },
-			      "SemanticSlots": {
-			        "When": {
-			          "Role": "mailbox_cleanup_evidence.when_mailbox_created"
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Verb": {
-			            "Verbs": [
-			              {
-			                "create": {
-			                  "State": "Generated"
-			                }
-			              }
-			            ],
-			            "Object": {
-			              "Role": "mailbox_cleanup_evidence"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.9,
-			          "ID": "mailbox_cleanup_evidences_are_created_on_when_mailbox_created"
 			        }
 			      ]
 			    },
@@ -265369,39 +264208,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "intune_managed_app_deployment_evidence_has_last_modified_time_raw": {
-			      "Binding": {
-			        "ConceptualEntity": "Intune Managed App Deployment Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "intune_managed_app_deployment_evidence": {
-			          "Target": {
-			            "Entity": "intune_managed_app_deployment_evidence"
-			          }
-			        },
-			        "intune_managed_app_deployment_evidence.last_modified_time_raw": {
-			          "Target": {
-			            "Entity": "intune_managed_app_deployment_evidence.last_modified_time_raw"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "intune_managed_app_deployment_evidence"
-			            },
-			            "Object": {
-			              "Role": "intune_managed_app_deployment_evidence.last_modified_time_raw"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "intune_managed_app_deployment_evidences_have_last_modified_time_raw"
-			        }
-			      ]
-			    },
 			    "intune_managed_app_deployment_evidence_has_health_qualification": {
 			      "Binding": {
 			        "ConceptualEntity": "Intune Managed App Deployment Evidence"
@@ -321506,105 +320312,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "user_cleanup_evidence_has_user_cleanup_key": {
-			      "Binding": {
-			        "ConceptualEntity": "User Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "user_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence"
-			          }
-			        },
-			        "user_cleanup_evidence.user_cleanup_key": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence.user_cleanup_key"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "user_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "user_cleanup_evidence.user_cleanup_key"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "user_cleanup_evidences_have_user_cleanup_keys"
-			        }
-			      ]
-			    },
-			    "user_cleanup_evidence_has_AD_object_GUID": {
-			      "Binding": {
-			        "ConceptualEntity": "User Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "user_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence"
-			          }
-			        },
-			        "user_cleanup_evidence.AD_object_GUID": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence.AD_object_GUID"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "user_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "user_cleanup_evidence.AD_object_GUID"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "user_cleanup_evidences_have_AD_object_GUID"
-			        }
-			      ]
-			    },
-			    "user_cleanup_evidence_has_entra_object_ID": {
-			      "Binding": {
-			        "ConceptualEntity": "User Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "user_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence"
-			          }
-			        },
-			        "user_cleanup_evidence.entra_object_ID": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence.entra_object_ID"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "user_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "user_cleanup_evidence.entra_object_ID"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "user_cleanup_evidences_have_entra_object_ID"
-			        }
-			      ]
-			    },
 			    "user_cleanup_evidence_has_sam_account_name": {
 			      "Binding": {
 			        "ConceptualEntity": "User Cleanup Evidence"
@@ -321701,72 +320408,6 @@ cultureInfo en-US
 			          "State": "Generated",
 			          "Weight": 0.99,
 			          "ID": "user_cleanup_evidences_have_display_names"
-			        }
-			      ]
-			    },
-			    "user_cleanup_evidence_has_when_created": {
-			      "Binding": {
-			        "ConceptualEntity": "User Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "user_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence"
-			          }
-			        },
-			        "user_cleanup_evidence.when_created": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence.when_created"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "user_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "user_cleanup_evidence.when_created"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "user_cleanup_evidences_have_when_created"
-			        }
-			      ]
-			    },
-			    "user_cleanup_evidence_has_password_last_set": {
-			      "Binding": {
-			        "ConceptualEntity": "User Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "user_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence"
-			          }
-			        },
-			        "user_cleanup_evidence.password_last_set": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence.password_last_set"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "user_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "user_cleanup_evidence.password_last_set"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "user_cleanup_evidences_have_password_last_sets"
 			        }
 			      ]
 			    },
@@ -322252,39 +320893,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "user_cleanup_evidence_has_AD_last_logon": {
-			      "Binding": {
-			        "ConceptualEntity": "User Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "user_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence"
-			          }
-			        },
-			        "user_cleanup_evidence.AD_last_logon": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence.AD_last_logon"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "user_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "user_cleanup_evidence.AD_last_logon"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "user_cleanup_evidences_have_AD_last_logon"
-			        }
-			      ]
-			    },
 			    "user_cleanup_evidence_has_AD_last_logon_quality": {
 			      "Binding": {
 			        "ConceptualEntity": "User Cleanup Evidence"
@@ -322338,39 +320946,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "user_cleanup_evidence_has_entra_last_signin": {
-			      "Binding": {
-			        "ConceptualEntity": "User Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "user_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence"
-			          }
-			        },
-			        "user_cleanup_evidence.entra_last_signin": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence.entra_last_signin"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "user_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "user_cleanup_evidence.entra_last_signin"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "user_cleanup_evidences_have_entra_last_signin"
-			        }
-			      ]
-			    },
 			    "user_cleanup_evidence_has_entra_last_signin_quality": {
 			      "Binding": {
 			        "ConceptualEntity": "User Cleanup Evidence"
@@ -322404,39 +320979,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "user_cleanup_evidence_has_entra_last_noninteractive_signin": {
-			      "Binding": {
-			        "ConceptualEntity": "User Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "user_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence"
-			          }
-			        },
-			        "user_cleanup_evidence.entra_last_noninteractive_signin": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence.entra_last_noninteractive_signin"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "user_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "user_cleanup_evidence.entra_last_noninteractive_signin"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "user_cleanup_evidences_have_entra_last_noninteractive_signin"
-			        }
-			      ]
-			    },
 			    "user_cleanup_evidence_has_entra_last_noninteractive_signin_quality": {
 			      "Binding": {
 			        "ConceptualEntity": "User Cleanup Evidence"
@@ -322467,39 +321009,6 @@ cultureInfo en-US
 			          "State": "Generated",
 			          "Weight": 0.99,
 			          "ID": "user_cleanup_evidences_have_entra_last_noninteractive_signin_quality"
-			        }
-			      ]
-			    },
-			    "user_cleanup_evidence_has_entra_last_successful_signin": {
-			      "Binding": {
-			        "ConceptualEntity": "User Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "user_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence"
-			          }
-			        },
-			        "user_cleanup_evidence.entra_last_successful_signin": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence.entra_last_successful_signin"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "user_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "user_cleanup_evidence.entra_last_successful_signin"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "user_cleanup_evidences_have_entra_last_successful_signin"
 			        }
 			      ]
 			    },
@@ -322566,39 +321075,6 @@ cultureInfo en-US
 			          "State": "Generated",
 			          "Weight": 0.99,
 			          "ID": "user_cleanup_evidences_have_EXO_last_user_actions"
-			        }
-			      ]
-			    },
-			    "user_cleanup_evidence_has_EXO_last_logon": {
-			      "Binding": {
-			        "ConceptualEntity": "User Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "user_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence"
-			          }
-			        },
-			        "user_cleanup_evidence.EXO_last_logon": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence.EXO_last_logon"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "user_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "user_cleanup_evidence.EXO_last_logon"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "user_cleanup_evidences_have_EXO_last_logons"
 			        }
 			      ]
 			    },
@@ -322850,39 +321326,6 @@ cultureInfo en-US
 			          "State": "Generated",
 			          "Weight": 0.99,
 			          "ID": "user_cleanup_evidences_have_M365_last_activity_qualities"
-			        }
-			      ]
-			    },
-			    "user_cleanup_evidence_has_console_last_activity": {
-			      "Binding": {
-			        "ConceptualEntity": "User Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "user_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence"
-			          }
-			        },
-			        "user_cleanup_evidence.console_last_activity": {
-			          "Target": {
-			            "Entity": "user_cleanup_evidence.console_last_activity"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "user_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "user_cleanup_evidence.console_last_activity"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "user_cleanup_evidences_have_console_last_activities"
 			        }
 			      ]
 			    },
@@ -323916,138 +322359,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "computer_cleanup_evidence_has_computer_cleanup_key": {
-			      "Binding": {
-			        "ConceptualEntity": "Computer Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "computer_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "computer_cleanup_evidence"
-			          }
-			        },
-			        "computer_cleanup_evidence.computer_cleanup_key": {
-			          "Target": {
-			            "Entity": "computer_cleanup_evidence.computer_cleanup_key"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "computer_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "computer_cleanup_evidence.computer_cleanup_key"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "computer_cleanup_evidences_have_computer_cleanup_keys"
-			        }
-			      ]
-			    },
-			    "computer_cleanup_evidence_has_AD_object_GUID": {
-			      "Binding": {
-			        "ConceptualEntity": "Computer Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "computer_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "computer_cleanup_evidence"
-			          }
-			        },
-			        "computer_cleanup_evidence.AD_object_GUID": {
-			          "Target": {
-			            "Entity": "computer_cleanup_evidence.AD_object_GUID"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "computer_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "computer_cleanup_evidence.AD_object_GUID"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "computer_cleanup_evidences_have_AD_object_GUID"
-			        }
-			      ]
-			    },
-			    "computer_cleanup_evidence_has_entra_device_ID": {
-			      "Binding": {
-			        "ConceptualEntity": "Computer Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "computer_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "computer_cleanup_evidence"
-			          }
-			        },
-			        "computer_cleanup_evidence.entra_device_ID": {
-			          "Target": {
-			            "Entity": "computer_cleanup_evidence.entra_device_ID"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "computer_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "computer_cleanup_evidence.entra_device_ID"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "computer_cleanup_evidences_have_entra_device_ids"
-			        }
-			      ]
-			    },
-			    "computer_cleanup_evidence_has_intune_device_ID": {
-			      "Binding": {
-			        "ConceptualEntity": "Computer Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "computer_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "computer_cleanup_evidence"
-			          }
-			        },
-			        "computer_cleanup_evidence.intune_device_ID": {
-			          "Target": {
-			            "Entity": "computer_cleanup_evidence.intune_device_ID"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "computer_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "computer_cleanup_evidence.intune_device_ID"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "computer_cleanup_evidences_have_intune_device_ID"
-			        }
-			      ]
-			    },
 			    "computer_cleanup_evidence_has_operating_system": {
 			      "Binding": {
 			        "ConceptualEntity": "Computer Cleanup Evidence"
@@ -324111,72 +322422,6 @@ cultureInfo en-US
 			          "State": "Generated",
 			          "Weight": 0.99,
 			          "ID": "computer_cleanup_evidences_have_scope_states"
-			        }
-			      ]
-			    },
-			    "computer_cleanup_evidence_has_when_created": {
-			      "Binding": {
-			        "ConceptualEntity": "Computer Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "computer_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "computer_cleanup_evidence"
-			          }
-			        },
-			        "computer_cleanup_evidence.when_created": {
-			          "Target": {
-			            "Entity": "computer_cleanup_evidence.when_created"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "computer_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "computer_cleanup_evidence.when_created"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "computer_cleanup_evidences_have_when_created"
-			        }
-			      ]
-			    },
-			    "computer_cleanup_evidence_has_password_last_set": {
-			      "Binding": {
-			        "ConceptualEntity": "Computer Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "computer_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "computer_cleanup_evidence"
-			          }
-			        },
-			        "computer_cleanup_evidence.password_last_set": {
-			          "Target": {
-			            "Entity": "computer_cleanup_evidence.password_last_set"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "computer_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "computer_cleanup_evidence.password_last_set"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "computer_cleanup_evidences_have_password_last_sets"
 			        }
 			      ]
 			    },
@@ -324345,39 +322590,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "computer_cleanup_evidence_has_AD_last_logon": {
-			      "Binding": {
-			        "ConceptualEntity": "Computer Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "computer_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "computer_cleanup_evidence"
-			          }
-			        },
-			        "computer_cleanup_evidence.AD_last_logon": {
-			          "Target": {
-			            "Entity": "computer_cleanup_evidence.AD_last_logon"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "computer_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "computer_cleanup_evidence.AD_last_logon"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "computer_cleanup_evidences_have_AD_last_logon"
-			        }
-			      ]
-			    },
 			    "computer_cleanup_evidence_has_AD_last_logon_quality": {
 			      "Binding": {
 			        "ConceptualEntity": "Computer Cleanup Evidence"
@@ -324431,39 +322643,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "computer_cleanup_evidence_has_entra_last_signin": {
-			      "Binding": {
-			        "ConceptualEntity": "Computer Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "computer_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "computer_cleanup_evidence"
-			          }
-			        },
-			        "computer_cleanup_evidence.entra_last_signin": {
-			          "Target": {
-			            "Entity": "computer_cleanup_evidence.entra_last_signin"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "computer_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "computer_cleanup_evidence.entra_last_signin"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "computer_cleanup_evidences_have_entra_last_signin"
-			        }
-			      ]
-			    },
 			    "computer_cleanup_evidence_has_entra_last_signin_quality": {
 			      "Binding": {
 			        "ConceptualEntity": "Computer Cleanup Evidence"
@@ -324494,39 +322673,6 @@ cultureInfo en-US
 			          "State": "Generated",
 			          "Weight": 0.99,
 			          "ID": "computer_cleanup_evidences_have_entra_last_signin_quality"
-			        }
-			      ]
-			    },
-			    "computer_cleanup_evidence_has_intune_last_sync": {
-			      "Binding": {
-			        "ConceptualEntity": "Computer Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "computer_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "computer_cleanup_evidence"
-			          }
-			        },
-			        "computer_cleanup_evidence.intune_last_sync": {
-			          "Target": {
-			            "Entity": "computer_cleanup_evidence.intune_last_sync"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "computer_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "computer_cleanup_evidence.intune_last_sync"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "computer_cleanup_evidences_have_intune_last_syncs"
 			        }
 			      ]
 			    },
@@ -325243,39 +323389,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "mailbox_cleanup_evidence_has_mailbox_cleanup_key": {
-			      "Binding": {
-			        "ConceptualEntity": "Mailbox Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "mailbox_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "mailbox_cleanup_evidence"
-			          }
-			        },
-			        "mailbox_cleanup_evidence.mailbox_cleanup_key": {
-			          "Target": {
-			            "Entity": "mailbox_cleanup_evidence.mailbox_cleanup_key"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "mailbox_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "mailbox_cleanup_evidence.mailbox_cleanup_key"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "mailbox_cleanup_evidences_have_mailbox_cleanup_keys"
-			        }
-			      ]
-			    },
 			    "mailbox_cleanup_evidence_has_mailbox_identity_basis": {
 			      "Binding": {
 			        "ConceptualEntity": "Mailbox Cleanup Evidence"
@@ -325306,39 +323419,6 @@ cultureInfo en-US
 			          "State": "Generated",
 			          "Weight": 0.99,
 			          "ID": "mailbox_cleanup_evidences_have_mailbox_identity_bases"
-			        }
-			      ]
-			    },
-			    "mailbox_cleanup_evidence_has_mailbox_GUID": {
-			      "Binding": {
-			        "ConceptualEntity": "Mailbox Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "mailbox_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "mailbox_cleanup_evidence"
-			          }
-			        },
-			        "mailbox_cleanup_evidence.mailbox_GUID": {
-			          "Target": {
-			            "Entity": "mailbox_cleanup_evidence.mailbox_GUID"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "mailbox_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "mailbox_cleanup_evidence.mailbox_GUID"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "mailbox_cleanup_evidences_have_mailbox_GUIDs"
 			        }
 			      ]
 			    },
@@ -325471,105 +323551,6 @@ cultureInfo en-US
 			          "State": "Generated",
 			          "Weight": 0.99,
 			          "ID": "mailbox_cleanup_evidences_have_scope_states"
-			        }
-			      ]
-			    },
-			    "mailbox_cleanup_evidence_has_when_mailbox_created": {
-			      "Binding": {
-			        "ConceptualEntity": "Mailbox Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "mailbox_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "mailbox_cleanup_evidence"
-			          }
-			        },
-			        "mailbox_cleanup_evidence.when_mailbox_created": {
-			          "Target": {
-			            "Entity": "mailbox_cleanup_evidence.when_mailbox_created"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "mailbox_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "mailbox_cleanup_evidence.when_mailbox_created"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "mailbox_cleanup_evidences_have_when_mailbox_created"
-			        }
-			      ]
-			    },
-			    "mailbox_cleanup_evidence_has_owner_AD_object_GUID": {
-			      "Binding": {
-			        "ConceptualEntity": "Mailbox Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "mailbox_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "mailbox_cleanup_evidence"
-			          }
-			        },
-			        "mailbox_cleanup_evidence.owner_AD_object_GUID": {
-			          "Target": {
-			            "Entity": "mailbox_cleanup_evidence.owner_AD_object_GUID"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "mailbox_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "mailbox_cleanup_evidence.owner_AD_object_GUID"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "mailbox_cleanup_evidences_have_owner_AD_object_GUID"
-			        }
-			      ]
-			    },
-			    "mailbox_cleanup_evidence_has_owner_entra_object_ID": {
-			      "Binding": {
-			        "ConceptualEntity": "Mailbox Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "mailbox_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "mailbox_cleanup_evidence"
-			          }
-			        },
-			        "mailbox_cleanup_evidence.owner_entra_object_ID": {
-			          "Target": {
-			            "Entity": "mailbox_cleanup_evidence.owner_entra_object_ID"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "mailbox_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "mailbox_cleanup_evidence.owner_entra_object_ID"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "mailbox_cleanup_evidences_have_owner_entra_object_ID"
 			        }
 			      ]
 			    },
@@ -325969,39 +323950,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "mailbox_cleanup_evidence_has_EXO_last_logon": {
-			      "Binding": {
-			        "ConceptualEntity": "Mailbox Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "mailbox_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "mailbox_cleanup_evidence"
-			          }
-			        },
-			        "mailbox_cleanup_evidence.EXO_last_logon": {
-			          "Target": {
-			            "Entity": "mailbox_cleanup_evidence.EXO_last_logon"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "mailbox_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "mailbox_cleanup_evidence.EXO_last_logon"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "mailbox_cleanup_evidences_have_EXO_last_logons"
-			        }
-			      ]
-			    },
 			    "mailbox_cleanup_evidence_has_EXO_last_logon_quality": {
 			      "Binding": {
 			        "ConceptualEntity": "Mailbox Cleanup Evidence"
@@ -326187,39 +324135,6 @@ cultureInfo en-US
 			        }
 			      ]
 			    },
-			    "mailbox_cleanup_evidence_has_owner_AD_last_logon": {
-			      "Binding": {
-			        "ConceptualEntity": "Mailbox Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "mailbox_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "mailbox_cleanup_evidence"
-			          }
-			        },
-			        "mailbox_cleanup_evidence.owner_AD_last_logon": {
-			          "Target": {
-			            "Entity": "mailbox_cleanup_evidence.owner_AD_last_logon"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "mailbox_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "mailbox_cleanup_evidence.owner_AD_last_logon"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "mailbox_cleanup_evidences_have_owner_AD_last_logon"
-			        }
-			      ]
-			    },
 			    "mailbox_cleanup_evidence_has_owner_AD_last_logon_quality": {
 			      "Binding": {
 			        "ConceptualEntity": "Mailbox Cleanup Evidence"
@@ -326250,39 +324165,6 @@ cultureInfo en-US
 			          "State": "Generated",
 			          "Weight": 0.99,
 			          "ID": "mailbox_cleanup_evidences_have_owner_AD_last_logon_quality"
-			        }
-			      ]
-			    },
-			    "mailbox_cleanup_evidence_has_owner_entra_last_signin": {
-			      "Binding": {
-			        "ConceptualEntity": "Mailbox Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "mailbox_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "mailbox_cleanup_evidence"
-			          }
-			        },
-			        "mailbox_cleanup_evidence.owner_entra_last_signin": {
-			          "Target": {
-			            "Entity": "mailbox_cleanup_evidence.owner_entra_last_signin"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "mailbox_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "mailbox_cleanup_evidence.owner_entra_last_signin"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "mailbox_cleanup_evidences_have_owner_entra_last_signin"
 			        }
 			      ]
 			    },
@@ -326382,39 +324264,6 @@ cultureInfo en-US
 			          "State": "Generated",
 			          "Weight": 0.99,
 			          "ID": "mailbox_cleanup_evidences_have_owner_M365_last_activity_qualities"
-			        }
-			      ]
-			    },
-			    "mailbox_cleanup_evidence_has_owner_console_last_activity": {
-			      "Binding": {
-			        "ConceptualEntity": "Mailbox Cleanup Evidence"
-			      },
-			      "State": "Generated",
-			      "Roles": {
-			        "mailbox_cleanup_evidence": {
-			          "Target": {
-			            "Entity": "mailbox_cleanup_evidence"
-			          }
-			        },
-			        "mailbox_cleanup_evidence.owner_console_last_activity": {
-			          "Target": {
-			            "Entity": "mailbox_cleanup_evidence.owner_console_last_activity"
-			          }
-			        }
-			      },
-			      "Phrasings": [
-			        {
-			          "Attribute": {
-			            "Subject": {
-			              "Role": "mailbox_cleanup_evidence"
-			            },
-			            "Object": {
-			              "Role": "mailbox_cleanup_evidence.owner_console_last_activity"
-			            }
-			          },
-			          "State": "Generated",
-			          "Weight": 0.99,
-			          "ID": "mailbox_cleanup_evidences_have_owner_console_last_activities"
 			        }
 			      ]
 			    },

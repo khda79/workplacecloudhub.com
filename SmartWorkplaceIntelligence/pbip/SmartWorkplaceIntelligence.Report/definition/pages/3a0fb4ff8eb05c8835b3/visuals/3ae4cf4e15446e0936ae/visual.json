@@ -79,20 +79,6 @@
                       "Entity": "Entra Membership Evidence"
                     }
                   },
-                  "Property": "TenantMembershipKey"
-                }
-              },
-              "queryRef": "Entra Membership Evidence.TenantMembershipKey",
-              "nativeQueryRef": "TenantMembershipKey"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Entra Membership Evidence"
-                    }
-                  },
                   "Property": "TenantGroupKey"
                 }
               },
@@ -670,41 +656,6 @@
           },
           "selector": {
             "metadata": "Entra Membership Evidence.TenantGroupKey"
-          }
-        },
-        {
-          "properties": {
-            "alignment": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Center'"
-                }
-              }
-            },
-            "styleHeader": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleValues": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleTotal": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            }
-          },
-          "selector": {
-            "metadata": "Entra Membership Evidence.TenantMembershipKey"
           }
         },
         {

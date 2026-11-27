@@ -63,6 +63,7 @@ table 'License User Assignments'
 	column 'User Key'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 8b685767-09b5-495d-b818-35bf20c647ab
 		summarizeBy: none
 		sourceColumn: User Key
@@ -70,6 +71,7 @@ table 'License User Assignments'
 	column 'Assignment Key'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 6c25a63a-926b-48cc-a2dc-75f12e030786
 		summarizeBy: none
 		sourceColumn: Assignment Key
@@ -77,12 +79,14 @@ table 'License User Assignments'
 	column 'User ID'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 858377ef-99c6-4fcc-b528-cdac258c59bc
 		summarizeBy: none
 		sourceColumn: User ID
 
 	column 'User Principal Name'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 354a64b4-fe11-43c9-81c4-036d74e9d0f9
 		summarizeBy: none
 		sourceColumn: User Principal Name
@@ -190,4 +194,3 @@ table 'License User Assignments'
 				        #"Loaded Batch ID"=row[#"Loaded Batch ID"]]),
 				    Output = if not Safe then error "License scope inputs require one common loaded batch" else if not SkuSafe then error "Ambiguous license SKU identity" else Table.FromRecords(Records,type table [TenantKey=text,#"User Key"=text,#"Assignment Key"=text,#"User ID"=nullable text,#"User Principal Name"=nullable text,#"SKU ID"=text,#"License Product"=text,#"Report Product"=nullable text,Country=text,#"AD Domain"=nullable text,#"Identity Qualification"=text,#"Loaded Batch ID"=text])
 				in Output
-

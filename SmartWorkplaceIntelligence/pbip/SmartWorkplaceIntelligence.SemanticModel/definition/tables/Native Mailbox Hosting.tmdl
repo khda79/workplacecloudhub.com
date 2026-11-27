@@ -122,6 +122,7 @@ table 'Native Mailbox Hosting'
 	column MailboxHostingKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 55695049-c99e-4ebe-82b6-2627dd808b07
 		summarizeBy: none
 		sourceColumn: MailboxHostingKey
@@ -190,4 +191,3 @@ table 'Native Mailbox Hosting'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactMailboxHosting.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="MailboxHostingKey", dataType="String"], [name="CountryLabel", dataType="String"], [name="HostingLocation", dataType="String"], [name="RecipientTypeDetails", dataType="String"], [name="MailboxTypeGroup", dataType="String"], [name="EvidenceSource", dataType="String"]}))
 				in
 				    Readers[Finish](BusinessRows)
-

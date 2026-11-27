@@ -53,6 +53,7 @@ table 'Collaboration Object Evidence'
 	column 'Object ID'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 8dd1dd22-a705-4e1b-ad08-9837adada9c1
 		summarizeBy: none
 		sourceColumn: Object ID
@@ -61,6 +62,7 @@ table 'Collaboration Object Evidence'
 
 	column 'Object Name'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 51bbe7b0-160e-4f0a-b50d-15fb77f1b112
 		summarizeBy: none
 		sourceColumn: Object Name
@@ -166,6 +168,7 @@ table 'Collaboration Object Evidence'
 	column 'Storage Used GB'
 		dataType: double
 		formatString: #,0.0
+		isAvailableInMdx: false
 		lineageTag: 8e76f484-e13c-4607-b147-74d2fe81f597
 		summarizeBy: sum
 		sourceColumn: Storage Used GB
@@ -256,4 +259,3 @@ table 'Collaboration Object Evidence'
 				    Typed)
 				in
 				    Readers[Finish](BusinessRows)
-

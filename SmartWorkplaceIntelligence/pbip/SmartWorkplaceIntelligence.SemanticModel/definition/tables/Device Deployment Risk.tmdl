@@ -23,6 +23,7 @@ table 'Device Deployment Risk'
 
 	column 'Inventory Key'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 2f19f98b-3059-463a-878d-84e0146d3353
 		summarizeBy: none
 		sourceColumn: Inventory Key
@@ -279,4 +280,3 @@ table 'Device Deployment Risk'
 				    Output=if not BatchSafe then error "Device risk inputs require one common prepared batch" else if Table.RowCount(CheckedRaw)<0 then error "Invalid AD risk artifact" else Table.FromRecords(Rows,Fields,MissingField.UseNull),
 				    Typed=Table.TransformColumnTypes(Output,List.Transform(List.RemoveItems(Fields,{"Enrollment At Risk","Enrollment Unknown Evidence","Windows 11 At Risk","Windows 11 Unknown Evidence","Observed Build"}),each {_,type text})&List.Transform({"Enrollment At Risk","Enrollment Unknown Evidence","Windows 11 At Risk","Windows 11 Unknown Evidence"},each {_,type logical})&{{"Observed Build",Int64.Type}})
 				in Typed
-

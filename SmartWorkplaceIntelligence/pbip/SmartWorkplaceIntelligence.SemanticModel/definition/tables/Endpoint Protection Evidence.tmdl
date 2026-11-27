@@ -104,18 +104,11 @@ table 'Endpoint Protection Evidence'
 		summarizeBy: none
 		sourceColumn: TenantKey
 
-	/// Prepared Endpoint Protection Key. Retains source qualification.
-	column 'Endpoint Protection Key'
-		dataType: string
-		isHidden
-		lineageTag: 2b594401-f127-41fb-8c36-90d077e262b1
-		summarizeBy: none
-		sourceColumn: Endpoint Protection Key
-
 	/// Prepared Device Source ID. Retains source qualification.
 	column 'Device Source ID'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 238c5ade-79ca-409b-bcb3-3782c0627509
 		summarizeBy: none
 		sourceColumn: Device Source ID
@@ -194,6 +187,7 @@ table 'Endpoint Protection Evidence'
 	/// Prepared Observation UTC. Retains source qualification.
 	column 'Observation UTC'
 		dataType: dateTime
+		isAvailableInMdx: false
 		lineageTag: 6d8229f8-0a95-4191-9400-811ae8102270
 		summarizeBy: none
 		sourceColumn: Observation UTC
@@ -221,6 +215,28 @@ table 'Endpoint Protection Evidence'
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
 
+	/// Unique AD domain in Device Identity Inventory for the tenant, loaded batch and device source ID. Unresolved or conflicting matches remain blank.
+	column 'AD Domain' =
+			VAR Tenant = 'Endpoint Protection Evidence'[TenantKey]
+			VAR BatchId = 'Endpoint Protection Evidence'[Loaded Batch ID]
+			VAR DeviceId = 'Endpoint Protection Evidence'[Device Source ID]
+			VAR MatchedDomain =
+			    IF (
+			        NOT ISBLANK ( Tenant ) && NOT ISBLANK ( BatchId ) && NOT ISBLANK ( DeviceId ),
+			        LOOKUPVALUE (
+			            'Device Identity Inventory'[AD Domain],
+			            'Device Identity Inventory'[TenantKey], Tenant,
+			            'Device Identity Inventory'[Loaded Batch ID], BatchId,
+			            'Device Identity Inventory'[Device Source ID], DeviceId,
+			            BLANK ()
+			        )
+			    )
+			RETURN IF ( MatchedDomain <> "Unknown", MatchedDomain )
+		dataType: string
+		isHidden
+		lineageTag: 95bee504-ceed-4831-9dd4-8ab9fd0d389a
+		summarizeBy: none
+
 	partition 'Endpoint Protection Evidence' = m
 		mode: import
 		source =
@@ -246,5 +262,4 @@ table 'Endpoint Protection Evidence'
 				    Typed = Table.TransformColumnTypes(TypedSpecial, {{"TenantKey", type text}, {"Endpoint Protection Key", type text}, {"Device Source ID", type text}, {"Country", type text}, {"Policy Version", type text}, {"Scope ID", type text}, {"Role", type text}, {"Expected Product", type text}, {"Expected Mode", type text}, {"Evaluation State", type text}, {"Evaluation Reason", type text}, {"Registration State", type text}, {"Evidence Source", type text}, {"Freshness", type text}, {"Exception Reason", type text}})
 				in Typed)
 				in
-				    Readers[Finish](BusinessRows)
-
+				    Table.RemoveColumns(Readers[Finish](BusinessRows), {"Endpoint Protection Key"})

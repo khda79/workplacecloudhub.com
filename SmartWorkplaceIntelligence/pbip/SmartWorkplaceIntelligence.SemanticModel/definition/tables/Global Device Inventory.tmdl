@@ -1267,16 +1267,19 @@ table 'Global Device Inventory'
 		lineageTag: bad89215-7495-4d85-9016-a24a3b2c19f5
 
 	column 'Device Source ID'
+		isAvailableInMdx: false
 		lineageTag: 5c638206-060f-4738-9e94-8da204c0e51a
 		isNameInferred
 		sourceColumn: [Device Source ID]
 
 	column 'Device Name'
+		isAvailableInMdx: false
 		lineageTag: 8e9b19f7-a061-49b3-ac96-7c422661841a
 		isNameInferred
 		sourceColumn: [Device Name]
 
 	column 'Primary User UPN'
+		isAvailableInMdx: false
 		lineageTag: c709de6e-5f0a-4b10-bba9-70b290b3284a
 		isNameInferred
 		sourceColumn: [Primary User UPN]
@@ -1457,16 +1460,19 @@ table 'Global Device Inventory'
 		sourceColumn: [Stop Error Count]
 
 	column 'Last Sync DateTime'
+		isAvailableInMdx: false
 		lineageTag: c725dd2f-bf8c-4088-a199-4e996eef8abd
 		isNameInferred
 		sourceColumn: [Last Sync DateTime]
 
 	column 'Observed Since'
+		isAvailableInMdx: false
 		lineageTag: a16b8502-6700-443c-b3b4-d59ea3813f4d
 		isNameInferred
 		sourceColumn: [Observed Since]
 
 	column 'Inventory Key'
+		isAvailableInMdx: false
 		lineageTag: 1a69cfd7-a88d-4913-82e2-a58e1f405241
 		isNameInferred
 		sourceColumn: [Inventory Key]
@@ -1492,6 +1498,7 @@ table 'Global Device Inventory'
 		sourceColumn: [AD Match Qualification]
 
 	column 'AD Created (source)'
+		isAvailableInMdx: false
 		lineageTag: 9c6e9c0d-2ee6-4ad9-b950-9558204e9a54
 		isNameInferred
 		sourceColumn: [AD Created (source)]
@@ -1567,6 +1574,7 @@ table 'Global Device Inventory'
 		sourceColumn: [System Freshness]
 
 	column 'System Observation (source)'
+		isAvailableInMdx: false
 		lineageTag: a4e4879e-ba7b-41d0-b668-a724e6887362
 		isNameInferred
 		sourceColumn: [System Observation (source)]
@@ -1622,26 +1630,31 @@ table 'Global Device Inventory'
 		sourceColumn: [AD Password Expired]
 
 	column 'Canonical Device Key'
+		isAvailableInMdx: false
 		lineageTag: 9b781854-1c97-489f-b54d-3e7864f98c1b
 		isNameInferred
 		sourceColumn: [Canonical Device Key]
 
 	column 'Native Device Key'
+		isAvailableInMdx: false
 		lineageTag: ce48af15-69ae-4462-962f-8f9ea9cb846e
 		isNameInferred
 		sourceColumn: [Native Device Key]
 
 	column 'AD Computer Key'
+		isAvailableInMdx: false
 		lineageTag: c1084904-34fd-4eb0-9af3-0f0c2050e32a
 		isNameInferred
 		sourceColumn: [AD Computer Key]
 
 	column 'Primary User Source ID'
+		isAvailableInMdx: false
 		lineageTag: 4d48953d-7dbc-4e4c-b6e9-a7c8d30349e5
 		isNameInferred
 		sourceColumn: [Primary User Source ID]
 
 	column 'Primary User SAM'
+		isAvailableInMdx: false
 		lineageTag: 1997126b-2b8e-4aa3-9980-2920e7d54395
 		isNameInferred
 		sourceColumn: [Primary User SAM]
@@ -1667,6 +1680,7 @@ table 'Global Device Inventory'
 	column 'Last Activity UTC' = VAR _nk=[Native Device Key] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] RETURN IF(NOT ISBLANK(_nk),MAXX(FILTER('Device Source Evidence',[TenantDeviceKey]=_nk && [TenantKey]=_t && [Loaded Batch ID]=_b),[ActivityUtcDateTime]))
 		dataType: dateTime
 		formatString: yyyy-MM-dd HH:mm
+		isAvailableInMdx: false
 		lineageTag: 84157ff2-a45b-4a37-8c77-9505a8f21935
 
 	/// Cached source-qualified inventory detail; computed only from existing loaded evidence, identical identifier matching to Inventory Enrollment Risk.
@@ -1847,6 +1861,7 @@ table 'Global Device Inventory'
 			VAR _upn=COALESCE('Global Device Inventory'[Primary User UPN],IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
 			RETURN IF(ISBLANK(_upn)||TRIM(_upn)="","Not resolved",_upn)
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 6cdb688d-993f-4ef4-b729-2b9ec1e6cde8
 
@@ -1861,6 +1876,7 @@ table 'Global Device Inventory'
 			VAR _sam=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User SAM],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
 			RETURN COALESCE(_sam,IF(NOT ISBLANK(_upn),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[UserPrincipalName],_upn,'Native User Evidence'[TenantKey],_t,'Native User Evidence'[Loaded Batch ID],_b,BLANK())),"Not resolved")
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: f3a8ff16-65ed-4e34-84f8-84a4ee34d107
 
@@ -1874,6 +1890,7 @@ table 'Global Device Inventory'
 			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
 			RETURN IF(_status="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon User],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())),"Not observed")
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 7e8b9c6d-4b7a-45f1-8e19-13ed8e30ceb3
 
@@ -1887,6 +1904,7 @@ table 'Global Device Inventory'
 			RETURN IF(IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon UTC],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
 		dataType: dateTime
 		formatString: yyyy-MM-dd HH:mm
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 1e7a16e3-1c36-4789-8bd2-ac90d79cabea
 
@@ -1909,6 +1927,7 @@ table 'Global Device Inventory'
 			RETURN IF(LEFT(_canonical,3)="ad:",_canonical,IF(NOT ISBLANK(_id)&&_id<>"","intune:"&LOWER(_id)))
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		displayFolder: Device qualification
 		lineageTag: 37d699a8-6ee2-4f4c-9304-6d3a6baec7e8
 		summarizeBy: none
@@ -2001,6 +2020,7 @@ table 'Global Device Inventory'
 
 	column 'AD Distinguished Name (migration)' = VAR _key=[AD Computer Key] RETURN IF(NOT ISBLANK(_key),LOOKUPVALUE('AD Computer Evidence'[DistinguishedName],'AD Computer Evidence'[TenantADComputerKey],_key))
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 1f57950c-3b61-4c5d-82f6-783653a78977
 
 	column 'AD Computers Container (migration)' = VAR _dn=SUBSTITUTE(UPPER([AD Distinguished Name (migration)]),"\\,","#ESCAPEDCOMMA#") VAR _comma=FIND(",",_dn,1,0) RETURN SWITCH(TRUE(),ISBLANK([AD Distinguished Name (migration)]),"AD path unavailable",_comma>0 && LEFT(MID(_dn,_comma+1,999),16)="CN=COMPUTERS,DC=","CN=Computers","Other AD location")
@@ -2016,6 +2036,7 @@ table 'Global Device Inventory'
 			VAR SuffixCount=CALCULATE(COUNTROWS('Global Device Inventory'),ALLEXCEPT('Global Device Inventory','Global Device Inventory'[Device 360 Label Base],'Global Device Inventory'[TenantKey],'Global Device Inventory'[Device 360 ID Suffix]))
 			RETURN B & IF(BaseCount>1 && TenantCount>1," · "&COALESCE(T,"Unknown tenant")) & IF(BaseCount>1 && SameTenantCount>1," · "&IF(SuffixCount=1,"…"&Tail,'Global Device Inventory'[Canonical Device Key]))
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: cbf6071f-e707-4c0d-9ba3-bd8f7fa0a85c
 		summarizeBy: none
 
@@ -2024,11 +2045,13 @@ table 'Global Device Inventory'
 			RETURN COALESCE(N,"Unknown device") & " · " & COALESCE(O,"Unknown ownership") & IF(NOT ISBLANK(D) && D<>"Unknown"," · "&D)
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: cd82e66c-ed9b-4212-a76d-6fabc3b9053d
 
 	column 'Device 360 ID Suffix' = UPPER(RIGHT('Global Device Inventory'[Canonical Device Key],8))
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 0b70cbf0-faa7-4104-9336-2d558be2e30e
 
 	partition 'Global Device Inventory' = calculated

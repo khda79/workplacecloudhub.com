@@ -754,6 +754,7 @@ table 'Device System Evidence'
 		dataType: string
 		isHidden
 		isNullable: false
+		isAvailableInMdx: false
 		lineageTag: 052dee24-2462-4b01-9e29-f14b019b46e9
 		summarizeBy: none
 		sourceColumn: Device System Key
@@ -762,6 +763,7 @@ table 'Device System Evidence'
 	column 'Device Source ID'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: fd9b7d89-248e-4bc5-82f9-4eb377ea38ca
 		summarizeBy: none
 		sourceColumn: Device Source ID
@@ -769,22 +771,17 @@ table 'Device System Evidence'
 	/// Observed device name for display only; never used for identity deduplication.
 	column 'Device Name'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 111360bd-2ecd-45a6-af42-1966f3d41106
 		summarizeBy: none
 		sourceColumn: Device Name
 
 	/// Prepared Azure AD Device ID observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
-	column 'Azure AD Device ID'
-		dataType: string
-		isHidden
-		lineageTag: 5608d195-d062-44bc-b731-61a176687ea9
-		summarizeBy: none
-		sourceColumn: Azure AD Device ID
-
 	/// Prepared Primary User UPN observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
 	column 'Primary User UPN'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 924e9e03-c4f0-428e-aa36-2c829012ee38
 		summarizeBy: none
 		sourceColumn: Primary User UPN
@@ -824,6 +821,7 @@ table 'Device System Evidence'
 	/// Original PlatformScriptLastUpdate value. Absence of a timezone is not silently interpreted as UTC.
 	column 'Observation Raw'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 20290a2a-ca55-49a7-a56d-48b708ededbd
 		summarizeBy: none
 		sourceColumn: Observation Raw
@@ -833,6 +831,7 @@ table 'Device System Evidence'
 		dataType: dateTime
 		isHidden
 		formatString: yyyy-mm-dd hh:mm:ss
+		isAvailableInMdx: false
 		lineageTag: e634b74a-1f50-47be-8287-8761b1fb277f
 		summarizeBy: none
 		sourceColumn: Observation UTC
@@ -849,6 +848,7 @@ table 'Device System Evidence'
 	column 'Observation Age Hours'
 		dataType: double
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: fe13779f-4127-4d9d-9f08-45ac82234e16
 		summarizeBy: none
 		sourceColumn: Observation Age Hours
@@ -932,6 +932,7 @@ table 'Device System Evidence'
 	/// Single consolidated value for equivalent boot aliases. Endpoint-local time; no inferred UTC or additional boot indicators.
 	column 'Last Boot Time'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 0d7efdbd-195e-4cb4-a6d5-c36197e4bf3a
 		summarizeBy: none
 		sourceColumn: Last Boot Time
@@ -1059,6 +1060,7 @@ table 'Device System Evidence'
 	/// Original source value retained for traceability; normalization never converts missingness or error into a confirmed adverse state.
 	column 'Last Sync Raw'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 4740f1e3-08d7-4a5c-8cbf-bdc88ec6d24b
 		summarizeBy: none
 		sourceColumn: Last Sync Raw
@@ -1068,6 +1070,7 @@ table 'Device System Evidence'
 		dataType: dateTime
 		isHidden
 		formatString: yyyy-mm-dd hh:mm:ss
+		isAvailableInMdx: false
 		lineageTag: 200dc10f-596f-422b-bff4-bce84e397168
 		summarizeBy: none
 		sourceColumn: Last Sync UTC
@@ -1218,6 +1221,7 @@ table 'Device System Evidence'
 	column 'Last Console Logon User'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: ea62c7fa-c014-41c8-9cfc-a975f30ba916
 		summarizeBy: none
 		sourceColumn: Last Console Logon User
@@ -1226,6 +1230,7 @@ table 'Device System Evidence'
 	column 'Last Console Logon UTC'
 		dataType: dateTime
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: ae81c6a1-3884-4e08-a232-90e4a28b1b4f
 		summarizeBy: none
 		sourceColumn: Last Console Logon UTC
@@ -1242,6 +1247,7 @@ table 'Device System Evidence'
 	column 'Last Console Logon SID'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 3d5cc533-bb6c-4959-9d88-c4b9c015ac00
 		summarizeBy: none
 		sourceColumn: Last Console Logon SID
@@ -1292,6 +1298,7 @@ table 'Device System Evidence'
 			VAR _upn=COALESCE('Device System Evidence'[Primary User UPN],IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
 			RETURN IF(ISBLANK(_upn)||TRIM(_upn)="","Not resolved",_upn)
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 944a9bcd-c200-46be-a151-ead1bddfd37f
 
@@ -1306,6 +1313,7 @@ table 'Device System Evidence'
 			VAR _sam=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User SAM],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
 			RETURN COALESCE(_sam,IF(NOT ISBLANK(_upn),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[UserPrincipalName],_upn,'Native User Evidence'[TenantKey],_t,'Native User Evidence'[Loaded Batch ID],_b,BLANK())),"Not resolved")
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 8c4dd99e-e39f-44c8-8792-942abd12b2dc
 
@@ -1337,7 +1345,6 @@ table 'Device System Evidence'
 				    Typed = Table.TransformColumnTypes(TypedNumbers, {{"TenantKey", type text}, {"Device System Key", type text}, {"Device Source ID", type text}, {"Device Name", type text}, {"Azure AD Device ID", type text}, {"Primary User UPN", type text}, {"Country", type text}, {"Country Basis", type text}, {"Inventory Match", type text}, {"Prepared Inventory Match", type text}, {"Observation Raw", type text}, {"Observation Time Basis", type text}, {"Freshness", type text}, {"Secure Boot State", type text}, {"Secure Boot Raw", type text}, {"BIOS Version", type text}, {"BIOS Date", type text}, {"BIOS Date Quality", type text}, {"Firmware Type", type text}, {"Firmware Raw", type text}, {"Last Boot Time", type text}, {"Last Boot Quality", type text}, {"Local Encryption State", type text}, {"Inventory Encryption State", type text}, {"Encryption Comparison", type text}, {"VBS State", type text}, {"VBS Raw", type text}, {"VBS Hardware Requirements", type text}, {"VBS Hardware Raw", type text}, {"Credential Guard State", type text}, {"Credential Guard Raw", type text}, {"Management State", type text}, {"Management Raw", type text}, {"Compliance State", type text}, {"Compliance Raw", type text}, {"Inventory Compliance State", type text}, {"Compliance Comparison", type text}, {"Last Sync Raw", type text}, {"Last Sync Time Basis", type text}, {"Third Party AV State", type text}, {"Third Party AV Raw", type text}, {"Third Party AV Products", type text}, {"Expected AV Name", type text}, {"Expected AV State", type text}, {"Expected AV Raw", type text}, {"AV Qualification", type text}, {"AV Comparison", type text}, {"Windows Update Reboot Required", type text}, {"Windows Update Reboot Raw", type text}, {"BitLocker OS Protection", type text}, {"BitLocker OS Protection Raw", type text}, {"BitLocker OS Conversion", type text}, {"BitLocker OS Conversion Raw", type text}, {"Data Quality Issues", type text}, {"Local Data Source", type text}, {"Local Data Freshness", type text}, {"Last Console Logon Status", type text}, {"Last Console Logon User", type text}, {"Last Console Logon Quality", type text}, {"Last Console Logon SID", type text}})
 				in Typed)
 				in
-				    Readers[Finish](BusinessRows)
+				    Table.RemoveColumns(Readers[Finish](BusinessRows), {"Azure AD Device ID"})
 
 	annotation PBI_ResultType = Exception
-

@@ -1073,26 +1073,22 @@ table 'Device Readiness Gap Evidence'
 	column 'Device Source ID'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 89932175-9590-46ae-b388-9d8e492a2ebe
 		summarizeBy: none
 		sourceColumn: Device Source ID
 
 	column 'Device Name'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 82480bec-43ce-4e32-b5b6-bcee2e457b38
 		summarizeBy: none
 		sourceColumn: Device Name
 
-	column 'Azure AD Device ID'
-		dataType: string
-		isHidden
-		lineageTag: 7d89acba-e9a9-411c-9cd5-c7abaefa6f0d
-		summarizeBy: none
-		sourceColumn: Azure AD Device ID
-
 	column 'AD Object GUID'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: a15ff094-ae82-44d1-ad43-fa81f711ac11
 		summarizeBy: none
 		sourceColumn: AD Object GUID
@@ -1123,6 +1119,7 @@ table 'Device Readiness Gap Evidence'
 
 	column 'Last Reboot (source)'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 8a5b490b-3cb6-4c23-8ed2-09606fdbe59f
 		summarizeBy: none
 		sourceColumn: Last Reboot (source)
@@ -1247,6 +1244,7 @@ table 'Device Readiness Gap Evidence'
 	column 'Backlog Device Key'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 3e43f2bb-55f5-5f27-875c-87d351daea96
 		summarizeBy: none
 		sourceColumn: Backlog Device Key
@@ -1322,6 +1320,7 @@ table 'Device Readiness Gap Evidence'
 			VAR _matches=FILTER(ALL('Device Inventory Evidence'),'Device Inventory Evidence'[Device Source ID]=_id && 'Device Inventory Evidence'[TenantKey]=_t && 'Device Inventory Evidence'[Loaded Batch ID]=_b)
 			RETURN IF(NOT ISBLANK(_id) && COUNTROWS(_matches)=1,COALESCE(MAXX(_matches,'Device Inventory Evidence'[Primary User (report)]),"Not resolved"),"Not resolved")
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 2be7f2f8-7d4c-5366-9aeb-5f872797f39b
 
 	partition 'Device Readiness Gap Evidence' = m
@@ -1376,5 +1375,4 @@ table 'Device Readiness Gap Evidence'
 				      #"Backlog Device Key"=if K[Key]([Device Source ID])<>"" then "intune:"&K[Key]([Device Source ID]) else if K[Key]([AD Object GUID])<>"" then "ad:"&K[Key]([AD Object GUID]) else "unresolved",
 				      #"Migration Firmware State"=K[OrState]([#"ISSUE-070 State"],[#"ISSUE-070B State"])],type record),
 				 Expanded=Table.ExpandRecordColumn(Added,"__context",{"Backlog Country","Backlog AD Domain","Country Match State","Domain Match State","Backlog Device Key","Migration Firmware State"})
-				in Expanded
-
+				in Table.RemoveColumns(Expanded, {"Azure AD Device ID"})

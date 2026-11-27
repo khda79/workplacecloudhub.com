@@ -88,6 +88,7 @@ table 'Native EXO Mailbox'
 	column TenantMailboxKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 7d200eab-bee5-4cbe-9156-2159cb309cbd
 		summarizeBy: none
 		sourceColumn: TenantMailboxKey
@@ -96,6 +97,7 @@ table 'Native EXO Mailbox'
 	column TenantUserKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 2d453063-ebb5-4fc1-a0c1-6860a0414a46
 		summarizeBy: none
 		sourceColumn: TenantUserKey
@@ -104,6 +106,7 @@ table 'Native EXO Mailbox'
 	column CmdbMailboxId
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: c8119879-d652-41c6-9d0c-3e03bd156b10
 		summarizeBy: none
 		sourceColumn: CmdbMailboxId
@@ -112,6 +115,7 @@ table 'Native EXO Mailbox'
 	column CmdbUserId
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: e678ba83-61f1-4c14-9716-004825d72d6a
 		summarizeBy: none
 		sourceColumn: CmdbUserId
@@ -140,6 +144,7 @@ table 'Native EXO Mailbox'
 	/// Native FactMailbox attribute; source qualification is retained.
 	column DisplayName
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 52078d8f-9496-4ec8-b801-f88987e53ca3
 		summarizeBy: none
 		sourceColumn: DisplayName
@@ -147,6 +152,7 @@ table 'Native EXO Mailbox'
 	/// Native FactMailbox attribute; source qualification is retained.
 	column PrimarySmtpAddress
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: dee4781f-e09f-4d6c-a7a1-88141f350de6
 		summarizeBy: none
 		sourceColumn: PrimarySmtpAddress
@@ -161,6 +167,7 @@ table 'Native EXO Mailbox'
 	/// Native FactMailbox attribute; source qualification is retained.
 	column DisplayNameLabel
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 6e641c63-988b-4ea8-bce9-e247da7e5f1e
 		summarizeBy: none
 		sourceColumn: DisplayNameLabel
@@ -168,6 +175,7 @@ table 'Native EXO Mailbox'
 	/// Native FactMailbox attribute; source qualification is retained.
 	column PrimarySmtpAddressLabel
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 3c719ac1-200f-431f-90e2-1d08fb5a24be
 		summarizeBy: none
 		sourceColumn: PrimarySmtpAddressLabel
@@ -197,11 +205,13 @@ table 'Native EXO Mailbox'
 
 	column 'User Principal Name' = RELATED('Native User Evidence'[UserPrincipalName])
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 92db81f3-e061-4031-b302-0b39349a0150
 		summarizeBy: none
 
 	column 'SAM Account Name' = RELATED('Native User Evidence'[SAM Account Name])
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: ca3f4087-b04c-427f-ba34-900b4ce0ccaf
 		summarizeBy: none
 
@@ -237,4 +247,3 @@ table 'Native EXO Mailbox'
 				    Readers[Finish](BusinessRows)
 
 	annotation PBI_ResultType = Exception
-

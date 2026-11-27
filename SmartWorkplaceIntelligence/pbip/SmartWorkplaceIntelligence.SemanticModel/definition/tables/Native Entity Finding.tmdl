@@ -108,6 +108,7 @@ table 'Native Entity Finding'
 	column TenantFindingKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: a74560cd-7d7e-4fce-945b-24472bfd2ffa
 		summarizeBy: none
 		sourceColumn: TenantFindingKey
@@ -124,6 +125,7 @@ table 'Native Entity Finding'
 	column TenantDeviceKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 6614f1e1-06d5-4ecc-a31b-a56962b35037
 		summarizeBy: none
 		sourceColumn: TenantDeviceKey
@@ -146,6 +148,7 @@ table 'Native Entity Finding'
 	/// Native EntityFinding attribute; source qualification is retained.
 	column EntityId
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: d24e6353-d6f8-45b3-a410-f2764aa90ab8
 		summarizeBy: none
 		sourceColumn: EntityId
@@ -222,4 +225,3 @@ table 'Native Entity Finding'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("EntityFinding.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantFindingKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="TenantGroupKey", dataType="String"], [name="EntityType", dataType="String"], [name="EntityId", dataType="String"], [name="Severity", dataType="String"], [name="FindingType", dataType="String"], [name="Description", dataType="String"], [name="RecommendedAction", dataType="String"], [name="DetectedDateTime", dataType="DateTime"], [name="LinkStatus", dataType="String"]}))
 				in
 				    Readers[Finish](BusinessRows)
-

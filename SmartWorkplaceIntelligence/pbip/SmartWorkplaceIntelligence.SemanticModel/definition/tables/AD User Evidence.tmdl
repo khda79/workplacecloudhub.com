@@ -54,6 +54,7 @@ table 'AD User Evidence'
 	column TenantADUserKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 4832e1b7-8c04-4566-ac91-7a172808fa7d
 		summarizeBy: none
 		sourceColumn: TenantADUserKey
@@ -61,6 +62,7 @@ table 'AD User Evidence'
 	/// Native ADUserSource attribute; source qualification is retained.
 	column ObjectGUID
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 89d0258b-954a-4952-9a5b-eb826ade4a46
 		summarizeBy: none
 		sourceColumn: ObjectGUID
@@ -68,6 +70,7 @@ table 'AD User Evidence'
 	/// Native ADUserSource attribute; source qualification is retained.
 	column ObjectSID
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 25e8d398-6855-4e54-829f-b0547457980f
 		summarizeBy: none
 		sourceColumn: ObjectSID
@@ -82,6 +85,7 @@ table 'AD User Evidence'
 	/// Native ADUserSource attribute; source qualification is retained.
 	column DistinguishedName
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 6c004ad8-a739-46d4-96b0-f70c653b0dc9
 		summarizeBy: none
 		sourceColumn: DistinguishedName
@@ -89,6 +93,7 @@ table 'AD User Evidence'
 	/// Native ADUserSource attribute; source qualification is retained.
 	column SamAccountName
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 7f914357-74f0-482a-a7ac-3af961ad7160
 		summarizeBy: none
 		sourceColumn: SamAccountName
@@ -96,6 +101,7 @@ table 'AD User Evidence'
 	/// Native ADUserSource attribute; source qualification is retained.
 	column UserPrincipalName
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: f97f0aca-6eed-4f0c-b20f-8a50e67938c7
 		summarizeBy: none
 		sourceColumn: UserPrincipalName
@@ -103,6 +109,7 @@ table 'AD User Evidence'
 	/// Native ADUserSource attribute; source qualification is retained.
 	column DisplayName
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 4bc098bb-b0df-4f79-89f3-acc04f895c34
 		summarizeBy: none
 		sourceColumn: DisplayName
@@ -153,6 +160,7 @@ table 'AD User Evidence'
 	column TenantUserKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 2100aad9-0753-44cf-b9d4-d6594bf731ff
 		summarizeBy: none
 		sourceColumn: TenantUserKey
@@ -167,6 +175,7 @@ table 'AD User Evidence'
 	/// Native ADUserSource attribute; source qualification is retained.
 	column LastLogonTimestampRaw
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: e4b0e3d0-c0e4-4f03-a248-6d5972922e36
 		summarizeBy: none
 		sourceColumn: LastLogonTimestampRaw
@@ -174,6 +183,7 @@ table 'AD User Evidence'
 	/// Native ADUserSource attribute; source qualification is retained.
 	column LastLogonUtcDateTime
 		dataType: dateTime
+		isAvailableInMdx: false
 		lineageTag: 8b9d7247-d0ad-486c-bef6-56e9782ef933
 		summarizeBy: none
 		sourceColumn: LastLogonUtcDateTime
@@ -188,6 +198,7 @@ table 'AD User Evidence'
 	/// Native ADUserSource attribute; source qualification is retained.
 	column CreationRaw
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: be7c5fc4-938a-4ce8-9a7d-7cf3a00305e4
 		summarizeBy: none
 		sourceColumn: CreationRaw
@@ -195,6 +206,7 @@ table 'AD User Evidence'
 	/// Native ADUserSource attribute; source qualification is retained.
 	column CreationUtcDateTime
 		dataType: dateTime
+		isAvailableInMdx: false
 		lineageTag: 3d185d2f-f419-4bee-b4c0-924c0eeab29c
 		summarizeBy: none
 		sourceColumn: CreationUtcDateTime
@@ -225,6 +237,7 @@ table 'AD User Evidence'
 	/// Explicit source observation. Missing historical fields remain unknown.
 	column ModificationRaw
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: a1f2624a-4292-4aac-9f33-7265582cabf1
 		summarizeBy: none
 		sourceColumn: ModificationRaw
@@ -233,6 +246,7 @@ table 'AD User Evidence'
 	column ModificationUtcDateTime
 		dataType: dateTime
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 3e25d410-8bfa-4ece-afc4-cff76ca5a98c
 		summarizeBy: none
 		sourceColumn: ModificationUtcDateTime
@@ -295,4 +309,3 @@ table 'AD User Evidence'
 				    Readers[Finish](BusinessRows)
 
 	annotation PBI_ResultType = Exception
-

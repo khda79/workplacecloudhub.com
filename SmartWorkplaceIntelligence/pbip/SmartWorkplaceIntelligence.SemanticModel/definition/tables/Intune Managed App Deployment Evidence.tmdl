@@ -75,14 +75,6 @@ table 'Intune Managed App Deployment Evidence'
 		summarizeBy: none
 		sourceColumn: TenantKey
 
-	/// Prepared IntuneManagedAppDeploymentEvidence.csv: EvidenceKey. Reported source scope only; not whole-tenant coverage or endpoint health.
-	column 'Evidence Key'
-		dataType: string
-		isHidden
-		lineageTag: 520e7aa5-b732-46dc-b08e-a0ec4ff0d558
-		summarizeBy: none
-		sourceColumn: EvidenceKey
-
 	/// Prepared IntuneManagedAppDeploymentEvidence.csv: ReceiptRunId. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Receipt Run ID'
 		dataType: string
@@ -119,6 +111,7 @@ table 'Intune Managed App Deployment Evidence'
 	column 'Source Record'
 		dataType: double
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 53ea0aec-20f6-4af3-a815-cd841cc100ae
 		summarizeBy: sum
 		sourceColumn: SourceRecord
@@ -144,6 +137,7 @@ table 'Intune Managed App Deployment Evidence'
 	/// Prepared IntuneManagedAppDeploymentEvidence.csv: DeviceId. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Device ID'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 8757af3a-e69f-47a7-b291-b0ce72b0fe72
 		summarizeBy: none
 		sourceColumn: DeviceId
@@ -151,6 +145,7 @@ table 'Intune Managed App Deployment Evidence'
 	/// Prepared IntuneManagedAppDeploymentEvidence.csv: UserPrincipalName. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'User Principal Name'
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: a8812e13-7777-4f7b-bd4b-b6ff7e2b3ac0
 		summarizeBy: none
 		sourceColumn: UserPrincipalName
@@ -196,13 +191,6 @@ table 'Intune Managed App Deployment Evidence'
 		lineageTag: 66b07c98-fe4c-4249-9f62-2991253629e3
 		summarizeBy: none
 		sourceColumn: ErrorCode
-
-	/// Prepared IntuneManagedAppDeploymentEvidence.csv: LastModifiedDateTime. Reported source scope only; not whole-tenant coverage or endpoint health.
-	column 'Last Modified Time Raw'
-		dataType: string
-		lineageTag: b69fb29a-6e6d-497b-8fb5-9b3c170097ec
-		summarizeBy: none
-		sourceColumn: LastModifiedDateTime
 
 	/// Prepared IntuneManagedAppDeploymentEvidence.csv: SourceStatusUTC. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Source Status UTC'
@@ -251,6 +239,7 @@ table 'Intune Managed App Deployment Evidence'
 	column 'Device Key'
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: e2d70430-3fc8-4c5e-b36a-1fd1e88abbcd
 		summarizeBy: none
 		sourceColumn: Device Key
@@ -274,6 +263,7 @@ table 'Intune Managed App Deployment Evidence'
 			VAR _upn=COALESCE(BLANK(),IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
 			RETURN IF(ISBLANK(_upn)||TRIM(_upn)="","Not resolved",_upn)
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: a6258a38-8341-4883-8240-445c510cf0e6
 
@@ -288,6 +278,7 @@ table 'Intune Managed App Deployment Evidence'
 			VAR _sam=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User SAM],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
 			RETURN COALESCE(_sam,IF(NOT ISBLANK(_upn),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[UserPrincipalName],_upn,'Native User Evidence'[TenantKey],_t,'Native User Evidence'[Loaded Batch ID],_b,BLANK())),"Not resolved")
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 7fdbb1a3-6cd3-439e-8437-c430a2f2b8f2
 
@@ -301,6 +292,7 @@ table 'Intune Managed App Deployment Evidence'
 			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
 			RETURN IF(_status="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon User],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())),"Not observed")
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 0ed95f24-5e97-4669-b102-37b41c9c6ecb
 
@@ -314,6 +306,7 @@ table 'Intune Managed App Deployment Evidence'
 			RETURN IF(IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon UTC],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
 		dataType: dateTime
 		formatString: yyyy-MM-dd HH:mm
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 55123f62-3090-4a56-aec7-29d02f37e1b3
 
@@ -340,6 +333,7 @@ table 'Intune Managed App Deployment Evidence'
 			 RETURN IF(NOT ISBLANK(_uid) && _upn='Intune Managed App Deployment Evidence'[User Principal Name],LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[SourceUserId],_uid,'Native User Evidence'[TenantKey],_tenant,'Native User Evidence'[Loaded Batch ID],_batch))) RETURN _display
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 03c4ef94-7d10-424c-bd60-f73f856799e1
 
 	column 'Device 360 Install Order' = SWITCH('Intune Managed App Deployment Evidence'[Reported Deployment State],"ReportedFailure",1,"Pending",2,"ReportedNotInstalled",3,"Unknown",4,"NotApplicable",5,"ReportedInstalled",6,4)
@@ -399,4 +393,4 @@ table 'Intune Managed App Deployment Evidence'
 				in
 				    WithDeviceKey)
 				in
-				    Readers[Finish](BusinessRows)
+				    Table.RemoveColumns(Readers[Finish](BusinessRows), {"EvidenceKey", "LastModifiedDateTime"})

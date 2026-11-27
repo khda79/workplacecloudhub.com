@@ -216,6 +216,7 @@ table 'Native Device Evidence'
 	column TenantDeviceKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 0918cb60-ce65-47a6-b9aa-4fa9d84ee462
 		summarizeBy: none
 		sourceColumn: TenantDeviceKey
@@ -224,6 +225,7 @@ table 'Native Device Evidence'
 	column CmdbDeviceId
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 8f2eee1a-7618-4eb5-8067-2416c69e4eb3
 		summarizeBy: none
 		sourceColumn: CmdbDeviceId
@@ -231,6 +233,7 @@ table 'Native Device Evidence'
 	/// Native DimDevice attribute; source qualification is retained.
 	column DeviceName
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: f9fc83e8-aa71-4742-9932-382c2e9adc56
 		summarizeBy: none
 		sourceColumn: DeviceName
@@ -287,6 +290,7 @@ table 'Native Device Evidence'
 	/// Native DimDevice attribute; source qualification is retained.
 	column DeviceNameLabel
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 6817ab96-d5f0-45b1-a0da-dd5045ac016e
 		summarizeBy: none
 		sourceColumn: DeviceNameLabel
@@ -336,6 +340,7 @@ table 'Native Device Evidence'
 	/// Native DimDevice attribute; source qualification is retained.
 	column DeviceSelection
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: ad90de44-d4b8-4b62-9504-c33e9a2d10e0
 		summarizeBy: none
 		sourceColumn: DeviceSelection
@@ -343,6 +348,7 @@ table 'Native Device Evidence'
 	/// Native DimDevice attribute; source qualification is retained.
 	column SourceDeviceId
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 368f0279-cd7c-4a0d-9ddd-611578a723f6
 		summarizeBy: none
 		sourceColumn: SourceDeviceId
@@ -357,6 +363,7 @@ table 'Native Device Evidence'
 	/// Native DimDevice attribute; source qualification is retained.
 	column AssociatedAccount
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 6ad0d641-5899-4096-8875-ad216028b60b
 		summarizeBy: none
 		sourceColumn: AssociatedAccount
@@ -392,6 +399,7 @@ table 'Native Device Evidence'
 	/// Native DimDevice attribute; source qualification is retained.
 	column PrimaryUserSourceId
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 9d444815-b08c-44d6-bb74-813260508067
 		summarizeBy: none
 		sourceColumn: PrimaryUserSourceId
@@ -399,6 +407,7 @@ table 'Native Device Evidence'
 	/// Native DimDevice attribute; source qualification is retained.
 	column SyncRaw
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 673aeee7-7764-44d0-a158-6e70ee774593
 		summarizeBy: none
 		sourceColumn: SyncRaw
@@ -407,6 +416,7 @@ table 'Native Device Evidence'
 	column SyncUtcDateTime
 		dataType: dateTime
 		formatString: yyyy-MM-dd HH:mm:ss
+		isAvailableInMdx: false
 		lineageTag: 4f29bfb2-b5a0-413d-ae69-342ee460bd12
 		summarizeBy: none
 		sourceColumn: SyncUtcDateTime
@@ -554,6 +564,7 @@ table 'Native Device Evidence'
 			VAR _upn=COALESCE(BLANK(),IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Native Device Key],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
 			RETURN IF(ISBLANK(_upn)||TRIM(_upn)="","Not resolved",_upn)
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: fc489415-a6fd-4547-bb39-40a0d598ba0a
 
@@ -568,6 +579,7 @@ table 'Native Device Evidence'
 			VAR _sam=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User SAM],'Global Device Inventory'[Native Device Key],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
 			RETURN COALESCE(_sam,IF(NOT ISBLANK(_upn),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[UserPrincipalName],_upn,'Native User Evidence'[TenantKey],_t,'Native User Evidence'[Loaded Batch ID],_b,BLANK())),"Not resolved")
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 802324ae-48a2-412b-b5e3-cd5c8d51752e
 
@@ -581,6 +593,7 @@ table 'Native Device Evidence'
 			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
 			RETURN IF(_status="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon User],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())),"Not observed")
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 543329ca-d7fc-4dec-bc68-27471dac1b94
 
@@ -594,6 +607,7 @@ table 'Native Device Evidence'
 			RETURN IF(IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon UTC],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
 		dataType: dateTime
 		formatString: yyyy-MM-dd HH:mm
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 5a2c997d-67c7-4cee-beec-dfdc5b4b772f
 
@@ -633,4 +647,3 @@ table 'Native Device Evidence'
 				    Readers[Finish](BusinessRows)
 
 	annotation PBI_ResultType = Exception
-

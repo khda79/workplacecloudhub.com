@@ -14,16 +14,19 @@ table 'Device Identity Inventory'
 		lineageTag: 943ff70d-fd69-4989-b61a-52eb13e81022
 
 	column 'Device Source ID'
+		isAvailableInMdx: false
 		lineageTag: 4a47afc2-f3cb-479b-9ec0-9464b31a5ff9
 		isNameInferred
 		sourceColumn: [Device Source ID]
 
 	column 'Device Name'
+		isAvailableInMdx: false
 		lineageTag: 277c7849-71f0-441b-b0d0-bf1da7dec5b2
 		isNameInferred
 		sourceColumn: [Device Name]
 
 	column 'Primary User UPN'
+		isAvailableInMdx: false
 		lineageTag: e0f3a686-58d0-4086-927b-bf8a63263b0b
 		isNameInferred
 		sourceColumn: [Primary User UPN]
@@ -204,16 +207,19 @@ table 'Device Identity Inventory'
 		sourceColumn: [Stop Error Count]
 
 	column 'Last Sync DateTime'
+		isAvailableInMdx: false
 		lineageTag: c41c4f35-acd0-4afe-a62b-e5f7fb471bc4
 		isNameInferred
 		sourceColumn: [Last Sync DateTime]
 
 	column 'Observed Since'
+		isAvailableInMdx: false
 		lineageTag: 620b961b-48ad-491d-9608-b7ba09132eec
 		isNameInferred
 		sourceColumn: [Observed Since]
 
 	column 'Inventory Key'
+		isAvailableInMdx: false
 		lineageTag: efa04a31-9f79-4fc4-8fd9-d776d8ff2faf
 		isNameInferred
 		sourceColumn: [Inventory Key]
@@ -239,6 +245,7 @@ table 'Device Identity Inventory'
 		sourceColumn: [AD Match Qualification]
 
 	column 'AD Created (source)'
+		isAvailableInMdx: false
 		lineageTag: fbae7aa6-2e88-4375-9828-8985bbc92f8e
 		isNameInferred
 		sourceColumn: [AD Created (source)]
@@ -314,6 +321,7 @@ table 'Device Identity Inventory'
 		sourceColumn: [System Freshness]
 
 	column 'System Observation (source)'
+		isAvailableInMdx: false
 		lineageTag: baa53fb8-c826-4986-ad86-e44864e220c8
 		isNameInferred
 		sourceColumn: [System Observation (source)]
@@ -369,26 +377,31 @@ table 'Device Identity Inventory'
 		sourceColumn: [AD Password Expired]
 
 	column 'Canonical Device Key'
+		isAvailableInMdx: false
 		lineageTag: 8a226ab9-831e-4443-a123-a9aac073c32f
 		isNameInferred
 		sourceColumn: [Canonical Device Key]
 
 	column 'Native Device Key'
+		isAvailableInMdx: false
 		lineageTag: 71ae8885-f660-4cb8-8241-101f2f07d024
 		isNameInferred
 		sourceColumn: [Native Device Key]
 
 	column 'AD Computer Key'
+		isAvailableInMdx: false
 		lineageTag: 4e55c2aa-bd6c-409b-a565-95a1da027203
 		isNameInferred
 		sourceColumn: [AD Computer Key]
 
 	column 'Primary User Source ID'
+		isAvailableInMdx: false
 		lineageTag: e9cd8dd8-7c7a-4eac-856c-092afc7cdc80
 		isNameInferred
 		sourceColumn: [Primary User Source ID]
 
 	column 'Primary User SAM'
+		isAvailableInMdx: false
 		lineageTag: 6f3bd43e-8d6a-402f-96fd-fa9b72c4cc51
 		isNameInferred
 		sourceColumn: [Primary User SAM]
@@ -412,6 +425,7 @@ table 'Device Identity Inventory'
 			VAR _upn=COALESCE('Device Identity Inventory'[Primary User UPN],IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
 			RETURN IF(ISBLANK(_upn)||TRIM(_upn)="","Not resolved",_upn)
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: b02ac8c6-5cfc-4148-9533-1ccca958da9f
 
@@ -426,6 +440,7 @@ table 'Device Identity Inventory'
 			VAR _sam=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User SAM],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
 			RETURN COALESCE(_sam,IF(NOT ISBLANK(_upn),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[UserPrincipalName],_upn,'Native User Evidence'[TenantKey],_t,'Native User Evidence'[Loaded Batch ID],_b,BLANK())),"Not resolved")
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: ba4e22ed-8bfc-41c5-b817-8ff7c623fffe
 
@@ -439,6 +454,7 @@ table 'Device Identity Inventory'
 			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
 			RETURN IF(_status="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon User],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())),"Not observed")
 		dataType: string
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 658d72b4-7946-4371-b77f-672dc126e108
 
@@ -452,6 +468,7 @@ table 'Device Identity Inventory'
 			RETURN IF(IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon UTC],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
 		dataType: dateTime
 		formatString: yyyy-MM-dd HH:mm
+		isAvailableInMdx: false
 		displayFolder: Report identity context
 		lineageTag: 93be6d1a-a5df-4792-8f05-bac4d01efb91
 
@@ -474,6 +491,7 @@ table 'Device Identity Inventory'
 			RETURN IF(LEFT(_canonical,3)="ad:",_canonical,IF(NOT ISBLANK(_id)&&_id<>"","intune:"&LOWER(_id)))
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		displayFolder: Device qualification
 		lineageTag: e6adf116-4035-45f7-91cd-ef8f522a0c30
 		summarizeBy: none
@@ -649,4 +667,3 @@ table 'Device Identity Inventory'
 				"AD Computer Key",[__ADNativeKey],
 				"Primary User Source ID",[__PrimaryUserId],
 				"Primary User SAM",IF(NOT ISBLANK([__PrimaryUserId]),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[SourceUserId],[__PrimaryUserId],'Native User Evidence'[TenantKey],[TenantKey],'Native User Evidence'[Loaded Batch ID],[Loaded Batch ID])))
-

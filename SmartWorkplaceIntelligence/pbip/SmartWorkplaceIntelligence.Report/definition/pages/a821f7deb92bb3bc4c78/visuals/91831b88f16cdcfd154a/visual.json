@@ -23,11 +23,11 @@
                       "Entity": "Native Device Application"
                     }
                   },
-                  "Property": "TenantDeviceApplicationKey"
+                  "Property": "ManagedDeviceId"
                 }
               },
-              "queryRef": "Native Device Application.TenantDeviceApplicationKey",
-              "nativeQueryRef": "TenantDeviceApplicationKey",
+              "queryRef": "Native Device Application.ManagedDeviceId",
+              "nativeQueryRef": "ManagedDeviceId",
               "active": true
             }
           ]
@@ -61,7 +61,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native selection · Device Application'"
+                  "Value": "'Device · Managed device ID'"
                 }
               }
             },

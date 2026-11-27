@@ -44,6 +44,7 @@ table 'AD Group Evidence'
 	column TenantADGroupKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: 542f9f18-7aa5-45b9-95f2-5c9f70a73ba7
 		summarizeBy: none
 		sourceColumn: TenantADGroupKey
@@ -51,6 +52,7 @@ table 'AD Group Evidence'
 	/// Native ADGroupSource attribute; source qualification is retained.
 	column ObjectGUID
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 087628bd-7353-437c-8006-b26d58827486
 		summarizeBy: none
 		sourceColumn: ObjectGUID
@@ -58,6 +60,7 @@ table 'AD Group Evidence'
 	/// Native ADGroupSource attribute; source qualification is retained.
 	column ObjectSID
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: de341fd0-6ee1-49aa-ab8d-75bbffc2367d
 		summarizeBy: none
 		sourceColumn: ObjectSID
@@ -72,6 +75,7 @@ table 'AD Group Evidence'
 	/// Native ADGroupSource attribute; source qualification is retained.
 	column DistinguishedName
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 2c5e92e1-4722-44bc-af7a-26bf1702ccca
 		summarizeBy: none
 		sourceColumn: DistinguishedName
@@ -79,6 +83,7 @@ table 'AD Group Evidence'
 	/// Native ADGroupSource attribute; source qualification is retained.
 	column Name
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 9204ce41-0bc0-463a-be83-d5b4ac3133ac
 		summarizeBy: none
 		sourceColumn: Name
@@ -86,6 +91,7 @@ table 'AD Group Evidence'
 	/// Native ADGroupSource attribute; source qualification is retained.
 	column DisplayName
 		dataType: string
+		isAvailableInMdx: false
 		lineageTag: 54d046e8-44b3-41eb-b45a-da61f8ddc0b8
 		summarizeBy: none
 		sourceColumn: DisplayName
@@ -122,6 +128,7 @@ table 'AD Group Evidence'
 	column TenantGroupKey
 		dataType: string
 		isHidden
+		isAvailableInMdx: false
 		lineageTag: a230f5f3-f278-4c0a-bf91-f68e89171708
 		summarizeBy: none
 		sourceColumn: TenantGroupKey
@@ -169,4 +176,3 @@ table 'AD Group Evidence'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("ADGroupSource.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantADGroupKey", dataType="String"], [name="ObjectGUID", dataType="String"], [name="ObjectSID", dataType="String"], [name="DomainName", dataType="String"], [name="DistinguishedName", dataType="String"], [name="Name", dataType="String"], [name="DisplayName", dataType="String"], [name="GroupCategory", dataType="String"], [name="GroupScope", dataType="String"], [name="ManagedBy", dataType="String"], [name="ManagedByADObjectKey", dataType="String"], [name="TenantGroupKey", dataType="String"], [name="CloudMatchStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]}))
 				in
 				    Readers[Finish](BusinessRows)
-
